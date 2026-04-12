@@ -289,7 +289,11 @@ namespace hyperbrowse::services
         return seed;
     }
 
-    ImageMetadataService::ImageMetadataService(std::size_t workerCount)
+    ImageMetadataService::ImageMetadataService(std::size_t workerCount,
+                                               std::size_t cacheCapacityEntries,
+                                               MetadataExtractor extractor)
+        : cacheCapacityEntries_(std::max<std::size_t>(1, cacheCapacityEntries))
+        , extractor_(extractor ? std::move(extractor) : MetadataExtractor{ExtractImageMetadata})
     {
         const std::size_t resolvedWorkerCount = std::max<std::size_t>(1, workerCount);
         workers_.reserve(resolvedWorkerCount);
@@ -309,6 +313,9 @@ namespace hyperbrowse::services
             shuttingDown_ = true;
             pendingJobs_.clear();
             queuedKeys_.clear();
+            inflightKeys_.clear();
+            cache_.clear();
+            cacheLruOrder_.clear();
         }
 
         workAvailable_.notify_all();
@@ -329,7 +336,8 @@ namespace hyperbrowse::services
 
     void ImageMetadataService::Schedule(std::uint64_t sessionId, MetadataWorkItem workItem)
     {
-        const MetadataCacheKey key{workItem.item.filePath, workItem.item.modifiedTimestampUtc};
+        MetadataCacheKey key{workItem.item.filePath, workItem.item.modifiedTimestampUtc};
+        key.filePath = util::NormalizePathForComparison(key.filePath);
 
         {
             std::scoped_lock lock(mutex_);
@@ -339,7 +347,14 @@ namespace hyperbrowse::services
                 return;
             }
 
-            pendingJobs_.push_back(PendingJob{sessionId, nextSequence_++, std::move(workItem)});
+            const auto generation = pathGenerations_.find(key.filePath);
+            pendingJobs_.push_back(PendingJob{
+                sessionId,
+                nextSequence_++,
+                generation == pathGenerations_.end() ? 0 : generation->second,
+                key,
+                std::move(workItem),
+            });
             queuedKeys_.insert(key);
         }
 
@@ -356,10 +371,19 @@ namespace hyperbrowse::services
 
     std::shared_ptr<const ImageMetadata> ImageMetadataService::FindCachedMetadata(const browser::BrowserItem& item) const
     {
-        const MetadataCacheKey key{item.filePath, item.modifiedTimestampUtc};
+        MetadataCacheKey key{item.filePath, item.modifiedTimestampUtc};
+        key.filePath = util::NormalizePathForComparison(key.filePath);
+
         std::scoped_lock lock(mutex_);
         const auto iterator = cache_.find(key);
-        return iterator == cache_.end() ? nullptr : iterator->second;
+        if (iterator == cache_.end())
+        {
+            return nullptr;
+        }
+
+        cacheLruOrder_.splice(cacheLruOrder_.begin(), cacheLruOrder_, iterator->second.lruIterator);
+        iterator->second.lruIterator = cacheLruOrder_.begin();
+        return iterator->second.metadata;
     }
 
     void ImageMetadataService::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
@@ -369,24 +393,40 @@ namespace hyperbrowse::services
             return;
         }
 
-        const std::vector<std::wstring> normalizedPaths = [&]()
+        const std::unordered_set<std::wstring> normalizedPaths = [&]()
         {
-            std::vector<std::wstring> paths;
+            std::unordered_set<std::wstring> paths;
             paths.reserve(filePaths.size());
             for (const std::wstring& filePath : filePaths)
             {
-                paths.push_back(util::NormalizePathForComparison(filePath));
+                paths.insert(util::NormalizePathForComparison(filePath));
             }
             return paths;
         }();
 
         std::scoped_lock lock(mutex_);
+        for (const std::wstring& normalizedPath : normalizedPaths)
+        {
+            pathGenerations_[normalizedPath] = nextPathGeneration_++;
+        }
+
+        for (auto iterator = pendingJobs_.begin(); iterator != pendingJobs_.end();)
+        {
+            if (!normalizedPaths.contains(iterator->cacheKey.filePath))
+            {
+                ++iterator;
+                continue;
+            }
+
+            queuedKeys_.erase(iterator->cacheKey);
+            iterator = pendingJobs_.erase(iterator);
+        }
+
         for (auto iterator = cache_.begin(); iterator != cache_.end();)
         {
-            const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), util::NormalizePathForComparison(iterator->first.filePath))
-                != normalizedPaths.end();
-            if (shouldErase)
+            if (normalizedPaths.contains(iterator->first.filePath))
             {
+                cacheLruOrder_.erase(iterator->second.lruIterator);
                 iterator = cache_.erase(iterator);
             }
             else
@@ -394,6 +434,17 @@ namespace hyperbrowse::services
                 ++iterator;
             }
         }
+    }
+
+    std::size_t ImageMetadataService::CacheEntryCount() const
+    {
+        std::scoped_lock lock(mutex_);
+        return cache_.size();
+    }
+
+    std::size_t ImageMetadataService::CacheCapacityEntries() const noexcept
+    {
+        return cacheCapacityEntries_;
     }
 
     void ImageMetadataService::WorkerLoop()
@@ -423,31 +474,63 @@ namespace hyperbrowse::services
                 });
 
                 job = *jobIterator;
-                queuedKeys_.erase(MetadataCacheKey{job.workItem.item.filePath, job.workItem.item.modifiedTimestampUtc});
-                inflightKeys_.insert(MetadataCacheKey{job.workItem.item.filePath, job.workItem.item.modifiedTimestampUtc});
+                queuedKeys_.erase(job.cacheKey);
+                inflightKeys_.insert(job.cacheKey);
                 pendingJobs_.erase(jobIterator);
             }
 
             std::wstring errorMessage;
-            std::shared_ptr<const ImageMetadata> metadata = ExtractImageMetadata(job.workItem.item, &errorMessage);
+            std::shared_ptr<const ImageMetadata> metadata = extractor_(job.workItem.item, &errorMessage);
 
             bool shouldNotify = false;
             {
                 std::scoped_lock lock(mutex_);
-                const MetadataCacheKey key{job.workItem.item.filePath, job.workItem.item.modifiedTimestampUtc};
-                inflightKeys_.erase(key);
-                if (metadata)
+                inflightKeys_.erase(job.cacheKey);
+
+                const auto generation = pathGenerations_.find(job.cacheKey.filePath);
+                const std::uint64_t currentPathGeneration = generation == pathGenerations_.end() ? 0 : generation->second;
+                const bool isCurrentSession = job.sessionId == activeSessionId_;
+                const bool isCurrentPathGeneration = currentPathGeneration == job.pathGeneration;
+                if (metadata && isCurrentSession && isCurrentPathGeneration)
                 {
-                    cache_[key] = metadata;
+                    InsertCacheEntryLocked(job.cacheKey, metadata);
                 }
 
-                shouldNotify = metadata != nullptr && targetWindow_ != nullptr && job.sessionId == activeSessionId_;
+                shouldNotify = metadata != nullptr
+                    && targetWindow_ != nullptr
+                    && isCurrentSession
+                    && isCurrentPathGeneration;
             }
 
             if (shouldNotify)
             {
                 PostReady(job.sessionId, job.workItem.modelIndex, job.workItem.item, metadata != nullptr);
             }
+        }
+    }
+
+    void ImageMetadataService::InsertCacheEntryLocked(MetadataCacheKey key, std::shared_ptr<const ImageMetadata> metadata)
+    {
+        if (!metadata)
+        {
+            return;
+        }
+
+        const auto existing = cache_.find(key);
+        if (existing != cache_.end())
+        {
+            cacheLruOrder_.erase(existing->second.lruIterator);
+            cache_.erase(existing);
+        }
+
+        cacheLruOrder_.push_front(key);
+        cache_.emplace(cacheLruOrder_.front(), CacheEntry{std::move(metadata), cacheLruOrder_.begin()});
+
+        while (cache_.size() > cacheCapacityEntries_ && !cacheLruOrder_.empty())
+        {
+            const MetadataCacheKey keyToEvict = cacheLruOrder_.back();
+            cacheLruOrder_.pop_back();
+            cache_.erase(keyToEvict);
         }
     }
 

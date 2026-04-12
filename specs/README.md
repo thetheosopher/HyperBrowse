@@ -11,6 +11,7 @@ This folder contains a repo-ready planning pack for building a high-performance 
 - `06-implementation-phases.md`
 - `07-copilot-prompt-sequence.md`
 - `08-issues-to-resolve.md`
+- `09-hardening-pass.md`
 
 ## Intended stack
 - Win32 shell

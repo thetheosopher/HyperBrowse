@@ -4,6 +4,8 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -59,7 +61,11 @@ namespace hyperbrowse::services
     public:
         static constexpr UINT kMessageId = WM_APP + 45;
 
-        explicit ImageMetadataService(std::size_t workerCount = 1);
+        using MetadataExtractor = std::function<std::shared_ptr<const ImageMetadata>(const browser::BrowserItem&, std::wstring*)>;
+
+        explicit ImageMetadataService(std::size_t workerCount = 1,
+                                      std::size_t cacheCapacityEntries = 512,
+                                      MetadataExtractor extractor = ExtractImageMetadata);
         ~ImageMetadataService();
 
         void BindTargetWindow(HWND targetWindow);
@@ -67,6 +73,8 @@ namespace hyperbrowse::services
         void CancelOutstanding();
         std::shared_ptr<const ImageMetadata> FindCachedMetadata(const browser::BrowserItem& item) const;
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
+        std::size_t CacheEntryCount() const;
+        std::size_t CacheCapacityEntries() const noexcept;
 
     private:
         struct MetadataCacheKey
@@ -90,21 +98,35 @@ namespace hyperbrowse::services
         {
             std::uint64_t sessionId{};
             int sequence{};
+            std::uint64_t pathGeneration{};
+            MetadataCacheKey cacheKey;
             MetadataWorkItem workItem;
+        };
+
+        struct CacheEntry
+        {
+            std::shared_ptr<const ImageMetadata> metadata;
+            std::list<MetadataCacheKey>::iterator lruIterator;
         };
 
         void WorkerLoop();
         void PostReady(std::uint64_t sessionId, int modelIndex, const browser::BrowserItem& item, bool success) const;
+        void InsertCacheEntryLocked(MetadataCacheKey key, std::shared_ptr<const ImageMetadata> metadata);
 
         mutable std::mutex mutex_;
         HWND targetWindow_{};
         bool shuttingDown_{};
         std::uint64_t activeSessionId_{};
         int nextSequence_{};
+        const std::size_t cacheCapacityEntries_{};
+        MetadataExtractor extractor_;
         std::vector<PendingJob> pendingJobs_;
         std::unordered_set<MetadataCacheKey, MetadataCacheKeyHasher> queuedKeys_;
         std::unordered_set<MetadataCacheKey, MetadataCacheKeyHasher> inflightKeys_;
-        std::unordered_map<MetadataCacheKey, std::shared_ptr<const ImageMetadata>, MetadataCacheKeyHasher> cache_;
+        mutable std::list<MetadataCacheKey> cacheLruOrder_;
+        mutable std::unordered_map<MetadataCacheKey, CacheEntry, MetadataCacheKeyHasher> cache_;
+        std::unordered_map<std::wstring, std::uint64_t> pathGenerations_;
+        std::uint64_t nextPathGeneration_{1};
         std::vector<std::thread> workers_;
         std::condition_variable workAvailable_;
     };

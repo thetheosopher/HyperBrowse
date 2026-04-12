@@ -8,11 +8,14 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -24,6 +27,7 @@
 #include "services/BatchConvertService.h"
 #include "services/FolderEnumerationService.h"
 #include "services/FolderWatchService.h"
+#include "services/ImageMetadataService.h"
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "ui/MainWindow.h"
@@ -548,6 +552,26 @@ namespace
         return key;
     }
 
+    hyperbrowse::browser::BrowserItem MakeMetadataItem(std::wstring fileName,
+                                                       std::wstring filePath,
+                                                       std::uint64_t modifiedTimestampUtc)
+    {
+        hyperbrowse::browser::BrowserItem item;
+        item.fileName = std::move(fileName);
+        item.filePath = std::move(filePath);
+        item.fileType = L"JPG";
+        item.modifiedTimestampUtc = modifiedTimestampUtc;
+        return item;
+    }
+
+    std::shared_ptr<const hyperbrowse::services::ImageMetadata> MakeMetadata(std::wstring cameraModel)
+    {
+        auto metadata = std::make_shared<hyperbrowse::services::ImageMetadata>();
+        metadata->cameraModel = std::move(cameraModel);
+        metadata->hasExif = !metadata->cameraModel.empty();
+        return metadata;
+    }
+
     fs::path TestSourceDirectory()
     {
 #ifdef HYPERBROWSE_TESTS_SOURCE_DIR
@@ -787,6 +811,166 @@ namespace
         scheduler.Schedule(7, 2, requests);
         PumpMessagesFor(300);
         Expect(state->thumbnailResult.readyCount == 0, "Cached thumbnails should not be re-decoded on the next schedule pass");
+    }
+
+    void RunImageMetadataServiceScenario()
+    {
+        const auto itemA = MakeMetadataItem(L"alpha.jpg", L"C:\\Metadata\\alpha.jpg", 11);
+        const auto itemB = MakeMetadataItem(L"beta.jpg", L"C:\\Metadata\\beta.jpg", 12);
+        const auto itemC = MakeMetadataItem(L"gamma.jpg", L"C:\\Metadata\\gamma.jpg", 13);
+
+        {
+            hyperbrowse::services::ImageMetadataService service(
+                1,
+                2,
+                [](const hyperbrowse::browser::BrowserItem& item, std::wstring*)
+                {
+                    return MakeMetadata(item.fileName);
+                });
+
+            Expect(service.CacheCapacityEntries() == 2, "Metadata cache did not preserve the configured entry capacity");
+
+            service.Schedule(1, {0, itemA, 0});
+            service.Schedule(1, {1, itemB, 0});
+            Expect(PumpMessagesUntil([&]()
+            {
+                return service.FindCachedMetadata(itemA) != nullptr && service.FindCachedMetadata(itemB) != nullptr;
+            }, 5000), "Metadata service did not populate the initial cache entries");
+            Expect(service.CacheEntryCount() == 2, "Metadata cache did not report the expected initial entry count");
+
+            const auto cachedA = service.FindCachedMetadata(itemA);
+            Expect(cachedA != nullptr && cachedA->cameraModel == L"alpha.jpg",
+                   "Metadata service returned the wrong cached payload for the first item");
+
+            service.Schedule(1, {2, itemC, 0});
+            Expect(PumpMessagesUntil([&]()
+            {
+                return service.FindCachedMetadata(itemC) != nullptr;
+            }, 5000), "Metadata service did not populate the replacement cache entry");
+            Expect(service.CacheEntryCount() == 2, "Metadata cache grew past the configured entry capacity");
+            Expect(service.FindCachedMetadata(itemA) != nullptr,
+                   "Metadata cache evicted the most recently used entry instead of keeping it resident");
+            Expect(service.FindCachedMetadata(itemB) == nullptr,
+                   "Metadata cache did not evict the least recently used entry after reaching capacity");
+        }
+
+        {
+            struct BlockingState
+            {
+                std::mutex mutex;
+                std::condition_variable started;
+                std::condition_variable released;
+                bool extractionStarted{};
+                bool allowCompletion{};
+            } cancellationState;
+
+            const auto cancelledItem = MakeMetadataItem(L"cancelled.jpg", L"C:\\Metadata\\cancelled.jpg", 21);
+            const auto currentItem = MakeMetadataItem(L"current.jpg", L"C:\\Metadata\\current.jpg", 22);
+
+            hyperbrowse::services::ImageMetadataService service(
+                1,
+                4,
+                [&](const hyperbrowse::browser::BrowserItem& item, std::wstring*)
+                {
+                    if (item.modifiedTimestampUtc == cancelledItem.modifiedTimestampUtc)
+                    {
+                        std::unique_lock lock(cancellationState.mutex);
+                        cancellationState.extractionStarted = true;
+                        cancellationState.started.notify_all();
+                        cancellationState.released.wait(lock, [&]()
+                        {
+                            return cancellationState.allowCompletion;
+                        });
+                    }
+
+                    return MakeMetadata(item.fileName);
+                });
+
+            service.Schedule(41, {0, cancelledItem, 0});
+            Expect(PumpMessagesUntil([&]()
+            {
+                std::scoped_lock lock(cancellationState.mutex);
+                return cancellationState.extractionStarted;
+            }, 1000), "Metadata cancellation scenario never started the blocked extraction");
+
+            service.CancelOutstanding();
+            service.Schedule(42, {1, currentItem, 0});
+
+            {
+                std::scoped_lock lock(cancellationState.mutex);
+                cancellationState.allowCompletion = true;
+            }
+            cancellationState.released.notify_all();
+
+            Expect(PumpMessagesUntil([&]()
+            {
+                return service.FindCachedMetadata(currentItem) != nullptr;
+            }, 5000), "Metadata cancellation scenario did not cache the latest session item");
+            PumpMessagesFor(100);
+            Expect(service.FindCachedMetadata(cancelledItem) == nullptr,
+                   "Metadata cancellation allowed an in-flight stale result to repopulate the cache");
+        }
+
+        {
+            struct BlockingState
+            {
+                std::mutex mutex;
+                std::condition_variable started;
+                std::condition_variable released;
+                bool extractionStarted{};
+                bool allowCompletion{};
+            } invalidationState;
+
+            const auto staleItem = MakeMetadataItem(L"watched.jpg", L"C:\\Metadata\\watched.jpg", 31);
+            const auto refreshedItem = MakeMetadataItem(L"watched.jpg", L"C:\\Metadata\\watched.jpg", 32);
+
+            hyperbrowse::services::ImageMetadataService service(
+                1,
+                4,
+                [&](const hyperbrowse::browser::BrowserItem& item, std::wstring*)
+                {
+                    if (item.modifiedTimestampUtc == staleItem.modifiedTimestampUtc)
+                    {
+                        std::unique_lock lock(invalidationState.mutex);
+                        invalidationState.extractionStarted = true;
+                        invalidationState.started.notify_all();
+                        invalidationState.released.wait(lock, [&]()
+                        {
+                            return invalidationState.allowCompletion;
+                        });
+                    }
+
+                    return MakeMetadata(item.fileName + L"-" + std::to_wstring(item.modifiedTimestampUtc));
+                });
+
+            service.Schedule(55, {0, staleItem, 0});
+            Expect(PumpMessagesUntil([&]()
+            {
+                std::scoped_lock lock(invalidationState.mutex);
+                return invalidationState.extractionStarted;
+            }, 1000), "Metadata invalidation scenario never started the blocked extraction");
+
+            service.InvalidateFilePaths({staleItem.filePath});
+            service.Schedule(55, {1, refreshedItem, 0});
+
+            {
+                std::scoped_lock lock(invalidationState.mutex);
+                invalidationState.allowCompletion = true;
+            }
+            invalidationState.released.notify_all();
+
+            Expect(PumpMessagesUntil([&]()
+            {
+                return service.FindCachedMetadata(refreshedItem) != nullptr;
+            }, 5000), "Metadata invalidation scenario did not cache the refreshed file metadata");
+            PumpMessagesFor(100);
+
+            const auto refreshedMetadata = service.FindCachedMetadata(refreshedItem);
+            Expect(refreshedMetadata != nullptr && refreshedMetadata->cameraModel == L"watched.jpg-32",
+                   "Metadata invalidation scenario cached the wrong refreshed payload");
+            Expect(service.FindCachedMetadata(staleItem) == nullptr,
+                   "Metadata invalidation allowed an in-flight stale result to repopulate the cache");
+        }
     }
 
         void RunRawDecoderScenario()
@@ -1052,6 +1236,7 @@ int main()
         RunJpegOrientationAdjustmentScenario();
         RunBatchConvertCancellationScenario(hwnd);
         RunThumbnailSchedulerScenario(hwnd, &state);
+        RunImageMetadataServiceScenario();
         RunRawDecoderScenario();
         RunBrowserPaneScenario(instance);
         RunViewerWindowScenario(instance, hwnd);
