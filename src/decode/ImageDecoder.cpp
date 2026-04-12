@@ -17,6 +17,7 @@
 #include <libraw/libraw.h>
 #endif
 
+#include "decode/NvJpegDecoder.h"
 #include "decode/WicDecodeHelpers.h"
 #include "decode/WicThumbnailDecoder.h"
 #include "util/Diagnostics.h"
@@ -64,24 +65,10 @@ namespace
     bool ProbeNvJpegRuntime()
     {
 #if defined(HYPERBROWSE_ENABLE_NVJPEG)
-        static constexpr const wchar_t* kCandidateDlls[] = {
-            L"nvjpeg64_12.dll",
-            L"nvjpeg64_11.dll",
-            L"nvjpeg64_10.dll",
-        };
-
-        for (const wchar_t* dllName : kCandidateDlls)
-        {
-            HMODULE module = LoadLibraryW(dllName);
-            if (module)
-            {
-                FreeLibrary(module);
-                return true;
-            }
-        }
-#endif
-
+        return hyperbrowse::decode::NvJpegDecoder::IsRuntimeAvailable();
+#else
         return false;
+#endif
     }
 
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeWicSource(IWICImagingFactory* factory,
@@ -766,7 +753,7 @@ namespace hyperbrowse::decode
             return L"WIC (nvJPEG runtime unavailable)";
         }
 
-        return L"WIC (nvJPEG plumbing active)";
+        return L"nvJPEG active for JPEG thumbnails";
     }
 
     bool IsWicFileType(std::wstring_view fileType)
@@ -801,6 +788,23 @@ namespace hyperbrowse::decode
     {
         hyperbrowse::util::Stopwatch stopwatch;
         const std::wstring fileType = FileTypeFromPath(key.filePath);
+        const bool isJpeg = fileType == L"jpg" || fileType == L"jpeg";
+        if (isJpeg && IsNvJpegAccelerationEnabled() && IsNvJpegRuntimeAvailable())
+        {
+            std::wstring nvJpegError;
+            auto thumbnail = NvJpegDecoder{}.Decode(key, &nvJpegError);
+            if (thumbnail)
+            {
+                hyperbrowse::util::RecordTiming(L"thumbnail.decode.nvjpeg", stopwatch.ElapsedMilliseconds());
+                return thumbnail;
+            }
+
+            if (errorMessage)
+            {
+                *errorMessage = std::move(nvJpegError);
+            }
+        }
+
         if (IsWicFileType(fileType))
         {
             auto thumbnail = WicThumbnailDecoder{}.Decode(key);

@@ -16,7 +16,8 @@
                 "strategy": "external"
             },
             "cacheVariables": {
-                "HYPERBROWSE_BUILD_TESTS": "ON"
+                "HYPERBROWSE_BUILD_TESTS": "ON",
+                "HYPERBROWSE_ENABLE_NVJPEG": "ON"
             }
         }
     ],

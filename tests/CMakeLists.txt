@@ -3,6 +3,7 @@ add_executable(HyperBrowseTests
     ../src/browser/BrowserPane.cpp
     ../src/cache/ThumbnailCache.cpp
     ../src/decode/ImageDecoder.cpp
+    ../src/decode/NvJpegDecoder.cpp
     ../src/decode/WicThumbnailDecoder.cpp
     ../src/services/BatchConvertService.cpp
     ../src/services/FileOperationService.cpp
@@ -40,6 +41,15 @@ endif()
 
 if(HYPERBROWSE_ENABLE_NVJPEG)
     target_compile_definitions(HyperBrowseTests PRIVATE HYPERBROWSE_ENABLE_NVJPEG=1)
+endif()
+
+if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
+    foreach(_hyperbrowse_cuda_runtime_dll IN LISTS HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
+        add_custom_command(TARGET HyperBrowseTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_hyperbrowse_cuda_runtime_dll}"
+                "$<TARGET_FILE_DIR:HyperBrowseTests>")
+    endforeach()
 endif()
 
 target_compile_definitions(HyperBrowseTests PRIVATE

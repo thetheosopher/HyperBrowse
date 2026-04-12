@@ -91,6 +91,12 @@ namespace
             && type == REG_DWORD;
     }
 
+    bool HasNvJpegCapability()
+    {
+        return hyperbrowse::decode::IsNvJpegBuildEnabled()
+            && hyperbrowse::decode::IsNvJpegRuntimeAvailable();
+    }
+
     void WriteDwordValue(HKEY key, const wchar_t* valueName, DWORD value)
     {
         RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
@@ -2176,11 +2182,11 @@ namespace hyperbrowse::ui
         CheckMenuItem(
             menu_,
             ID_VIEW_NVJPEG_ACCELERATION,
-            MF_BYCOMMAND | (nvJpegEnabled_ ? MF_CHECKED : MF_UNCHECKED));
+            MF_BYCOMMAND | ((nvJpegEnabled_ && HasNvJpegCapability()) ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(
             menu_,
             ID_VIEW_NVJPEG_ACCELERATION,
-            MF_BYCOMMAND | (decode::IsNvJpegBuildEnabled() ? MF_ENABLED : MF_GRAYED));
+            MF_BYCOMMAND | (HasNvJpegCapability() ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
@@ -2613,7 +2619,7 @@ namespace hyperbrowse::ui
             ToggleRecursiveBrowsing();
             return true;
         case ID_VIEW_NVJPEG_ACCELERATION:
-            if (decode::IsNvJpegBuildEnabled())
+            if (HasNvJpegCapability())
             {
                 nvJpegEnabled_ = !nvJpegEnabled_;
                 decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);

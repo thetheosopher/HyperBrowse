@@ -17,14 +17,29 @@ set(HYPERBROWSE_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseVersion
 set(HYPERBROWSE_PORTABLE_README "${CMAKE_CURRENT_BINARY_DIR}/PortableREADME.txt")
 set(HYPERBROWSE_RUNTIME_DEPENDENCIES "${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.txt")
 
-configure_file(cmake/HyperBrowseVersion.rc.in "${HYPERBROWSE_VERSION_RESOURCE}" @ONLY)
-configure_file(cmake/PortableREADME.txt.in "${HYPERBROWSE_PORTABLE_README}" @ONLY)
-configure_file(cmake/RuntimeDependencies.txt.in "${HYPERBROWSE_RUNTIME_DEPENDENCIES}" @ONLY)
-
 option(HYPERBROWSE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(HYPERBROWSE_BUILD_TESTS "Build placeholder tests" ON)
 option(HYPERBROWSE_ENABLE_LIBRAW "Build with vendored LibRaw support" ON)
-option(HYPERBROWSE_ENABLE_NVJPEG "Enable optional nvJPEG acceleration plumbing" OFF)
+option(HYPERBROWSE_ENABLE_NVJPEG "Enable optional nvJPEG acceleration plumbing" ON)
+option(HYPERBROWSE_BUNDLE_CUDA_REDIST "Download and bundle NVIDIA CUDA runtime redistributables with HyperBrowse" ON)
+
+set(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS "")
+set(HYPERBROWSE_BUNDLED_CUDA_LICENSE_FILES "")
+set(HYPERBROWSE_PORTABLE_NVIDIA_RUNTIME_LINE "The app uses WIC by default and only uses nvJPEG when that optional runtime is available.")
+set(HYPERBROWSE_RUNTIME_DEPENDENCY_NVIDIA_LINE "nvJPEG, because acceleration is optional and the application stays correct without NVIDIA runtime support")
+set(HYPERBROWSE_PORTABLE_NVIDIA_CONTENT_LINE "")
+
+if(HYPERBROWSE_ENABLE_NVJPEG AND HYPERBROWSE_BUNDLE_CUDA_REDIST)
+    include(cmake/BundleCudaRedistributables.cmake)
+    hyperbrowse_prepare_cuda_redistributables(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS HYPERBROWSE_BUNDLED_CUDA_LICENSE_FILES)
+    set(HYPERBROWSE_PORTABLE_NVIDIA_CONTENT_LINE "- Bundled NVIDIA CUDA runtime DLLs: cudart64_12.dll and nvjpeg64_12.dll")
+    set(HYPERBROWSE_PORTABLE_NVIDIA_RUNTIME_LINE "NVIDIA CUDA and nvJPEG runtime DLLs are bundled beside the executable, so nvJPEG does not depend on PATH or a machine-wide CUDA install.")
+    set(HYPERBROWSE_RUNTIME_DEPENDENCY_NVIDIA_LINE "NVIDIA CUDA runtime DLLs (cudart64_12.dll and nvjpeg64_12.dll) downloaded from official NVIDIA redistributable archives and staged beside HyperBrowse.exe when nvJPEG support is enabled")
+endif()
+
+configure_file(cmake/HyperBrowseVersion.rc.in "${HYPERBROWSE_VERSION_RESOURCE}" @ONLY)
+configure_file(cmake/PortableREADME.txt.in "${HYPERBROWSE_PORTABLE_README}" @ONLY)
+configure_file(cmake/RuntimeDependencies.txt.in "${HYPERBROWSE_RUNTIME_DEPENDENCIES}" @ONLY)
 
 if(MSVC)
     add_compile_options(/permissive- /Zc:__cplusplus /W4 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX /DWIN32_LEAN_AND_MEAN)
@@ -49,6 +64,7 @@ add_executable(HyperBrowse WIN32
     src/browser/BrowserPane.cpp
     src/cache/ThumbnailCache.cpp
     src/decode/ImageDecoder.cpp
+    src/decode/NvJpegDecoder.cpp
     src/decode/WicThumbnailDecoder.cpp
     src/services/BatchConvertService.cpp
     src/services/FileOperationService.cpp
@@ -98,6 +114,15 @@ set_target_properties(HyperBrowse PROPERTIES
     VERSION ${PROJECT_VERSION}
 )
 
+if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
+    foreach(_hyperbrowse_cuda_runtime_dll IN LISTS HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
+        add_custom_command(TARGET HyperBrowse POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_hyperbrowse_cuda_runtime_dll}"
+                "$<TARGET_FILE_DIR:HyperBrowse>")
+    endforeach()
+endif()
+
 install(TARGETS HyperBrowse
     RUNTIME DESTINATION "."
     COMPONENT Portable)
@@ -125,6 +150,39 @@ install(FILES "${HYPERBROWSE_RUNTIME_DEPENDENCIES}"
     DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
     COMPONENT Runtime
     RENAME "runtime-dependencies.txt")
+
+if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
+    install(PROGRAMS ${HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS}
+        DESTINATION "."
+        COMPONENT Portable)
+
+    install(PROGRAMS ${HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS}
+        DESTINATION "${HYPERBROWSE_INSTALLER_BIN_DIR}"
+        COMPONENT Runtime)
+endif()
+
+if(HYPERBROWSE_BUNDLED_CUDA_LICENSE_FILES)
+    list(GET HYPERBROWSE_BUNDLED_CUDA_LICENSE_FILES 0 _hyperbrowse_cudart_license)
+    list(GET HYPERBROWSE_BUNDLED_CUDA_LICENSE_FILES 1 _hyperbrowse_nvjpeg_license)
+
+    install(FILES "${_hyperbrowse_cudart_license}"
+        DESTINATION "."
+        COMPONENT Portable
+        RENAME "NVIDIA-CUDA-RUNTIME-LICENSE.txt")
+    install(FILES "${_hyperbrowse_nvjpeg_license}"
+        DESTINATION "."
+        COMPONENT Portable
+        RENAME "NVIDIA-NVJPEG-LICENSE.txt")
+
+    install(FILES "${_hyperbrowse_cudart_license}"
+        DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
+        COMPONENT Runtime
+        RENAME "nvidia-cuda-runtime-license.txt")
+    install(FILES "${_hyperbrowse_nvjpeg_license}"
+        DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
+        COMPONENT Runtime
+        RENAME "nvidia-nvjpeg-license.txt")
+endif()
 
 if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
     install(PROGRAMS ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}

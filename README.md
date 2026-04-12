@@ -33,6 +33,8 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 ```
 
+The optional nvJPEG backend is compiled by default. To disable it explicitly, configure with `-DHYPERBROWSE_ENABLE_NVJPEG=OFF`.
+
 ### Ninja + MSVC
 
 ```powershell
@@ -60,6 +62,10 @@ cmake --install build --config Debug --component Runtime --prefix build/dist/Hyp
 
 The portable layout stages `HyperBrowse.exe`, the required VC runtime DLLs for the active MSVC toolchain when needed, and a short `README.txt`. The installer-friendly layout stages the executable under `bin/` and documentation under `docs/` so an external installer step can consume a predictable layout.
 
+When nvJPEG support is enabled, CMake now downloads the official NVIDIA `cuda_cudart` and `libnvjpeg` redistributable archives, verifies their SHA256 hashes, copies the runtime DLLs beside the built executables, and installs those DLLs and license files into the portable and installer layouts. The application no longer relies on CUDA or nvJPEG being present on `PATH`.
+
 ## Notes
 
 This repo is intentionally lightweight and ready for iterative expansion using the spec pack and prompt sequence.
+
+When the nvJPEG backend is compiled in, HyperBrowse still falls back to WIC automatically if runtime activation fails, for example on machines without a compatible NVIDIA GPU.

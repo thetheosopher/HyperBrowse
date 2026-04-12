@@ -202,6 +202,11 @@ namespace hyperbrowse::browser
 
     void BrowserPane::SetModel(BrowserModel* model)
     {
+        if (model_ == model)
+        {
+            return;
+        }
+
         model_ = model;
         ++thumbnailSessionId_;
         ++metadataSessionId_;
@@ -214,8 +219,6 @@ namespace hyperbrowse::browser
 
     void BrowserPane::RefreshFromModel()
     {
-        ++thumbnailSessionId_;
-        ++metadataSessionId_;
         RebuildOrder();
         UpdateSelectionBytes();
         UpdateDetailsListView();
