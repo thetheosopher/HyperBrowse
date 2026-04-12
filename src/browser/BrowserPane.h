@@ -1,0 +1,155 @@
+#pragma once
+
+#include <windows.h>
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+namespace hyperbrowse::browser
+{
+    struct BrowserItem;
+    class BrowserModel;
+
+    enum class BrowserViewMode : int
+    {
+        Thumbnails = 0,
+        Details = 1,
+    };
+
+    enum class BrowserSortMode : int
+    {
+        FileName = 0,
+        ModifiedDate = 1,
+        FileSize = 2,
+        Dimensions = 3,
+        FileType = 4,
+        Random = 5,
+    };
+}
+
+namespace hyperbrowse::services
+{
+    class ThumbnailScheduler;
+}
+
+namespace hyperbrowse::browser
+{
+    class BrowserPane
+    {
+    public:
+        static constexpr UINT kStateChangedMessage = WM_APP + 42;
+        static constexpr UINT kOpenItemMessage = WM_APP + 44;
+
+        struct ThemeColors
+        {
+            COLORREF windowBackground;
+            COLORREF surfaceBackground;
+            COLORREF text;
+            COLORREF mutedText;
+            COLORREF border;
+            COLORREF accent;
+            COLORREF accentFill;
+            COLORREF selectionText;
+            COLORREF rubberBand;
+        };
+
+        explicit BrowserPane(HINSTANCE instance);
+        ~BrowserPane();
+
+        bool Create(HWND parent);
+        HWND Hwnd() const noexcept;
+
+        void SetModel(BrowserModel* model);
+        void RefreshFromModel();
+        void SetViewMode(BrowserViewMode mode);
+        BrowserViewMode GetViewMode() const noexcept;
+        void SetSortMode(BrowserSortMode sortMode);
+        BrowserSortMode GetSortMode() const noexcept;
+        void SetDarkTheme(bool enabled);
+
+        void ClearSelection();
+        std::uint64_t SelectedCount() const noexcept;
+        std::uint64_t SelectedBytes() const noexcept;
+        int PrimarySelectedModelIndex() const noexcept;
+        std::vector<int> OrderedModelIndicesSnapshot() const;
+
+    private:
+        static constexpr const wchar_t* kClassName = L"HyperBrowseBrowserPane";
+        static constexpr int kItemPadding = 12;
+        static constexpr int kItemWidth = 184;
+        static constexpr int kItemHeight = 194;
+        static constexpr int kPreviewInset = 12;
+        static constexpr int kPreviewHeight = 112;
+
+        bool RegisterClass() const;
+        bool CreateDetailsListView();
+        void LayoutChildren();
+        void RebuildOrder();
+        void UpdateDetailsListView();
+        void UpdateVerticalScrollBar();
+        void SetScrollOffset(int value);
+        int ColumnsForClientWidth(int width) const;
+        RECT GetThumbnailCellRect(int viewIndex) const;
+        RECT GetThumbnailPreviewRect(const RECT& cellRect) const;
+        int HitTestThumbnailItem(POINT point) const;
+        int ViewIndexFromModelIndex(int modelIndex) const;
+        int ModelIndexFromViewIndex(int viewIndex) const;
+        const BrowserItem* ItemFromViewIndex(int viewIndex) const;
+        void NotifyStateChanged() const;
+        void ApplyThemeToDetailsList() const;
+        void RebuildSelectionFromDetailsList();
+        void SyncDetailsListSelectionFromModel();
+        void UpdateSelectionBytes();
+        void SelectSingleViewIndex(int viewIndex);
+        void ToggleViewIndexSelection(int viewIndex);
+        void ExtendSelectionToViewIndex(int viewIndex);
+        void BeginRubberBandSelection(POINT point, bool additive);
+        void UpdateRubberBandSelection(POINT point);
+        void EndRubberBandSelection();
+        void RequestOpenItemForViewIndex(int viewIndex) const;
+        void ScheduleVisibleThumbnailWork();
+        void CancelThumbnailWork();
+        void InvalidateThumbnailCellForModelIndex(int modelIndex) const;
+        void DrawPlaceholderState(HDC hdc, const RECT& clientRect) const;
+        void DrawThumbnailCells(HDC hdc, const RECT& clientRect) const;
+        void DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item) const;
+        std::wstring BuildListText(int viewIndex, int subItem) const;
+        std::wstring BuildPlaceholderText() const;
+        LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
+        static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+        HINSTANCE instance_{};
+        HWND parent_{};
+        HWND hwnd_{};
+        HWND detailsList_{};
+        HFONT detailsListFont_{};
+        bool ownsDetailsListFont_{};
+        HBRUSH backgroundBrush_{};
+        HBRUSH surfaceBrush_{};
+        ThemeColors colors_{};
+        std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
+        bool darkTheme_{};
+        bool syncingDetailsSelection_{};
+        BrowserViewMode viewMode_{BrowserViewMode::Thumbnails};
+        BrowserSortMode sortMode_{BrowserSortMode::FileName};
+        BrowserModel* model_{};
+        std::vector<int> orderedModelIndices_;
+        std::unordered_set<int> selectedModelIndices_;
+        std::unordered_set<int> rubberBandSeedSelection_;
+        std::uint64_t selectedBytes_{};
+        int scrollOffsetY_{};
+        int anchorModelIndex_{-1};
+        int focusedModelIndex_{-1};
+        bool rubberBandActive_{};
+        POINT rubberBandStart_{};
+        RECT rubberBandRect_{};
+        std::uint64_t thumbnailSessionId_{1};
+        std::uint64_t thumbnailRequestEpoch_{};
+        mutable std::wstring listViewTextBuffer_;
+    };
+
+    std::wstring BrowserSortModeToLabel(BrowserSortMode sortMode);
+}

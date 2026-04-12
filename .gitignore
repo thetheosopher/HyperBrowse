@@ -1,0 +1,22 @@
+# Build outputs
+/build/
+/out/
+/bin/
+/obj/
+/x64/
+/.vs/
+/CMakeUserPresets.json
+/CMakeCache.txt
+/CMakeFiles/
+/Testing/
+
+# IDE
+.vscode/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.userosscache
+
+# Logs
+*.log

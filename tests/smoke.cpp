@@ -1,0 +1,855 @@
+#include <windows.h>
+
+#include <commctrl.h>
+#include <objbase.h>
+#include <propvarutil.h>
+#include <shlobj.h>
+#include <shellapi.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "browser/BrowserModel.h"
+#include "browser/BrowserPane.h"
+#include "decode/WicThumbnailDecoder.h"
+#include "services/FolderEnumerationService.h"
+#include "services/ThumbnailScheduler.h"
+#include "ui/MainWindow.h"
+#include "viewer/ViewerWindow.h"
+
+namespace fs = std::filesystem;
+
+namespace
+{
+    using Microsoft::WRL::ComPtr;
+
+    constexpr wchar_t kTestWindowClassName[] = L"HyperBrowseFolderEnumerationTestWindow";
+
+    struct EnumerationResult
+    {
+        std::uint64_t totalCount{};
+        std::uint64_t totalBytes{};
+        std::vector<hyperbrowse::browser::BrowserItem> items;
+        std::wstring errorMessage;
+        bool completed{};
+        bool failed{};
+    };
+
+    struct ThumbnailResult
+    {
+        std::uint64_t expectedSessionId{};
+        int readyCount{};
+        std::vector<std::wstring> readyPaths;
+    };
+
+    struct TestWindowState
+    {
+        std::uint64_t expectedRequestId{};
+        EnumerationResult enumerationResult;
+        ThumbnailResult thumbnailResult;
+    };
+
+    class ComScope
+    {
+    public:
+        ComScope()
+        {
+            const HRESULT result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+            if (FAILED(result) && result != RPC_E_CHANGED_MODE)
+            {
+                throw std::runtime_error("Failed to initialize COM for tests");
+            }
+
+            shouldUninitialize_ = SUCCEEDED(result) || result == S_FALSE;
+        }
+
+        ~ComScope()
+        {
+            if (shouldUninitialize_)
+            {
+                CoUninitialize();
+            }
+        }
+
+    private:
+        bool shouldUninitialize_{};
+    };
+
+    class TempFolder
+    {
+    public:
+        explicit TempFolder(std::wstring name)
+            : root_(fs::temp_directory_path() / std::move(name))
+        {
+            std::error_code error;
+            fs::remove_all(root_, error);
+            fs::create_directories(root_);
+        }
+
+        ~TempFolder()
+        {
+            std::error_code error;
+            fs::remove_all(root_, error);
+        }
+
+        const fs::path& Root() const noexcept
+        {
+            return root_;
+        }
+
+        void WriteFile(const fs::path& relativePath, std::size_t byteCount)
+        {
+            const fs::path absolutePath = root_ / relativePath;
+            fs::create_directories(absolutePath.parent_path());
+            std::ofstream stream(absolutePath, std::ios::binary);
+            stream << std::string(byteCount, 'x');
+        }
+
+    private:
+        fs::path root_;
+    };
+
+    enum class TestImageFormat
+    {
+        Jpeg,
+        Png,
+        Gif,
+        Tiff,
+    };
+
+    void Expect(bool condition, const std::string& message)
+    {
+        if (!condition)
+        {
+            throw std::runtime_error(message);
+        }
+    }
+
+    void CheckHResult(HRESULT result, const char* message)
+    {
+        if (FAILED(result))
+        {
+            throw std::runtime_error(message);
+        }
+    }
+
+    void ResetEnumerationResult(TestWindowState* state)
+    {
+        state->enumerationResult = EnumerationResult{};
+    }
+
+    void ResetThumbnailResult(TestWindowState* state, std::uint64_t expectedSessionId)
+    {
+        state->thumbnailResult = ThumbnailResult{};
+        state->thumbnailResult.expectedSessionId = expectedSessionId;
+    }
+
+    bool PumpMessagesUntil(const std::function<bool()>& predicate, DWORD timeoutMs)
+    {
+        const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+        MSG msg{};
+        while (GetTickCount64() < deadline)
+        {
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            if (predicate())
+            {
+                return true;
+            }
+
+            MsgWaitForMultipleObjectsEx(0, nullptr, 25, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        }
+
+        return predicate();
+    }
+
+    void PumpMessagesFor(DWORD durationMs)
+    {
+        const ULONGLONG deadline = GetTickCount64() + durationMs;
+        MSG msg{};
+        while (GetTickCount64() < deadline)
+        {
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            MsgWaitForMultipleObjectsEx(0, nullptr, 25, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        }
+    }
+
+    std::wstring ReadTreeItemText(HWND treeView, HTREEITEM item)
+    {
+        wchar_t buffer[260]{};
+        TVITEMW treeItem{};
+        treeItem.mask = TVIF_TEXT;
+        treeItem.hItem = item;
+        treeItem.pszText = buffer;
+        treeItem.cchTextMax = static_cast<int>(std::size(buffer));
+        Expect(TreeView_GetItem(treeView, &treeItem) != FALSE, "Failed to read a tree item text");
+        return buffer;
+    }
+
+    std::wstring QueryShellDisplayName(const std::wstring& folderPath)
+    {
+        SHFILEINFOW shellInfo{};
+        if (SHGetFileInfoW(
+            folderPath.c_str(),
+            FILE_ATTRIBUTE_DIRECTORY,
+            &shellInfo,
+            sizeof(shellInfo),
+            SHGFI_DISPLAYNAME | SHGFI_SYSICONINDEX | SHGFI_SMALLICON) != 0
+            && shellInfo.szDisplayName[0] != L'\0')
+        {
+            return shellInfo.szDisplayName;
+        }
+
+        const fs::path path(folderPath);
+        const std::wstring leaf = path.filename().wstring();
+        return leaf.empty() ? folderPath : leaf;
+    }
+
+    std::wstring TryGetKnownFolderPathForTest(REFKNOWNFOLDERID folderId)
+    {
+        PWSTR rawPath = nullptr;
+        const HRESULT result = SHGetKnownFolderPath(folderId, KF_FLAG_DEFAULT, nullptr, &rawPath);
+        if (FAILED(result) || !rawPath)
+        {
+            return {};
+        }
+
+        std::wstring path = rawPath;
+        CoTaskMemFree(rawPath);
+        return path;
+    }
+
+    std::vector<std::wstring> ExpectedSpecialFolderRootTexts()
+    {
+        std::vector<std::wstring> rootTexts;
+        const KNOWNFOLDERID folderIds[] = {
+            FOLDERID_Desktop,
+            FOLDERID_Documents,
+            FOLDERID_Pictures,
+        };
+
+        for (const KNOWNFOLDERID& folderId : folderIds)
+        {
+            const std::wstring folderPath = TryGetKnownFolderPathForTest(folderId);
+            if (folderPath.empty())
+            {
+                continue;
+            }
+
+            std::error_code error;
+            if (!fs::is_directory(fs::path(folderPath), error) || error)
+            {
+                continue;
+            }
+
+            rootTexts.push_back(QueryShellDisplayName(folderPath));
+        }
+
+        return rootTexts;
+    }
+
+    LRESULT CALLBACK TestWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        (void)wParam;
+        if (message == WM_NCCREATE)
+        {
+            auto* createStruct = reinterpret_cast<CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+
+        auto* state = reinterpret_cast<TestWindowState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (message == hyperbrowse::services::FolderEnumerationService::kMessageId)
+        {
+            std::unique_ptr<hyperbrowse::services::FolderEnumerationUpdate> update(
+                reinterpret_cast<hyperbrowse::services::FolderEnumerationUpdate*>(lParam));
+
+            if (!state || !update || update->requestId != state->expectedRequestId)
+            {
+                return 0;
+            }
+
+            switch (update->kind)
+            {
+            case hyperbrowse::services::FolderEnumerationUpdateKind::Batch:
+                state->enumerationResult.totalCount = update->totalCount;
+                state->enumerationResult.totalBytes = update->totalBytes;
+                state->enumerationResult.items.insert(state->enumerationResult.items.end(),
+                                                      std::make_move_iterator(update->items.begin()),
+                                                      std::make_move_iterator(update->items.end()));
+                return 0;
+            case hyperbrowse::services::FolderEnumerationUpdateKind::Completed:
+                state->enumerationResult.totalCount = update->totalCount;
+                state->enumerationResult.totalBytes = update->totalBytes;
+                state->enumerationResult.completed = true;
+                return 0;
+            case hyperbrowse::services::FolderEnumerationUpdateKind::Failed:
+                state->enumerationResult.errorMessage = update->message;
+                state->enumerationResult.failed = true;
+                return 0;
+            default:
+                return 0;
+            }
+        }
+
+        if (message == hyperbrowse::services::ThumbnailScheduler::kMessageId)
+        {
+            std::unique_ptr<hyperbrowse::services::ThumbnailReadyUpdate> update(
+                reinterpret_cast<hyperbrowse::services::ThumbnailReadyUpdate*>(lParam));
+            if (!state || !update || update->sessionId != state->thumbnailResult.expectedSessionId)
+            {
+                return 0;
+            }
+
+            if (update->success)
+            {
+                ++state->thumbnailResult.readyCount;
+                state->thumbnailResult.readyPaths.push_back(update->cacheKey.filePath);
+            }
+            return 0;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    HWND CreateTestWindow(TestWindowState* state, HINSTANCE instance)
+    {
+        WNDCLASSEXW windowClass{};
+        windowClass.cbSize = sizeof(windowClass);
+        windowClass.lpfnWndProc = &TestWindowProc;
+        windowClass.hInstance = instance;
+        windowClass.lpszClassName = kTestWindowClassName;
+        RegisterClassExW(&windowClass);
+
+        return CreateWindowExW(
+            0,
+            kTestWindowClassName,
+            L"HyperBrowseTests",
+            0,
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            nullptr,
+            instance,
+            state);
+    }
+
+    HWND CreateUiHostWindow(HINSTANCE instance)
+    {
+        return CreateWindowExW(
+            0,
+            kTestWindowClassName,
+            L"HyperBrowseUiHost",
+            WS_OVERLAPPEDWINDOW,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            960,
+            720,
+            nullptr,
+            nullptr,
+            instance,
+            nullptr);
+    }
+
+    GUID ContainerFormatGuid(TestImageFormat format)
+    {
+        switch (format)
+        {
+        case TestImageFormat::Jpeg:
+            return GUID_ContainerFormatJpeg;
+        case TestImageFormat::Png:
+            return GUID_ContainerFormatPng;
+        case TestImageFormat::Gif:
+            return GUID_ContainerFormatGif;
+        case TestImageFormat::Tiff:
+        default:
+            return GUID_ContainerFormatTiff;
+        }
+    }
+
+    std::vector<BYTE> BuildPixelBuffer(UINT width, UINT height)
+    {
+        std::vector<BYTE> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U, 0);
+        for (UINT y = 0; y < height; ++y)
+        {
+            for (UINT x = 0; x < width; ++x)
+            {
+                const std::size_t index = (static_cast<std::size_t>(y) * width + x) * 4U;
+                pixels[index + 0] = static_cast<BYTE>((x * 37U) % 255U);
+                pixels[index + 1] = static_cast<BYTE>((y * 53U) % 255U);
+                pixels[index + 2] = static_cast<BYTE>(((x + y) * 29U) % 255U);
+                pixels[index + 3] = 255;
+            }
+        }
+
+        return pixels;
+    }
+
+    void WriteTestImage(const fs::path& path,
+                        TestImageFormat format,
+                        UINT width,
+                        UINT height,
+                        std::uint16_t orientation = 1)
+    {
+        fs::create_directories(path.parent_path());
+
+        ComPtr<IWICImagingFactory> factory;
+        CheckHResult(
+            CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)),
+            "Failed to create the WIC imaging factory for test image generation");
+
+        std::vector<BYTE> pixels = BuildPixelBuffer(width, height);
+        const UINT stride = width * 4;
+
+        ComPtr<IWICBitmap> bitmap;
+        CheckHResult(
+            factory->CreateBitmapFromMemory(width,
+                                            height,
+                                            GUID_WICPixelFormat32bppBGRA,
+                                            stride,
+                                            static_cast<UINT>(pixels.size()),
+                                            pixels.data(),
+                                            &bitmap),
+            "Failed to create the WIC bitmap backing store for a test image");
+
+        ComPtr<IWICStream> stream;
+        CheckHResult(factory->CreateStream(&stream), "Failed to create a WIC stream for a test image");
+        CheckHResult(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE), "Failed to open the test image output path");
+
+        ComPtr<IWICBitmapEncoder> encoder;
+        CheckHResult(factory->CreateEncoder(ContainerFormatGuid(format), nullptr, &encoder), "Failed to create a WIC encoder");
+        CheckHResult(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache), "Failed to initialize the WIC encoder");
+
+        ComPtr<IWICBitmapFrameEncode> frame;
+        ComPtr<IPropertyBag2> propertyBag;
+        CheckHResult(encoder->CreateNewFrame(&frame, &propertyBag), "Failed to create a WIC frame encoder");
+        CheckHResult(frame->Initialize(propertyBag.Get()), "Failed to initialize the WIC frame encoder");
+        CheckHResult(frame->SetSize(width, height), "Failed to set the test image size");
+
+        WICPixelFormatGUID pixelFormat = GUID_WICPixelFormat32bppBGRA;
+        CheckHResult(frame->SetPixelFormat(&pixelFormat), "Failed to set the test image pixel format");
+
+        if (format == TestImageFormat::Jpeg && orientation != 1)
+        {
+            ComPtr<IWICMetadataQueryWriter> metadataWriter;
+            CheckHResult(frame->GetMetadataQueryWriter(&metadataWriter), "Failed to acquire the JPEG metadata writer");
+
+            PROPVARIANT value;
+            PropVariantInit(&value);
+            CheckHResult(InitPropVariantFromUInt16(orientation, &value), "Failed to build the JPEG orientation metadata value");
+            CheckHResult(metadataWriter->SetMetadataByName(L"/app1/ifd/{ushort=274}", &value), "Failed to write the JPEG orientation metadata");
+            PropVariantClear(&value);
+        }
+
+        CheckHResult(frame->WriteSource(bitmap.Get(), nullptr), "Failed to write the test image pixels");
+        CheckHResult(frame->Commit(), "Failed to commit the test image frame");
+        CheckHResult(encoder->Commit(), "Failed to commit the test image encoder");
+    }
+
+    hyperbrowse::cache::ThumbnailCacheKey MakeCacheKey(const fs::path& path,
+                                                       std::uint64_t modifiedTimestampUtc,
+                                                       int targetWidth = 160,
+                                                       int targetHeight = 112)
+    {
+        hyperbrowse::cache::ThumbnailCacheKey key;
+        key.filePath = path.wstring();
+        key.modifiedTimestampUtc = modifiedTimestampUtc;
+        key.targetWidth = targetWidth;
+        key.targetHeight = targetHeight;
+        return key;
+    }
+
+    void RunEnumerationScenario(HWND hwnd, TestWindowState* state)
+    {
+        hyperbrowse::services::FolderEnumerationService service;
+
+        TempFolder root(L"HyperBrowsePrompt3Root");
+        root.WriteFile(L"one.jpg", 10);
+        root.WriteFile(L"two.png", 20);
+        root.WriteFile(L"five.NRW", 50);
+        root.WriteFile(L"ignore.txt", 5);
+        root.WriteFile(L"nested\\three.gif", 30);
+        root.WriteFile(L"nested\\four.nef", 40);
+
+        ResetEnumerationResult(state);
+        state->expectedRequestId = service.EnumerateFolderAsync(hwnd, root.Root().wstring(), false);
+        Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
+               "Non-recursive enumeration timed out or failed");
+        Expect(state->enumerationResult.totalCount == 3, "Non-recursive enumeration returned the wrong supported-file count");
+        Expect(state->enumerationResult.totalBytes == 80, "Non-recursive enumeration returned the wrong byte total");
+        Expect(state->enumerationResult.items.size() == 3, "Non-recursive enumeration returned the wrong batch item count");
+        Expect(state->enumerationResult.items.front().placeholderWidth == 256, "Placeholder width was not collected");
+        Expect(state->enumerationResult.items.front().placeholderHeight == 256, "Placeholder height was not collected");
+
+        ResetEnumerationResult(state);
+        state->expectedRequestId = service.EnumerateFolderAsync(hwnd, root.Root().wstring(), true);
+        Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
+               "Recursive enumeration timed out or failed");
+        Expect(state->enumerationResult.totalCount == 5, "Recursive enumeration returned the wrong supported-file count");
+        Expect(state->enumerationResult.totalBytes == 150, "Recursive enumeration returned the wrong byte total");
+
+        TempFolder slow(L"HyperBrowsePrompt3Slow");
+        for (int index = 0; index < 400; ++index)
+        {
+            slow.WriteFile(L"bulk\\image_" + std::to_wstring(index) + L".jpg", 1);
+        }
+
+        TempFolder quick(L"HyperBrowsePrompt3Quick");
+        quick.WriteFile(L"picked.png", 7);
+
+        ResetEnumerationResult(state);
+        service.EnumerateFolderAsync(hwnd, slow.Root().wstring(), false);
+        state->expectedRequestId = service.EnumerateFolderAsync(hwnd, quick.Root().wstring(), false);
+        Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
+               "Cancellation scenario timed out or failed");
+        Expect(state->enumerationResult.totalCount == 1, "Cancellation scenario did not surface the latest folder request");
+        Expect(state->enumerationResult.items.size() == 1, "Cancellation scenario returned stale items from the superseded request");
+        Expect(state->enumerationResult.items.front().fileName == L"picked.png", "Cancellation scenario returned the wrong final file");
+        Expect(state->enumerationResult.items.front().fileType == L"PNG", "Enumeration did not capture the file type field");
+        Expect(state->enumerationResult.items.front().modifiedTimestampUtc != 0, "Enumeration did not capture the modified timestamp field");
+    }
+
+    void RunWicDecoderScenario()
+    {
+        TempFolder root(L"HyperBrowsePrompt5Decoder");
+        const fs::path jpegPath = root.Root() / L"rotated.jpg";
+        const fs::path pngPath = root.Root() / L"sample.png";
+        const fs::path gifPath = root.Root() / L"sample.gif";
+        const fs::path tiffPath = root.Root() / L"sample.tif";
+
+        WriteTestImage(jpegPath, TestImageFormat::Jpeg, 24, 48, 6);
+        WriteTestImage(pngPath, TestImageFormat::Png, 96, 48);
+        WriteTestImage(gifPath, TestImageFormat::Gif, 36, 18);
+        WriteTestImage(tiffPath, TestImageFormat::Tiff, 18, 54);
+
+        hyperbrowse::decode::WicThumbnailDecoder decoder;
+
+        const auto jpegThumbnail = decoder.Decode(MakeCacheKey(jpegPath, 1));
+        Expect(jpegThumbnail != nullptr, "WIC failed to decode the JPEG thumbnail");
+         Expect(jpegThumbnail->Width() > jpegThumbnail->Height(), "WIC did not apply JPEG EXIF orientation");
+         Expect(jpegThumbnail->SourceWidth() == 48 && jpegThumbnail->SourceHeight() == 24,
+             "WIC did not surface the oriented JPEG source dimensions");
+
+        const auto pngThumbnail = decoder.Decode(MakeCacheKey(pngPath, 2));
+        Expect(pngThumbnail != nullptr, "WIC failed to decode the PNG thumbnail");
+         Expect(pngThumbnail->Width() <= 160 && pngThumbnail->Height() <= 112, "PNG thumbnail scaling exceeded the target bounds");
+         Expect(pngThumbnail->SourceWidth() == 96 && pngThumbnail->SourceHeight() == 48,
+             "WIC did not surface the PNG source dimensions");
+
+        const auto gifThumbnail = decoder.Decode(MakeCacheKey(gifPath, 3));
+         Expect(gifThumbnail != nullptr, "WIC failed to decode the GIF first frame thumbnail");
+         Expect(gifThumbnail->SourceWidth() == 36 && gifThumbnail->SourceHeight() == 18,
+             "WIC did not surface the GIF source dimensions");
+
+        const auto tiffThumbnail = decoder.Decode(MakeCacheKey(tiffPath, 4));
+         Expect(tiffThumbnail != nullptr, "WIC failed to decode the TIFF first page thumbnail");
+         Expect(tiffThumbnail->SourceWidth() == 18 && tiffThumbnail->SourceHeight() == 54,
+             "WIC did not surface the TIFF source dimensions");
+    }
+
+    void RunThumbnailSchedulerScenario(HWND hwnd, TestWindowState* state)
+    {
+        TempFolder root(L"HyperBrowsePrompt5Scheduler");
+        const fs::path offscreenPngPath = root.Root() / L"offscreen.png";
+        const fs::path visibleJpegPath = root.Root() / L"visible.jpg";
+        const fs::path visibleGifPath = root.Root() / L"visible.gif";
+        const fs::path offscreenTiffPath = root.Root() / L"offscreen.tif";
+
+        WriteTestImage(offscreenPngPath, TestImageFormat::Png, 96, 48);
+        WriteTestImage(visibleJpegPath, TestImageFormat::Jpeg, 24, 48, 6);
+        WriteTestImage(visibleGifPath, TestImageFormat::Gif, 36, 18);
+        WriteTestImage(offscreenTiffPath, TestImageFormat::Tiff, 18, 54);
+
+        const auto offscreenPngKey = MakeCacheKey(offscreenPngPath, 10);
+        const auto visibleJpegKey = MakeCacheKey(visibleJpegPath, 11);
+        const auto visibleGifKey = MakeCacheKey(visibleGifPath, 12);
+        const auto offscreenTiffKey = MakeCacheKey(offscreenTiffPath, 13);
+
+        hyperbrowse::services::ThumbnailScheduler scheduler(8ULL * 1024ULL * 1024ULL, 1);
+        scheduler.BindTargetWindow(hwnd);
+
+        ResetThumbnailResult(state, 7);
+        const std::vector<hyperbrowse::services::ThumbnailWorkItem> requests{
+            {0, offscreenPngKey, 1},
+            {1, visibleJpegKey, 0},
+            {2, visibleGifKey, 0},
+            {3, offscreenTiffKey, 1},
+        };
+        scheduler.Schedule(7, 1, requests);
+
+        Expect(PumpMessagesUntil([&]() { return state->thumbnailResult.readyCount >= 4; }, 5000),
+               "Thumbnail scheduler decode work timed out");
+        Expect(!state->thumbnailResult.readyPaths.empty(), "Thumbnail scheduler did not post any ready messages");
+        const std::wstring& firstReadyPath = state->thumbnailResult.readyPaths.front();
+        Expect(firstReadyPath == visibleJpegPath.wstring() || firstReadyPath == visibleGifPath.wstring(),
+               "Thumbnail scheduler did not prioritize visible work ahead of offscreen work");
+        Expect(scheduler.FindCachedThumbnail(offscreenPngKey) != nullptr, "Offscreen PNG thumbnail was not cached");
+        Expect(scheduler.FindCachedThumbnail(visibleJpegKey) != nullptr, "Visible JPEG thumbnail was not cached");
+        Expect(scheduler.FindCachedThumbnail(visibleGifKey) != nullptr, "Visible GIF thumbnail was not cached");
+        Expect(scheduler.FindCachedThumbnail(offscreenTiffKey) != nullptr, "Offscreen TIFF thumbnail was not cached");
+
+        const auto visibleJpegThumbnail = scheduler.FindCachedThumbnail(visibleJpegKey);
+        Expect(visibleJpegThumbnail->SourceWidth() == 48 && visibleJpegThumbnail->SourceHeight() == 24,
+               "Thumbnail scheduler did not retain the JPEG source dimensions in cache");
+        const auto offscreenPngThumbnail = scheduler.FindCachedThumbnail(offscreenPngKey);
+        Expect(offscreenPngThumbnail->SourceWidth() == 96 && offscreenPngThumbnail->SourceHeight() == 48,
+               "Thumbnail scheduler did not retain the PNG source dimensions in cache");
+
+        ResetThumbnailResult(state, 7);
+        scheduler.Schedule(7, 2, requests);
+        PumpMessagesFor(300);
+        Expect(state->thumbnailResult.readyCount == 0, "Cached thumbnails should not be re-decoded on the next schedule pass");
+    }
+
+    void RunBrowserPaneScenario(HINSTANCE instance)
+    {
+        HWND hostWindow = CreateUiHostWindow(instance);
+        Expect(hostWindow != nullptr, "Failed to create the hidden UI host window");
+
+        hyperbrowse::browser::BrowserPane browserPane(instance);
+        Expect(browserPane.Create(hostWindow), "Failed to create the BrowserPane test control");
+
+         WNDCLASSEXW browserPaneClass{};
+         browserPaneClass.cbSize = sizeof(browserPaneClass);
+         Expect(GetClassInfoExW(instance, L"HyperBrowseBrowserPane", &browserPaneClass) != FALSE,
+             "Failed to query the BrowserPane window class");
+         Expect((browserPaneClass.style & CS_DBLCLKS) != 0,
+             "BrowserPane must register with CS_DBLCLKS so thumbnail double-clicks open the viewer");
+
+        MoveWindow(browserPane.Hwnd(), 0, 0, 860, 620, TRUE);
+
+        hyperbrowse::browser::BrowserModel model;
+        std::vector<hyperbrowse::browser::BrowserItem> items;
+        items.push_back(hyperbrowse::browser::BrowserItem{L"alpha.jpg", L"C:\\Alpha\\alpha.jpg", L"JPG", L"2026-04-11 10:00", 100, 40, 320, 240});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"테스트-漢字.png", L"C:\\Alpha\\테스트-漢字.png", L"PNG", L"2026-04-11 10:01", 200, 10, 640, 480});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"gamma.gif", L"C:\\Alpha\\gamma.gif", L"GIF", L"2026-04-11 10:02", 300, 70, 160, 120});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"delta.nef", L"C:\\Alpha\\delta.nef", L"NEF", L"2026-04-11 10:03", 400, 55, 1024, 768});
+        model.Reset(L"C:\\Alpha", false);
+        model.AppendItems(std::move(items), 4, 175);
+        model.Complete();
+
+        browserPane.SetModel(&model);
+        browserPane.RefreshFromModel();
+
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(50, 50));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(50, 50));
+        Expect(browserPane.SelectedCount() == 1, "Single-click selection in thumbnail mode failed");
+
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, MAKELPARAM(450, 50));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(450, 50));
+        Expect(browserPane.SelectedCount() == 3, "Shift-range selection in thumbnail mode failed");
+
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON | MK_CONTROL, MAKELPARAM(250, 50));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(250, 50));
+        Expect(browserPane.SelectedCount() == 2, "Ctrl-toggle selection in thumbnail mode failed");
+
+        browserPane.ClearSelection();
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(5, 5));
+        SendMessageW(browserPane.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(390, 210));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(390, 210));
+        Expect(browserPane.SelectedCount() == 2, "Rubber-band selection in thumbnail mode failed");
+
+        browserPane.SetViewMode(hyperbrowse::browser::BrowserViewMode::Details);
+        browserPane.SetSortMode(hyperbrowse::browser::BrowserSortMode::FileSize);
+
+        HWND listView = FindWindowExW(browserPane.Hwnd(), nullptr, WC_LISTVIEWW, nullptr);
+        Expect(listView != nullptr, "Details-mode list view was not created");
+        Expect(ListView_GetItemCount(listView) == 4, "Virtual details view item count is incorrect");
+         Expect(SendMessageW(listView, LVM_GETUNICODEFORMAT, 0, 0) != FALSE,
+             "Details-mode list view is not running in Unicode mode");
+
+        wchar_t buffer[256]{};
+        ListView_GetItemText(listView, 0, 0, buffer, static_cast<int>(std::size(buffer)));
+         Expect(std::wstring(buffer) == L"테스트-漢字.png", "Details view did not preserve the Unicode filename text for the smallest item");
+
+        Expect(model.UpdateDecodedDimensions(0, 20, 20), "Browser model did not accept a decoded-dimensions update");
+        Expect(model.UpdateDecodedDimensions(1, 10, 10), "Browser model did not accept the second decoded-dimensions update");
+        Expect(model.UpdateDecodedDimensions(2, 40, 40), "Browser model did not accept the third decoded-dimensions update");
+        browserPane.SetSortMode(hyperbrowse::browser::BrowserSortMode::Dimensions);
+        browserPane.RefreshFromModel();
+
+        ListView_GetItemText(listView, 0, 0, buffer, static_cast<int>(std::size(buffer)));
+        Expect(std::wstring(buffer) == L"테스트-漢字.png", "Dimension sort did not preserve the Unicode filename in details mode");
+        ListView_GetItemText(listView, 0, 4, buffer, static_cast<int>(std::size(buffer)));
+        Expect(std::wstring(buffer) == L"10x10", "Dimensions column did not surface the decoded dimensions");
+
+        DestroyWindow(hostWindow);
+    }
+
+    void RunViewerWindowScenario(HINSTANCE instance, HWND ownerWindow)
+    {
+        TempFolder root(L"HyperBrowsePrompt6Viewer");
+        const fs::path firstPath = root.Root() / L"first.jpg";
+        const fs::path secondPath = root.Root() / L"second.png";
+        WriteTestImage(firstPath, TestImageFormat::Jpeg, 48, 24, 6);
+        WriteTestImage(secondPath, TestImageFormat::Png, 64, 32);
+
+        std::vector<hyperbrowse::browser::BrowserItem> items;
+        items.push_back(hyperbrowse::browser::BrowserItem{L"first.jpg", firstPath.wstring(), L"JPG", L"2026-04-11 12:00", 1, 10, 256, 256});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"second.png", secondPath.wstring(), L"PNG", L"2026-04-11 12:01", 2, 20, 256, 256});
+
+        hyperbrowse::viewer::ViewerWindow viewer(instance);
+        Expect(viewer.Open(ownerWindow, items, 0, false), "Viewer window failed to open");
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
+               "Viewer window did not finish the initial image decode");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
+               "Viewer next-image navigation failed");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, '1', 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == 100; }, 1000),
+               "Viewer actual-size mode did not set zoom to 100%");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'R', 0);
+        PumpMessagesFor(100);
+        Expect(viewer.RotationQuarterTurns() == 1, "Viewer rotate-right command failed");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 100; }, 1000),
+               "Viewer zoom-in command failed");
+
+        const POINT initialPan = viewer.PanOffset();
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(120, 120));
+        SendMessageW(viewer.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(160, 150));
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(160, 150));
+        PumpMessagesFor(100);
+        const POINT movedPan = viewer.PanOffset();
+        Expect(movedPan.x != initialPan.x || movedPan.y != initialPan.y, "Viewer pan interaction failed");
+
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(viewer.IsFullScreen(), "Viewer double-click did not enter full screen");
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(!viewer.IsFullScreen(), "Viewer double-click did not exit full screen");
+
+        SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
+        PumpMessagesFor(100);
+    }
+
+    void RunMainWindowFolderTreeScenario(HINSTANCE instance)
+    {
+         const std::vector<std::wstring> expectedSpecialRoots = ExpectedSpecialFolderRootTexts();
+         std::wstring persistedDriveRootText;
+
+         {
+             hyperbrowse::ui::MainWindow mainWindow(instance);
+             Expect(mainWindow.Create(), "Failed to create the MainWindow for the folder-tree scenario");
+
+             HWND mainWindowHandle = FindWindowW(L"HyperBrowseMainWindow", nullptr);
+             Expect(mainWindowHandle != nullptr, "Failed to find the created MainWindow instance");
+
+             HWND treeView = FindWindowExW(mainWindowHandle, nullptr, WC_TREEVIEWW, nullptr);
+             Expect(treeView != nullptr, "MainWindow did not create the folder tree control");
+
+             HTREEITEM rootItem = TreeView_GetRoot(treeView);
+             Expect(rootItem != nullptr, "Folder tree did not populate any root items");
+
+             HTREEITEM currentRoot = rootItem;
+             for (const std::wstring& expectedRootText : expectedSpecialRoots)
+             {
+              Expect(currentRoot != nullptr, "Folder tree did not place special folders ahead of drive roots");
+              Expect(ReadTreeItemText(treeView, currentRoot) == expectedRootText,
+                  "Folder tree did not insert Desktop/Documents/Pictures above the drive roots in the expected order");
+              currentRoot = TreeView_GetNextSibling(treeView, currentRoot);
+             }
+
+             Expect(currentRoot != nullptr, "Folder tree did not include any drive roots after the special folders");
+             persistedDriveRootText = ReadTreeItemText(treeView, currentRoot);
+             Expect(persistedDriveRootText.find(L"Open Folder") == std::wstring::npos,
+                 "Folder tree still shows the old placeholder prompt instead of filesystem roots");
+
+             TreeView_Expand(treeView, currentRoot, TVE_EXPAND);
+             TreeView_SelectItem(treeView, currentRoot);
+             PumpMessagesFor(300);
+
+             wchar_t title[512]{};
+             GetWindowTextW(mainWindowHandle, title, static_cast<int>(std::size(title)));
+             Expect(std::wstring(title).find(L":\\") != std::wstring::npos,
+                 "Selecting a tree node did not route the main window to a concrete filesystem folder");
+
+             DestroyWindow(mainWindowHandle);
+             PumpMessagesFor(100);
+         }
+
+         {
+             hyperbrowse::ui::MainWindow restoredMainWindow(instance);
+             Expect(restoredMainWindow.Create(), "Failed to recreate the MainWindow for persistence verification");
+
+             HWND restoredHandle = FindWindowW(L"HyperBrowseMainWindow", nullptr);
+             Expect(restoredHandle != nullptr, "Failed to find the recreated MainWindow instance");
+
+             HWND restoredTreeView = FindWindowExW(restoredHandle, nullptr, WC_TREEVIEWW, nullptr);
+             Expect(restoredTreeView != nullptr, "Recreated MainWindow did not create the folder tree control");
+
+             PumpMessagesFor(300);
+             const HTREEITEM selectedItem = TreeView_GetSelection(restoredTreeView);
+             Expect(selectedItem != nullptr, "MainWindow did not restore any tree selection from the previous session");
+             Expect(ReadTreeItemText(restoredTreeView, selectedItem) == persistedDriveRootText,
+                 "MainWindow did not restore the previously selected folder tree item on startup");
+
+             wchar_t title[512]{};
+             GetWindowTextW(restoredHandle, title, static_cast<int>(std::size(title)));
+             Expect(std::wstring(title).find(L":\\") != std::wstring::npos,
+                 "MainWindow did not reload the persisted folder selection on startup");
+
+             DestroyWindow(restoredHandle);
+             PumpMessagesFor(100);
+         }
+    }
+}
+
+int main()
+{
+    try
+    {
+        ComScope comScope;
+        HINSTANCE instance = GetModuleHandleW(nullptr);
+        INITCOMMONCONTROLSEX commonControls{};
+        commonControls.dwSize = sizeof(commonControls);
+        commonControls.dwICC = ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES | ICC_STANDARD_CLASSES;
+        InitCommonControlsEx(&commonControls);
+
+        TestWindowState state{};
+        HWND hwnd = CreateTestWindow(&state, instance);
+        Expect(hwnd != nullptr, "Failed to create the hidden test window");
+
+        RunEnumerationScenario(hwnd, &state);
+        RunWicDecoderScenario();
+        RunThumbnailSchedulerScenario(hwnd, &state);
+        RunBrowserPaneScenario(instance);
+        RunViewerWindowScenario(instance, hwnd);
+        RunMainWindowFolderTreeScenario(instance);
+
+        DestroyWindow(hwnd);
+        UnregisterClassW(kTestWindowClassName, instance);
+
+        std::cout << "HyperBrowse thumbnail pipeline smoke tests passed\n";
+        return 0;
+    }
+    catch (const std::exception& exception)
+    {
+        std::cerr << "HyperBrowse smoke test failed: " << exception.what() << '\n';
+        return 1;
+    }
+}
