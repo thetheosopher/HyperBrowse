@@ -21,22 +21,13 @@ namespace
     namespace fs = std::filesystem;
 
     constexpr int kWheelScrollAmount = 72;
+    constexpr float kThumbnailPreviewAspectRatio = 0.72f;
     constexpr int kVisiblePriority = 0;
     constexpr int kNearVisiblePriority = 1;
     constexpr int kProactivePrefetchPriority = 2;
     constexpr int kNearVisiblePrefetchRows = 1;
     constexpr int kMinimumTopOfFolderPrefetchRows = 6;
     constexpr int kMaximumTopOfFolderPrefetchRows = 18;
-    constexpr int kThumbnailTextInset = 14;
-    constexpr int kThumbnailTitleTopGap = 12;
-    constexpr int kThumbnailTitleHeight = 38;
-    constexpr int kThumbnailMetaTopGap = 6;
-    constexpr int kThumbnailMetaHeight = 14;
-    constexpr int kThumbnailInfoBottomInset = 12;
-    constexpr int kThumbnailInfoHeight = 18;
-    constexpr int kThumbnailBadgeHorizontalPadding = 8;
-    constexpr int kThumbnailBadgeGap = 10;
-    constexpr int kThumbnailBadgeCornerRadius = 8;
 
     hyperbrowse::browser::BrowserPane::ThemeColors MakeThemeColors(bool darkTheme)
     {
@@ -204,6 +195,16 @@ namespace hyperbrowse::browser
         }
     }
 
+    int ThumbnailSizePresetToPixels(ThumbnailSizePreset preset)
+    {
+        return static_cast<int>(preset);
+    }
+
+    std::wstring ThumbnailSizePresetToLabel(ThumbnailSizePreset preset)
+    {
+        return std::to_wstring(ThumbnailSizePresetToPixels(preset)) + L" px";
+    }
+
     BrowserPane::BrowserPane(HINSTANCE instance)
         : instance_(instance)
         , colors_(MakeThemeColors(false))
@@ -336,6 +337,66 @@ namespace hyperbrowse::browser
     BrowserSortMode BrowserPane::GetSortMode() const noexcept
     {
         return sortMode_;
+    }
+
+    void BrowserPane::SetThumbnailSizePreset(ThumbnailSizePreset preset)
+    {
+        if (thumbnailSizePreset_ == preset)
+        {
+            return;
+        }
+
+        thumbnailSizePreset_ = preset;
+        RebuildThumbnailFonts();
+        UpdateVerticalScrollBar();
+        ScheduleVisibleThumbnailWork();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    ThumbnailSizePreset BrowserPane::GetThumbnailSizePreset() const noexcept
+    {
+        return thumbnailSizePreset_;
+    }
+
+    void BrowserPane::SetCompactThumbnailLayout(bool enabled)
+    {
+        if (compactThumbnailLayout_ == enabled)
+        {
+            return;
+        }
+
+        compactThumbnailLayout_ = enabled;
+        RebuildThumbnailFonts();
+        UpdateVerticalScrollBar();
+        ScheduleVisibleThumbnailWork();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    bool BrowserPane::IsCompactThumbnailLayoutEnabled() const noexcept
+    {
+        return compactThumbnailLayout_;
+    }
+
+    void BrowserPane::SetThumbnailDetailsVisible(bool visible)
+    {
+        if (thumbnailDetailsVisible_ == visible)
+        {
+            return;
+        }
+
+        thumbnailDetailsVisible_ = visible;
+        RebuildThumbnailFonts();
+        UpdateVerticalScrollBar();
+        ScheduleVisibleThumbnailWork();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    bool BrowserPane::AreThumbnailDetailsVisible() const noexcept
+    {
+        return thumbnailDetailsVisible_;
     }
 
     void BrowserPane::SetDarkTheme(bool enabled)
@@ -636,6 +697,49 @@ namespace hyperbrowse::browser
         return true;
     }
 
+    BrowserPane::ThumbnailLayoutMetrics BrowserPane::CurrentThumbnailLayout() const
+    {
+        const int previewWidth = ThumbnailSizePresetToPixels(thumbnailSizePreset_);
+        const int previewHeight = std::max(72, static_cast<int>(std::lround(static_cast<double>(previewWidth) * kThumbnailPreviewAspectRatio)));
+        const bool compact = compactThumbnailLayout_;
+        const bool showDetails = thumbnailDetailsVisible_;
+
+        ThumbnailLayoutMetrics layout;
+        layout.cellPadding = compact ? std::max(6, previewWidth / 20) : std::max(10, previewWidth / 14);
+        layout.previewInset = compact ? std::max(4, previewWidth / 32) : std::max(8, previewWidth / 20);
+        layout.previewWidth = previewWidth;
+        layout.previewHeight = previewHeight;
+        layout.textInset = compact ? std::max(8, previewWidth / 22) : std::max(12, previewWidth / 16);
+        layout.titleTopGap = showDetails ? (compact ? std::max(4, previewWidth / 40) : std::max(8, previewWidth / 24)) : 0;
+        layout.titleHeight = showDetails ? std::clamp(previewWidth / 6, compact ? 20 : 26, compact ? 32 : 38) : 0;
+        layout.metaTopGap = showDetails ? (compact ? 3 : 5) : 0;
+        layout.metaHeight = showDetails ? std::clamp(previewWidth / 12, compact ? 10 : 12, compact ? 12 : 14) : 0;
+        layout.infoBottomInset = showDetails ? (compact ? 6 : 10) : 0;
+        layout.infoHeight = showDetails ? std::clamp(previewWidth / 10, compact ? 12 : 16, compact ? 14 : 18) : 0;
+        layout.badgeHorizontalPadding = compact ? 6 : 8;
+        layout.badgeGap = compact ? 6 : 10;
+        layout.badgeCornerRadius = compact ? 6 : 8;
+        layout.cellCornerRadius = compact ? 12 : 16;
+        layout.previewCornerRadius = compact ? 10 : 12;
+        layout.loadingIconSize = std::clamp(previewWidth / 5, 18, 40);
+        layout.titlePointSize = std::clamp(previewWidth / (compact ? 18 : 16), compact ? 9 : 10, compact ? 11 : 12);
+        layout.metaPointSize = std::clamp(previewWidth / 24, 8, compact ? 9 : 10);
+        layout.statusPointSize = std::clamp(previewWidth / 24, 8, 10);
+        layout.itemWidth = layout.previewWidth + (layout.previewInset * 2);
+        layout.itemHeight = layout.previewHeight + (layout.previewInset * 2);
+        if (showDetails)
+        {
+            layout.itemHeight += layout.titleTopGap
+                + layout.titleHeight
+                + layout.metaTopGap
+                + layout.metaHeight
+                + layout.infoBottomInset
+                + layout.infoHeight;
+        }
+
+        return layout;
+    }
+
     void BrowserPane::LayoutChildren()
     {
         if (!hwnd_)
@@ -789,11 +893,12 @@ namespace hyperbrowse::browser
 
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
+    const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
         const int clientWidth = clientRect.right - clientRect.left;
         const int clientHeight = clientRect.bottom - clientRect.top;
         const int columns = ColumnsForClientWidth(clientWidth);
         const int rows = (static_cast<int>(orderedModelIndices_.size()) + columns - 1) / columns;
-        const int contentHeight = kItemPadding + rows * (kItemHeight + kItemPadding);
+    const int contentHeight = layout.cellPadding + rows * (layout.itemHeight + layout.cellPadding);
         const int maxOffset = std::max(0, contentHeight - clientHeight);
         scrollOffsetY_ = std::clamp(scrollOffsetY_, 0, maxOffset);
 
@@ -812,11 +917,12 @@ namespace hyperbrowse::browser
     {
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
         const int clientWidth = clientRect.right - clientRect.left;
         const int clientHeight = clientRect.bottom - clientRect.top;
         const int columns = ColumnsForClientWidth(clientWidth);
         const int rows = columns > 0 ? (static_cast<int>(orderedModelIndices_.size()) + columns - 1) / columns : 0;
-        const int contentHeight = kItemPadding + rows * (kItemHeight + kItemPadding);
+        const int contentHeight = layout.cellPadding + rows * (layout.itemHeight + layout.cellPadding);
         const int maxOffset = std::max(0, contentHeight - clientHeight);
         const int clampedValue = std::clamp(value, 0, maxOffset);
         if (clampedValue == scrollOffsetY_)
@@ -836,33 +942,36 @@ namespace hyperbrowse::browser
 
     int BrowserPane::ColumnsForClientWidth(int width) const
     {
-        const int stride = kItemWidth + kItemPadding;
-        return std::max(1, (std::max(width, stride) - kItemPadding) / stride);
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        const int stride = layout.itemWidth + layout.cellPadding;
+        return std::max(1, (std::max(width, stride) - layout.cellPadding) / stride);
     }
 
     RECT BrowserPane::GetThumbnailCellRect(int viewIndex) const
     {
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
         const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
         const int row = viewIndex / columns;
         const int column = viewIndex % columns;
 
         RECT rect{};
-        rect.left = kItemPadding + column * (kItemWidth + kItemPadding);
-        rect.top = kItemPadding + row * (kItemHeight + kItemPadding) - scrollOffsetY_;
-        rect.right = rect.left + kItemWidth;
-        rect.bottom = rect.top + kItemHeight;
+        rect.left = layout.cellPadding + column * (layout.itemWidth + layout.cellPadding);
+        rect.top = layout.cellPadding + row * (layout.itemHeight + layout.cellPadding) - scrollOffsetY_;
+        rect.right = rect.left + layout.itemWidth;
+        rect.bottom = rect.top + layout.itemHeight;
         return rect;
     }
 
     RECT BrowserPane::GetThumbnailPreviewRect(const RECT& cellRect) const
     {
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
         RECT previewRect{};
-        previewRect.left = cellRect.left + kPreviewInset;
-        previewRect.top = cellRect.top + kPreviewInset;
-        previewRect.right = cellRect.right - kPreviewInset;
-        previewRect.bottom = previewRect.top + kPreviewHeight;
+        previewRect.left = cellRect.left + layout.previewInset;
+        previewRect.top = cellRect.top + layout.previewInset;
+        previewRect.right = previewRect.left + layout.previewWidth;
+        previewRect.bottom = previewRect.top + layout.previewHeight;
         return previewRect;
     }
 
@@ -873,7 +982,8 @@ namespace hyperbrowse::browser
             return -1;
         }
 
-        if (point.x < kItemPadding || point.y < 0)
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        if (point.x < layout.cellPadding || point.y < 0)
         {
             return -1;
         }
@@ -881,24 +991,24 @@ namespace hyperbrowse::browser
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
         const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
-        const int horizontalStride = kItemWidth + kItemPadding;
-        const int verticalStride = kItemHeight + kItemPadding;
+        const int horizontalStride = layout.itemWidth + layout.cellPadding;
+        const int verticalStride = layout.itemHeight + layout.cellPadding;
         const int adjustedY = point.y + scrollOffsetY_;
-        if (adjustedY < kItemPadding)
+        if (adjustedY < layout.cellPadding)
         {
             return -1;
         }
 
-        const int column = (point.x - kItemPadding) / horizontalStride;
-        const int row = (adjustedY - kItemPadding) / verticalStride;
+        const int column = (point.x - layout.cellPadding) / horizontalStride;
+        const int row = (adjustedY - layout.cellPadding) / verticalStride;
         if (column < 0 || column >= columns || row < 0)
         {
             return -1;
         }
 
-        const int xWithinStride = (point.x - kItemPadding) % horizontalStride;
-        const int yWithinStride = (adjustedY - kItemPadding) % verticalStride;
-        if (xWithinStride > kItemWidth || yWithinStride > kItemHeight)
+        const int xWithinStride = (point.x - layout.cellPadding) % horizontalStride;
+        const int yWithinStride = (adjustedY - layout.cellPadding) % verticalStride;
+        if (xWithinStride > layout.itemWidth || yWithinStride > layout.itemHeight)
         {
             return -1;
         }
@@ -952,9 +1062,11 @@ namespace hyperbrowse::browser
     {
         ReleaseThumbnailFonts();
 
-        thumbnailTitleFont_ = CreateSizedUiFont(11, FW_SEMIBOLD);
-        thumbnailMetaFont_ = CreateSizedUiFont(9, FW_NORMAL);
-        thumbnailStatusFont_ = CreateSizedUiFont(9, FW_SEMIBOLD);
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+
+        thumbnailTitleFont_ = CreateSizedUiFont(layout.titlePointSize, FW_SEMIBOLD);
+        thumbnailMetaFont_ = CreateSizedUiFont(layout.metaPointSize, FW_NORMAL);
+        thumbnailStatusFont_ = CreateSizedUiFont(layout.statusPointSize, FW_SEMIBOLD);
 
         if (!thumbnailTitleFont_)
         {
@@ -1447,9 +1559,10 @@ namespace hyperbrowse::browser
 
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
         const int clientHeight = clientRect.bottom - clientRect.top;
         const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
-        const int verticalStride = kItemHeight + kItemPadding;
+        const int verticalStride = layout.itemHeight + layout.cellPadding;
         const int firstVisibleRow = std::max(0, scrollOffsetY_ / verticalStride);
         const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
         const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
@@ -1462,8 +1575,8 @@ namespace hyperbrowse::browser
         const int requestEndRow = lastVisibleRow + kNearVisiblePrefetchRows + proactivePrefetchRows;
         const int firstIndex = requestStartRow * columns;
         const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (requestEndRow + 1) * columns);
-        const int targetWidth = kItemWidth - (2 * kPreviewInset);
-        const int targetHeight = kPreviewHeight;
+        const int targetWidth = layout.previewWidth;
+        const int targetHeight = layout.previewHeight;
 
         std::vector<services::ThumbnailWorkItem> workItems;
         workItems.reserve(static_cast<std::size_t>(std::max(0, lastIndex - firstIndex)));
@@ -1550,7 +1663,7 @@ namespace hyperbrowse::browser
             }
             else if (orderedModelIndices_.empty())
             {
-                title = L"No Supported Images";
+                title = L"No Supported Images Found";
             }
         }
 
@@ -1572,14 +1685,22 @@ namespace hyperbrowse::browser
 
         RECT titleRect{panelRect.left + 20, panelRect.top + 20, panelRect.right - 20, panelRect.top + 54};
         RECT bodyRect{panelRect.left + 24, titleRect.bottom + 8, panelRect.right - 24, panelRect.bottom - 22};
+        const std::wstring text = BuildPlaceholderText();
+        if (text.empty())
+        {
+            titleRect.top = panelRect.top + ((panelRect.bottom - panelRect.top - 34) / 2);
+            titleRect.bottom = titleRect.top + 34;
+        }
 
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, colors_.text);
         DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
-        SetTextColor(hdc, colors_.mutedText);
-        const std::wstring text = BuildPlaceholderText();
-        DrawTextW(hdc, text.c_str(), -1, &bodyRect, DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+        if (!text.empty())
+        {
+            SetTextColor(hdc, colors_.mutedText);
+            DrawTextW(hdc, text.c_str(), -1, &bodyRect, DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+        }
     }
 
     void BrowserPane::DrawThumbnailCells(HDC hdc, const RECT& clientRect) const
@@ -1591,8 +1712,9 @@ namespace hyperbrowse::browser
             return;
         }
 
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
         const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
-        const int verticalStride = kItemHeight + kItemPadding;
+        const int verticalStride = layout.itemHeight + layout.cellPadding;
         const int firstRow = std::max(0, scrollOffsetY_ / verticalStride);
         const int lastRow = std::max(firstRow, (scrollOffsetY_ + static_cast<int>(clientRect.bottom - clientRect.top)) / verticalStride + 1);
         const int firstIndex = firstRow * columns;
@@ -1624,11 +1746,20 @@ namespace hyperbrowse::browser
                 : static_cast<HGDIOBJ>(borderPen_ ? borderPen_ : GetStockObject(BLACK_PEN));
             HGDIOBJ oldPen = SelectObject(hdc, pen);
             HGDIOBJ oldBrush = SelectObject(hdc, cellBrush);
-            RoundRect(hdc, cellRect.left, cellRect.top, cellRect.right, cellRect.bottom, 16, 16);
+            RoundRect(hdc,
+                      cellRect.left,
+                      cellRect.top,
+                      cellRect.right,
+                      cellRect.bottom,
+                      layout.cellCornerRadius,
+                      layout.cellCornerRadius);
 
             if (selected && accentBrush_)
             {
-                RECT accentRect{cellRect.left + 1, cellRect.top + 1, cellRect.right - 1, cellRect.top + 6};
+                RECT accentRect{cellRect.left + 1,
+                                cellRect.top + 1,
+                                cellRect.right - 1,
+                                cellRect.top + std::max(4, layout.previewInset / 2)};
                 FillRect(hdc, &accentRect, accentBrush_);
             }
 
@@ -1637,133 +1768,142 @@ namespace hyperbrowse::browser
                 ? (selectedPreviewBrush_ ? selectedPreviewBrush_ : previewBrush_)
                 : (previewBrush_ ? previewBrush_ : backgroundBrush_);
             SelectObject(hdc, previewBrush);
-            RoundRect(hdc, previewRect.left, previewRect.top, previewRect.right, previewRect.bottom, 12, 12);
+            RoundRect(hdc,
+                      previewRect.left,
+                      previewRect.top,
+                      previewRect.right,
+                      previewRect.bottom,
+                      layout.previewCornerRadius,
+                      layout.previewCornerRadius);
 
             SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
             DrawPreviewThumbnail(hdc, previewRect, *item, selected);
 
-            SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
-            const int titleTop = previewRect.bottom + kThumbnailTitleTopGap;
-            RECT nameRect{cellRect.left + kThumbnailTextInset,
-                          titleTop,
-                          cellRect.right - kThumbnailTextInset,
-                          titleTop + kThumbnailTitleHeight};
-            HGDIOBJ oldFont = thumbnailTitleFont_
-                ? SelectObject(hdc, thumbnailTitleFont_)
-                : static_cast<HGDIOBJ>(nullptr);
-            const std::wstring displayTitle = BuildThumbnailDisplayTitle(*item);
-            DrawTextW(hdc,
-                      displayTitle.c_str(),
-                      -1,
-                      &nameRect,
-                      DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS | DT_NOPREFIX);
-            if (oldFont)
+            if (thumbnailDetailsVisible_)
             {
-                SelectObject(hdc, oldFont);
-            }
-
-            std::wstring metaLine = FormatDimensionsForItem(*item);
-            if (selected && modelIndex >= 0)
-            {
-                const auto metadata = FindCachedMetadataForModelIndex(modelIndex);
-                if (metadata)
-                {
-                    const std::wstring cameraLabel = BuildCameraLabel(*metadata);
-                    if (!cameraLabel.empty())
-                    {
-                        metaLine.append(L"  |  ");
-                        metaLine.append(cameraLabel);
-                    }
-                    else if (!metadata->dateTaken.empty())
-                    {
-                        metaLine.append(L"  |  ");
-                        metaLine.append(metadata->dateTaken);
-                    }
-                }
-                else
-                {
-                    ScheduleMetadataForItem(modelIndex, *item);
-                }
-            }
-
-            SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
-            oldFont = thumbnailMetaFont_
-                ? SelectObject(hdc, thumbnailMetaFont_)
-                : static_cast<HGDIOBJ>(nullptr);
-            const int metaTop = nameRect.bottom + kThumbnailMetaTopGap;
-            RECT metaRect{cellRect.left + kThumbnailTextInset,
-                          metaTop,
-                          cellRect.right - kThumbnailTextInset,
-                          metaTop + kThumbnailMetaHeight};
-            DrawTextW(hdc, metaLine.c_str(), -1, &metaRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-
-            RECT infoRect{cellRect.left + kThumbnailTextInset,
-                          cellRect.bottom - kThumbnailInfoBottomInset - kThumbnailInfoHeight,
-                          cellRect.right - kThumbnailTextInset,
-                          cellRect.bottom - kThumbnailInfoBottomInset};
-            const std::wstring typeLabel = ToUppercase(item->fileType);
-            const std::wstring sizeLabel = FormatByteSize(item->fileSizeBytes);
-
-            SIZE badgeTextExtent{};
-            if (!typeLabel.empty())
-            {
-                GetTextExtentPoint32W(hdc,
-                                      typeLabel.c_str(),
-                                      static_cast<int>(typeLabel.size()),
-                                      &badgeTextExtent);
-            }
-
-            const int footerWidth = infoRect.right - infoRect.left;
-            const int badgeTextWidth = static_cast<int>(badgeTextExtent.cx);
-            const int badgePreferredWidth = badgeTextWidth + (kThumbnailBadgeHorizontalPadding * 2);
-            const int badgeMaxWidth = std::min(footerWidth, (footerWidth * 2) / 5);
-            const int badgeWidth = typeLabel.empty()
-                ? 0
-                : std::min(footerWidth,
-                           std::max(42,
-                                    std::min(badgeMaxWidth,
-                                             badgePreferredWidth)));
-
-            if (badgeWidth > 0)
-            {
-                const HBRUSH badgeBrush = selected
-                    ? (selectedPreviewBrush_ ? selectedPreviewBrush_ : previewBrush_)
-                    : (placeholderBrush_ ? placeholderBrush_ : previewBrush_);
-                HGDIOBJ oldBadgePen = SelectObject(hdc, GetStockObject(NULL_PEN));
-                HGDIOBJ oldBadgeBrush = SelectObject(hdc, badgeBrush);
-                RECT badgeRect{infoRect.left, infoRect.top, infoRect.left + badgeWidth, infoRect.bottom};
-                RoundRect(hdc,
-                          badgeRect.left,
-                          badgeRect.top,
-                          badgeRect.right,
-                          badgeRect.bottom,
-                          kThumbnailBadgeCornerRadius,
-                          kThumbnailBadgeCornerRadius);
-                SelectObject(hdc, oldBadgeBrush);
-                SelectObject(hdc, oldBadgePen);
-
                 SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
+                const int titleTop = previewRect.bottom + layout.titleTopGap;
+                RECT nameRect{cellRect.left + layout.textInset,
+                              titleTop,
+                              cellRect.right - layout.textInset,
+                              titleTop + layout.titleHeight};
+                HGDIOBJ oldFont = thumbnailTitleFont_
+                    ? SelectObject(hdc, thumbnailTitleFont_)
+                    : static_cast<HGDIOBJ>(nullptr);
+                const std::wstring displayTitle = BuildThumbnailDisplayTitle(*item);
                 DrawTextW(hdc,
-                          typeLabel.c_str(),
+                          displayTitle.c_str(),
                           -1,
-                          &badgeRect,
-                          DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            }
+                          &nameRect,
+                          DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS | DT_NOPREFIX);
+                if (oldFont)
+                {
+                    SelectObject(hdc, oldFont);
+                }
 
-            const int sizeLeft = badgeWidth > 0 ? (infoRect.left + badgeWidth + kThumbnailBadgeGap) : infoRect.left;
-            RECT sizeRect{sizeLeft, infoRect.top, infoRect.right, infoRect.bottom};
-            SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
-            HGDIOBJ footerFont = thumbnailMetaFont_
-                ? SelectObject(hdc, thumbnailMetaFont_)
-                : static_cast<HGDIOBJ>(nullptr);
-            DrawTextW(hdc, sizeLabel.c_str(), -1, &sizeRect, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            if (footerFont)
-            {
-                SelectObject(hdc, footerFont);
-            }
-            if (oldFont)
-            {
-                SelectObject(hdc, oldFont);
+                std::wstring metaLine = FormatDimensionsForItem(*item);
+                if (selected && modelIndex >= 0)
+                {
+                    const auto metadata = FindCachedMetadataForModelIndex(modelIndex);
+                    if (metadata)
+                    {
+                        const std::wstring cameraLabel = BuildCameraLabel(*metadata);
+                        if (!cameraLabel.empty())
+                        {
+                            metaLine.append(L"  |  ");
+                            metaLine.append(cameraLabel);
+                        }
+                        else if (!metadata->dateTaken.empty())
+                        {
+                            metaLine.append(L"  |  ");
+                            metaLine.append(metadata->dateTaken);
+                        }
+                    }
+                    else
+                    {
+                        ScheduleMetadataForItem(modelIndex, *item);
+                    }
+                }
+
+                SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
+                oldFont = thumbnailMetaFont_
+                    ? SelectObject(hdc, thumbnailMetaFont_)
+                    : static_cast<HGDIOBJ>(nullptr);
+                const int metaTop = nameRect.bottom + layout.metaTopGap;
+                RECT metaRect{cellRect.left + layout.textInset,
+                              metaTop,
+                              cellRect.right - layout.textInset,
+                              metaTop + layout.metaHeight};
+                DrawTextW(hdc, metaLine.c_str(), -1, &metaRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+                RECT infoRect{cellRect.left + layout.textInset,
+                              cellRect.bottom - layout.infoBottomInset - layout.infoHeight,
+                              cellRect.right - layout.textInset,
+                              cellRect.bottom - layout.infoBottomInset};
+                const std::wstring typeLabel = ToUppercase(item->fileType);
+                const std::wstring sizeLabel = FormatByteSize(item->fileSizeBytes);
+
+                SIZE badgeTextExtent{};
+                if (!typeLabel.empty())
+                {
+                    GetTextExtentPoint32W(hdc,
+                                          typeLabel.c_str(),
+                                          static_cast<int>(typeLabel.size()),
+                                          &badgeTextExtent);
+                }
+
+                const int footerWidth = infoRect.right - infoRect.left;
+                const int badgeTextWidth = static_cast<int>(badgeTextExtent.cx);
+                const int badgePreferredWidth = badgeTextWidth + (layout.badgeHorizontalPadding * 2);
+                const int badgeMaxWidth = std::min(footerWidth, (footerWidth * 2) / 5);
+                const int badgeWidth = typeLabel.empty()
+                    ? 0
+                    : std::min(footerWidth,
+                               std::max(42,
+                                        std::min(badgeMaxWidth,
+                                                 badgePreferredWidth)));
+
+                if (badgeWidth > 0)
+                {
+                    const HBRUSH badgeBrush = selected
+                        ? (selectedPreviewBrush_ ? selectedPreviewBrush_ : previewBrush_)
+                        : (placeholderBrush_ ? placeholderBrush_ : previewBrush_);
+                    HGDIOBJ oldBadgePen = SelectObject(hdc, GetStockObject(NULL_PEN));
+                    HGDIOBJ oldBadgeBrush = SelectObject(hdc, badgeBrush);
+                    RECT badgeRect{infoRect.left, infoRect.top, infoRect.left + badgeWidth, infoRect.bottom};
+                    RoundRect(hdc,
+                              badgeRect.left,
+                              badgeRect.top,
+                              badgeRect.right,
+                              badgeRect.bottom,
+                              layout.badgeCornerRadius,
+                              layout.badgeCornerRadius);
+                    SelectObject(hdc, oldBadgeBrush);
+                    SelectObject(hdc, oldBadgePen);
+
+                    SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
+                    DrawTextW(hdc,
+                              typeLabel.c_str(),
+                              -1,
+                              &badgeRect,
+                              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                }
+
+                const int sizeLeft = badgeWidth > 0 ? (infoRect.left + badgeWidth + layout.badgeGap) : infoRect.left;
+                RECT sizeRect{sizeLeft, infoRect.top, infoRect.right, infoRect.bottom};
+                SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
+                HGDIOBJ footerFont = thumbnailMetaFont_
+                    ? SelectObject(hdc, thumbnailMetaFont_)
+                    : static_cast<HGDIOBJ>(nullptr);
+                DrawTextW(hdc, sizeLabel.c_str(), -1, &sizeRect, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                if (footerFont)
+                {
+                    SelectObject(hdc, footerFont);
+                }
+                if (oldFont)
+                {
+                    SelectObject(hdc, oldFont);
+                }
             }
 
             SelectObject(hdc, oldBrush);
@@ -1783,19 +1923,41 @@ namespace hyperbrowse::browser
 
     void BrowserPane::DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item, bool selected) const
     {
-        const int targetWidth = kItemWidth - (2 * kPreviewInset);
-        const int targetHeight = kPreviewHeight;
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        const int targetWidth = layout.previewWidth;
+        const int targetHeight = layout.previewHeight;
         const auto cacheKey = MakeThumbnailCacheKey(item, targetWidth, targetHeight);
 
         if (!thumbnailScheduler_ || !decode::CanDecodeThumbnail(item))
         {
-            RECT iconTextRect{previewRect.left + 10, previewRect.top + 12, previewRect.right - 10, previewRect.top + 34};
+            RECT iconTextRect{previewRect.left + layout.textInset,
+                              previewRect.top + std::max(10, layout.previewInset - 2),
+                              previewRect.right - layout.textInset,
+                              previewRect.top + std::max(34, layout.previewInset + layout.metaHeight)};
             const std::wstring placeholder = decode::IsRawFileType(item.fileType) ? item.fileType : std::wstring(L"IMAGE");
-            SetTextColor(hdc, colors_.mutedText);
+            SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
+            HGDIOBJ oldFont = thumbnailStatusFont_
+                ? SelectObject(hdc, thumbnailStatusFont_)
+                : static_cast<HGDIOBJ>(nullptr);
             DrawTextW(hdc, placeholder.c_str(), -1, &iconTextRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
-            RECT dimTextRect{previewRect.left + 10, previewRect.bottom - 30, previewRect.right - 10, previewRect.bottom - 12};
-            DrawTextW(hdc, FormatDimensionsForItem(item).c_str(), -1, &dimTextRect,
-                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+            if (thumbnailDetailsVisible_)
+            {
+                RECT dimTextRect{previewRect.left + layout.textInset,
+                                 previewRect.bottom - layout.infoBottomInset - layout.infoHeight,
+                                 previewRect.right - layout.textInset,
+                                 previewRect.bottom - layout.infoBottomInset};
+                DrawTextW(hdc,
+                          FormatDimensionsForItem(item).c_str(),
+                          -1,
+                          &dimTextRect,
+                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            }
+
+            if (oldFont)
+            {
+                SelectObject(hdc, oldFont);
+            }
             return;
         }
 
@@ -1804,9 +1966,10 @@ namespace hyperbrowse::browser
         {
             const int previewWidth = previewRect.right - previewRect.left;
             const int previewHeight = previewRect.bottom - previewRect.top;
-            const int iconSize = 28;
+            const int iconSize = layout.loadingIconSize;
             const int iconX = previewRect.left + ((previewWidth - iconSize) / 2);
-            const int iconY = previewRect.top + std::max(16, ((previewHeight - iconSize) / 2) - 12);
+            const int iconY = previewRect.top + std::max(layout.previewInset,
+                                                         ((previewHeight - iconSize) / 2) - (layout.metaHeight / 2));
             if (HCURSOR waitCursor = LoadCursorW(nullptr, IDC_WAIT))
             {
                 DrawIconEx(hdc, iconX, iconY, waitCursor, iconSize, iconSize, 0, nullptr, DI_NORMAL);
@@ -1817,7 +1980,10 @@ namespace hyperbrowse::browser
             HGDIOBJ oldFont = thumbnailStatusFont_
                 ? SelectObject(hdc, thumbnailStatusFont_)
                 : static_cast<HGDIOBJ>(nullptr);
-            RECT statusRect{previewRect.left + 12, iconY + iconSize + 8, previewRect.right - 12, previewRect.bottom - 16};
+            RECT statusRect{previewRect.left + layout.textInset,
+                            iconY + iconSize + std::max(6, layout.metaTopGap),
+                            previewRect.right - layout.textInset,
+                            previewRect.bottom - layout.previewInset};
             DrawTextW(hdc, L"Loading thumbnail", -1, &statusRect, DT_CENTER | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             if (oldFont)
             {
@@ -1915,11 +2081,11 @@ namespace hyperbrowse::browser
 
         if (model_->IsEnumerating() && orderedModelIndices_.empty())
         {
-            return L"Scanning the selected folder asynchronously...\r\n\r\nSupported formats: jpg, jpeg, png, gif, tif, tiff, nef, nrw";
+            return L"Scanning the selected folder asynchronously...\r\n\r\nSupported formats: jpg, jpeg, png, gif, tif, tiff, arw, cr2, cr3, dng, nef, nrw, raf, rw2";
         }
 
         return orderedModelIndices_.empty()
-            ? L"No supported images were found in the selected folder scope."
+            ? L""
             : L"";
     }
 

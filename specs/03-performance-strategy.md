@@ -56,7 +56,8 @@ The application wins on user-perceived speed, not on theoretical throughput alon
 ### PNG / GIF / TIFF
 - use WIC
 
-### NEF / NRW
+### Supported RAW formats
+- ARW / CR2 / CR3 / DNG / NEF / NRW / RAF / RW2
 - prefer embedded preview extraction for thumbnail path when available
 - use LibRaw full decode only when needed
 

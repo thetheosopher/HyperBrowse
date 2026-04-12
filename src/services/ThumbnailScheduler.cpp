@@ -46,13 +46,7 @@ namespace
 
     bool IsRawCacheKey(const hyperbrowse::cache::ThumbnailCacheKey& cacheKey)
     {
-        std::wstring extension = fs::path(cacheKey.filePath).extension().wstring();
-        std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t value)
-        {
-            return static_cast<wchar_t>(towlower(value));
-        });
-
-        return extension == L".nef" || extension == L".nrw";
+        return hyperbrowse::decode::IsRawFileType(fs::path(cacheKey.filePath).extension().wstring());
     }
 }
 

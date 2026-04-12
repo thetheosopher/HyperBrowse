@@ -33,8 +33,14 @@ The application is intentionally scoped as a **pure viewer/browser** rather than
 - TIFF / TIF
 
 ### RAW formats
+- Sony ARW
+- Canon CR2
+- Canon CR3
+- Adobe DNG
 - Nikon NEF
 - Nikon NRW
+- Fujifilm RAF
+- Panasonic RW2
 
 ## 5. High-Level Feature Scope
 
@@ -165,7 +171,7 @@ Support:
 ### TIFF
 - first page only in browser and viewer for v1
 
-### Nikon RAW (NEF / NRW)
+### Supported RAW formats (ARW / CR2 / CR3 / DNG / NEF / NRW / RAF / RW2)
 - support metadata extraction
 - support thumbnail generation from embedded preview when available
 - support full-image viewing through RAW decode path when supported

@@ -22,7 +22,7 @@ This folder contains a repo-ready planning pack for building a high-performance 
 - Win32 shell
 - Direct2D + Direct3D11 rendering
 - WIC for baseline common-format decoding
-- LibRaw for Nikon RAW
+- LibRaw for supported mainstream RAW formats
 - optional nvJPEG for accelerated JPEG thumbnail batches
 
 ## Suggested next step

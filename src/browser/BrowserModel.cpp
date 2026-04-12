@@ -1,5 +1,7 @@
 #include "browser/BrowserModel.h"
 
+#include "decode/ImageDecoder.h"
+
 #include <algorithm>
 #include <cwctype>
 #include <cwchar>
@@ -285,14 +287,8 @@ namespace hyperbrowse::browser
     bool IsSupportedImageExtension(std::wstring_view extension)
     {
         const std::wstring normalized = ToLowercase(extension);
-        return normalized == L".jpg"
-            || normalized == L".jpeg"
-            || normalized == L".png"
-            || normalized == L".gif"
-            || normalized == L".tif"
-            || normalized == L".tiff"
-            || normalized == L".nef"
-            || normalized == L".nrw";
+            return hyperbrowse::decode::IsWicFileType(normalized)
+                || hyperbrowse::decode::IsRawFileType(normalized);
     }
 
     bool FilePathsEqual(std::wstring_view lhs, std::wstring_view rhs)

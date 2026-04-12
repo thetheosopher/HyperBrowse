@@ -8,7 +8,7 @@ Use a **low-overhead pure native Windows architecture**:
 - Direct2D rendering for 2D image presentation
 - Direct3D 11 for texture/resource management and GPU interop
 - WIC for baseline common-format decode
-- LibRaw for Nikon RAW
+- LibRaw for supported mainstream RAW formats
 - nvJPEG as an optional accelerated JPEG thumbnail path
 - CMake-based build
 
@@ -128,7 +128,7 @@ Handles:
 
 ### LibRaw decoder
 Handles:
-- NEF / NRW metadata
+- ARW / CR2 / CR3 / DNG / NEF / NRW / RAF / RW2 metadata
 - embedded preview extraction
 - full RAW decode for viewer path where supported
 

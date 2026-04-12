@@ -84,7 +84,11 @@ namespace hyperbrowse::viewer
         }
     }
 
-    bool ViewerWindow::Open(HWND owner, std::vector<browser::BrowserItem> items, int selectedIndex, bool darkTheme)
+    bool ViewerWindow::Open(HWND owner,
+                            std::vector<browser::BrowserItem> items,
+                            int selectedIndex,
+                            bool darkTheme,
+                            HMONITOR targetMonitor)
     {
         owner_ = owner;
         items_ = std::move(items);
@@ -111,7 +115,7 @@ namespace hyperbrowse::viewer
                 0,
                 kWindowClassName,
                 L"HyperBrowse Viewer",
-                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
                 1280,
@@ -129,7 +133,12 @@ namespace hyperbrowse::viewer
 
         SetDarkTheme(darkTheme_);
         UpdateWindowTitle();
-        ShowWindow(hwnd_, SW_SHOWNORMAL);
+        if (IsIconic(hwnd_))
+        {
+            ShowWindow(hwnd_, SW_RESTORE);
+        }
+
+        SetFullScreen(true, targetMonitor);
         SetForegroundWindow(hwnd_);
         LoadCurrentImageAsync(LoadReason::Open);
         return true;
@@ -604,23 +613,55 @@ namespace hyperbrowse::viewer
         }
     }
 
-    void ViewerWindow::ToggleFullScreen()
+    HMONITOR ViewerWindow::ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept
+    {
+        if (preferredMonitor)
+        {
+            return preferredMonitor;
+        }
+
+        if (owner_ && IsWindow(owner_))
+        {
+            return MonitorFromWindow(owner_, MONITOR_DEFAULTTONEAREST);
+        }
+
+        if (hwnd_ && IsWindow(hwnd_))
+        {
+            return MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+        }
+
+        return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    }
+
+    void ViewerWindow::SetFullScreen(bool enabled, HMONITOR targetMonitor)
     {
         if (!hwnd_)
         {
             return;
         }
 
-        if (!fullScreen_)
+        if (enabled)
         {
-            windowedStyle_ = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE));
-            windowedExStyle_ = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_EXSTYLE));
-            GetWindowPlacement(hwnd_, &windowedPlacement_);
+            if (!fullScreen_)
+            {
+                windowedStyle_ = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE));
+                windowedExStyle_ = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_EXSTYLE));
+                windowedPlacement_.length = sizeof(WINDOWPLACEMENT);
+                GetWindowPlacement(hwnd_, &windowedPlacement_);
+                SetWindowLongPtrW(hwnd_, GWL_STYLE, windowedStyle_ & ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU));
+                SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, windowedExStyle_ & ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
+            }
 
             MONITORINFO monitorInfo{sizeof(MONITORINFO)};
-            GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitorInfo);
-            SetWindowLongPtrW(hwnd_, GWL_STYLE, windowedStyle_ & ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU));
-            SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, windowedExStyle_ & ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
+            const HMONITOR monitor = ResolveTargetMonitor(targetMonitor);
+            if (GetMonitorInfoW(monitor, &monitorInfo) == FALSE)
+            {
+                monitorInfo.rcMonitor.left = 0;
+                monitorInfo.rcMonitor.top = 0;
+                monitorInfo.rcMonitor.right = GetSystemMetrics(SM_CXSCREEN);
+                monitorInfo.rcMonitor.bottom = GetSystemMetrics(SM_CYSCREEN);
+            }
+
             SetWindowPos(hwnd_, HWND_TOP,
                          monitorInfo.rcMonitor.left,
                          monitorInfo.rcMonitor.top,
@@ -631,12 +672,33 @@ namespace hyperbrowse::viewer
             return;
         }
 
+        if (!fullScreen_)
+        {
+            return;
+        }
+
         SetWindowLongPtrW(hwnd_, GWL_STYLE, windowedStyle_);
         SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, windowedExStyle_);
         SetWindowPlacement(hwnd_, &windowedPlacement_);
         SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         fullScreen_ = false;
+    }
+
+    void ViewerWindow::ToggleFullScreen()
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        if (!fullScreen_)
+        {
+            SetFullScreen(true);
+            return;
+        }
+
+        SetFullScreen(false);
     }
 
     void ViewerWindow::AdvanceSlideshow()
@@ -1129,6 +1191,10 @@ namespace hyperbrowse::viewer
                 ReleaseCapture();
             }
             asyncState_->targetWindow = nullptr;
+            fullScreen_ = false;
+            windowedStyle_ = 0;
+            windowedExStyle_ = 0;
+            windowedPlacement_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
             LogPrefetchStats();
             NotifyActivityChanged(false);
             NotifyZoomChanged(0);

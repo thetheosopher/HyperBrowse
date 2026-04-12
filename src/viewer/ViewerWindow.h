@@ -24,7 +24,11 @@ namespace hyperbrowse::viewer
         explicit ViewerWindow(HINSTANCE instance);
         ~ViewerWindow();
 
-        bool Open(HWND owner, std::vector<browser::BrowserItem> items, int selectedIndex, bool darkTheme);
+        bool Open(HWND owner,
+                  std::vector<browser::BrowserItem> items,
+                  int selectedIndex,
+                  bool darkTheme,
+                  HMONITOR targetMonitor = nullptr);
         HWND Hwnd() const noexcept;
         bool IsOpen() const noexcept;
         bool IsFullScreen() const noexcept;
@@ -89,6 +93,8 @@ namespace hyperbrowse::viewer
         void SetActualSize();
         void RotateLeft();
         void RotateRight();
+        HMONITOR ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept;
+        void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
         void ToggleFullScreen();
         void AdvanceSlideshow();
         void ResetViewState();

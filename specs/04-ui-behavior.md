@@ -38,7 +38,9 @@ Keep menus compact and practical.
 - Thumbnail Mode
 - Details/List Mode
 - Recursive Browsing
-- Thumbnail Size presets
+- Thumbnail Size presets (96, 128, 160, 192, 256, 320 px)
+- Compact thumbnail layout toggle
+- Show thumbnail details toggle
 - Sort By
 - Sort Direction
 - Theme
@@ -82,16 +84,18 @@ When a folder is selected:
 
 ### Requirements
 - virtualized grid
-- variable thumbnail sizes
+- variable thumbnail sizes with practical presets from 96 px to 320 px
 - visible placeholders before thumbnail decode completes
 - smooth mouse wheel and keyboard scroll
 - strong multi-select behavior
+- compact spacing option for denser browsing
+- thumbnail-only option that hides filename and metadata rows
 
 ### Thumbnail cell content
 Each cell may include:
 - image thumbnail
 - filename
-- optional compact metadata badges later
+- metadata badge and file size footer when details are visible
 
 ## 5.2 Details/List Mode
 

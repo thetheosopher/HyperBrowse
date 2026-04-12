@@ -38,6 +38,9 @@ namespace
     constexpr wchar_t kRegistryValueThemeMode[] = L"ThemeMode";
     constexpr wchar_t kRegistryValueNvJpegEnabled[] = L"NvJpegEnabled";
     constexpr wchar_t kRegistryValueLibRawOutOfProcessEnabled[] = L"LibRawOutOfProcessEnabled";
+    constexpr wchar_t kRegistryValueThumbnailSizePreset[] = L"ThumbnailSizePreset";
+    constexpr wchar_t kRegistryValueCompactThumbnailLayout[] = L"CompactThumbnailLayout";
+    constexpr wchar_t kRegistryValueThumbnailDetailsVisible[] = L"ThumbnailDetailsVisible";
     constexpr wchar_t kRegistryValueSelectedFolderPath[] = L"SelectedFolderPath";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
@@ -65,6 +68,7 @@ namespace
     constexpr UINT ID_FILE_OPEN_CONTAINING_FOLDER = 1019;
     constexpr UINT ID_FILE_COPY_PATH = 1020;
     constexpr UINT ID_FILE_PROPERTIES = 1021;
+    constexpr UINT ID_FILE_VIEW_ON_SECONDARY_MONITOR = 1022;
     constexpr UINT ID_VIEW_THUMBNAILS = 2001;
     constexpr UINT ID_VIEW_DETAILS = 2002;
     constexpr UINT ID_VIEW_RECURSIVE = 2003;
@@ -72,6 +76,14 @@ namespace
     constexpr UINT ID_VIEW_THEME_DARK = 2102;
     constexpr UINT ID_VIEW_NVJPEG_ACCELERATION = 2103;
     constexpr UINT ID_VIEW_LIBRAW_OUT_OF_PROCESS = 2104;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_96 = 2110;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_128 = 2111;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_160 = 2112;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_192 = 2113;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_256 = 2114;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_320 = 2115;
+    constexpr UINT ID_VIEW_THUMBNAIL_LAYOUT_COMPACT = 2116;
+    constexpr UINT ID_VIEW_THUMBNAIL_DETAILS = 2117;
     constexpr UINT ID_VIEW_SORT_FILENAME = 2201;
     constexpr UINT ID_VIEW_SORT_MODIFIED = 2202;
     constexpr UINT ID_VIEW_SORT_SIZE = 2203;
@@ -541,10 +553,135 @@ namespace
         }
     }
 
+    bool TryParseThumbnailSizePreset(DWORD value, hyperbrowse::browser::ThumbnailSizePreset* preset)
+    {
+        if (!preset)
+        {
+            return false;
+        }
+
+        switch (value)
+        {
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels96):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels96;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels128):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels128;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels160):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels160;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels192):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels192;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels256):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels256;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels320):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels320;
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    hyperbrowse::browser::ThumbnailSizePreset ThumbnailSizePresetFromCommandId(UINT commandId)
+    {
+        switch (commandId)
+        {
+        case ID_VIEW_THUMBNAIL_SIZE_96:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels96;
+        case ID_VIEW_THUMBNAIL_SIZE_128:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels128;
+        case ID_VIEW_THUMBNAIL_SIZE_160:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels160;
+        case ID_VIEW_THUMBNAIL_SIZE_256:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels256;
+        case ID_VIEW_THUMBNAIL_SIZE_320:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels320;
+        case ID_VIEW_THUMBNAIL_SIZE_192:
+        default:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels192;
+        }
+    }
+
+    UINT CommandIdFromThumbnailSizePreset(hyperbrowse::browser::ThumbnailSizePreset preset)
+    {
+        switch (preset)
+        {
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels96:
+            return ID_VIEW_THUMBNAIL_SIZE_96;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels128:
+            return ID_VIEW_THUMBNAIL_SIZE_128;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels160:
+            return ID_VIEW_THUMBNAIL_SIZE_160;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels256:
+            return ID_VIEW_THUMBNAIL_SIZE_256;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels320:
+            return ID_VIEW_THUMBNAIL_SIZE_320;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels192:
+        default:
+            return ID_VIEW_THUMBNAIL_SIZE_192;
+        }
+    }
+
     bool IsJpegBrowserItem(const hyperbrowse::browser::BrowserItem& item)
     {
         return hyperbrowse::decode::IsWicFileType(item.fileType)
             && (_wcsicmp(item.fileType.c_str(), L"JPG") == 0 || _wcsicmp(item.fileType.c_str(), L"JPEG") == 0);
+    }
+
+    struct AlternateMonitorSearch
+    {
+        HMONITOR referenceMonitor{};
+        HMONITOR alternateMonitor{};
+    };
+
+    BOOL CALLBACK CaptureAlternateMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM lParam)
+    {
+        auto* search = reinterpret_cast<AlternateMonitorSearch*>(lParam);
+        if (!search)
+        {
+            return FALSE;
+        }
+
+        if (monitor != search->referenceMonitor)
+        {
+            search->alternateMonitor = monitor;
+            return FALSE;
+        }
+
+        return TRUE;
+    }
+
+    HMONITOR FindAlternateMonitorForWindow(HWND hwnd)
+    {
+        if (GetSystemMetrics(SM_CMONITORS) < 2)
+        {
+            return nullptr;
+        }
+
+        const HMONITOR referenceMonitor = hwnd && IsWindow(hwnd)
+            ? MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+            : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+        AlternateMonitorSearch search{referenceMonitor, nullptr};
+        EnumDisplayMonitors(nullptr, nullptr, &CaptureAlternateMonitor, reinterpret_cast<LPARAM>(&search));
+        return search.alternateMonitor;
+    }
+
+    HMONITOR ResolveViewerMonitor(HWND hwnd, bool preferSecondaryMonitor)
+    {
+        if (preferSecondaryMonitor)
+        {
+            return FindAlternateMonitorForWindow(hwnd);
+        }
+
+        if (hwnd && IsWindow(hwnd))
+        {
+            return MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        }
+
+        return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
     }
 }
 
@@ -698,10 +835,11 @@ namespace hyperbrowse::ui
         HMENU batchConvertFolderMenu = CreatePopupMenu();
         HMENU viewMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
+        HMENU thumbnailSizeMenu = CreatePopupMenu();
         HMENU themeMenu = CreatePopupMenu();
         HMENU helpMenu = CreatePopupMenu();
 
-        if (!menu_ || !fileMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !viewMenu || !sortMenu || !themeMenu || !helpMenu)
+        if (!menu_ || !fileMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !themeMenu || !helpMenu)
         {
             return false;
         }
@@ -709,6 +847,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_OPEN_FOLDER, L"&Open Folder...\tCtrl+O");
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information\tCtrl+I");
         AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
@@ -748,6 +887,15 @@ namespace hyperbrowse::ui
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_TYPE, L"By &Type");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By &Random");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(sortMenu), L"&Sort By");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_96, L"&96 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_128, L"1&28 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_160, L"1&60 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_192, L"1&92 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_256, L"2&56 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_320, L"3&20 px");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"&Compact Thumbnail Layout");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection\tCtrl+Shift+S");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder");
@@ -829,6 +977,7 @@ namespace hyperbrowse::ui
             ? browser::BrowserViewMode::Thumbnails
             : browser::BrowserViewMode::Details);
         browserPaneController_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
+        ApplyThumbnailDisplaySettings();
         decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);
         decode::SetLibRawOutOfProcessEnabled(libRawOutOfProcessEnabled_);
 
@@ -845,6 +994,18 @@ namespace hyperbrowse::ui
         UpdateStatusText();
         LayoutChildren();
         return true;
+    }
+
+    void MainWindow::ApplyThumbnailDisplaySettings()
+    {
+        if (!browserPaneController_)
+        {
+            return;
+        }
+
+        browserPaneController_->SetThumbnailSizePreset(thumbnailSizePreset_);
+        browserPaneController_->SetCompactThumbnailLayout(compactThumbnailLayout_);
+        browserPaneController_->SetThumbnailDetailsVisible(thumbnailDetailsVisible_);
     }
 
     void MainWindow::InitializeFolderTree()
@@ -1260,7 +1421,7 @@ namespace hyperbrowse::ui
         browserPaneController_->RefreshFromModel();
     }
 
-    void MainWindow::OpenItemInViewer(int modelIndex)
+    void MainWindow::OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor)
     {
         if (!browserModel_ || !browserPaneController_ || !viewerWindow_)
         {
@@ -1305,17 +1466,30 @@ namespace hyperbrowse::ui
             return;
         }
 
-        OpenItemsInViewer(std::move(viewerItems), selectedViewerIndex, false);
+        OpenItemsInViewer(std::move(viewerItems), selectedViewerIndex, false, preferSecondaryMonitor);
     }
 
-    void MainWindow::OpenItemsInViewer(std::vector<browser::BrowserItem> items, int selectedIndex, bool startSlideshow)
+    void MainWindow::OpenItemsInViewer(std::vector<browser::BrowserItem> items,
+                                       int selectedIndex,
+                                       bool startSlideshow,
+                                       bool preferSecondaryMonitor)
     {
         if (!viewerWindow_ || items.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(items.size()))
         {
             return;
         }
 
-        if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark))
+        const HMONITOR targetMonitor = ResolveViewerMonitor(hwnd_, preferSecondaryMonitor);
+        if (preferSecondaryMonitor && !targetMonitor)
+        {
+            MessageBoxW(hwnd_,
+                        L"A secondary monitor is not currently available.",
+                        L"View on Secondary Monitor",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
             if (startSlideshow)
             {
@@ -1450,6 +1624,7 @@ namespace hyperbrowse::ui
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool allowMutatingFileCommands = hasSelection && !fileOperationActive_;
+        const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
 
         HMENU menu = CreatePopupMenu();
         HMENU batchConvertSelectionMenu = CreatePopupMenu();
@@ -1472,6 +1647,7 @@ namespace hyperbrowse::ui
         }
 
         AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+        AppendMenuW(menu, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
         AppendMenuW(menu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information");
         AppendMenuW(menu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer");
         AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
@@ -1505,6 +1681,8 @@ namespace hyperbrowse::ui
         AppendMenuW(menu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree");
 
         EnableMenuItem(menu, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
+                   MF_BYCOMMAND | ((hasSelection && hasSecondaryMonitor) ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
@@ -2134,8 +2312,20 @@ namespace hyperbrowse::ui
         const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
+        const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
+        const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
+            ? browserPaneController_->GetThumbnailSizePreset()
+            : thumbnailSizePreset_;
+        const bool compactThumbnailLayout = browserPaneController_
+            ? browserPaneController_->IsCompactThumbnailLayoutEnabled()
+            : compactThumbnailLayout_;
+        const bool thumbnailDetailsVisible = browserPaneController_
+            ? browserPaneController_->AreThumbnailDetailsVisible()
+            : thumbnailDetailsVisible_;
 
         EnableMenuItem(menu_, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
+                   MF_BYCOMMAND | ((hasSelection && hasSecondaryMonitor) ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
@@ -2201,6 +2391,20 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_LIBRAW_OUT_OF_PROCESS,
             MF_BYCOMMAND | (decode::IsLibRawBuildEnabled() ? MF_ENABLED : MF_GRAYED));
+        CheckMenuRadioItem(
+            menu_,
+            ID_VIEW_THUMBNAIL_SIZE_96,
+            ID_VIEW_THUMBNAIL_SIZE_320,
+            CommandIdFromThumbnailSizePreset(thumbnailSizePreset),
+            MF_BYCOMMAND);
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_THUMBNAIL_LAYOUT_COMPACT,
+            MF_BYCOMMAND | (compactThumbnailLayout ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_THUMBNAIL_DETAILS,
+            MF_BYCOMMAND | (thumbnailDetailsVisible ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
@@ -2336,6 +2540,21 @@ namespace hyperbrowse::ui
                 libRawOutOfProcessEnabled_ = value != 0;
             }
 
+            if (TryReadDwordValue(key, kRegistryValueThumbnailSizePreset, &value))
+            {
+                TryParseThumbnailSizePreset(value, &thumbnailSizePreset_);
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueCompactThumbnailLayout, &value))
+            {
+                compactThumbnailLayout_ = value != 0;
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueThumbnailDetailsVisible, &value))
+            {
+                thumbnailDetailsVisible_ = value != 0;
+            }
+
             TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
 
             RegCloseKey(key);
@@ -2361,6 +2580,9 @@ namespace hyperbrowse::ui
             RegDeleteValueW(key, L"RecursiveBrowsing");
             WriteDwordValue(key, kRegistryValueNvJpegEnabled, nvJpegEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueLibRawOutOfProcessEnabled, libRawOutOfProcessEnabled_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueThumbnailSizePreset, static_cast<DWORD>(thumbnailSizePreset_));
+            WriteDwordValue(key, kRegistryValueCompactThumbnailLayout, compactThumbnailLayout_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
             WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
             RegCloseKey(key);
         }
@@ -2571,6 +2793,9 @@ namespace hyperbrowse::ui
         case ID_FILE_OPEN_SELECTED:
             OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1);
             return true;
+        case ID_FILE_VIEW_ON_SECONDARY_MONITOR:
+            OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1, true);
+            return true;
         case ID_FILE_IMAGE_INFORMATION:
             ShowImageInformation();
             return true;
@@ -2657,6 +2882,29 @@ namespace hyperbrowse::ui
                 UpdateStatusText();
                 UpdateMenuState();
             }
+            return true;
+        case ID_VIEW_THUMBNAIL_SIZE_96:
+        case ID_VIEW_THUMBNAIL_SIZE_128:
+        case ID_VIEW_THUMBNAIL_SIZE_160:
+        case ID_VIEW_THUMBNAIL_SIZE_192:
+        case ID_VIEW_THUMBNAIL_SIZE_256:
+        case ID_VIEW_THUMBNAIL_SIZE_320:
+            thumbnailSizePreset_ = ThumbnailSizePresetFromCommandId(commandId);
+            ApplyThumbnailDisplaySettings();
+            UpdateStatusText();
+            UpdateMenuState();
+            return true;
+        case ID_VIEW_THUMBNAIL_LAYOUT_COMPACT:
+            compactThumbnailLayout_ = !compactThumbnailLayout_;
+            ApplyThumbnailDisplaySettings();
+            UpdateStatusText();
+            UpdateMenuState();
+            return true;
+        case ID_VIEW_THUMBNAIL_DETAILS:
+            thumbnailDetailsVisible_ = !thumbnailDetailsVisible_;
+            ApplyThumbnailDisplaySettings();
+            UpdateStatusText();
+            UpdateMenuState();
             return true;
         case ID_VIEW_SORT_FILENAME:
         case ID_VIEW_SORT_MODIFIED:
@@ -2789,6 +3037,16 @@ namespace hyperbrowse::ui
 
     std::wstring MainWindow::BuildShellStateText() const
     {
+        const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
+            ? browserPaneController_->GetThumbnailSizePreset()
+            : thumbnailSizePreset_;
+        const bool compactThumbnailLayout = browserPaneController_
+            ? browserPaneController_->IsCompactThumbnailLayoutEnabled()
+            : compactThumbnailLayout_;
+        const bool thumbnailDetailsVisible = browserPaneController_
+            ? browserPaneController_->AreThumbnailDetailsVisible()
+            : thumbnailDetailsVisible_;
+
         std::wstring shellState = L"View: ";
         shellState.append(browserMode_ == BrowserMode::Thumbnails ? L"Thumbnails" : L"Details");
         shellState.append(L" | Sort: ");
@@ -2796,6 +3054,14 @@ namespace hyperbrowse::ui
             ? browser::BrowserSortModeToLabel(browserPaneController_->GetSortMode())
             : std::wstring(L"Filename");
         shellState.append(sortLabel);
+        if (browserMode_ == BrowserMode::Thumbnails)
+        {
+            shellState.append(L" | Tiles: ");
+            shellState.append(std::to_wstring(static_cast<int>(thumbnailSizePreset)));
+            shellState.append(L" px");
+            shellState.append(compactThumbnailLayout ? L", Compact" : L", Standard");
+            shellState.append(thumbnailDetailsVisible ? L", Details" : L", Thumbnail Only");
+        }
         shellState.append(L" | Recursive: ");
         shellState.append(recursiveBrowsingEnabled_ ? L"On" : L"Off");
         shellState.append(L" | Theme: ");

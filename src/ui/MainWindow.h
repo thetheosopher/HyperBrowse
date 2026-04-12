@@ -13,6 +13,7 @@
 
 namespace hyperbrowse::browser
 {
+    enum class ThumbnailSizePreset : int;
     class BrowserPane;
 }
 
@@ -114,8 +115,11 @@ namespace hyperbrowse::ui
         void OpenFolder();
         void LoadFolderAsync(std::wstring folderPath);
         void RefreshBrowserPane();
-        void OpenItemInViewer(int modelIndex);
-        void OpenItemsInViewer(std::vector<browser::BrowserItem> items, int selectedIndex, bool startSlideshow);
+        void OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor = false);
+        void OpenItemsInViewer(std::vector<browser::BrowserItem> items,
+                       int selectedIndex,
+                       bool startSlideshow,
+                       bool preferSecondaryMonitor = false);
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
         bool ChooseFolder(std::wstring* folderPath) const;
         bool HasSelectedJpegItems() const;
@@ -155,6 +159,7 @@ namespace hyperbrowse::ui
 
         void SetBrowserMode(BrowserMode mode);
         void ToggleRecursiveBrowsing();
+        void ApplyThumbnailDisplaySettings();
         void SetThemeMode(ThemeMode themeMode);
         ThemePalette GetThemePalette() const;
         std::wstring BuildShellStateText() const;
@@ -211,5 +216,8 @@ namespace hyperbrowse::ui
         bool viewerWindowActive_{};
         bool nvJpegEnabled_{};
         bool libRawOutOfProcessEnabled_{true};
+        browser::ThumbnailSizePreset thumbnailSizePreset_{static_cast<browser::ThumbnailSizePreset>(192)};
+        bool compactThumbnailLayout_{};
+        bool thumbnailDetailsVisible_{true};
     };
 }

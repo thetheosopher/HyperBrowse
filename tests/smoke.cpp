@@ -588,6 +588,12 @@ namespace
         TempFolder root(L"HyperBrowsePrompt3Root");
         root.WriteFile(L"one.jpg", 10);
         root.WriteFile(L"two.png", 20);
+        root.WriteFile(L"six.cr2", 60);
+        root.WriteFile(L"seven.cr3", 70);
+        root.WriteFile(L"eight.arw", 80);
+        root.WriteFile(L"nine.dng", 90);
+        root.WriteFile(L"ten.raf", 100);
+        root.WriteFile(L"eleven.rw2", 110);
         root.WriteFile(L"five.NRW", 50);
         root.WriteFile(L"ignore.txt", 5);
         root.WriteFile(L"nested\\three.gif", 30);
@@ -597,9 +603,9 @@ namespace
         state->expectedRequestId = service.EnumerateFolderAsync(hwnd, root.Root().wstring(), false);
         Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
                "Non-recursive enumeration timed out or failed");
-        Expect(state->enumerationResult.totalCount == 3, "Non-recursive enumeration returned the wrong supported-file count");
-        Expect(state->enumerationResult.totalBytes == 80, "Non-recursive enumeration returned the wrong byte total");
-        Expect(state->enumerationResult.items.size() == 3, "Non-recursive enumeration returned the wrong batch item count");
+         Expect(state->enumerationResult.totalCount == 9, "Non-recursive enumeration returned the wrong supported-file count");
+         Expect(state->enumerationResult.totalBytes == 590, "Non-recursive enumeration returned the wrong byte total");
+         Expect(state->enumerationResult.items.size() == 9, "Non-recursive enumeration returned the wrong batch item count");
         Expect(state->enumerationResult.items.front().placeholderWidth == 256, "Placeholder width was not collected");
         Expect(state->enumerationResult.items.front().placeholderHeight == 256, "Placeholder height was not collected");
 
@@ -607,8 +613,8 @@ namespace
         state->expectedRequestId = service.EnumerateFolderAsync(hwnd, root.Root().wstring(), true);
         Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
                "Recursive enumeration timed out or failed");
-        Expect(state->enumerationResult.totalCount == 5, "Recursive enumeration returned the wrong supported-file count");
-        Expect(state->enumerationResult.totalBytes == 150, "Recursive enumeration returned the wrong byte total");
+         Expect(state->enumerationResult.totalCount == 11, "Recursive enumeration returned the wrong supported-file count");
+         Expect(state->enumerationResult.totalBytes == 660, "Recursive enumeration returned the wrong byte total");
 
         TempFolder slow(L"HyperBrowsePrompt3Slow");
         for (int index = 0; index < 400; ++index)
@@ -973,46 +979,79 @@ namespace
         }
     }
 
-        void RunRawDecoderScenario()
+    void RunRawFormatAllowlistScenario()
+    {
+        const std::vector<std::wstring> supportedRawFormats{
+            L"ARW",
+            L"CR2",
+            L"CR3",
+            L"DNG",
+            L"NEF",
+            L"NRW",
+            L"RAF",
+            L"RW2",
+        };
+
+        for (const std::wstring& rawFormat : supportedRawFormats)
         {
-         const fs::path fixtureRoot = TestSourceDirectory() / L"fixtures" / L"raw";
-            const fs::path nefPath = fixtureRoot / L"RAW_NIKON_D1.NEF";
-         const fs::path nrwPath = fixtureRoot / L"RAW_NIKON_P7000.NRW";
+            Expect(hyperbrowse::decode::IsRawFileType(rawFormat),
+                   std::string("RAW allowlist omitted format: ") + Utf8FromWide(rawFormat));
 
-         Expect(fs::exists(nefPath), "The NEF fixture is missing from tests/fixtures/raw");
-         Expect(fs::exists(nrwPath), "The NRW fixture is missing from tests/fixtures/raw");
+            hyperbrowse::browser::BrowserItem item;
+            item.fileName = L"sample." + rawFormat;
+            item.filePath = L"C:\\Raw\\sample." + rawFormat;
+            item.fileType = rawFormat;
 
-         const hyperbrowse::browser::BrowserItem nefItem = hyperbrowse::browser::BuildBrowserItemFromPath(nefPath);
-         const hyperbrowse::browser::BrowserItem nrwItem = hyperbrowse::browser::BuildBrowserItemFromPath(nrwPath);
+            Expect(hyperbrowse::decode::CanDecodeThumbnail(item),
+                   std::string("RAW thumbnail routing omitted format: ") + Utf8FromWide(rawFormat));
+            Expect(hyperbrowse::decode::CanDecodeFullImage(item),
+                   std::string("RAW full-image routing omitted format: ") + Utf8FromWide(rawFormat));
+        }
 
-         Expect(hyperbrowse::decode::CanDecodeThumbnail(nefItem), "NEF fixture should be thumbnail-decodable");
-         Expect(hyperbrowse::decode::CanDecodeFullImage(nefItem), "NEF fixture should be full-image decodable");
-         Expect(hyperbrowse::decode::CanDecodeThumbnail(nrwItem), "NRW fixture should be thumbnail-decodable");
-         Expect(hyperbrowse::decode::CanDecodeFullImage(nrwItem), "NRW fixture should be full-image decodable");
+        Expect(!hyperbrowse::decode::IsRawFileType(L"ORF"),
+               "The RAW allowlist unexpectedly includes ORF before it was requested");
+    }
 
-         std::wstring errorMessage;
-         const auto nefThumbnail = hyperbrowse::decode::DecodeThumbnail(MakeCacheKey(nefPath, nefItem.modifiedTimestampUtc), &errorMessage);
-         Expect(nefThumbnail != nullptr, std::string("LibRaw failed to decode the NEF thumbnail fixture: ") + Utf8FromWide(errorMessage));
-         Expect(nefThumbnail->SourceWidth() > 0 && nefThumbnail->SourceHeight() > 0,
-             "LibRaw did not surface NEF thumbnail source dimensions");
+    void RunRawDecoderScenario()
+    {
+        const fs::path fixtureRoot = TestSourceDirectory() / L"fixtures" / L"raw";
+        const fs::path nefPath = fixtureRoot / L"RAW_NIKON_D1.NEF";
+        const fs::path nrwPath = fixtureRoot / L"RAW_NIKON_P7000.NRW";
 
-         errorMessage.clear();
-         const auto nrwThumbnail = hyperbrowse::decode::DecodeThumbnail(MakeCacheKey(nrwPath, nrwItem.modifiedTimestampUtc), &errorMessage);
-         Expect(nrwThumbnail != nullptr, std::string("LibRaw failed to decode the NRW thumbnail fixture: ") + Utf8FromWide(errorMessage));
-         Expect(nrwThumbnail->SourceWidth() > 0 && nrwThumbnail->SourceHeight() > 0,
-             "LibRaw did not surface NRW thumbnail source dimensions");
+        Expect(fs::exists(nefPath), "The NEF fixture is missing from tests/fixtures/raw");
+        Expect(fs::exists(nrwPath), "The NRW fixture is missing from tests/fixtures/raw");
 
-         errorMessage.clear();
-         const auto nefFullImage = hyperbrowse::decode::DecodeFullImage(nefItem, &errorMessage);
-         Expect(nefFullImage != nullptr, std::string("LibRaw failed to decode the NEF full-image fixture: ") + Utf8FromWide(errorMessage));
-         Expect(nefFullImage->SourceWidth() > 0 && nefFullImage->SourceHeight() > 0,
-             "LibRaw did not surface NEF full-image source dimensions");
+        const hyperbrowse::browser::BrowserItem nefItem = hyperbrowse::browser::BuildBrowserItemFromPath(nefPath);
+        const hyperbrowse::browser::BrowserItem nrwItem = hyperbrowse::browser::BuildBrowserItemFromPath(nrwPath);
 
-         errorMessage.clear();
-         const auto nrwFullImage = hyperbrowse::decode::DecodeFullImage(nrwItem, &errorMessage);
-         Expect(nrwFullImage != nullptr, std::string("LibRaw failed to decode the NRW full-image fixture: ") + Utf8FromWide(errorMessage));
-         Expect(nrwFullImage->SourceWidth() > 0 && nrwFullImage->SourceHeight() > 0,
-             "LibRaw did not surface NRW full-image source dimensions");
+        Expect(hyperbrowse::decode::CanDecodeThumbnail(nefItem), "NEF fixture should be thumbnail-decodable");
+        Expect(hyperbrowse::decode::CanDecodeFullImage(nefItem), "NEF fixture should be full-image decodable");
+        Expect(hyperbrowse::decode::CanDecodeThumbnail(nrwItem), "NRW fixture should be thumbnail-decodable");
+        Expect(hyperbrowse::decode::CanDecodeFullImage(nrwItem), "NRW fixture should be full-image decodable");
+
+        std::wstring errorMessage;
+        const auto nefThumbnail = hyperbrowse::decode::DecodeThumbnail(MakeCacheKey(nefPath, nefItem.modifiedTimestampUtc), &errorMessage);
+        Expect(nefThumbnail != nullptr, std::string("LibRaw failed to decode the NEF thumbnail fixture: ") + Utf8FromWide(errorMessage));
+        Expect(nefThumbnail->SourceWidth() > 0 && nefThumbnail->SourceHeight() > 0,
+               "LibRaw did not surface NEF thumbnail source dimensions");
+
+        errorMessage.clear();
+        const auto nrwThumbnail = hyperbrowse::decode::DecodeThumbnail(MakeCacheKey(nrwPath, nrwItem.modifiedTimestampUtc), &errorMessage);
+        Expect(nrwThumbnail != nullptr, std::string("LibRaw failed to decode the NRW thumbnail fixture: ") + Utf8FromWide(errorMessage));
+        Expect(nrwThumbnail->SourceWidth() > 0 && nrwThumbnail->SourceHeight() > 0,
+               "LibRaw did not surface NRW thumbnail source dimensions");
+
+        errorMessage.clear();
+        const auto nefFullImage = hyperbrowse::decode::DecodeFullImage(nefItem, &errorMessage);
+        Expect(nefFullImage != nullptr, std::string("LibRaw failed to decode the NEF full-image fixture: ") + Utf8FromWide(errorMessage));
+        Expect(nefFullImage->SourceWidth() > 0 && nefFullImage->SourceHeight() > 0,
+               "LibRaw did not surface NEF full-image source dimensions");
+
+        errorMessage.clear();
+        const auto nrwFullImage = hyperbrowse::decode::DecodeFullImage(nrwItem, &errorMessage);
+        Expect(nrwFullImage != nullptr, std::string("LibRaw failed to decode the NRW full-image fixture: ") + Utf8FromWide(errorMessage));
+        Expect(nrwFullImage->SourceWidth() > 0 && nrwFullImage->SourceHeight() > 0,
+               "LibRaw did not surface NRW full-image source dimensions");
         }
 
     void RunBrowserPaneScenario(HINSTANCE instance)
@@ -1049,12 +1088,12 @@ namespace
         SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(50, 50));
         Expect(browserPane.SelectedCount() == 1, "Single-click selection in thumbnail mode failed");
 
-        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, MAKELPARAM(450, 50));
-        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(450, 50));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, MAKELPARAM(500, 50));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(500, 50));
         Expect(browserPane.SelectedCount() == 3, "Shift-range selection in thumbnail mode failed");
 
-        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON | MK_CONTROL, MAKELPARAM(250, 50));
-        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(250, 50));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON | MK_CONTROL, MAKELPARAM(300, 50));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(300, 50));
         Expect(browserPane.SelectedCount() == 2, "Ctrl-toggle selection in thumbnail mode failed");
 
         browserPane.ClearSelection();
@@ -1062,6 +1101,45 @@ namespace
         SendMessageW(browserPane.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(390, 210));
         SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(390, 210));
         Expect(browserPane.SelectedCount() == 2, "Rubber-band selection in thumbnail mode failed");
+
+         Expect(browserPane.GetThumbnailSizePreset() == hyperbrowse::browser::ThumbnailSizePreset::Pixels192,
+             "BrowserPane did not default to the expected thumbnail size preset");
+         Expect(!browserPane.IsCompactThumbnailLayoutEnabled(),
+             "BrowserPane should default to the standard thumbnail layout");
+         Expect(browserPane.AreThumbnailDetailsVisible(),
+             "BrowserPane should default to showing thumbnail details");
+
+         browserPane.SetThumbnailSizePreset(hyperbrowse::browser::ThumbnailSizePreset::Pixels96);
+         browserPane.SetCompactThumbnailLayout(true);
+         browserPane.SetThumbnailDetailsVisible(false);
+         browserPane.RefreshFromModel();
+         browserPane.ClearSelection();
+         SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(20, 20));
+         SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(20, 20));
+         Expect(browserPane.GetThumbnailSizePreset() == hyperbrowse::browser::ThumbnailSizePreset::Pixels96,
+             "BrowserPane did not store the compact thumbnail size preset");
+         Expect(browserPane.IsCompactThumbnailLayoutEnabled(),
+             "BrowserPane did not enable compact thumbnail layout");
+         Expect(!browserPane.AreThumbnailDetailsVisible(),
+             "BrowserPane did not disable thumbnail details");
+         Expect(browserPane.SelectedCount() == 1,
+             "Thumbnail-only compact mode did not preserve thumbnail hit-testing");
+
+         browserPane.SetThumbnailSizePreset(hyperbrowse::browser::ThumbnailSizePreset::Pixels320);
+         browserPane.SetCompactThumbnailLayout(false);
+         browserPane.SetThumbnailDetailsVisible(true);
+         browserPane.RefreshFromModel();
+         browserPane.ClearSelection();
+         SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(40, 40));
+         SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(40, 40));
+         Expect(browserPane.GetThumbnailSizePreset() == hyperbrowse::browser::ThumbnailSizePreset::Pixels320,
+             "BrowserPane did not store the large thumbnail size preset");
+         Expect(!browserPane.IsCompactThumbnailLayoutEnabled(),
+             "BrowserPane did not restore the standard thumbnail layout");
+         Expect(browserPane.AreThumbnailDetailsVisible(),
+             "BrowserPane did not restore thumbnail details visibility");
+         Expect(browserPane.SelectedCount() == 1,
+             "Large thumbnail mode did not preserve thumbnail hit-testing");
 
         browserPane.SetViewMode(hyperbrowse::browser::BrowserViewMode::Details);
         browserPane.SetSortMode(hyperbrowse::browser::BrowserSortMode::FileSize);
@@ -1106,6 +1184,7 @@ namespace
         Expect(viewer.Open(ownerWindow, items, 0, false), "Viewer window failed to open");
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
                "Viewer window did not finish the initial image decode");
+         Expect(viewer.IsFullScreen(), "Viewer should open in full screen by default");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
@@ -1133,10 +1212,10 @@ namespace
 
         SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
         PumpMessagesFor(100);
-        Expect(viewer.IsFullScreen(), "Viewer double-click did not enter full screen");
+        Expect(!viewer.IsFullScreen(), "Viewer double-click did not exit full screen");
         SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
         PumpMessagesFor(100);
-        Expect(!viewer.IsFullScreen(), "Viewer double-click did not exit full screen");
+        Expect(viewer.IsFullScreen(), "Viewer double-click did not re-enter full screen");
 
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);
@@ -1237,6 +1316,7 @@ int main()
         RunBatchConvertCancellationScenario(hwnd);
         RunThumbnailSchedulerScenario(hwnd, &state);
         RunImageMetadataServiceScenario();
+        RunRawFormatAllowlistScenario();
         RunRawDecoderScenario();
         RunBrowserPaneScenario(instance);
         RunViewerWindowScenario(instance, hwnd);

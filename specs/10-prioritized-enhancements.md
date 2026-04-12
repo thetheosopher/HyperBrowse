@@ -191,7 +191,7 @@ Based on the current spec pack and implementation, HyperBrowse already has a str
 - batch convert support
 - dark/light theme switching
 - optional nvJPEG acceleration path
-- Nikon RAW support and embedded-preview-first behavior
+- mainstream RAW support and embedded-preview-first behavior
 - startup timing instrumentation already in place
 
 These strengths mean the next product gains do not need a platform reset. They need focused workflow and UX work.

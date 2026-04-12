@@ -13,7 +13,7 @@ Append this guidance to each prompt when useful:
 - Do not block the UI thread.
 - Favor explicit architecture over hidden framework magic.
 - Optimize for low-latency browsing of folders containing thousands of images.
-- Use WIC for common formats, LibRaw for Nikon RAW, and optional nvJPEG for JPEG thumbnail acceleration.
+- Use WIC for common formats, LibRaw for supported mainstream RAW formats, and optional nvJPEG for JPEG thumbnail acceleration.
 - Preserve existing project structure and naming unless the prompt explicitly asks to change it.
 - Add logging/timing hooks around performance-critical operations.
 
@@ -63,7 +63,7 @@ Implement the browser model and async folder enumeration pipeline.
 Requirements:
 - Selecting a folder populates the browser model asynchronously.
 - Support recursive browsing as a toggle, default off.
-- Filter to supported formats: jpg, jpeg, png, gif, tif, tiff, nef, nrw.
+- Filter to supported formats: jpg, jpeg, png, gif, tif, tiff, arw, cr2, cr3, dng, nef, nrw, raf, rw2.
 - Collect filename, path, size, modified date, and placeholder dimensions fields.
 - Update status bar incrementally with folder image count and total size.
 - Do not block the UI thread.
@@ -134,12 +134,12 @@ Include instrumentation so prefetch hit rate can be measured later.
 
 ---
 
-## Prompt 8 - Add LibRaw backend for Nikon RAW
+## Prompt 8 - Add LibRaw backend for mainstream RAW
 
-Implement Nikon RAW support using LibRaw.
+Implement mainstream RAW support using LibRaw.
 
 Requirements:
-- Add a LibRaw decoder backend for NEF and NRW.
+- Add a LibRaw decoder backend for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2.
 - Extract metadata and embedded previews where possible.
 - Use embedded preview as the preferred thumbnail path.
 - Add full RAW decode path for viewer when supported.

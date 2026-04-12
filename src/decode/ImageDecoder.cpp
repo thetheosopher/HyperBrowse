@@ -1170,7 +1170,14 @@ namespace hyperbrowse::decode
     bool IsRawFileType(std::wstring_view fileType)
     {
         const std::wstring normalized = NormalizeFileType(fileType);
-        return normalized == L"nef" || normalized == L"nrw";
+        return normalized == L"arw"
+            || normalized == L"cr2"
+            || normalized == L"cr3"
+            || normalized == L"dng"
+            || normalized == L"nef"
+            || normalized == L"nrw"
+            || normalized == L"raf"
+            || normalized == L"rw2";
     }
 
     bool CanDecodeThumbnail(const browser::BrowserItem& item)
@@ -1212,7 +1219,7 @@ namespace hyperbrowse::decode
 #else
             if (errorMessage)
             {
-                *errorMessage = L"This build does not include LibRaw support for Nikon RAW thumbnails.";
+                *errorMessage = L"This build does not include LibRaw support for the configured RAW thumbnail formats.";
             }
             return {};
 #endif
@@ -1374,7 +1381,7 @@ namespace hyperbrowse::decode
 #else
             if (errorMessage)
             {
-                *errorMessage = L"This build does not include LibRaw support for Nikon RAW viewer decode.";
+                *errorMessage = L"This build does not include LibRaw support for the configured RAW viewer formats.";
             }
             return {};
 #endif
@@ -1382,7 +1389,7 @@ namespace hyperbrowse::decode
 
         if (errorMessage)
         {
-            *errorMessage = L"The current viewer build supports JPEG, PNG, GIF, TIFF, NEF, and NRW images.";
+            *errorMessage = L"The current viewer build supports JPEG, PNG, GIF, TIFF, and RAW formats ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2.";
         }
         return {};
     }

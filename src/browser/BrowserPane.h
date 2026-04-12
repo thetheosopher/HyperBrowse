@@ -28,6 +28,16 @@ namespace hyperbrowse::browser
         FileType = 4,
         Random = 5,
     };
+
+    enum class ThumbnailSizePreset : int
+    {
+        Pixels96 = 96,
+        Pixels128 = 128,
+        Pixels160 = 160,
+        Pixels192 = 192,
+        Pixels256 = 256,
+        Pixels320 = 320,
+    };
 }
 
 namespace hyperbrowse::services
@@ -75,6 +85,12 @@ namespace hyperbrowse::browser
         BrowserViewMode GetViewMode() const noexcept;
         void SetSortMode(BrowserSortMode sortMode);
         BrowserSortMode GetSortMode() const noexcept;
+        void SetThumbnailSizePreset(ThumbnailSizePreset preset);
+        ThumbnailSizePreset GetThumbnailSizePreset() const noexcept;
+        void SetCompactThumbnailLayout(bool enabled);
+        bool IsCompactThumbnailLayoutEnabled() const noexcept;
+        void SetThumbnailDetailsVisible(bool visible);
+        bool AreThumbnailDetailsVisible() const noexcept;
         void SetDarkTheme(bool enabled);
 
         void ClearSelection();
@@ -92,14 +108,36 @@ namespace hyperbrowse::browser
 
     private:
         static constexpr const wchar_t* kClassName = L"HyperBrowseBrowserPane";
-        static constexpr int kItemPadding = 14;
-        static constexpr int kItemWidth = 202;
-        static constexpr int kItemHeight = 244;
-        static constexpr int kPreviewInset = 14;
-        static constexpr int kPreviewHeight = 124;
+
+        struct ThumbnailLayoutMetrics
+        {
+            int cellPadding{};
+            int itemWidth{};
+            int itemHeight{};
+            int previewInset{};
+            int previewWidth{};
+            int previewHeight{};
+            int textInset{};
+            int titleTopGap{};
+            int titleHeight{};
+            int metaTopGap{};
+            int metaHeight{};
+            int infoBottomInset{};
+            int infoHeight{};
+            int badgeHorizontalPadding{};
+            int badgeGap{};
+            int badgeCornerRadius{};
+            int cellCornerRadius{};
+            int previewCornerRadius{};
+            int loadingIconSize{};
+            int titlePointSize{};
+            int metaPointSize{};
+            int statusPointSize{};
+        };
 
         bool RegisterClass() const;
         bool CreateDetailsListView();
+        ThumbnailLayoutMetrics CurrentThumbnailLayout() const;
         void LayoutChildren();
         void RebuildOrder();
         void UpdateDetailsListView();
@@ -171,6 +209,9 @@ namespace hyperbrowse::browser
         bool syncingDetailsSelection_{};
         BrowserViewMode viewMode_{BrowserViewMode::Thumbnails};
         BrowserSortMode sortMode_{BrowserSortMode::FileName};
+        ThumbnailSizePreset thumbnailSizePreset_{ThumbnailSizePreset::Pixels192};
+        bool compactThumbnailLayout_{};
+        bool thumbnailDetailsVisible_{true};
         BrowserModel* model_{};
         std::vector<int> orderedModelIndices_;
         std::unordered_set<int> selectedModelIndices_;
@@ -189,4 +230,6 @@ namespace hyperbrowse::browser
     };
 
     std::wstring BrowserSortModeToLabel(BrowserSortMode sortMode);
+    int ThumbnailSizePresetToPixels(ThumbnailSizePreset preset);
+    std::wstring ThumbnailSizePresetToLabel(ThumbnailSizePreset preset);
 }
