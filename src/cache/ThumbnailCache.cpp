@@ -1,5 +1,7 @@
 #include "cache/ThumbnailCache.h"
 
+#include <algorithm>
+#include <cwctype>
 #include <functional>
 
 namespace
@@ -9,6 +11,17 @@ namespace
     {
         const std::size_t hashedValue = std::hash<TValue>{}(value);
         *seed ^= hashedValue + 0x9e3779b9 + (*seed << 6) + (*seed >> 2);
+    }
+
+    std::wstring NormalizePath(std::wstring_view value)
+    {
+        std::wstring normalized(value);
+        std::replace(normalized.begin(), normalized.end(), L'/', L'\\');
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](wchar_t character)
+        {
+            return static_cast<wchar_t>(towlower(character));
+        });
+        return normalized;
     }
 }
 
@@ -118,6 +131,37 @@ namespace hyperbrowse::cache
         entries_.emplace(lruOrder_.front(), Entry{thumbnail, lruOrder_.begin(), byteCount});
         currentBytes_ += byteCount;
         EvictIfNeeded();
+    }
+
+    void ThumbnailCache::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
+    {
+        if (filePaths.empty())
+        {
+            return;
+        }
+
+        std::vector<std::wstring> normalizedPaths;
+        normalizedPaths.reserve(filePaths.size());
+        for (const std::wstring& filePath : filePaths)
+        {
+            normalizedPaths.push_back(NormalizePath(filePath));
+        }
+
+        std::scoped_lock lock(mutex_);
+        for (auto iterator = entries_.begin(); iterator != entries_.end();)
+        {
+            const std::wstring normalizedKeyPath = NormalizePath(iterator->first.filePath);
+            const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), normalizedKeyPath) != normalizedPaths.end();
+            if (!shouldErase)
+            {
+                ++iterator;
+                continue;
+            }
+
+            currentBytes_ -= iterator->second.byteCount;
+            lruOrder_.erase(iterator->second.lruIterator);
+            iterator = entries_.erase(iterator);
+        }
     }
 
     void ThumbnailCache::Clear()

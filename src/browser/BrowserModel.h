@@ -1,7 +1,9 @@
 #pragma once
 
+#include <filesystem>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hyperbrowse::browser
@@ -28,6 +30,11 @@ namespace hyperbrowse::browser
         void Complete();
         void Fail(std::wstring errorMessage);
         bool UpdateDecodedDimensions(int modelIndex, int width, int height);
+        int FindItemIndexByPath(std::wstring_view filePath) const noexcept;
+        bool UpsertItem(BrowserItem item);
+        bool RemoveItemByPath(std::wstring_view filePath);
+        bool RemoveItemsByPathPrefix(std::wstring_view pathPrefix);
+        bool ReplacePathPrefix(std::wstring_view oldPrefix, std::wstring_view newPrefix);
 
         const std::wstring& FolderPath() const noexcept;
         const std::vector<BrowserItem>& Items() const noexcept;
@@ -52,6 +59,10 @@ namespace hyperbrowse::browser
 
     std::wstring FormatByteSize(std::uint64_t byteCount);
     std::wstring FormatDimensions(int width, int height);
+    bool IsSupportedImageExtension(std::wstring_view extension);
+    bool FilePathsEqual(std::wstring_view lhs, std::wstring_view rhs);
+    bool PathHasPrefix(std::wstring_view path, std::wstring_view prefix);
+    BrowserItem BuildBrowserItemFromPath(const std::filesystem::path& path);
     int EffectiveImageWidth(const BrowserItem& item) noexcept;
     int EffectiveImageHeight(const BrowserItem& item) noexcept;
     std::wstring FormatDimensionsForItem(const BrowserItem& item);

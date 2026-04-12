@@ -5,6 +5,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -23,6 +24,8 @@ namespace fs = std::filesystem;
 namespace
 {
     using Microsoft::WRL::ComPtr;
+
+    std::atomic_bool g_nvJpegEnabled{false};
 
     std::wstring NormalizeFileType(std::wstring_view fileType)
     {
@@ -52,6 +55,29 @@ namespace
         }
 
         return std::wstring(message, message + std::strlen(message));
+    }
+
+    bool ProbeNvJpegRuntime()
+    {
+#if defined(HYPERBROWSE_ENABLE_NVJPEG)
+        static constexpr const wchar_t* kCandidateDlls[] = {
+            L"nvjpeg64_12.dll",
+            L"nvjpeg64_11.dll",
+            L"nvjpeg64_10.dll",
+        };
+
+        for (const wchar_t* dllName : kCandidateDlls)
+        {
+            HMODULE module = LoadLibraryW(dllName);
+            if (module)
+            {
+                FreeLibrary(module);
+                return true;
+            }
+        }
+#endif
+
+        return false;
     }
 
     WICBitmapTransformOptions OrientationToTransform(std::uint16_t orientation)
@@ -731,6 +757,17 @@ namespace
             }
         }
 
+        processor.recycle();
+        result = OpenRawFile(processor, key.filePath);
+        if (result != LIBRAW_SUCCESS)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"Failed to reopen the RAW image for thumbnail fallback: " + WideErrorString(libraw_strerror(result));
+            }
+            return {};
+        }
+
         ConfigureRawPostprocess(processor, true);
         result = processor.unpack();
         if (result != LIBRAW_SUCCESS)
@@ -793,6 +830,18 @@ namespace
 
         const int sourceWidth = RawImageWidth(processor);
         const int sourceHeight = RawImageHeight(processor);
+        processor.recycle();
+
+        result = OpenRawFile(processor, item.filePath);
+        if (result != LIBRAW_SUCCESS)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"RAW decode failed while reopening the file: " + WideErrorString(libraw_strerror(result));
+            }
+            return {};
+        }
+
         ConfigureRawPostprocess(processor, false);
 
         result = processor.unpack();
@@ -834,6 +883,50 @@ namespace
 
 namespace hyperbrowse::decode
 {
+    void SetNvJpegAccelerationEnabled(bool enabled)
+    {
+        g_nvJpegEnabled.store(enabled && IsNvJpegBuildEnabled(), std::memory_order_release);
+    }
+
+    bool IsNvJpegAccelerationEnabled()
+    {
+        return g_nvJpegEnabled.load(std::memory_order_acquire);
+    }
+
+    bool IsNvJpegBuildEnabled()
+    {
+#if defined(HYPERBROWSE_ENABLE_NVJPEG)
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    bool IsNvJpegRuntimeAvailable()
+    {
+        return IsNvJpegBuildEnabled() && ProbeNvJpegRuntime();
+    }
+
+    std::wstring DescribeJpegAccelerationState()
+    {
+        if (!IsNvJpegBuildEnabled())
+        {
+            return L"WIC (nvJPEG build disabled)";
+        }
+
+        if (!IsNvJpegAccelerationEnabled())
+        {
+            return L"WIC (nvJPEG disabled)";
+        }
+
+        if (!IsNvJpegRuntimeAvailable())
+        {
+            return L"WIC (nvJPEG runtime unavailable)";
+        }
+
+        return L"WIC (nvJPEG plumbing active)";
+    }
+
     bool IsWicFileType(std::wstring_view fileType)
     {
         const std::wstring normalized = NormalizeFileType(fileType);

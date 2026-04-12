@@ -45,6 +45,7 @@ namespace hyperbrowse::services
         void BindTargetWindow(HWND targetWindow);
         void Schedule(std::uint64_t sessionId, std::uint64_t requestEpoch, std::vector<ThumbnailWorkItem> workItems);
         void CancelOutstanding();
+        void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
 
         std::shared_ptr<const cache::CachedThumbnail> FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const;
         std::size_t CacheBytes() const;

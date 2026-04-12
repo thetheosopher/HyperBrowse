@@ -3,8 +3,10 @@
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <shellapi.h>
 #include <windowsx.h>
+#include <wrl/client.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -15,7 +17,11 @@
 
 #include "browser/BrowserModel.h"
 #include "browser/BrowserPane.h"
+#include "decode/ImageDecoder.h"
+#include "services/BatchConvertService.h"
 #include "services/FolderEnumerationService.h"
+#include "services/FolderWatchService.h"
+#include "services/JpegTransformService.h"
 #include "util/Log.h"
 #include "util/Timing.h"
 #include "viewer/ViewerWindow.h"
@@ -29,6 +35,7 @@ namespace
     constexpr wchar_t kRegistryValueBrowserMode[] = L"BrowserMode";
     constexpr wchar_t kRegistryValueRecursiveBrowsing[] = L"RecursiveBrowsing";
     constexpr wchar_t kRegistryValueThemeMode[] = L"ThemeMode";
+    constexpr wchar_t kRegistryValueNvJpegEnabled[] = L"NvJpegEnabled";
     constexpr wchar_t kRegistryValueSelectedFolderPath[] = L"SelectedFolderPath";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
@@ -36,17 +43,30 @@ namespace
 
     constexpr UINT ID_FILE_REFRESH_TREE = 1001;
     constexpr UINT ID_FILE_EXIT = 1002;
+    constexpr UINT ID_FILE_IMAGE_INFORMATION = 1003;
+    constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_JPEG = 1010;
+    constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_PNG = 1011;
+    constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_TIFF = 1012;
+    constexpr UINT ID_FILE_BATCH_CONVERT_FOLDER_JPEG = 1013;
+    constexpr UINT ID_FILE_BATCH_CONVERT_FOLDER_PNG = 1014;
+    constexpr UINT ID_FILE_BATCH_CONVERT_FOLDER_TIFF = 1015;
+    constexpr UINT ID_FILE_BATCH_CONVERT_CANCEL = 1016;
+    constexpr UINT ID_FILE_ROTATE_JPEG_LEFT = 1017;
+    constexpr UINT ID_FILE_ROTATE_JPEG_RIGHT = 1018;
     constexpr UINT ID_VIEW_THUMBNAILS = 2001;
     constexpr UINT ID_VIEW_DETAILS = 2002;
     constexpr UINT ID_VIEW_RECURSIVE = 2003;
     constexpr UINT ID_VIEW_THEME_LIGHT = 2101;
     constexpr UINT ID_VIEW_THEME_DARK = 2102;
+    constexpr UINT ID_VIEW_NVJPEG_ACCELERATION = 2103;
     constexpr UINT ID_VIEW_SORT_FILENAME = 2201;
     constexpr UINT ID_VIEW_SORT_MODIFIED = 2202;
     constexpr UINT ID_VIEW_SORT_SIZE = 2203;
     constexpr UINT ID_VIEW_SORT_DIMENSIONS = 2204;
     constexpr UINT ID_VIEW_SORT_TYPE = 2205;
     constexpr UINT ID_VIEW_SORT_RANDOM = 2206;
+    constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
+    constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     constexpr UINT ID_HELP_ABOUT = 9001;
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
@@ -351,7 +371,9 @@ namespace hyperbrowse::ui
         : instance_(instance)
         , browserModel_(std::make_unique<browser::BrowserModel>())
         , browserPaneController_(std::make_unique<browser::BrowserPane>(instance))
+        , batchConvertService_(std::make_unique<services::BatchConvertService>())
         , folderEnumerationService_(std::make_unique<services::FolderEnumerationService>())
+        , folderWatchService_(std::make_unique<services::FolderWatchService>())
         , viewerWindow_(std::make_unique<viewer::ViewerWindow>(instance))
     {
     }
@@ -361,6 +383,16 @@ namespace hyperbrowse::ui
         if (folderEnumerationService_)
         {
             folderEnumerationService_->Cancel();
+        }
+
+        if (folderWatchService_)
+        {
+            folderWatchService_->Stop();
+        }
+
+        if (batchConvertService_)
+        {
+            batchConvertService_->Cancel();
         }
 
         if (backgroundBrush_)
@@ -437,17 +469,33 @@ namespace hyperbrowse::ui
     {
         menu_ = CreateMenu();
         HMENU fileMenu = CreatePopupMenu();
+        HMENU batchConvertSelectionMenu = CreatePopupMenu();
+        HMENU batchConvertFolderMenu = CreatePopupMenu();
         HMENU viewMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
         HMENU themeMenu = CreatePopupMenu();
         HMENU helpMenu = CreatePopupMenu();
 
-        if (!menu_ || !fileMenu || !viewMenu || !sortMenu || !themeMenu || !helpMenu)
+        if (!menu_ || !fileMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !viewMenu || !sortMenu || !themeMenu || !helpMenu)
         {
             return false;
         }
 
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information");
+        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_ROTATE_JPEG_LEFT, L"Rotate JPEG &Left");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Rotate JPEG &Right");
+        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_JPEG, L"Selection to &JPEG");
+        AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_PNG, L"Selection to &PNG");
+        AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_TIFF, L"Selection to &TIFF");
+        AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_JPEG, L"Folder to JPE&G");
+        AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_PNG, L"Folder to P&NG");
+        AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_TIFF, L"Folder to TIF&F");
+        AppendMenuW(fileMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertSelectionMenu), L"Batch Convert &Selection");
+        AppendMenuW(fileMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertFolderMenu), L"Batch Convert &Folder");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_BATCH_CONVERT_CANCEL, L"&Cancel Batch Convert");
         AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_EXIT, L"E&xit");
 
@@ -464,9 +512,13 @@ namespace hyperbrowse::ui
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By &Random");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(sortMenu), L"&Sort By");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder");
+        AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light");
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(themeMenu), L"&Theme");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
 
@@ -535,6 +587,7 @@ namespace hyperbrowse::ui
             ? browser::BrowserViewMode::Thumbnails
             : browser::BrowserViewMode::Details);
         browserPaneController_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
+        decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);
 
         InitializeFolderTree();
         if (!startupFolderPath_.empty())
@@ -923,6 +976,14 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (batchConvertActive_)
+        {
+            progressText.append(L" | Convert: ");
+            progressText.append(std::to_wstring(batchConvertCompleted_));
+            progressText.append(L"/");
+            progressText.append(std::to_wstring(batchConvertTotal_));
+        }
+
         const std::uint64_t selectedCount = browserPaneController_ ? browserPaneController_->SelectedCount() : 0;
         const std::uint64_t selectedBytes = browserPaneController_ ? browserPaneController_->SelectedBytes() : 0;
         const std::wstring selectionText = L"Selection: " + std::to_wstring(selectedCount)
@@ -995,11 +1056,364 @@ namespace hyperbrowse::ui
             return;
         }
 
-        if (viewerWindow_->Open(hwnd_, std::move(viewerItems), selectedViewerIndex, themeMode_ == ThemeMode::Dark))
+        OpenItemsInViewer(std::move(viewerItems), selectedViewerIndex, false);
+    }
+
+    void MainWindow::OpenItemsInViewer(std::vector<browser::BrowserItem> items, int selectedIndex, bool startSlideshow)
+    {
+        if (!viewerWindow_ || items.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(items.size()))
         {
+            return;
+        }
+
+        if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark))
+        {
+            if (startSlideshow)
+            {
+                viewerWindow_->StartSlideshow();
+            }
             viewerWindowActive_ = true;
             UpdateStatusText();
         }
+    }
+
+    std::vector<browser::BrowserItem> MainWindow::CollectItemsForScope(bool selectionScope) const
+    {
+        std::vector<browser::BrowserItem> items;
+        if (!browserModel_)
+        {
+            return items;
+        }
+
+        const auto& modelItems = browserModel_->Items();
+        if (selectionScope && browserPaneController_)
+        {
+            for (const int modelIndex : browserPaneController_->OrderedSelectedModelIndicesSnapshot())
+            {
+                if (modelIndex >= 0 && modelIndex < static_cast<int>(modelItems.size()))
+                {
+                    items.push_back(modelItems[static_cast<std::size_t>(modelIndex)]);
+                }
+            }
+            return items;
+        }
+
+        std::vector<int> orderedModelIndices = browserPaneController_
+            ? browserPaneController_->OrderedModelIndicesSnapshot()
+            : std::vector<int>{};
+        if (orderedModelIndices.empty())
+        {
+            orderedModelIndices.reserve(modelItems.size());
+            for (std::size_t index = 0; index < modelItems.size(); ++index)
+            {
+                orderedModelIndices.push_back(static_cast<int>(index));
+            }
+        }
+
+        for (const int modelIndex : orderedModelIndices)
+        {
+            if (modelIndex >= 0 && modelIndex < static_cast<int>(modelItems.size()))
+            {
+                items.push_back(modelItems[static_cast<std::size_t>(modelIndex)]);
+            }
+        }
+
+        return items;
+    }
+
+    bool MainWindow::ChooseFolder(std::wstring* folderPath) const
+    {
+        if (!folderPath)
+        {
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
+        HRESULT result = CoCreateInstance(CLSID_FileOpenDialog,
+                                          nullptr,
+                                          CLSCTX_INPROC_SERVER,
+                                          IID_PPV_ARGS(dialog.GetAddressOf()));
+        if (FAILED(result) || !dialog)
+        {
+            return false;
+        }
+
+        DWORD options = 0;
+        dialog->GetOptions(&options);
+        dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+        result = dialog->Show(hwnd_);
+        if (FAILED(result))
+        {
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<IShellItem> shellItem;
+        result = dialog->GetResult(&shellItem);
+        if (FAILED(result) || !shellItem)
+        {
+            return false;
+        }
+
+        PWSTR rawFolderPath = nullptr;
+        result = shellItem->GetDisplayName(SIGDN_FILESYSPATH, &rawFolderPath);
+        if (FAILED(result) || !rawFolderPath)
+        {
+            return false;
+        }
+
+        *folderPath = rawFolderPath;
+        CoTaskMemFree(rawFolderPath);
+        return true;
+    }
+
+    void MainWindow::ShowImageInformation()
+    {
+        if (!browserPaneController_)
+        {
+            return;
+        }
+
+        const int modelIndex = browserPaneController_->PrimarySelectedModelIndex();
+        if (modelIndex < 0)
+        {
+            MessageBoxW(hwnd_, L"Select an image first.", L"Image Information", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const std::wstring report = browserPaneController_->BuildMetadataReportForModelIndex(modelIndex);
+        MessageBoxW(hwnd_, report.c_str(), L"Image Information", MB_OK | MB_ICONINFORMATION);
+    }
+
+    void MainWindow::StartSlideshow(bool selectionScope)
+    {
+        if (!browserModel_ || !browserPaneController_)
+        {
+            return;
+        }
+
+        std::vector<browser::BrowserItem> items = CollectItemsForScope(selectionScope);
+        if (items.empty())
+        {
+            MessageBoxW(hwnd_,
+                        selectionScope ? L"Select one or more images first." : L"Open a folder with images first.",
+                        L"Slideshow",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        int selectedIndex = 0;
+        if (!selectionScope)
+        {
+            const int primaryModelIndex = browserPaneController_->PrimarySelectedModelIndex();
+            const auto orderedModelIndices = browserPaneController_->OrderedModelIndicesSnapshot();
+            for (int index = 0; index < static_cast<int>(orderedModelIndices.size()); ++index)
+            {
+                if (orderedModelIndices[static_cast<std::size_t>(index)] == primaryModelIndex)
+                {
+                    selectedIndex = index;
+                    break;
+                }
+            }
+        }
+
+        OpenItemsInViewer(std::move(items), selectedIndex, true);
+    }
+
+    void MainWindow::StartBatchConvert(bool selectionScope, services::BatchConvertFormat format)
+    {
+        if (!batchConvertService_)
+        {
+            return;
+        }
+
+        std::vector<browser::BrowserItem> items = CollectItemsForScope(selectionScope);
+        if (items.empty())
+        {
+            MessageBoxW(hwnd_,
+                        selectionScope ? L"Select one or more images first." : L"Open a folder with images first.",
+                        L"Batch Convert",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::wstring outputFolder;
+        if (!ChooseFolder(&outputFolder) || outputFolder.empty())
+        {
+            return;
+        }
+
+        batchConvertOutputFolder_ = outputFolder;
+        batchConvertCompleted_ = 0;
+        batchConvertTotal_ = items.size();
+        batchConvertFailed_ = 0;
+        batchConvertCurrentFile_.clear();
+        batchConvertActive_ = true;
+        activeBatchConvertRequestId_ = batchConvertService_->Start(hwnd_, std::move(items), outputFolder, format);
+        UpdateStatusText();
+        UpdateMenuState();
+    }
+
+    void MainWindow::RotateSelectedJpegs(int quarterTurnsDelta)
+    {
+        if (!browserModel_ || !browserPaneController_)
+        {
+            return;
+        }
+
+        const std::vector<browser::BrowserItem> items = CollectItemsForScope(true);
+        if (items.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more JPEG images first.", L"Rotate JPEG", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
+
+        std::vector<std::wstring> updatedPaths;
+        std::size_t successCount = 0;
+        std::size_t failureCount = 0;
+        for (const browser::BrowserItem& item : items)
+        {
+            if (!decode::IsWicFileType(item.fileType) || (_wcsicmp(item.fileType.c_str(), L"JPG") != 0 && _wcsicmp(item.fileType.c_str(), L"JPEG") != 0))
+            {
+                continue;
+            }
+
+            std::wstring errorMessage;
+            if (services::ApplyLosslessJpegRotate(item.filePath, quarterTurnsDelta, &errorMessage))
+            {
+                ++successCount;
+                updatedPaths.push_back(item.filePath);
+                browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(fs::path(item.filePath)));
+            }
+            else
+            {
+                ++failureCount;
+            }
+        }
+
+        if (!updatedPaths.empty())
+        {
+            browserPaneController_->InvalidateMediaCacheForPaths(updatedPaths);
+            RefreshBrowserPane();
+            browserPaneController_->RestoreSelectionByFilePaths(selectedPaths, focusedPath);
+        }
+
+        std::wstring summary = L"Updated " + std::to_wstring(successCount) + L" JPEG file(s).";
+        if (failureCount > 0)
+        {
+            summary.append(L"\nFailed: ");
+            summary.append(std::to_wstring(failureCount));
+            summary.append(L".");
+        }
+        MessageBoxW(hwnd_, summary.c_str(), L"Rotate JPEG", MB_OK | MB_ICONINFORMATION);
+    }
+
+    void MainWindow::ApplyFolderWatchChanges(const services::FolderWatchUpdate& update)
+    {
+        if (!browserModel_ || !browserPaneController_)
+        {
+            return;
+        }
+
+        if (update.requiresFullReload)
+        {
+            LoadFolderAsync(update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath);
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
+        std::vector<std::wstring> invalidatedPaths;
+        bool changed = false;
+
+        auto upsertFromPath = [&](const std::wstring& path)
+        {
+            std::error_code error;
+            const fs::path watchedPath(path);
+            if (fs::is_regular_file(watchedPath, error) && !error)
+            {
+                if (browser::IsSupportedImageExtension(watchedPath.extension().wstring()))
+                {
+                    changed = browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(watchedPath)) || changed;
+                    invalidatedPaths.push_back(path);
+                }
+                return;
+            }
+
+            if (!recursiveBrowsingEnabled_ || !fs::is_directory(watchedPath, error) || error)
+            {
+                return;
+            }
+
+            const fs::directory_options options = fs::directory_options::skip_permission_denied;
+            for (fs::recursive_directory_iterator iterator(watchedPath, options, error), end; iterator != end; iterator.increment(error))
+            {
+                if (error)
+                {
+                    error.clear();
+                    continue;
+                }
+
+                std::error_code statusError;
+                if (!iterator->is_regular_file(statusError) || statusError)
+                {
+                    continue;
+                }
+
+                if (!browser::IsSupportedImageExtension(iterator->path().extension().wstring()))
+                {
+                    continue;
+                }
+
+                changed = browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(iterator->path())) || changed;
+                invalidatedPaths.push_back(iterator->path().wstring());
+            }
+        };
+
+        for (const services::FolderWatchEvent& event : update.events)
+        {
+            switch (event.kind)
+            {
+            case services::FolderWatchEventKind::Added:
+            case services::FolderWatchEventKind::Modified:
+                upsertFromPath(event.path);
+                break;
+            case services::FolderWatchEventKind::Removed:
+                changed = browserModel_->RemoveItemByPath(event.path) || changed;
+                changed = browserModel_->RemoveItemsByPathPrefix(event.path) || changed;
+                invalidatedPaths.push_back(event.path);
+                break;
+            case services::FolderWatchEventKind::Renamed:
+            {
+                const bool renamed = browserModel_->ReplacePathPrefix(event.oldPath, event.path);
+                changed = renamed || changed;
+                invalidatedPaths.push_back(event.oldPath);
+                invalidatedPaths.push_back(event.path);
+                if (!renamed)
+                {
+                    changed = browserModel_->RemoveItemByPath(event.oldPath) || changed;
+                    changed = browserModel_->RemoveItemsByPathPrefix(event.oldPath) || changed;
+                    upsertFromPath(event.path);
+                }
+                break;
+            }
+            default:
+                break;
+            }
+        }
+
+        if (!changed && invalidatedPaths.empty())
+        {
+            return;
+        }
+
+        browserPaneController_->InvalidateMediaCacheForPaths(invalidatedPaths);
+        RefreshBrowserPane();
+        browserPaneController_->RestoreSelectionByFilePaths(selectedPaths, focusedPath);
+        UpdateStatusText();
+        UpdateWindowTitle();
     }
 
     void MainWindow::UpdateMenuState() const
@@ -1027,6 +1441,19 @@ namespace hyperbrowse::ui
             ID_VIEW_THEME_DARK,
             themeMode_ == ThemeMode::Light ? ID_VIEW_THEME_LIGHT : ID_VIEW_THEME_DARK,
             MF_BYCOMMAND);
+
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_NVJPEG_ACCELERATION,
+            MF_BYCOMMAND | (nvJpegEnabled_ ? MF_CHECKED : MF_UNCHECKED));
+        EnableMenuItem(
+            menu_,
+            ID_VIEW_NVJPEG_ACCELERATION,
+            MF_BYCOMMAND | (decode::IsNvJpegBuildEnabled() ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(
+            menu_,
+            ID_FILE_BATCH_CONVERT_CANCEL,
+            MF_BYCOMMAND | (batchConvertActive_ ? MF_ENABLED : MF_GRAYED));
 
         const browser::BrowserSortMode sortMode = browserPaneController_
             ? browserPaneController_->GetSortMode()
@@ -1146,6 +1573,11 @@ namespace hyperbrowse::ui
                 recursiveBrowsingEnabled_ = value != 0;
             }
 
+            if (TryReadDwordValue(key, kRegistryValueNvJpegEnabled, &value))
+            {
+                nvJpegEnabled_ = value != 0;
+            }
+
             TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
 
             RegCloseKey(key);
@@ -1169,6 +1601,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueBrowserMode, static_cast<DWORD>(browserMode_));
             WriteDwordValue(key, kRegistryValueThemeMode, static_cast<DWORD>(themeMode_));
             WriteDwordValue(key, kRegistryValueRecursiveBrowsing, recursiveBrowsingEnabled_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueNvJpegEnabled, nvJpegEnabled_ ? 1UL : 0UL);
             WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
             RegCloseKey(key);
         }
@@ -1184,6 +1617,11 @@ namespace hyperbrowse::ui
         folderPath = NormalizeFolderPath(std::move(folderPath));
 
         util::LogInfo(L"Queueing folder enumeration for " + folderPath);
+        if (folderWatchService_)
+        {
+            folderWatchService_->Stop();
+            activeFolderWatchRequestId_ = 0;
+        }
         browserModel_->Reset(folderPath, recursiveBrowsingEnabled_);
         if (browserPaneController_)
         {
@@ -1213,6 +1651,10 @@ namespace hyperbrowse::ui
         case services::FolderEnumerationUpdateKind::Completed:
             browserModel_->Complete();
             util::LogInfo(L"Completed folder enumeration for " + update->folderPath);
+            if (folderWatchService_)
+            {
+                activeFolderWatchRequestId_ = folderWatchService_->StartWatching(hwnd_, update->folderPath, browserModel_->IsRecursive());
+            }
             break;
         case services::FolderEnumerationUpdateKind::Failed:
             browserModel_->Fail(update->message);
@@ -1225,6 +1667,19 @@ namespace hyperbrowse::ui
         RefreshBrowserPane();
         UpdateStatusText();
         UpdateWindowTitle();
+        return 0;
+    }
+
+    LRESULT MainWindow::OnFolderWatchMessage(LPARAM lParam)
+    {
+        std::unique_ptr<services::FolderWatchUpdate> update(
+            reinterpret_cast<services::FolderWatchUpdate*>(lParam));
+        if (!update || update->requestId != activeFolderWatchRequestId_)
+        {
+            return 0;
+        }
+
+        ApplyFolderWatchChanges(*update);
         return 0;
     }
 
@@ -1249,6 +1704,48 @@ namespace hyperbrowse::ui
         }
 
         OpenItemInViewer(static_cast<int>(lParam));
+        return 0;
+    }
+
+    LRESULT MainWindow::OnBatchConvertMessage(LPARAM lParam)
+    {
+        std::unique_ptr<services::BatchConvertUpdate> update(
+            reinterpret_cast<services::BatchConvertUpdate*>(lParam));
+        if (!update || update->requestId != activeBatchConvertRequestId_)
+        {
+            return 0;
+        }
+
+        batchConvertCompleted_ = update->completedCount;
+        batchConvertTotal_ = update->totalCount;
+        batchConvertFailed_ = update->failedCount;
+        batchConvertCurrentFile_ = update->currentFileName;
+        batchConvertOutputFolder_ = update->outputFolder;
+
+        if (update->finished)
+        {
+            batchConvertActive_ = false;
+            UpdateMenuState();
+
+            std::wstring summary;
+            if (update->cancelled)
+            {
+                summary = L"Batch conversion was cancelled.";
+            }
+            else
+            {
+                summary = L"Batch conversion completed. Converted ";
+                summary.append(std::to_wstring(update->completedCount - update->failedCount));
+                summary.append(L" of ");
+                summary.append(std::to_wstring(update->totalCount));
+                summary.append(L" image(s).\nFailures: ");
+                summary.append(std::to_wstring(update->failedCount));
+                summary.append(L".");
+            }
+            MessageBoxW(hwnd_, summary.c_str(), L"Batch Convert", MB_OK | MB_ICONINFORMATION);
+        }
+
+        UpdateStatusText();
         return 0;
     }
 
@@ -1284,6 +1781,42 @@ namespace hyperbrowse::ui
         case ID_FILE_REFRESH_TREE:
             RefreshFolderTree();
             return true;
+        case ID_FILE_IMAGE_INFORMATION:
+            ShowImageInformation();
+            return true;
+        case ID_FILE_ROTATE_JPEG_LEFT:
+            RotateSelectedJpegs(-1);
+            return true;
+        case ID_FILE_ROTATE_JPEG_RIGHT:
+            RotateSelectedJpegs(+1);
+            return true;
+        case ID_FILE_BATCH_CONVERT_SELECTION_JPEG:
+            StartBatchConvert(true, services::BatchConvertFormat::Jpeg);
+            return true;
+        case ID_FILE_BATCH_CONVERT_SELECTION_PNG:
+            StartBatchConvert(true, services::BatchConvertFormat::Png);
+            return true;
+        case ID_FILE_BATCH_CONVERT_SELECTION_TIFF:
+            StartBatchConvert(true, services::BatchConvertFormat::Tiff);
+            return true;
+        case ID_FILE_BATCH_CONVERT_FOLDER_JPEG:
+            StartBatchConvert(false, services::BatchConvertFormat::Jpeg);
+            return true;
+        case ID_FILE_BATCH_CONVERT_FOLDER_PNG:
+            StartBatchConvert(false, services::BatchConvertFormat::Png);
+            return true;
+        case ID_FILE_BATCH_CONVERT_FOLDER_TIFF:
+            StartBatchConvert(false, services::BatchConvertFormat::Tiff);
+            return true;
+        case ID_FILE_BATCH_CONVERT_CANCEL:
+            if (batchConvertService_)
+            {
+                batchConvertService_->Cancel();
+                batchConvertActive_ = false;
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+            return true;
         case ID_VIEW_THUMBNAILS:
             SetBrowserMode(BrowserMode::Thumbnails);
             return true;
@@ -1292,6 +1825,15 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_RECURSIVE:
             ToggleRecursiveBrowsing();
+            return true;
+        case ID_VIEW_NVJPEG_ACCELERATION:
+            if (decode::IsNvJpegBuildEnabled())
+            {
+                nvJpegEnabled_ = !nvJpegEnabled_;
+                decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);
+                UpdateStatusText();
+                UpdateMenuState();
+            }
             return true;
         case ID_VIEW_SORT_FILENAME:
         case ID_VIEW_SORT_MODIFIED:
@@ -1311,6 +1853,12 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_THEME_DARK:
             SetThemeMode(ThemeMode::Dark);
+            return true;
+        case ID_VIEW_SLIDESHOW_SELECTION:
+            StartSlideshow(true);
+            return true;
+        case ID_VIEW_SLIDESHOW_FOLDER:
+            StartSlideshow(false);
             return true;
         case ID_HELP_ABOUT:
             MessageBoxW(
@@ -1423,11 +1971,24 @@ namespace hyperbrowse::ui
         shellState.append(recursiveBrowsingEnabled_ ? L"On" : L"Off");
         shellState.append(L" | Theme: ");
         shellState.append(themeMode_ == ThemeMode::Dark ? L"Dark" : L"Light");
+        shellState.append(L" | JPEG: ");
+        shellState.append(decode::DescribeJpegAccelerationState());
         if (viewerWindowActive_ && viewerZoomPercent_ > 0)
         {
             shellState.append(L" | Viewer Zoom: ");
             shellState.append(std::to_wstring(viewerZoomPercent_));
             shellState.append(L"%");
+        }
+        if (viewerWindow_ && viewerWindow_->IsSlideshowActive())
+        {
+            shellState.append(L" | Slideshow: On");
+        }
+        if (batchConvertActive_)
+        {
+            shellState.append(L" | Convert: ");
+            shellState.append(std::to_wstring(batchConvertCompleted_));
+            shellState.append(L"/");
+            shellState.append(std::to_wstring(batchConvertTotal_));
         }
         return shellState;
     }
@@ -1536,10 +2097,14 @@ namespace hyperbrowse::ui
         }
         case services::FolderEnumerationService::kMessageId:
             return OnFolderEnumerationMessage(lParam);
+        case services::FolderWatchService::kMessageId:
+            return OnFolderWatchMessage(lParam);
         case browser::BrowserPane::kStateChangedMessage:
             return OnBrowserPaneStateMessage(wParam, lParam);
         case browser::BrowserPane::kOpenItemMessage:
             return OnBrowserPaneOpenItemMessage(wParam, lParam);
+        case services::BatchConvertService::kMessageId:
+            return OnBatchConvertMessage(lParam);
         case viewer::ViewerWindow::kZoomChangedMessage:
             return OnViewerZoomMessage(lParam);
         case viewer::ViewerWindow::kActivityChangedMessage:
@@ -1581,6 +2146,14 @@ namespace hyperbrowse::ui
             if (folderEnumerationService_)
             {
                 folderEnumerationService_->Cancel();
+            }
+            if (folderWatchService_)
+            {
+                folderWatchService_->Stop();
+            }
+            if (batchConvertService_)
+            {
+                batchConvertService_->Cancel();
             }
             SaveWindowState();
             PostQuitMessage(0);

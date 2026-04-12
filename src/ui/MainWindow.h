@@ -9,15 +9,20 @@
 #include <string>
 #include <vector>
 
+#include "browser/BrowserModel.h"
+
 namespace hyperbrowse::browser
 {
-    class BrowserModel;
     class BrowserPane;
 }
 
 namespace hyperbrowse::services
 {
+    struct FolderWatchUpdate;
+    enum class BatchConvertFormat : int;
+    class BatchConvertService;
     class FolderEnumerationService;
+    class FolderWatchService;
 }
 
 namespace hyperbrowse::viewer
@@ -104,12 +109,22 @@ namespace hyperbrowse::ui
         void LoadFolderAsync(std::wstring folderPath);
         void RefreshBrowserPane();
         void OpenItemInViewer(int modelIndex);
+        void OpenItemsInViewer(std::vector<browser::BrowserItem> items, int selectedIndex, bool startSlideshow);
+        std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
+        bool ChooseFolder(std::wstring* folderPath) const;
+        void ShowImageInformation();
+        void StartSlideshow(bool selectionScope);
+        void StartBatchConvert(bool selectionScope, services::BatchConvertFormat format);
+        void RotateSelectedJpegs(int quarterTurnsDelta);
+        void ApplyFolderWatchChanges(const services::FolderWatchUpdate& update);
         LRESULT OnFolderEnumerationMessage(LPARAM lParam);
+        LRESULT OnFolderWatchMessage(LPARAM lParam);
         LRESULT OnFolderTreeNotify(LPARAM lParam);
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
+        LRESULT OnBatchConvertMessage(LPARAM lParam);
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
         LRESULT OnViewerClosedMessage();
@@ -150,10 +165,21 @@ namespace hyperbrowse::ui
         std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
         std::unique_ptr<browser::BrowserModel> browserModel_;
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
+        std::unique_ptr<services::BatchConvertService> batchConvertService_;
         std::unique_ptr<services::FolderEnumerationService> folderEnumerationService_;
+        std::unique_ptr<services::FolderWatchService> folderWatchService_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
         std::uint64_t activeEnumerationRequestId_{};
+        std::uint64_t activeFolderWatchRequestId_{};
+        std::uint64_t activeBatchConvertRequestId_{};
+        bool batchConvertActive_{};
+        std::size_t batchConvertCompleted_{};
+        std::size_t batchConvertTotal_{};
+        std::size_t batchConvertFailed_{};
+        std::wstring batchConvertOutputFolder_;
+        std::wstring batchConvertCurrentFile_;
         int viewerZoomPercent_{};
         bool viewerWindowActive_{};
+        bool nvJpegEnabled_{};
     };
 }

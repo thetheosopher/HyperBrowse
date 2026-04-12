@@ -12,6 +12,7 @@
 #include "browser/BrowserModel.h"
 #include "cache/ThumbnailCache.h"
 #include "decode/ImageDecoder.h"
+#include "services/ImageMetadataService.h"
 #include "services/ThumbnailScheduler.h"
 
 namespace
@@ -62,6 +63,16 @@ namespace
     int CompareCaseInsensitive(const std::wstring& lhs, const std::wstring& rhs)
     {
         return _wcsicmp(lhs.c_str(), rhs.c_str());
+    }
+
+    std::wstring BuildCameraLabel(const hyperbrowse::services::ImageMetadata& metadata)
+    {
+        if (!metadata.cameraMake.empty() && !metadata.cameraModel.empty())
+        {
+            return metadata.cameraMake + L" " + metadata.cameraModel;
+        }
+
+        return !metadata.cameraModel.empty() ? metadata.cameraModel : metadata.cameraMake;
     }
 
     RECT NormalizeRect(POINT start, POINT end)
@@ -127,6 +138,7 @@ namespace hyperbrowse::browser
         : instance_(instance)
         , colors_(MakeThemeColors(false))
         , thumbnailScheduler_(std::make_unique<services::ThumbnailScheduler>())
+        , metadataService_(std::make_unique<services::ImageMetadataService>())
     {
         backgroundBrush_ = CreateSolidBrush(colors_.windowBackground);
         surfaceBrush_ = CreateSolidBrush(colors_.surfaceBackground);
@@ -176,6 +188,10 @@ namespace hyperbrowse::browser
         {
             thumbnailScheduler_->BindTargetWindow(hwnd_);
         }
+        if (hwnd_ && metadataService_)
+        {
+            metadataService_->BindTargetWindow(hwnd_);
+        }
 
         return hwnd_ != nullptr;
     }
@@ -189,12 +205,18 @@ namespace hyperbrowse::browser
     {
         model_ = model;
         ++thumbnailSessionId_;
+        ++metadataSessionId_;
         CancelThumbnailWork();
+        if (metadataService_)
+        {
+            metadataService_->CancelOutstanding();
+        }
     }
 
     void BrowserPane::RefreshFromModel()
     {
         ++thumbnailSessionId_;
+        ++metadataSessionId_;
         RebuildOrder();
         UpdateSelectionBytes();
         UpdateDetailsListView();
@@ -312,6 +334,143 @@ namespace hyperbrowse::browser
         return orderedModelIndices_;
     }
 
+    std::vector<int> BrowserPane::OrderedSelectedModelIndicesSnapshot() const
+    {
+        std::vector<int> orderedSelection;
+        orderedSelection.reserve(selectedModelIndices_.size());
+        for (const int modelIndex : orderedModelIndices_)
+        {
+            if (selectedModelIndices_.contains(modelIndex))
+            {
+                orderedSelection.push_back(modelIndex);
+            }
+        }
+        return orderedSelection;
+    }
+
+    std::vector<std::wstring> BrowserPane::SelectedFilePathsSnapshot() const
+    {
+        std::vector<std::wstring> filePaths;
+        if (!model_)
+        {
+            return filePaths;
+        }
+
+        const auto& items = model_->Items();
+        for (const int modelIndex : OrderedSelectedModelIndicesSnapshot())
+        {
+            if (modelIndex >= 0 && modelIndex < static_cast<int>(items.size()))
+            {
+                filePaths.push_back(items[static_cast<std::size_t>(modelIndex)].filePath);
+            }
+        }
+
+        return filePaths;
+    }
+
+    std::wstring BrowserPane::FocusedFilePathSnapshot() const
+    {
+        if (!model_ || focusedModelIndex_ < 0)
+        {
+            return {};
+        }
+
+        const auto& items = model_->Items();
+        return focusedModelIndex_ < static_cast<int>(items.size())
+            ? items[static_cast<std::size_t>(focusedModelIndex_)].filePath
+            : std::wstring{};
+    }
+
+    void BrowserPane::RestoreSelectionByFilePaths(const std::vector<std::wstring>& filePaths, const std::wstring& focusedFilePath)
+    {
+        selectedModelIndices_.clear();
+        anchorModelIndex_ = -1;
+        focusedModelIndex_ = -1;
+
+        if (!model_)
+        {
+            return;
+        }
+
+        const auto& items = model_->Items();
+        for (const std::wstring& filePath : filePaths)
+        {
+            const int modelIndex = model_->FindItemIndexByPath(filePath);
+            if (modelIndex >= 0)
+            {
+                selectedModelIndices_.insert(modelIndex);
+                if (anchorModelIndex_ < 0)
+                {
+                    anchorModelIndex_ = modelIndex;
+                }
+            }
+        }
+
+        if (!focusedFilePath.empty())
+        {
+            focusedModelIndex_ = model_->FindItemIndexByPath(focusedFilePath);
+        }
+        if (focusedModelIndex_ < 0 && !selectedModelIndices_.empty())
+        {
+            focusedModelIndex_ = *selectedModelIndices_.begin();
+        }
+
+        UpdateSelectionBytes();
+        SyncDetailsListSelectionFromModel();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    void BrowserPane::InvalidateMediaCacheForPaths(const std::vector<std::wstring>& filePaths)
+    {
+        if (filePaths.empty())
+        {
+            return;
+        }
+
+        if (thumbnailScheduler_)
+        {
+            thumbnailScheduler_->CancelOutstanding();
+            thumbnailScheduler_->InvalidateFilePaths(filePaths);
+        }
+        if (metadataService_)
+        {
+            metadataService_->InvalidateFilePaths(filePaths);
+        }
+
+        ScheduleVisibleThumbnailWork();
+    }
+
+    std::shared_ptr<const hyperbrowse::services::ImageMetadata> BrowserPane::FindCachedMetadataForModelIndex(int modelIndex) const
+    {
+        if (!metadataService_ || !model_ || modelIndex < 0 || modelIndex >= static_cast<int>(model_->Items().size()))
+        {
+            return nullptr;
+        }
+
+        return metadataService_->FindCachedMetadata(model_->Items()[static_cast<std::size_t>(modelIndex)]);
+    }
+
+    std::wstring BrowserPane::BuildMetadataReportForModelIndex(int modelIndex) const
+    {
+        if (!model_ || modelIndex < 0 || modelIndex >= static_cast<int>(model_->Items().size()))
+        {
+            return {};
+        }
+
+        const BrowserItem& item = model_->Items()[static_cast<std::size_t>(modelIndex)];
+        std::wstring errorMessage;
+        const auto metadata = FindCachedMetadataForModelIndex(modelIndex)
+            ? FindCachedMetadataForModelIndex(modelIndex)
+            : services::ExtractImageMetadata(item, &errorMessage);
+        if (!metadata)
+        {
+            return errorMessage.empty() ? L"No metadata is available for the selected image." : errorMessage;
+        }
+
+        return services::FormatImageMetadataReport(item, *metadata);
+    }
+
     bool BrowserPane::RegisterClass() const
     {
         WNDCLASSEXW windowClass{};
@@ -399,6 +558,24 @@ namespace hyperbrowse::browser
         column.cx = 110;
         column.iSubItem = 4;
         ListView_InsertColumn(detailsList_, 4, &column);
+
+        std::wstring dateTaken = L"Date Taken";
+        column.pszText = dateTaken.data();
+        column.cx = 160;
+        column.iSubItem = 5;
+        ListView_InsertColumn(detailsList_, 5, &column);
+
+        std::wstring camera = L"Camera";
+        column.pszText = camera.data();
+        column.cx = 180;
+        column.iSubItem = 6;
+        ListView_InsertColumn(detailsList_, 6, &column);
+
+        std::wstring title = L"Title";
+        column.pszText = title.data();
+        column.cx = 220;
+        column.iSubItem = 7;
+        ListView_InsertColumn(detailsList_, 7, &column);
 
         ApplyThemeToDetailsList();
         return true;
@@ -956,6 +1133,16 @@ namespace hyperbrowse::browser
         PostMessageW(parent_, kOpenItemMessage, reinterpret_cast<WPARAM>(hwnd_), static_cast<LPARAM>(modelIndex));
     }
 
+    void BrowserPane::ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const
+    {
+        if (!metadataService_ || modelIndex < 0)
+        {
+            return;
+        }
+
+        metadataService_->Schedule(metadataSessionId_, services::MetadataWorkItem{modelIndex, item, 0});
+    }
+
     void BrowserPane::ScheduleVisibleThumbnailWork()
     {
         if (!thumbnailScheduler_)
@@ -1202,6 +1389,31 @@ namespace hyperbrowse::browser
             return item->modifiedDate;
         case 4:
             return FormatDimensionsForItem(*item);
+        case 5:
+        case 6:
+        case 7:
+        {
+            const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+            const auto metadata = modelIndex >= 0 ? FindCachedMetadataForModelIndex(modelIndex) : nullptr;
+            if (!metadata)
+            {
+                if (modelIndex >= 0)
+                {
+                    ScheduleMetadataForItem(modelIndex, *item);
+                }
+                return L"...";
+            }
+
+            if (subItem == 5)
+            {
+                return metadata->dateTaken;
+            }
+            if (subItem == 6)
+            {
+                return BuildCameraLabel(*metadata);
+            }
+            return metadata->title;
+        }
         default:
             return L"";
         }
@@ -1386,6 +1598,21 @@ namespace hyperbrowse::browser
             }
 
             InvalidateThumbnailCellForModelIndex(update->modelIndex);
+            return 0;
+        }
+        case services::ImageMetadataService::kMessageId:
+        {
+            std::unique_ptr<services::MetadataReadyUpdate> update(
+                reinterpret_cast<services::MetadataReadyUpdate*>(lParam));
+            if (!update || !update->success || update->sessionId != metadataSessionId_)
+            {
+                return 0;
+            }
+
+            if (detailsList_ && viewMode_ == BrowserViewMode::Details)
+            {
+                InvalidateRect(detailsList_, nullptr, FALSE);
+            }
             return 0;
         }
         case WM_NOTIFY:

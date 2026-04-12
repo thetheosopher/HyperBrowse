@@ -106,6 +106,11 @@ namespace hyperbrowse::services
         requestedKeys_.clear();
     }
 
+    void ThumbnailScheduler::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
+    {
+        cache_.InvalidateFilePaths(filePaths);
+    }
+
     std::shared_ptr<const cache::CachedThumbnail> ThumbnailScheduler::FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const
     {
         return cache_.Find(key);

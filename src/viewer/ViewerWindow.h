@@ -30,6 +30,9 @@ namespace hyperbrowse::viewer
         int CurrentZoomPercent() const noexcept;
         int RotationQuarterTurns() const noexcept;
         POINT PanOffset() const noexcept;
+        void StartSlideshow(UINT intervalMs = 3000);
+        void StopSlideshow();
+        bool IsSlideshowActive() const noexcept;
         void SetDarkTheme(bool enabled);
 
     private:
@@ -77,6 +80,7 @@ namespace hyperbrowse::viewer
         void RotateLeft();
         void RotateRight();
         void ToggleFullScreen();
+        void AdvanceSlideshow();
         void ResetViewState();
         double FitScaleForClient(const RECT& clientRect) const;
         double EffectiveScaleForClient(const RECT& clientRect) const;
@@ -110,6 +114,9 @@ namespace hyperbrowse::viewer
         bool panning_{};
         POINT lastPanPoint_{};
         bool fullScreen_{};
+        bool slideshowActive_{};
+        UINT slideshowIntervalMs_{3000};
+        UINT_PTR slideshowTimerId_{};
         DWORD windowedStyle_{};
         DWORD windowedExStyle_{};
         WINDOWPLACEMENT windowedPlacement_{sizeof(WINDOWPLACEMENT)};

@@ -9,6 +9,12 @@
 
 namespace hyperbrowse::decode
 {
+    void SetNvJpegAccelerationEnabled(bool enabled);
+    bool IsNvJpegAccelerationEnabled();
+    bool IsNvJpegBuildEnabled();
+    bool IsNvJpegRuntimeAvailable();
+    std::wstring DescribeJpegAccelerationState();
+
     bool IsWicFileType(std::wstring_view fileType);
     bool IsRawFileType(std::wstring_view fileType);
     bool CanDecodeThumbnail(const browser::BrowserItem& item);

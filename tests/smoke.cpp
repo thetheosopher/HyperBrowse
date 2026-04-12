@@ -19,6 +19,7 @@
 
 #include "browser/BrowserModel.h"
 #include "browser/BrowserPane.h"
+#include "decode/ImageDecoder.h"
 #include "decode/WicThumbnailDecoder.h"
 #include "services/FolderEnumerationService.h"
 #include "services/ThumbnailScheduler.h"
@@ -139,6 +140,30 @@ namespace
         {
             throw std::runtime_error(message);
         }
+    }
+
+    std::string Utf8FromWide(std::wstring_view text)
+    {
+        if (text.empty())
+        {
+            return {};
+        }
+
+        const int required = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+        if (required <= 0)
+        {
+            std::string fallback;
+            fallback.reserve(text.size());
+            for (wchar_t character : text)
+            {
+                fallback.push_back(character <= 0x7f ? static_cast<char>(character) : '?');
+            }
+            return fallback;
+        }
+
+        std::string utf8(static_cast<std::size_t>(required), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8.data(), required, nullptr, nullptr);
+        return utf8;
     }
 
     void ResetEnumerationResult(TestWindowState* state)
@@ -478,6 +503,15 @@ namespace
         return key;
     }
 
+    fs::path TestSourceDirectory()
+    {
+#ifdef HYPERBROWSE_TESTS_SOURCE_DIR
+        return fs::path(HYPERBROWSE_TESTS_SOURCE_DIR);
+#else
+        return fs::current_path();
+#endif
+    }
+
     void RunEnumerationScenario(HWND hwnd, TestWindowState* state)
     {
         hyperbrowse::services::FolderEnumerationService service;
@@ -619,6 +653,48 @@ namespace
         PumpMessagesFor(300);
         Expect(state->thumbnailResult.readyCount == 0, "Cached thumbnails should not be re-decoded on the next schedule pass");
     }
+
+        void RunRawDecoderScenario()
+        {
+         const fs::path fixtureRoot = TestSourceDirectory() / L"fixtures" / L"raw";
+            const fs::path nefPath = fixtureRoot / L"RAW_NIKON_D1.NEF";
+         const fs::path nrwPath = fixtureRoot / L"RAW_NIKON_P7000.NRW";
+
+         Expect(fs::exists(nefPath), "The NEF fixture is missing from tests/fixtures/raw");
+         Expect(fs::exists(nrwPath), "The NRW fixture is missing from tests/fixtures/raw");
+
+         const hyperbrowse::browser::BrowserItem nefItem = hyperbrowse::browser::BuildBrowserItemFromPath(nefPath);
+         const hyperbrowse::browser::BrowserItem nrwItem = hyperbrowse::browser::BuildBrowserItemFromPath(nrwPath);
+
+         Expect(hyperbrowse::decode::CanDecodeThumbnail(nefItem), "NEF fixture should be thumbnail-decodable");
+         Expect(hyperbrowse::decode::CanDecodeFullImage(nefItem), "NEF fixture should be full-image decodable");
+         Expect(hyperbrowse::decode::CanDecodeThumbnail(nrwItem), "NRW fixture should be thumbnail-decodable");
+         Expect(hyperbrowse::decode::CanDecodeFullImage(nrwItem), "NRW fixture should be full-image decodable");
+
+         std::wstring errorMessage;
+         const auto nefThumbnail = hyperbrowse::decode::DecodeThumbnail(MakeCacheKey(nefPath, nefItem.modifiedTimestampUtc), &errorMessage);
+         Expect(nefThumbnail != nullptr, std::string("LibRaw failed to decode the NEF thumbnail fixture: ") + Utf8FromWide(errorMessage));
+         Expect(nefThumbnail->SourceWidth() > 0 && nefThumbnail->SourceHeight() > 0,
+             "LibRaw did not surface NEF thumbnail source dimensions");
+
+         errorMessage.clear();
+         const auto nrwThumbnail = hyperbrowse::decode::DecodeThumbnail(MakeCacheKey(nrwPath, nrwItem.modifiedTimestampUtc), &errorMessage);
+         Expect(nrwThumbnail != nullptr, std::string("LibRaw failed to decode the NRW thumbnail fixture: ") + Utf8FromWide(errorMessage));
+         Expect(nrwThumbnail->SourceWidth() > 0 && nrwThumbnail->SourceHeight() > 0,
+             "LibRaw did not surface NRW thumbnail source dimensions");
+
+         errorMessage.clear();
+         const auto nefFullImage = hyperbrowse::decode::DecodeFullImage(nefItem, &errorMessage);
+         Expect(nefFullImage != nullptr, std::string("LibRaw failed to decode the NEF full-image fixture: ") + Utf8FromWide(errorMessage));
+         Expect(nefFullImage->SourceWidth() > 0 && nefFullImage->SourceHeight() > 0,
+             "LibRaw did not surface NEF full-image source dimensions");
+
+         errorMessage.clear();
+         const auto nrwFullImage = hyperbrowse::decode::DecodeFullImage(nrwItem, &errorMessage);
+         Expect(nrwFullImage != nullptr, std::string("LibRaw failed to decode the NRW full-image fixture: ") + Utf8FromWide(errorMessage));
+         Expect(nrwFullImage->SourceWidth() > 0 && nrwFullImage->SourceHeight() > 0,
+             "LibRaw did not surface NRW full-image source dimensions");
+        }
 
     void RunBrowserPaneScenario(HINSTANCE instance)
     {
@@ -837,6 +913,7 @@ int main()
         RunEnumerationScenario(hwnd, &state);
         RunWicDecoderScenario();
         RunThumbnailSchedulerScenario(hwnd, &state);
+        RunRawDecoderScenario();
         RunBrowserPaneScenario(instance);
         RunViewerWindowScenario(instance, hwnd);
         RunMainWindowFolderTreeScenario(instance);

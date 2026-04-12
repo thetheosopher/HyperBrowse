@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace hyperbrowse::cache
 {
@@ -64,6 +65,7 @@ namespace hyperbrowse::cache
 
         std::shared_ptr<const CachedThumbnail> Find(const ThumbnailCacheKey& key) const;
         void Insert(ThumbnailCacheKey key, std::shared_ptr<const CachedThumbnail> thumbnail);
+        void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
         void Clear();
         std::size_t CurrentBytes() const;
         std::size_t CapacityBytes() const noexcept;

@@ -33,6 +33,8 @@ namespace hyperbrowse::browser
 namespace hyperbrowse::services
 {
     class ThumbnailScheduler;
+    struct ImageMetadata;
+    class ImageMetadataService;
 }
 
 namespace hyperbrowse::browser
@@ -75,6 +77,13 @@ namespace hyperbrowse::browser
         std::uint64_t SelectedBytes() const noexcept;
         int PrimarySelectedModelIndex() const noexcept;
         std::vector<int> OrderedModelIndicesSnapshot() const;
+        std::vector<int> OrderedSelectedModelIndicesSnapshot() const;
+        std::vector<std::wstring> SelectedFilePathsSnapshot() const;
+        std::wstring FocusedFilePathSnapshot() const;
+        void RestoreSelectionByFilePaths(const std::vector<std::wstring>& filePaths, const std::wstring& focusedFilePath);
+        void InvalidateMediaCacheForPaths(const std::vector<std::wstring>& filePaths);
+        std::shared_ptr<const hyperbrowse::services::ImageMetadata> FindCachedMetadataForModelIndex(int modelIndex) const;
+        std::wstring BuildMetadataReportForModelIndex(int modelIndex) const;
 
     private:
         static constexpr const wchar_t* kClassName = L"HyperBrowseBrowserPane";
@@ -111,6 +120,7 @@ namespace hyperbrowse::browser
         void EndRubberBandSelection();
         void RequestOpenItemForViewIndex(int viewIndex) const;
         void ScheduleVisibleThumbnailWork();
+        void ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const;
         void CancelThumbnailWork();
         void InvalidateThumbnailCellForModelIndex(int modelIndex) const;
         void DrawPlaceholderState(HDC hdc, const RECT& clientRect) const;
@@ -131,6 +141,7 @@ namespace hyperbrowse::browser
         HBRUSH surfaceBrush_{};
         ThemeColors colors_{};
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
+        std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
         bool darkTheme_{};
         bool syncingDetailsSelection_{};
         BrowserViewMode viewMode_{BrowserViewMode::Thumbnails};
@@ -147,6 +158,7 @@ namespace hyperbrowse::browser
         POINT rubberBandStart_{};
         RECT rubberBandRect_{};
         std::uint64_t thumbnailSessionId_{1};
+        std::uint64_t metadataSessionId_{1};
         std::uint64_t thumbnailRequestEpoch_{};
         mutable std::wstring listViewTextBuffer_;
     };

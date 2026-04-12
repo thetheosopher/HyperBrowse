@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(HYPERBROWSE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(HYPERBROWSE_BUILD_TESTS "Build placeholder tests" ON)
 option(HYPERBROWSE_ENABLE_LIBRAW "Build with vendored LibRaw support" ON)
+option(HYPERBROWSE_ENABLE_NVJPEG "Enable optional nvJPEG acceleration plumbing" OFF)
 
 if(MSVC)
     add_compile_options(/permissive- /Zc:__cplusplus /W4 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX /DWIN32_LEAN_AND_MEAN)
@@ -34,7 +35,11 @@ add_executable(HyperBrowse WIN32
     src/cache/ThumbnailCache.cpp
     src/decode/ImageDecoder.cpp
     src/decode/WicThumbnailDecoder.cpp
+    src/services/BatchConvertService.cpp
     src/services/FolderEnumerationService.cpp
+    src/services/FolderWatchService.cpp
+    src/services/ImageMetadataService.cpp
+    src/services/JpegTransformService.cpp
     src/services/ThumbnailScheduler.cpp
     src/ui/MainWindow.cpp
     src/util/Log.cpp
@@ -51,6 +56,7 @@ target_link_libraries(HyperBrowse PRIVATE
     d2d1
     d3d11
     msimg32
+    propsys
     windowscodecs
     shell32
     shlwapi
@@ -59,6 +65,10 @@ target_link_libraries(HyperBrowse PRIVATE
 if(HYPERBROWSE_ENABLE_LIBRAW)
     target_link_libraries(HyperBrowse PRIVATE HyperBrowse::LibRaw)
     target_compile_definitions(HyperBrowse PRIVATE HYPERBROWSE_ENABLE_LIBRAW=1)
+endif()
+
+if(HYPERBROWSE_ENABLE_NVJPEG)
+    target_compile_definitions(HyperBrowse PRIVATE HYPERBROWSE_ENABLE_NVJPEG=1)
 endif()
 
 if(MSVC)

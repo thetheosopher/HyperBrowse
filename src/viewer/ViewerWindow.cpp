@@ -77,6 +77,7 @@ namespace hyperbrowse::viewer
 
         currentIndex_ = selectedIndex;
         darkTheme_ = darkTheme;
+    StopSlideshow();
         ResetCachedImageSlots();
         ResetPrefetchStatistics();
 
@@ -151,6 +152,34 @@ namespace hyperbrowse::viewer
             static_cast<LONG>(std::lround(panOffsetX_)),
             static_cast<LONG>(std::lround(panOffsetY_)),
         };
+    }
+
+    void ViewerWindow::StartSlideshow(UINT intervalMs)
+    {
+        if (!hwnd_ || items_.size() < 2)
+        {
+            return;
+        }
+
+        slideshowIntervalMs_ = std::max<UINT>(1000, intervalMs);
+        slideshowTimerId_ = SetTimer(hwnd_, 1, slideshowIntervalMs_, nullptr);
+        slideshowActive_ = slideshowTimerId_ != 0;
+    }
+
+    void ViewerWindow::StopSlideshow()
+    {
+        if (hwnd_ && slideshowTimerId_ != 0)
+        {
+            KillTimer(hwnd_, slideshowTimerId_);
+        }
+
+        slideshowTimerId_ = 0;
+        slideshowActive_ = false;
+    }
+
+    bool ViewerWindow::IsSlideshowActive() const noexcept
+    {
+        return slideshowActive_;
     }
 
     void ViewerWindow::SetDarkTheme(bool enabled)
@@ -559,6 +588,25 @@ namespace hyperbrowse::viewer
         fullScreen_ = false;
     }
 
+    void ViewerWindow::AdvanceSlideshow()
+    {
+        if (items_.size() < 2)
+        {
+            return;
+        }
+
+        if (currentIndex_ >= static_cast<int>(items_.size()) - 1)
+        {
+            currentIndex_ = 0;
+            currentSlot_ = {};
+            currentImage_.reset();
+            LoadCurrentImageAsync();
+            return;
+        }
+
+        Navigate(+1);
+    }
+
     void ViewerWindow::ResetViewState()
     {
         zoomMode_ = ZoomMode::Fit;
@@ -724,6 +772,16 @@ namespace hyperbrowse::viewer
             case 'R':
                 RotateRight();
                 return 0;
+            case VK_SPACE:
+                if (IsSlideshowActive())
+                {
+                    StopSlideshow();
+                }
+                else
+                {
+                    StartSlideshow();
+                }
+                return 0;
             case VK_F11:
                 ToggleFullScreen();
                 return 0;
@@ -776,6 +834,13 @@ namespace hyperbrowse::viewer
         case WM_LBUTTONDBLCLK:
             ToggleFullScreen();
             return 0;
+        case WM_TIMER:
+            if (wParam == slideshowTimerId_)
+            {
+                AdvanceSlideshow();
+                return 0;
+            }
+            break;
         case kDecodedImageMessage:
             return HandleDecodedImageMessage(lParam);
         case kPrefetchImageMessage:
@@ -867,6 +932,7 @@ namespace hyperbrowse::viewer
             DestroyWindow(hwnd_);
             return 0;
         case WM_DESTROY:
+            StopSlideshow();
             if (GetCapture() == hwnd_)
             {
                 ReleaseCapture();
