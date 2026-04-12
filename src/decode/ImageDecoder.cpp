@@ -17,13 +17,17 @@
 #include <libraw/libraw.h>
 #endif
 
+#include "decode/WicDecodeHelpers.h"
 #include "decode/WicThumbnailDecoder.h"
+#include "util/Diagnostics.h"
 
 namespace fs = std::filesystem;
 
 namespace
 {
     using Microsoft::WRL::ComPtr;
+
+    namespace wic = hyperbrowse::decode::wic_support;
 
     std::atomic_bool g_nvJpegEnabled{false};
 
@@ -80,150 +84,7 @@ namespace
         return false;
     }
 
-    WICBitmapTransformOptions OrientationToTransform(std::uint16_t orientation)
-    {
-        switch (orientation)
-        {
-        case 2:
-            return WICBitmapTransformFlipHorizontal;
-        case 3:
-            return WICBitmapTransformRotate180;
-        case 4:
-            return WICBitmapTransformFlipVertical;
-        case 5:
-            return static_cast<WICBitmapTransformOptions>(WICBitmapTransformRotate90 | WICBitmapTransformFlipHorizontal);
-        case 6:
-            return WICBitmapTransformRotate90;
-        case 7:
-            return static_cast<WICBitmapTransformOptions>(WICBitmapTransformRotate270 | WICBitmapTransformFlipHorizontal);
-        case 8:
-            return WICBitmapTransformRotate270;
-        case 1:
-        default:
-            return WICBitmapTransformRotate0;
-        }
-    }
-
-    std::uint16_t ReadOrientation(IWICBitmapFrameDecode* frame)
-    {
-        ComPtr<IWICMetadataQueryReader> metadataQueryReader;
-        if (FAILED(frame->GetMetadataQueryReader(&metadataQueryReader)) || !metadataQueryReader)
-        {
-            return 1;
-        }
-
-        static constexpr const wchar_t* kOrientationQueries[] = {
-            L"/app1/ifd/{ushort=274}",
-            L"/ifd/{ushort=274}",
-        };
-
-        for (const wchar_t* query : kOrientationQueries)
-        {
-            PROPVARIANT value;
-            PropVariantInit(&value);
-            const HRESULT queryResult = metadataQueryReader->GetMetadataByName(query, &value);
-            if (SUCCEEDED(queryResult))
-            {
-                std::uint16_t orientation = 1;
-                switch (value.vt)
-                {
-                case VT_UI1:
-                    orientation = value.bVal;
-                    break;
-                case VT_UI2:
-                    orientation = value.uiVal;
-                    break;
-                case VT_UI4:
-                    orientation = static_cast<std::uint16_t>(value.ulVal);
-                    break;
-                default:
-                    break;
-                }
-
-                PropVariantClear(&value);
-                return orientation;
-            }
-
-            PropVariantClear(&value);
-        }
-
-        return 1;
-    }
-
-    bool TransformSwapsDimensions(WICBitmapTransformOptions transform)
-    {
-        return transform == WICBitmapTransformRotate90
-            || transform == WICBitmapTransformRotate270
-            || transform == static_cast<WICBitmapTransformOptions>(WICBitmapTransformRotate90 | WICBitmapTransformFlipHorizontal)
-            || transform == static_cast<WICBitmapTransformOptions>(WICBitmapTransformRotate270 | WICBitmapTransformFlipHorizontal);
-    }
-
-    void ComputeScaledSize(UINT sourceWidth,
-                           UINT sourceHeight,
-                           int targetWidth,
-                           int targetHeight,
-                           UINT* scaledWidth,
-                           UINT* scaledHeight)
-    {
-        const double widthRatio = static_cast<double>(std::max(1, targetWidth)) / static_cast<double>(std::max<UINT>(1, sourceWidth));
-        const double heightRatio = static_cast<double>(std::max(1, targetHeight)) / static_cast<double>(std::max<UINT>(1, sourceHeight));
-        const double scale = std::min(widthRatio, heightRatio);
-
-        *scaledWidth = std::max<UINT>(1, static_cast<UINT>(std::lround(static_cast<double>(sourceWidth) * scale)));
-        *scaledHeight = std::max<UINT>(1, static_cast<UINT>(std::lround(static_cast<double>(sourceHeight) * scale)));
-    }
-
-    HBITMAP CreateBitmapBuffer(UINT width, UINT height, void** bits)
-    {
-        BITMAPINFO bitmapInfo{};
-        bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
-        bitmapInfo.bmiHeader.biWidth = static_cast<LONG>(width);
-        bitmapInfo.bmiHeader.biHeight = -static_cast<LONG>(height);
-        bitmapInfo.bmiHeader.biPlanes = 1;
-        bitmapInfo.bmiHeader.biBitCount = 32;
-        bitmapInfo.bmiHeader.biCompression = BI_RGB;
-        return CreateDIBSection(nullptr, &bitmapInfo, DIB_RGB_COLORS, bits, nullptr, 0);
-    }
-
-    bool InitializeWicFactory(ComPtr<IWICImagingFactory>* factory,
-                              bool* shouldUninitializeCom,
-                              std::wstring* errorMessage)
-    {
-        const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        *shouldUninitializeCom = SUCCEEDED(comResult) || comResult == S_FALSE;
-        if (FAILED(comResult) && comResult != RPC_E_CHANGED_MODE)
-        {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to initialize COM for image decode.";
-            }
-            return false;
-        }
-
-        const HRESULT result = CoCreateInstance(
-            CLSID_WICImagingFactory,
-            nullptr,
-            CLSCTX_INPROC_SERVER,
-            IID_PPV_ARGS(factory->GetAddressOf()));
-        if (FAILED(result))
-        {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to create the WIC imaging factory.";
-            }
-            if (*shouldUninitializeCom)
-            {
-                CoUninitialize();
-                *shouldUninitializeCom = false;
-            }
-            return false;
-        }
-
-        return true;
-    }
-
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeWicSource(IWICImagingFactory* factory,
-                                                                                bool shouldUninitializeCom,
                                                                                 IWICBitmapDecoder* decoder,
                                                                                 int targetWidth,
                                                                                 int targetHeight,
@@ -254,10 +115,10 @@ namespace
             return {};
         }
 
-        const WICBitmapTransformOptions transform = OrientationToTransform(ReadOrientation(frame.Get()));
+        const WICBitmapTransformOptions transform = wic::OrientationToTransform(wic::ReadOrientation(frame.Get()));
         UINT orientedWidth = sourceWidth;
         UINT orientedHeight = sourceHeight;
-        if (TransformSwapsDimensions(transform))
+        if (wic::TransformSwapsDimensions(transform))
         {
             std::swap(orientedWidth, orientedHeight);
         }
@@ -273,10 +134,6 @@ namespace
                 {
                     *errorMessage = L"Failed to apply image orientation.";
                 }
-                if (shouldUninitializeCom)
-                {
-                    CoUninitialize();
-                }
                 return {};
             }
 
@@ -287,7 +144,7 @@ namespace
         UINT scaledHeight = orientedHeight;
         if (targetWidth > 0 && targetHeight > 0)
         {
-            ComputeScaledSize(orientedWidth, orientedHeight, targetWidth, targetHeight, &scaledWidth, &scaledHeight);
+            wic::ComputeScaledSize(orientedWidth, orientedHeight, targetWidth, targetHeight, &scaledWidth, &scaledHeight);
             if (scaledWidth != orientedWidth || scaledHeight != orientedHeight)
             {
                 ComPtr<IWICBitmapScaler> scaler;
@@ -297,10 +154,6 @@ namespace
                     if (errorMessage)
                     {
                         *errorMessage = L"Failed to scale the decoded image.";
-                    }
-                    if (shouldUninitializeCom)
-                    {
-                        CoUninitialize();
                     }
                     return {};
                 }
@@ -323,15 +176,11 @@ namespace
             {
                 *errorMessage = L"Failed to convert the decoded image into the viewer pixel format.";
             }
-            if (shouldUninitializeCom)
-            {
-                CoUninitialize();
-            }
             return {};
         }
 
         void* bits = nullptr;
-        HBITMAP bitmap = CreateBitmapBuffer(scaledWidth, scaledHeight, &bits);
+        HBITMAP bitmap = wic::CreateBitmapBuffer(scaledWidth, scaledHeight, &bits);
         if (!bitmap || !bits)
         {
             if (bitmap)
@@ -342,10 +191,6 @@ namespace
             if (errorMessage)
             {
                 *errorMessage = L"Failed to allocate the destination bitmap.";
-            }
-            if (shouldUninitializeCom)
-            {
-                CoUninitialize();
             }
             return {};
         }
@@ -360,16 +205,7 @@ namespace
             {
                 *errorMessage = L"Failed to copy decoded pixels into the destination bitmap.";
             }
-            if (shouldUninitializeCom)
-            {
-                CoUninitialize();
-            }
             return {};
-        }
-
-        if (shouldUninitializeCom)
-        {
-            CoUninitialize();
         }
 
         return std::make_shared<hyperbrowse::cache::CachedThumbnail>(bitmap,
@@ -397,9 +233,17 @@ namespace
             return {};
         }
 
-        bool shouldUninitializeCom = false;
+        wic::ComInitializationScope comInitialization(
+            COINIT_MULTITHREADED,
+            errorMessage,
+            L"Failed to initialize COM for image decode.");
+        if (!comInitialization.Succeeded())
+        {
+            return {};
+        }
+
         ComPtr<IWICImagingFactory> factory;
-        if (!InitializeWicFactory(&factory, &shouldUninitializeCom, errorMessage))
+        if (!wic::InitializeWicFactory(&factory, errorMessage))
         {
             return {};
         }
@@ -413,10 +257,6 @@ namespace
             {
                 *errorMessage = L"Failed to initialize the WIC memory stream for the RAW preview.";
             }
-            if (shouldUninitializeCom)
-            {
-                CoUninitialize();
-            }
             return {};
         }
 
@@ -428,15 +268,10 @@ namespace
             {
                 *errorMessage = L"Failed to create a WIC decoder for the embedded RAW preview.";
             }
-            if (shouldUninitializeCom)
-            {
-                CoUninitialize();
-            }
             return {};
         }
 
         return DecodeWicSource(factory.Get(),
-                               shouldUninitializeCom,
                                decoder.Get(),
                                targetWidth,
                                targetHeight,
@@ -448,9 +283,17 @@ namespace
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeWicFile(const hyperbrowse::browser::BrowserItem& item,
                                                                               std::wstring* errorMessage)
     {
-        bool shouldUninitializeCom = false;
+        wic::ComInitializationScope comInitialization(
+            COINIT_MULTITHREADED,
+            errorMessage,
+            L"Failed to initialize COM for image decode.");
+        if (!comInitialization.Succeeded())
+        {
+            return {};
+        }
+
         ComPtr<IWICImagingFactory> factory;
-        if (!InitializeWicFactory(&factory, &shouldUninitializeCom, errorMessage))
+        if (!wic::InitializeWicFactory(&factory, errorMessage))
         {
             return {};
         }
@@ -467,14 +310,10 @@ namespace
             {
                 *errorMessage = L"Failed to open the selected image for decode.";
             }
-            if (shouldUninitializeCom)
-            {
-                CoUninitialize();
-            }
             return {};
         }
 
-        return DecodeWicSource(factory.Get(), shouldUninitializeCom, decoder.Get(), 0, 0, 0, 0, errorMessage);
+        return DecodeWicSource(factory.Get(), decoder.Get(), 0, 0, 0, 0, errorMessage);
     }
 
     std::vector<unsigned char> ScaleBgra(const std::vector<unsigned char>& sourcePixels,
@@ -522,19 +361,19 @@ namespace
         {
             UINT scaledWidth = 0;
             UINT scaledHeight = 0;
-            ComputeScaledSize(static_cast<UINT>(sourceBitmapWidth),
-                              static_cast<UINT>(sourceBitmapHeight),
-                              targetWidth,
-                              targetHeight,
-                              &scaledWidth,
-                              &scaledHeight);
+            wic::ComputeScaledSize(static_cast<UINT>(sourceBitmapWidth),
+                                   static_cast<UINT>(sourceBitmapHeight),
+                                   targetWidth,
+                                   targetHeight,
+                                   &scaledWidth,
+                                   &scaledHeight);
             destinationWidth = static_cast<int>(scaledWidth);
             destinationHeight = static_cast<int>(scaledHeight);
             bgraPixels = ScaleBgra(bgraPixels, sourceBitmapWidth, sourceBitmapHeight, destinationWidth, destinationHeight);
         }
 
         void* bits = nullptr;
-        HBITMAP bitmap = CreateBitmapBuffer(static_cast<UINT>(destinationWidth), static_cast<UINT>(destinationHeight), &bits);
+        HBITMAP bitmap = wic::CreateBitmapBuffer(static_cast<UINT>(destinationWidth), static_cast<UINT>(destinationHeight), &bits);
         if (!bitmap || !bits)
         {
             if (bitmap)
@@ -698,6 +537,7 @@ namespace
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeRawThumbnail(const hyperbrowse::cache::ThumbnailCacheKey& key,
                                                                                    std::wstring* errorMessage)
     {
+        hyperbrowse::util::Stopwatch decodeStopwatch;
         LibRaw processor;
         int result = OpenRawFile(processor, key.filePath);
         if (result != LIBRAW_SUCCESS)
@@ -752,6 +592,7 @@ namespace
                 LibRaw::dcraw_clear_mem(thumbnail);
                 if (decodedThumbnail)
                 {
+                    hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw.embedded_preview", decodeStopwatch.ElapsedMilliseconds());
                     return decodedThumbnail;
                 }
             }
@@ -801,6 +642,7 @@ namespace
         {
             LibRaw::dcraw_clear_mem(image);
         }
+        hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw.fallback_full", decodeStopwatch.ElapsedMilliseconds());
         return decodedImage;
     }
 
@@ -957,16 +799,21 @@ namespace hyperbrowse::decode
     std::shared_ptr<const cache::CachedThumbnail> DecodeThumbnail(const cache::ThumbnailCacheKey& key,
                                                                   std::wstring* errorMessage)
     {
+        hyperbrowse::util::Stopwatch stopwatch;
         const std::wstring fileType = FileTypeFromPath(key.filePath);
         if (IsWicFileType(fileType))
         {
-            return WicThumbnailDecoder{}.Decode(key);
+            auto thumbnail = WicThumbnailDecoder{}.Decode(key);
+            hyperbrowse::util::RecordTiming(L"thumbnail.decode.wic", stopwatch.ElapsedMilliseconds());
+            return thumbnail;
         }
 
         if (IsRawFileType(fileType))
         {
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
-            return DecodeRawThumbnail(key, errorMessage);
+            auto thumbnail = DecodeRawThumbnail(key, errorMessage);
+            hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw", stopwatch.ElapsedMilliseconds());
+            return thumbnail;
 #else
             if (errorMessage)
             {
@@ -986,15 +833,20 @@ namespace hyperbrowse::decode
     std::shared_ptr<const cache::CachedThumbnail> DecodeFullImage(const browser::BrowserItem& item,
                                                                   std::wstring* errorMessage)
     {
+        hyperbrowse::util::Stopwatch stopwatch;
         if (IsWicFileType(item.fileType))
         {
-            return DecodeWicFile(item, errorMessage);
+            auto image = DecodeWicFile(item, errorMessage);
+            hyperbrowse::util::RecordTiming(L"viewer.decode.wic", stopwatch.ElapsedMilliseconds());
+            return image;
         }
 
         if (IsRawFileType(item.fileType))
         {
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
-            return DecodeRawFullImage(item, errorMessage);
+            auto image = DecodeRawFullImage(item, errorMessage);
+            hyperbrowse::util::RecordTiming(L"viewer.decode.raw", stopwatch.ElapsedMilliseconds());
+            return image;
 #else
             if (errorMessage)
             {

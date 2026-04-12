@@ -54,18 +54,17 @@ namespace
         return orientation < kRotationMap.size() ? kRotationMap[orientation] : 6;
     }
 
-    std::uint16_t RotateLeftOrientation(std::uint16_t orientation)
+    int NormalizeClockwiseQuarterTurns(int quarterTurnsDelta)
     {
-        static constexpr std::array<std::uint16_t, 9> kRotationMap{0, 8, 5, 6, 7, 4, 1, 2, 3};
-        return orientation < kRotationMap.size() ? kRotationMap[orientation] : 8;
+        return ((quarterTurnsDelta % 4) + 4) % 4;
     }
 }
 
 namespace hyperbrowse::services
 {
-    bool ApplyLosslessJpegRotate(const std::wstring& filePath,
-                                 int quarterTurnsDelta,
-                                 std::wstring* errorMessage)
+    bool AdjustJpegOrientation(const std::wstring& filePath,
+                               int quarterTurnsDelta,
+                               std::wstring* errorMessage)
     {
         if (quarterTurnsDelta == 0)
         {
@@ -77,7 +76,7 @@ namespace hyperbrowse::services
         {
             if (errorMessage)
             {
-                *errorMessage = L"Failed to open the JPEG file for rotation.";
+                *errorMessage = L"Failed to open the JPEG file for orientation adjustment.";
             }
             return false;
         }
@@ -164,12 +163,10 @@ namespace hyperbrowse::services
                         orientation = 1;
                     }
 
-                    const int steps = ((quarterTurnsDelta % 4) + 4) % 4;
-                    for (int step = 0; step < steps; ++step)
+                    const int clockwiseTurns = NormalizeClockwiseQuarterTurns(quarterTurnsDelta);
+                    for (int step = 0; step < clockwiseTurns; ++step)
                     {
-                        orientation = quarterTurnsDelta > 0
-                            ? RotateRightOrientation(orientation)
-                            : RotateLeftOrientation(orientation);
+                        orientation = RotateRightOrientation(orientation);
                     }
 
                     WriteUInt16(&bytes, entryOffset + 8, littleEndian, orientation);
@@ -190,7 +187,7 @@ namespace hyperbrowse::services
         {
             if (errorMessage)
             {
-                *errorMessage = L"The JPEG file does not expose an editable EXIF orientation tag for lossless rotation.";
+                *errorMessage = L"The JPEG file does not expose an editable EXIF orientation tag.";
             }
             return false;
         }
@@ -200,7 +197,7 @@ namespace hyperbrowse::services
         {
             if (errorMessage)
             {
-                *errorMessage = L"Failed to reopen the JPEG file for writing.";
+                *errorMessage = L"Failed to reopen the JPEG file for writing the adjusted orientation metadata.";
             }
             return false;
         }
@@ -210,7 +207,7 @@ namespace hyperbrowse::services
         {
             if (errorMessage)
             {
-                *errorMessage = L"Failed to write the updated EXIF orientation back to disk.";
+                *errorMessage = L"Failed to write the updated EXIF orientation metadata back to disk.";
             }
             return false;
         }

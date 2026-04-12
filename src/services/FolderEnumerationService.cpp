@@ -1,9 +1,11 @@
 #include "services/FolderEnumerationService.h"
 
+#include <chrono>
 #include <filesystem>
+#include <future>
 #include <system_error>
-#include <thread>
 
+#include "util/Diagnostics.h"
 #include "util/Log.h"
 
 namespace fs = std::filesystem;
@@ -226,20 +228,25 @@ namespace hyperbrowse::services
     {
         sharedState_->shutdown.store(true, std::memory_order_release);
         Cancel();
+        WaitForWorkers();
     }
 
     std::uint64_t FolderEnumerationService::EnumerateFolderAsync(HWND targetWindow, std::wstring folderPath, bool recursive)
     {
+        ReapCompletedWorkers();
+
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
         sharedState_->activeRequestId.store(requestId, std::memory_order_release);
 
         EnumerationSharedStateView stateView{sharedState_, targetWindow, requestId};
         util::LogInfo(L"Starting async folder enumeration for " + folderPath);
 
-        std::thread([stateView, folderPath = std::move(folderPath), recursive]() mutable
+        workers_.push_back(std::async(std::launch::async, [stateView, folderPath = std::move(folderPath), recursive]() mutable
         {
+            util::Stopwatch stopwatch;
             EnumerateFolder(stateView, folderPath, recursive);
-        }).detach();
+            util::RecordTiming(L"folder.enumeration", stopwatch.ElapsedMilliseconds());
+        }));
 
         return requestId;
     }
@@ -247,5 +254,26 @@ namespace hyperbrowse::services
     void FolderEnumerationService::Cancel()
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
+        ReapCompletedWorkers();
+    }
+
+    void FolderEnumerationService::ReapCompletedWorkers()
+    {
+        workers_.erase(std::remove_if(workers_.begin(), workers_.end(), [](std::future<void>& worker)
+        {
+            return !worker.valid() || worker.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
+        }), workers_.end());
+    }
+
+    void FolderEnumerationService::WaitForWorkers()
+    {
+        for (std::future<void>& worker : workers_)
+        {
+            if (worker.valid())
+            {
+                worker.wait();
+            }
+        }
+        workers_.clear();
     }
 }

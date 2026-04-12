@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "browser/BrowserModel.h"
+#include "util/PathUtils.h"
 
 namespace hyperbrowse::services
 {
@@ -73,7 +74,11 @@ namespace hyperbrowse::services
             std::wstring filePath;
             std::uint64_t modifiedTimestampUtc{};
 
-            bool operator==(const MetadataCacheKey& other) const noexcept = default;
+            bool operator==(const MetadataCacheKey& other) const noexcept
+            {
+                return modifiedTimestampUtc == other.modifiedTimestampUtc
+                    && util::NormalizePathForComparison(filePath) == util::NormalizePathForComparison(other.filePath);
+            }
         };
 
         struct MetadataCacheKeyHasher

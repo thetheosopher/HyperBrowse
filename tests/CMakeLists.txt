@@ -11,6 +11,7 @@ add_executable(HyperBrowseTests
     ../src/services/JpegTransformService.cpp
     ../src/ui/MainWindow.cpp
     ../src/services/ThumbnailScheduler.cpp
+    ../src/util/Diagnostics.cpp
     ../src/util/Log.cpp
     ../src/viewer/ViewerWindow.cpp
     smoke.cpp

@@ -3,6 +3,8 @@
 #include <windows.h>
 
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,6 +48,12 @@ namespace hyperbrowse::viewer
             Custom,
         };
 
+        enum class LoadReason
+        {
+            Open,
+            Navigation,
+        };
+
         struct AsyncState
         {
             std::atomic_uint64_t activeRequestId{0};
@@ -63,7 +71,7 @@ namespace hyperbrowse::viewer
 
         bool RegisterWindowClass() const;
         void UpdateWindowTitle() const;
-        void LoadCurrentImageAsync();
+        void LoadCurrentImageAsync(LoadReason reason);
         void Navigate(int delta);
         void PrepareForImageChange();
         void ResetCachedImageSlots();
@@ -73,6 +81,8 @@ namespace hyperbrowse::viewer
         void SetCurrentImageSlot(int index,
                                  std::shared_ptr<const cache::CachedThumbnail> image,
                                  bool prefetched);
+        void ReapCompletedBackgroundTasks();
+        void WaitForBackgroundTasks();
         void LogPrefetchStats() const;
         void ZoomBy(double factor);
         void FitToWindow();
@@ -125,5 +135,9 @@ namespace hyperbrowse::viewer
         std::atomic_uint64_t prefetchCancelledCount_{0};
         std::atomic_uint64_t prefetchHitCount_{0};
         std::atomic_uint64_t prefetchMissCount_{0};
+        LoadReason pendingLoadReason_{LoadReason::Navigation};
+        std::chrono::steady_clock::time_point pendingLoadStartedAt_{};
+        bool pendingLoadActive_{};
+        std::vector<std::future<void>> backgroundTasks_;
     };
 }

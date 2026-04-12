@@ -6,6 +6,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
+include(InstallRequiredSystemLibraries)
+
+set(HYPERBROWSE_INSTALLER_BIN_DIR "bin")
+set(HYPERBROWSE_INSTALLER_DOC_DIR "docs")
+
+set(HYPERBROWSE_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseVersion.rc")
+set(HYPERBROWSE_PORTABLE_README "${CMAKE_CURRENT_BINARY_DIR}/PortableREADME.txt")
+set(HYPERBROWSE_RUNTIME_DEPENDENCIES "${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.txt")
+
+configure_file(cmake/HyperBrowseVersion.rc.in "${HYPERBROWSE_VERSION_RESOURCE}" @ONLY)
+configure_file(cmake/PortableREADME.txt.in "${HYPERBROWSE_PORTABLE_README}" @ONLY)
+configure_file(cmake/RuntimeDependencies.txt.in "${HYPERBROWSE_RUNTIME_DEPENDENCIES}" @ONLY)
+
 option(HYPERBROWSE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(HYPERBROWSE_BUILD_TESTS "Build placeholder tests" ON)
 option(HYPERBROWSE_ENABLE_LIBRAW "Build with vendored LibRaw support" ON)
@@ -42,8 +57,10 @@ add_executable(HyperBrowse WIN32
     src/services/JpegTransformService.cpp
     src/services/ThumbnailScheduler.cpp
     src/ui/MainWindow.cpp
+    src/util/Diagnostics.cpp
     src/util/Log.cpp
     src/viewer/ViewerWindow.cpp
+    "${HYPERBROWSE_VERSION_RESOURCE}"
 )
 
 target_include_directories(HyperBrowse PRIVATE
@@ -77,7 +94,46 @@ endif()
 
 set_target_properties(HyperBrowse PROPERTIES
     OUTPUT_NAME "HyperBrowse"
+    VERSION ${PROJECT_VERSION}
 )
+
+install(TARGETS HyperBrowse
+    RUNTIME DESTINATION "."
+    COMPONENT Portable)
+
+install(TARGETS HyperBrowse
+    RUNTIME DESTINATION "${HYPERBROWSE_INSTALLER_BIN_DIR}"
+    COMPONENT Runtime)
+
+install(FILES "${HYPERBROWSE_PORTABLE_README}"
+    DESTINATION "."
+    COMPONENT Portable
+    RENAME "README.txt")
+
+install(FILES "${HYPERBROWSE_RUNTIME_DEPENDENCIES}"
+    DESTINATION "."
+    COMPONENT Portable
+    RENAME "RUNTIME-DEPENDENCIES.txt")
+
+install(FILES "${HYPERBROWSE_PORTABLE_README}"
+    DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
+    COMPONENT Runtime
+    RENAME "README-portable.txt")
+
+install(FILES "${HYPERBROWSE_RUNTIME_DEPENDENCIES}"
+    DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
+    COMPONENT Runtime
+    RENAME "runtime-dependencies.txt")
+
+if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+    install(PROGRAMS ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+        DESTINATION "."
+        COMPONENT Portable)
+
+    install(PROGRAMS ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+        DESTINATION "${HYPERBROWSE_INSTALLER_BIN_DIR}"
+        COMPONENT Runtime)
+endif()
 
 if(HYPERBROWSE_BUILD_TESTS)
     enable_testing()

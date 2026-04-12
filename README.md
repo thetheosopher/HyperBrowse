@@ -44,6 +44,22 @@ cmake --build build
 
 The executable will be generated under the selected build output directory. On first run it creates the main shell and persists the splitter width on exit.
 
+## Packaging
+
+Create the portable layout after building:
+
+```powershell
+cmake --install build --config Debug --component Portable --prefix build/dist/HyperBrowse-0.1.0-portable
+```
+
+Create the installer-friendly staging layout after building:
+
+```powershell
+cmake --install build --config Debug --component Runtime --prefix build/dist/HyperBrowse-0.1.0-installer-layout
+```
+
+The portable layout stages `HyperBrowse.exe`, the required VC runtime DLLs for the active MSVC toolchain when needed, and a short `README.txt`. The installer-friendly layout stages the executable under `bin/` and documentation under `docs/` so an external installer step can consume a predictable layout.
+
 ## Notes
 
 This repo is intentionally lightweight and ready for iterative expansion using the spec pack and prompt sequence.

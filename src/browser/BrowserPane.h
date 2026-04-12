@@ -44,6 +44,7 @@ namespace hyperbrowse::browser
     public:
         static constexpr UINT kStateChangedMessage = WM_APP + 42;
         static constexpr UINT kOpenItemMessage = WM_APP + 44;
+        static constexpr UINT kContextMenuMessage = WM_APP + 45;
 
         struct ThemeColors
         {
@@ -109,16 +110,22 @@ namespace hyperbrowse::browser
         const BrowserItem* ItemFromViewIndex(int viewIndex) const;
         void NotifyStateChanged() const;
         void ApplyThemeToDetailsList() const;
+        void RebuildThemeResources();
+        void ReleaseThemeResources();
         void RebuildSelectionFromDetailsList();
         void SyncDetailsListSelectionFromModel();
         void UpdateSelectionBytes();
+        void SelectAll();
         void SelectSingleViewIndex(int viewIndex);
         void ToggleViewIndexSelection(int viewIndex);
         void ExtendSelectionToViewIndex(int viewIndex);
         void BeginRubberBandSelection(POINT point, bool additive);
         void UpdateRubberBandSelection(POINT point);
         void EndRubberBandSelection();
+        void RequestOpenPrimarySelection() const;
         void RequestOpenItemForViewIndex(int viewIndex) const;
+        POINT ContextMenuAnchorScreenPoint() const;
+        void ShowContextMenu(POINT screenPoint) const;
         void ScheduleVisibleThumbnailWork();
         void ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const;
         void CancelThumbnailWork();
@@ -139,6 +146,11 @@ namespace hyperbrowse::browser
         bool ownsDetailsListFont_{};
         HBRUSH backgroundBrush_{};
         HBRUSH surfaceBrush_{};
+        HBRUSH selectedCellBrush_{};
+        HBRUSH selectedPreviewBrush_{};
+        HPEN borderPen_{};
+        HPEN selectedBorderPen_{};
+        HPEN rubberBandPen_{};
         ThemeColors colors_{};
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;

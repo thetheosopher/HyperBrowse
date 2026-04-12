@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <condition_variable>
-#include <cwctype>
 #include <cstring>
 #include <thread>
 
@@ -16,28 +15,11 @@
 #endif
 
 #include "decode/ImageDecoder.h"
+#include "util/HashUtils.h"
 
 namespace
 {
     using Microsoft::WRL::ComPtr;
-
-    template <typename TValue>
-    void HashCombine(std::size_t* seed, const TValue& value)
-    {
-        const std::size_t hashedValue = std::hash<TValue>{}(value);
-        *seed ^= hashedValue + 0x9e3779b9 + (*seed << 6) + (*seed >> 2);
-    }
-
-    std::wstring NormalizePath(std::wstring_view value)
-    {
-        std::wstring normalized(value);
-        std::replace(normalized.begin(), normalized.end(), L'/', L'\\');
-        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](wchar_t character)
-        {
-            return static_cast<wchar_t>(towlower(character));
-        });
-        return normalized;
-    }
 
     class ComScope
     {
@@ -302,8 +284,8 @@ namespace hyperbrowse::services
     std::size_t ImageMetadataService::MetadataCacheKeyHasher::operator()(const MetadataCacheKey& key) const noexcept
     {
         std::size_t seed = 0;
-        HashCombine(&seed, NormalizePath(key.filePath));
-        HashCombine(&seed, key.modifiedTimestampUtc);
+        util::HashCombine(&seed, util::NormalizePathForComparison(key.filePath));
+        util::HashCombine(&seed, key.modifiedTimestampUtc);
         return seed;
     }
 
@@ -393,7 +375,7 @@ namespace hyperbrowse::services
             paths.reserve(filePaths.size());
             for (const std::wstring& filePath : filePaths)
             {
-                paths.push_back(NormalizePath(filePath));
+                paths.push_back(util::NormalizePathForComparison(filePath));
             }
             return paths;
         }();
@@ -401,7 +383,7 @@ namespace hyperbrowse::services
         std::scoped_lock lock(mutex_);
         for (auto iterator = cache_.begin(); iterator != cache_.end();)
         {
-            const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), NormalizePath(iterator->first.filePath))
+            const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), util::NormalizePathForComparison(iterator->first.filePath))
                 != normalizedPaths.end();
             if (shouldErase)
             {

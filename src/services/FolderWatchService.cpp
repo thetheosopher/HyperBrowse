@@ -258,22 +258,16 @@ namespace hyperbrowse::services
     void FolderWatchService::Stop()
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
-
-        HANDLE directoryHandle = INVALID_HANDLE_VALUE;
-        HANDLE stopEvent = nullptr;
         {
             std::scoped_lock lock(sharedState_->handleMutex);
-            directoryHandle = sharedState_->directoryHandle;
-            stopEvent = sharedState_->stopEvent;
-        }
-
-        if (stopEvent)
-        {
-            SetEvent(stopEvent);
-        }
-        if (directoryHandle != INVALID_HANDLE_VALUE)
-        {
-            CancelIoEx(directoryHandle, nullptr);
+            if (sharedState_->stopEvent)
+            {
+                SetEvent(sharedState_->stopEvent);
+            }
+            if (sharedState_->directoryHandle != INVALID_HANDLE_VALUE)
+            {
+                CancelIoEx(sharedState_->directoryHandle, nullptr);
+            }
         }
 
         if (worker_.joinable())

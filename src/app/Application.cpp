@@ -3,6 +3,7 @@
 #include <objbase.h>
 
 #include "ui/MainWindow.h"
+#include "util/Diagnostics.h"
 #include "util/Log.h"
 #include "util/Timing.h"
 
@@ -18,6 +19,7 @@ namespace hyperbrowse::app
     int Application::Run(int nCmdShow)
     {
         util::ScopedTimer startupTimer{L"Application::Run"};
+        util::Stopwatch startupStopwatch;
         util::LogInfo(L"Starting HyperBrowse application shell");
 
         const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -40,10 +42,16 @@ namespace hyperbrowse::app
         }
 
         mainWindow_->Show(nCmdShow);
+        util::RecordTiming(L"app.startup", startupStopwatch.ElapsedMilliseconds());
 
         MSG msg{};
         while (GetMessageW(&msg, nullptr, 0, 0) > 0)
         {
+            if (mainWindow_ && mainWindow_->TranslateAcceleratorMessage(&msg))
+            {
+                continue;
+            }
+
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

@@ -40,6 +40,7 @@ namespace hyperbrowse::ui
 
         bool Create();
         void Show(int nCmdShow) const;
+        bool TranslateAcceleratorMessage(MSG* message) const;
 
     private:
         struct FolderTreeNodeData
@@ -84,6 +85,7 @@ namespace hyperbrowse::ui
         };
 
         bool RegisterWindowClass() const;
+        bool CreateAccelerators();
         bool CreateMenuBar();
         bool CreateChildWindows();
         void InitializeFolderTree();
@@ -106,16 +108,21 @@ namespace hyperbrowse::ui
         void LoadWindowState();
         void SaveWindowState() const;
         bool HandleCommand(UINT commandId);
+        void OpenFolder();
         void LoadFolderAsync(std::wstring folderPath);
         void RefreshBrowserPane();
         void OpenItemInViewer(int modelIndex);
         void OpenItemsInViewer(std::vector<browser::BrowserItem> items, int selectedIndex, bool startSlideshow);
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
         bool ChooseFolder(std::wstring* folderPath) const;
+        bool HasSelectedJpegItems() const;
+        void ShowBrowserContextMenu(POINT screenPoint);
+        void ShowDiagnosticsSnapshot() const;
+        void ResetDiagnosticsState() const;
         void ShowImageInformation();
         void StartSlideshow(bool selectionScope);
         void StartBatchConvert(bool selectionScope, services::BatchConvertFormat format);
-        void RotateSelectedJpegs(int quarterTurnsDelta);
+        void AdjustSelectedJpegOrientation(int quarterTurnsDelta);
         void ApplyFolderWatchChanges(const services::FolderWatchUpdate& update);
         LRESULT OnFolderEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderWatchMessage(LPARAM lParam);
@@ -124,6 +131,7 @@ namespace hyperbrowse::ui
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
+        LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBatchConvertMessage(LPARAM lParam);
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
@@ -154,6 +162,7 @@ namespace hyperbrowse::ui
         HWND statusBar_{};
         HIMAGELIST treeImageList_{};
         HMENU menu_{};
+        HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
         BrowserMode browserMode_{BrowserMode::Thumbnails};
         ThemeMode themeMode_{ThemeMode::Light};

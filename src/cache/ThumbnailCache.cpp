@@ -1,39 +1,18 @@
 #include "cache/ThumbnailCache.h"
 
 #include <algorithm>
-#include <cwctype>
-#include <functional>
 
-namespace
-{
-    template <typename TValue>
-    void HashCombine(std::size_t* seed, const TValue& value)
-    {
-        const std::size_t hashedValue = std::hash<TValue>{}(value);
-        *seed ^= hashedValue + 0x9e3779b9 + (*seed << 6) + (*seed >> 2);
-    }
-
-    std::wstring NormalizePath(std::wstring_view value)
-    {
-        std::wstring normalized(value);
-        std::replace(normalized.begin(), normalized.end(), L'/', L'\\');
-        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](wchar_t character)
-        {
-            return static_cast<wchar_t>(towlower(character));
-        });
-        return normalized;
-    }
-}
+#include "util/HashUtils.h"
 
 namespace hyperbrowse::cache
 {
     std::size_t ThumbnailCacheKeyHasher::operator()(const ThumbnailCacheKey& key) const noexcept
     {
         std::size_t seed = 0;
-        HashCombine(&seed, key.filePath);
-        HashCombine(&seed, key.modifiedTimestampUtc);
-        HashCombine(&seed, key.targetWidth);
-        HashCombine(&seed, key.targetHeight);
+        util::HashCombine(&seed, util::NormalizePathForComparison(key.filePath));
+        util::HashCombine(&seed, key.modifiedTimestampUtc);
+        util::HashCombine(&seed, key.targetWidth);
+        util::HashCombine(&seed, key.targetHeight);
         return seed;
     }
 
@@ -97,8 +76,11 @@ namespace hyperbrowse::cache
 
     std::shared_ptr<const CachedThumbnail> ThumbnailCache::Find(const ThumbnailCacheKey& key) const
     {
+        ThumbnailCacheKey normalizedKey = key;
+        normalizedKey.filePath = util::NormalizePathForComparison(normalizedKey.filePath);
+
         std::scoped_lock lock(mutex_);
-        const auto iterator = entries_.find(key);
+        const auto iterator = entries_.find(normalizedKey);
         if (iterator == entries_.end())
         {
             return {};
@@ -115,6 +97,8 @@ namespace hyperbrowse::cache
         {
             return;
         }
+
+        key.filePath = util::NormalizePathForComparison(key.filePath);
 
         std::scoped_lock lock(mutex_);
 
@@ -144,14 +128,13 @@ namespace hyperbrowse::cache
         normalizedPaths.reserve(filePaths.size());
         for (const std::wstring& filePath : filePaths)
         {
-            normalizedPaths.push_back(NormalizePath(filePath));
+            normalizedPaths.push_back(util::NormalizePathForComparison(filePath));
         }
 
         std::scoped_lock lock(mutex_);
         for (auto iterator = entries_.begin(); iterator != entries_.end();)
         {
-            const std::wstring normalizedKeyPath = NormalizePath(iterator->first.filePath);
-            const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), normalizedKeyPath) != normalizedPaths.end();
+            const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), iterator->first.filePath) != normalizedPaths.end();
             if (!shouldErase)
             {
                 ++iterator;

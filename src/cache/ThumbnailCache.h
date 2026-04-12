@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "util/PathUtils.h"
+
 namespace hyperbrowse::cache
 {
     struct ThumbnailCacheKey
@@ -20,7 +22,13 @@ namespace hyperbrowse::cache
         int targetWidth{};
         int targetHeight{};
 
-        bool operator==(const ThumbnailCacheKey& other) const noexcept = default;
+        bool operator==(const ThumbnailCacheKey& other) const noexcept
+        {
+            return modifiedTimestampUtc == other.modifiedTimestampUtc
+                && targetWidth == other.targetWidth
+                && targetHeight == other.targetHeight
+                && util::NormalizePathForComparison(filePath) == util::NormalizePathForComparison(other.filePath);
+        }
     };
 
     struct ThumbnailCacheKeyHasher

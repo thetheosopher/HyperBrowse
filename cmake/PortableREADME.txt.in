@@ -1,0 +1,18 @@
+HyperBrowse Portable Build
+
+This folder contains the portable HyperBrowse layout for Windows 10/11 x64.
+
+Contents:
+- HyperBrowse.exe
+- Any Microsoft Visual C++ runtime DLLs staged by CMake for this toolchain
+- RUNTIME-DEPENDENCIES.txt
+
+Run:
+1. Keep all files in this folder together.
+2. Launch HyperBrowse.exe.
+3. Open a folder from File > Open Folder or press Ctrl+O.
+
+Notes:
+- User settings are stored in HKCU\Software\HyperBrowse.
+- The app uses WIC by default and only uses nvJPEG when that optional runtime is available.
+- No installer is required for this layout.

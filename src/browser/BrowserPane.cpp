@@ -140,8 +140,7 @@ namespace hyperbrowse::browser
         , thumbnailScheduler_(std::make_unique<services::ThumbnailScheduler>())
         , metadataService_(std::make_unique<services::ImageMetadataService>())
     {
-        backgroundBrush_ = CreateSolidBrush(colors_.windowBackground);
-        surfaceBrush_ = CreateSolidBrush(colors_.surfaceBackground);
+        RebuildThemeResources();
     }
 
     BrowserPane::~BrowserPane()
@@ -151,15 +150,7 @@ namespace hyperbrowse::browser
             DeleteObject(detailsListFont_);
         }
 
-        if (backgroundBrush_)
-        {
-            DeleteObject(backgroundBrush_);
-        }
-
-        if (surfaceBrush_)
-        {
-            DeleteObject(surfaceBrush_);
-        }
+        ReleaseThemeResources();
     }
 
     bool BrowserPane::Create(HWND parent)
@@ -276,18 +267,7 @@ namespace hyperbrowse::browser
         darkTheme_ = enabled;
         colors_ = MakeThemeColors(enabled);
 
-        if (backgroundBrush_)
-        {
-            DeleteObject(backgroundBrush_);
-        }
-
-        if (surfaceBrush_)
-        {
-            DeleteObject(surfaceBrush_);
-        }
-
-        backgroundBrush_ = CreateSolidBrush(colors_.windowBackground);
-        surfaceBrush_ = CreateSolidBrush(colors_.surfaceBackground);
+        RebuildThemeResources();
         ApplyThemeToDetailsList();
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
@@ -392,7 +372,6 @@ namespace hyperbrowse::browser
             return;
         }
 
-        const auto& items = model_->Items();
         for (const std::wstring& filePath : filePaths)
         {
             const int modelIndex = model_->FindItemIndexByPath(filePath);
@@ -485,7 +464,7 @@ namespace hyperbrowse::browser
         windowClass.lpszClassName = kClassName;
         windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-            windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+        windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
         return RegisterClassExW(&windowClass) != 0;
     }
 
@@ -867,19 +846,72 @@ namespace hyperbrowse::browser
 
     const BrowserItem* BrowserPane::ItemFromViewIndex(int viewIndex) const
     {
-        if (!model_)
-        {
-            return nullptr;
-        }
-
         const int modelIndex = ModelIndexFromViewIndex(viewIndex);
-        if (modelIndex < 0)
+        if (!model_ || modelIndex < 0)
         {
             return nullptr;
         }
 
         const auto& items = model_->Items();
         return modelIndex < static_cast<int>(items.size()) ? &items[static_cast<std::size_t>(modelIndex)] : nullptr;
+    }
+
+    void BrowserPane::RebuildThemeResources()
+    {
+        ReleaseThemeResources();
+
+        backgroundBrush_ = CreateSolidBrush(colors_.windowBackground);
+        surfaceBrush_ = CreateSolidBrush(colors_.surfaceBackground);
+        selectedCellBrush_ = CreateSolidBrush(colors_.accentFill);
+        selectedPreviewBrush_ = CreateSolidBrush(colors_.accent);
+        borderPen_ = CreatePen(PS_SOLID, 1, colors_.border);
+        selectedBorderPen_ = CreatePen(PS_SOLID, 1, colors_.accent);
+        rubberBandPen_ = CreatePen(PS_DOT, 1, colors_.rubberBand);
+    }
+
+    void BrowserPane::ReleaseThemeResources()
+    {
+        if (backgroundBrush_)
+        {
+            DeleteObject(backgroundBrush_);
+            backgroundBrush_ = nullptr;
+        }
+
+        if (surfaceBrush_)
+        {
+            DeleteObject(surfaceBrush_);
+            surfaceBrush_ = nullptr;
+        }
+
+        if (selectedCellBrush_)
+        {
+            DeleteObject(selectedCellBrush_);
+            selectedCellBrush_ = nullptr;
+        }
+
+        if (selectedPreviewBrush_)
+        {
+            DeleteObject(selectedPreviewBrush_);
+            selectedPreviewBrush_ = nullptr;
+        }
+
+        if (borderPen_)
+        {
+            DeleteObject(borderPen_);
+            borderPen_ = nullptr;
+        }
+
+        if (selectedBorderPen_)
+        {
+            DeleteObject(selectedBorderPen_);
+            selectedBorderPen_ = nullptr;
+        }
+
+        if (rubberBandPen_)
+        {
+            DeleteObject(rubberBandPen_);
+            rubberBandPen_ = nullptr;
+        }
     }
 
     void BrowserPane::NotifyStateChanged() const
@@ -976,6 +1008,34 @@ namespace hyperbrowse::browser
                 selectedBytes_ += items[static_cast<std::size_t>(modelIndex)].fileSizeBytes;
             }
         }
+    }
+
+    void BrowserPane::SelectAll()
+    {
+        if (!model_ || orderedModelIndices_.empty())
+        {
+            return;
+        }
+
+        selectedModelIndices_.clear();
+        for (const int modelIndex : orderedModelIndices_)
+        {
+            selectedModelIndices_.insert(modelIndex);
+        }
+
+        if (focusedModelIndex_ < 0 || !selectedModelIndices_.contains(focusedModelIndex_))
+        {
+            focusedModelIndex_ = orderedModelIndices_.front();
+        }
+        if (anchorModelIndex_ < 0 || !selectedModelIndices_.contains(anchorModelIndex_))
+        {
+            anchorModelIndex_ = focusedModelIndex_;
+        }
+
+        UpdateSelectionBytes();
+        SyncDetailsListSelectionFromModel();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
     void BrowserPane::SelectSingleViewIndex(int viewIndex)
@@ -1117,6 +1177,21 @@ namespace hyperbrowse::browser
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
+    void BrowserPane::RequestOpenPrimarySelection() const
+    {
+        const int primaryModelIndex = PrimarySelectedModelIndex();
+        if (primaryModelIndex < 0)
+        {
+            return;
+        }
+
+        const int viewIndex = ViewIndexFromModelIndex(primaryModelIndex);
+        if (viewIndex >= 0)
+        {
+            RequestOpenItemForViewIndex(viewIndex);
+        }
+    }
+
     void BrowserPane::RequestOpenItemForViewIndex(int viewIndex) const
     {
         if (!parent_)
@@ -1131,6 +1206,53 @@ namespace hyperbrowse::browser
         }
 
         PostMessageW(parent_, kOpenItemMessage, reinterpret_cast<WPARAM>(hwnd_), static_cast<LPARAM>(modelIndex));
+    }
+
+    POINT BrowserPane::ContextMenuAnchorScreenPoint() const
+    {
+        POINT screenPoint{};
+        const int primaryModelIndex = PrimarySelectedModelIndex();
+        const int viewIndex = ViewIndexFromModelIndex(primaryModelIndex);
+
+        if (viewMode_ == BrowserViewMode::Details && detailsList_ && IsWindowVisible(detailsList_))
+        {
+            RECT itemRect{};
+            if (viewIndex >= 0 && ListView_GetItemRect(detailsList_, viewIndex, &itemRect, LVIR_BOUNDS) != FALSE)
+            {
+                screenPoint.x = itemRect.left + ((itemRect.right - itemRect.left) / 2);
+                screenPoint.y = itemRect.top + ((itemRect.bottom - itemRect.top) / 2);
+                ClientToScreen(detailsList_, &screenPoint);
+                return screenPoint;
+            }
+        }
+
+        RECT anchorRect{};
+        if (viewMode_ == BrowserViewMode::Thumbnails && viewIndex >= 0)
+        {
+            anchorRect = GetThumbnailCellRect(viewIndex);
+        }
+        else if (hwnd_)
+        {
+            GetClientRect(hwnd_, &anchorRect);
+        }
+
+        screenPoint.x = anchorRect.left + ((anchorRect.right - anchorRect.left) / 2);
+        screenPoint.y = anchorRect.top + ((anchorRect.bottom - anchorRect.top) / 2);
+        if (hwnd_)
+        {
+            ClientToScreen(hwnd_, &screenPoint);
+        }
+        return screenPoint;
+    }
+
+    void BrowserPane::ShowContextMenu(POINT screenPoint) const
+    {
+        if (!parent_)
+        {
+            return;
+        }
+
+        SendMessageW(parent_, kContextMenuMessage, reinterpret_cast<WPARAM>(hwnd_), MAKELPARAM(screenPoint.x, screenPoint.y));
     }
 
     void BrowserPane::ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const
@@ -1270,19 +1392,23 @@ namespace hyperbrowse::browser
 
             const bool selected = selectedModelIndices_.contains(ModelIndexFromViewIndex(viewIndex));
 
-            const HBRUSH cellBrush = CreateSolidBrush(selected ? colors_.accentFill : colors_.surfaceBackground);
+            const HBRUSH cellBrush = selected
+                ? (selectedCellBrush_ ? selectedCellBrush_ : surfaceBrush_)
+                : surfaceBrush_;
             FillRect(hdc, &cellRect, cellBrush);
-            DeleteObject(cellBrush);
 
-            HPEN pen = CreatePen(PS_SOLID, 1, selected ? colors_.accent : colors_.border);
+            HGDIOBJ pen = selected
+                ? static_cast<HGDIOBJ>(selectedBorderPen_ ? selectedBorderPen_ : GetStockObject(BLACK_PEN))
+                : static_cast<HGDIOBJ>(borderPen_ ? borderPen_ : GetStockObject(BLACK_PEN));
             HGDIOBJ oldPen = SelectObject(hdc, pen);
             HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
             Rectangle(hdc, cellRect.left, cellRect.top, cellRect.right, cellRect.bottom);
 
             RECT previewRect = GetThumbnailPreviewRect(cellRect);
-            const HBRUSH previewBrush = CreateSolidBrush(selected ? colors_.accent : colors_.windowBackground);
+            const HBRUSH previewBrush = selected
+                ? (selectedPreviewBrush_ ? selectedPreviewBrush_ : backgroundBrush_)
+                : backgroundBrush_;
             FillRect(hdc, &previewRect, previewBrush);
-            DeleteObject(previewBrush);
             Rectangle(hdc, previewRect.left, previewRect.top, previewRect.right, previewRect.bottom);
 
             SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
@@ -1298,18 +1424,16 @@ namespace hyperbrowse::browser
 
             SelectObject(hdc, oldBrush);
             SelectObject(hdc, oldPen);
-            DeleteObject(pen);
         }
 
         if (rubberBandActive_)
         {
-            HPEN pen = CreatePen(PS_DOT, 1, colors_.rubberBand);
+            HGDIOBJ pen = static_cast<HGDIOBJ>(rubberBandPen_ ? rubberBandPen_ : GetStockObject(BLACK_PEN));
             HGDIOBJ oldPen = SelectObject(hdc, pen);
             HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
             Rectangle(hdc, rubberBandRect_.left, rubberBandRect_.top, rubberBandRect_.right, rubberBandRect_.bottom);
             SelectObject(hdc, oldBrush);
             SelectObject(hdc, oldPen);
-            DeleteObject(pen);
         }
     }
 
@@ -1458,6 +1582,32 @@ namespace hyperbrowse::browser
                 SetFocus(detailsList_);
             }
             return 0;
+        case WM_KEYDOWN:
+            if (viewMode_ == BrowserViewMode::Thumbnails)
+            {
+                const bool controlPressed = GetKeyState(VK_CONTROL) < 0;
+                if (wParam == VK_RETURN)
+                {
+                    RequestOpenPrimarySelection();
+                    return 0;
+                }
+                if ((wParam == 'A' || wParam == 'a') && controlPressed)
+                {
+                    SelectAll();
+                    return 0;
+                }
+                if (wParam == VK_ESCAPE && !selectedModelIndices_.empty())
+                {
+                    ClearSelection();
+                    return 0;
+                }
+                if (wParam == VK_APPS || (wParam == VK_F10 && GetKeyState(VK_SHIFT) < 0))
+                {
+                    ShowContextMenu(ContextMenuAnchorScreenPoint());
+                    return 0;
+                }
+            }
+            break;
         case WM_VSCROLL:
             if (viewMode_ == BrowserViewMode::Thumbnails)
             {
@@ -1566,6 +1716,29 @@ namespace hyperbrowse::browser
         case WM_CAPTURECHANGED:
             EndRubberBandSelection();
             return 0;
+        case WM_CONTEXTMENU:
+            if (viewMode_ == BrowserViewMode::Thumbnails && reinterpret_cast<HWND>(wParam) == hwnd_)
+            {
+                POINT screenPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (screenPoint.x == -1 && screenPoint.y == -1)
+                {
+                    ShowContextMenu(ContextMenuAnchorScreenPoint());
+                    return 0;
+                }
+
+                POINT clientPoint = screenPoint;
+                ScreenToClient(hwnd_, &clientPoint);
+                const int viewIndex = HitTestThumbnailItem(clientPoint);
+                const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+                if (modelIndex >= 0 && !selectedModelIndices_.contains(modelIndex))
+                {
+                    SelectSingleViewIndex(viewIndex);
+                }
+
+                ShowContextMenu(screenPoint);
+                return 0;
+            }
+            break;
         case services::ThumbnailScheduler::kMessageId:
         {
             std::unique_ptr<services::ThumbnailReadyUpdate> update(
@@ -1634,6 +1807,36 @@ namespace hyperbrowse::browser
                 case LVN_ITEMCHANGED:
                     RebuildSelectionFromDetailsList();
                     return 0;
+                case LVN_KEYDOWN:
+                {
+                    const auto* keyDown = reinterpret_cast<const NMLVKEYDOWN*>(lParam);
+                    const bool controlPressed = GetKeyState(VK_CONTROL) < 0;
+                    if (keyDown->wVKey == VK_RETURN)
+                    {
+                        const int focusedItem = ListView_GetNextItem(detailsList_, -1, LVNI_FOCUSED);
+                        if (focusedItem >= 0)
+                        {
+                            RequestOpenItemForViewIndex(focusedItem);
+                        }
+                        return 0;
+                    }
+                    if ((keyDown->wVKey == 'A' || keyDown->wVKey == 'a') && controlPressed)
+                    {
+                        SelectAll();
+                        return 0;
+                    }
+                    if (keyDown->wVKey == VK_ESCAPE && !selectedModelIndices_.empty())
+                    {
+                        ClearSelection();
+                        return 0;
+                    }
+                    if (keyDown->wVKey == VK_APPS || (keyDown->wVKey == VK_F10 && GetKeyState(VK_SHIFT) < 0))
+                    {
+                        ShowContextMenu(ContextMenuAnchorScreenPoint());
+                        return 0;
+                    }
+                    break;
+                }
                 case LVN_COLUMNCLICK:
                 {
                     const auto* columnClick = reinterpret_cast<const NMLISTVIEW*>(lParam);
@@ -1666,6 +1869,26 @@ namespace hyperbrowse::browser
                     {
                         RequestOpenItemForViewIndex(activate->iItem);
                     }
+                    return 0;
+                }
+                case NM_RCLICK:
+                {
+                    POINT screenPoint{};
+                    GetCursorPos(&screenPoint);
+
+                    POINT clientPoint = screenPoint;
+                    ScreenToClient(detailsList_, &clientPoint);
+
+                    LVHITTESTINFO hitTestInfo{};
+                    hitTestInfo.pt = clientPoint;
+                    ListView_SubItemHitTest(detailsList_, &hitTestInfo);
+                    const int modelIndex = ModelIndexFromViewIndex(hitTestInfo.iItem);
+                    if (modelIndex >= 0 && !selectedModelIndices_.contains(modelIndex))
+                    {
+                        SelectSingleViewIndex(hitTestInfo.iItem);
+                    }
+
+                    ShowContextMenu(screenPoint);
                     return 0;
                 }
                 default:

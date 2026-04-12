@@ -3,11 +3,13 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <future>
 #include <memory>
-#include <thread>
 
 #include "decode/ImageDecoder.h"
+#include "util/Diagnostics.h"
 #include "util/Log.h"
 
 namespace
@@ -54,6 +56,7 @@ namespace hyperbrowse::viewer
         asyncState_->shutdown.store(true, std::memory_order_release);
         asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
         asyncState_->targetWindow = nullptr;
+        WaitForBackgroundTasks();
 
         if (hwnd_ && IsWindow(hwnd_))
         {
@@ -77,9 +80,10 @@ namespace hyperbrowse::viewer
 
         currentIndex_ = selectedIndex;
         darkTheme_ = darkTheme;
-    StopSlideshow();
+        StopSlideshow();
         ResetCachedImageSlots();
         ResetPrefetchStatistics();
+        ReapCompletedBackgroundTasks();
 
         if (!hwnd_)
         {
@@ -112,7 +116,7 @@ namespace hyperbrowse::viewer
         UpdateWindowTitle();
         ShowWindow(hwnd_, SW_SHOWNORMAL);
         SetForegroundWindow(hwnd_);
-        LoadCurrentImageAsync();
+        LoadCurrentImageAsync(LoadReason::Open);
         return true;
     }
 
@@ -277,13 +281,37 @@ namespace hyperbrowse::viewer
         currentImage_ = currentSlot_.image;
     }
 
-    void ViewerWindow::LoadCurrentImageAsync()
+    void ViewerWindow::ReapCompletedBackgroundTasks()
+    {
+        backgroundTasks_.erase(std::remove_if(backgroundTasks_.begin(), backgroundTasks_.end(), [](std::future<void>& task)
+        {
+            return !task.valid() || task.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
+        }), backgroundTasks_.end());
+    }
+
+    void ViewerWindow::WaitForBackgroundTasks()
+    {
+        for (std::future<void>& task : backgroundTasks_)
+        {
+            if (task.valid())
+            {
+                task.wait();
+            }
+        }
+        backgroundTasks_.clear();
+    }
+
+    void ViewerWindow::LoadCurrentImageAsync(LoadReason reason)
     {
         PrepareForImageChange();
+        pendingLoadReason_ = reason;
+        pendingLoadStartedAt_ = std::chrono::steady_clock::now();
+        pendingLoadActive_ = true;
 
         if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
         {
             loading_ = false;
+            pendingLoadActive_ = false;
             errorMessage_ = L"The viewer does not have a valid image selection.";
             return;
         }
@@ -294,7 +322,8 @@ namespace hyperbrowse::viewer
         const std::uint64_t requestId = asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel) + 1;
         asyncState_->targetWindow = hwnd_;
         const std::shared_ptr<AsyncState> asyncState = asyncState_;
-        std::thread([asyncState, item, selectedIndex, requestId, navigationGeneration]()
+        ReapCompletedBackgroundTasks();
+        backgroundTasks_.push_back(std::async(std::launch::async, [asyncState, item, selectedIndex, requestId, navigationGeneration]()
         {
             std::wstring errorMessage;
             auto image = decode::DecodeFullImage(item, &errorMessage);
@@ -319,7 +348,7 @@ namespace hyperbrowse::viewer
             }
 
             update.release();
-        }).detach();
+        }));
     }
 
     void ViewerWindow::Navigate(int delta)
@@ -344,6 +373,8 @@ namespace hyperbrowse::viewer
                 nextSlot_ = {};
                 currentIndex_ = nextIndex;
                 prefetchHitCount_.fetch_add(1, std::memory_order_acq_rel);
+                util::IncrementCounter(L"viewer.prefetch.hit");
+                util::RecordTiming(L"viewer.navigation", 0.0);
                 PrepareForImageChange();
                 loading_ = false;
                 errorMessage_.clear();
@@ -369,6 +400,8 @@ namespace hyperbrowse::viewer
                 previousSlot_ = {};
                 currentIndex_ = nextIndex;
                 prefetchHitCount_.fetch_add(1, std::memory_order_acq_rel);
+                util::IncrementCounter(L"viewer.prefetch.hit");
+                util::RecordTiming(L"viewer.navigation", 0.0);
                 PrepareForImageChange();
                 loading_ = false;
                 errorMessage_.clear();
@@ -387,10 +420,11 @@ namespace hyperbrowse::viewer
         }
 
         prefetchMissCount_.fetch_add(1, std::memory_order_acq_rel);
+        util::IncrementCounter(L"viewer.prefetch.miss");
         currentIndex_ = nextIndex;
         currentSlot_ = {};
         currentImage_.reset();
-        LoadCurrentImageAsync();
+        LoadCurrentImageAsync(LoadReason::Navigation);
     }
 
     void ViewerWindow::ScheduleAdjacentPrefetch(std::uint64_t navigationGeneration)
@@ -442,7 +476,9 @@ namespace hyperbrowse::viewer
         const browser::BrowserItem item = items_[static_cast<std::size_t>(index)];
         const std::shared_ptr<AsyncState> asyncState = asyncState_;
         prefetchRequestCount_.fetch_add(1, std::memory_order_acq_rel);
-        std::thread([asyncState, item, index, navigationGeneration]()
+        util::IncrementCounter(L"viewer.prefetch.request");
+        ReapCompletedBackgroundTasks();
+        backgroundTasks_.push_back(std::async(std::launch::async, [asyncState, item, index, navigationGeneration]()
         {
             std::wstring errorMessage;
             auto image = decode::DecodeFullImage(item, &errorMessage);
@@ -470,7 +506,7 @@ namespace hyperbrowse::viewer
             }
 
             update.release();
-        }).detach();
+        }));
     }
 
     void ViewerWindow::LogPrefetchStats() const
@@ -600,7 +636,7 @@ namespace hyperbrowse::viewer
             currentIndex_ = 0;
             currentSlot_ = {};
             currentImage_.reset();
-            LoadCurrentImageAsync();
+            LoadCurrentImageAsync(LoadReason::Navigation);
             return;
         }
 
@@ -676,6 +712,16 @@ namespace hyperbrowse::viewer
             return 0;
         }
 
+        if (pendingLoadActive_)
+        {
+            const double elapsedMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - pendingLoadStartedAt_).count();
+            util::RecordTiming(
+                pendingLoadReason_ == LoadReason::Open ? L"viewer.open" : L"viewer.navigation",
+                elapsedMs);
+            pendingLoadActive_ = false;
+        }
+
         SetCurrentImageSlot(update->index, std::move(update->image), false);
         errorMessage_ = std::move(update->errorMessage);
         loading_ = false;
@@ -701,6 +747,7 @@ namespace hyperbrowse::viewer
         if (update->navigationGeneration != asyncState_->navigationGeneration.load(std::memory_order_acquire))
         {
             prefetchCancelledCount_.fetch_add(1, std::memory_order_acq_rel);
+            util::IncrementCounter(L"viewer.prefetch.cancelled");
             return 0;
         }
 
@@ -715,6 +762,7 @@ namespace hyperbrowse::viewer
             previousSlot_.image = std::move(update->image);
             previousSlot_.prefetched = true;
             prefetchCompletedCount_.fetch_add(1, std::memory_order_acq_rel);
+            util::IncrementCounter(L"viewer.prefetch.completed");
             return 0;
         }
 
@@ -724,10 +772,12 @@ namespace hyperbrowse::viewer
             nextSlot_.image = std::move(update->image);
             nextSlot_.prefetched = true;
             prefetchCompletedCount_.fetch_add(1, std::memory_order_acq_rel);
+            util::IncrementCounter(L"viewer.prefetch.completed");
             return 0;
         }
 
         prefetchCancelledCount_.fetch_add(1, std::memory_order_acq_rel);
+        util::IncrementCounter(L"viewer.prefetch.cancelled");
         return 0;
     }
 

@@ -4,9 +4,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "browser/BrowserModel.h"
@@ -58,8 +58,11 @@ namespace hyperbrowse::services
             std::atomic_bool shutdown{false};
         };
 
+        void ReapCompletedWorkers();
+        void WaitForWorkers();
+
         std::shared_ptr<SharedState> sharedState_;
-        std::thread worker_;
+        std::vector<std::future<void>> workers_;
         std::atomic_uint64_t nextRequestId_{0};
     };
 }

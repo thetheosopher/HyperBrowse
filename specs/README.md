@@ -10,6 +10,7 @@ This folder contains a repo-ready planning pack for building a high-performance 
 - `05-benchmarking-plan.md`
 - `06-implementation-phases.md`
 - `07-copilot-prompt-sequence.md`
+- `08-issues-to-resolve.md`
 
 ## Intended stack
 - Win32 shell

@@ -4,7 +4,9 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <chrono>
 #include <filesystem>
+#include <future>
 #include <vector>
 
 #include "cache/ThumbnailCache.h"
@@ -335,6 +337,7 @@ namespace hyperbrowse::services
     {
         sharedState_->shutdown.store(true, std::memory_order_release);
         Cancel();
+        WaitForWorkers();
     }
 
     std::uint64_t BatchConvertService::Start(HWND targetWindow,
@@ -343,40 +346,72 @@ namespace hyperbrowse::services
                                              BatchConvertFormat format)
     {
         Cancel();
+        ReapCompletedWorkers();
 
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
         sharedState_->activeRequestId.store(requestId, std::memory_order_release);
-        worker_ = std::thread([sharedState = sharedState_,
-                               targetWindow,
-                               items = std::move(items),
-                               outputFolder = std::move(outputFolder),
-                               format,
-                               requestId]() mutable
+        workers_.push_back(std::async(std::launch::async,
+            [sharedState = sharedState_,
+             targetWindow,
+             items = std::move(items),
+             outputFolder = std::move(outputFolder),
+             format,
+             requestId]() mutable
         {
-            fs::create_directories(outputFolder);
+            const auto isCancelled = [&]()
+            {
+                return sharedState->shutdown.load(std::memory_order_acquire)
+                    || sharedState->activeRequestId.load(std::memory_order_acquire) != requestId;
+            };
+
+            const auto postCancelled = [&](std::size_t completedCount, std::size_t failedCount)
+            {
+                auto update = std::make_unique<BatchConvertUpdate>();
+                update->requestId = requestId;
+                update->completedCount = completedCount;
+                update->totalCount = items.size();
+                update->failedCount = failedCount;
+                update->format = format;
+                update->outputFolder = outputFolder;
+                update->cancelled = true;
+                update->finished = true;
+                PostUpdate(targetWindow, std::move(update));
+            };
+
+            std::error_code directoryError;
+            fs::create_directories(outputFolder, directoryError);
+            if (directoryError)
+            {
+                auto update = std::make_unique<BatchConvertUpdate>();
+                update->requestId = requestId;
+                update->totalCount = items.size();
+                update->failedCount = items.size();
+                update->format = format;
+                update->outputFolder = outputFolder;
+                update->finished = true;
+                update->message = L"Failed to create the output folder for batch conversion.";
+                PostUpdate(targetWindow, std::move(update));
+                return;
+            }
 
             std::size_t completedCount = 0;
             std::size_t failedCount = 0;
             for (const browser::BrowserItem& item : items)
             {
-                if (sharedState->shutdown.load(std::memory_order_acquire)
-                    || sharedState->activeRequestId.load(std::memory_order_acquire) != requestId)
+                if (isCancelled())
                 {
-                    auto update = std::make_unique<BatchConvertUpdate>();
-                    update->requestId = requestId;
-                    update->completedCount = completedCount;
-                    update->totalCount = items.size();
-                    update->failedCount = failedCount;
-                    update->format = format;
-                    update->outputFolder = outputFolder;
-                    update->cancelled = true;
-                    update->finished = true;
-                    PostUpdate(targetWindow, std::move(update));
+                    postCancelled(completedCount, failedCount);
                     return;
                 }
 
                 std::wstring errorMessage;
                 const auto decodedImage = decode::DecodeFullImage(item, &errorMessage);
+                if (isCancelled())
+                {
+                    postCancelled(completedCount, failedCount);
+                    return;
+                }
+
                 if (!decodedImage)
                 {
                     ++failedCount;
@@ -384,10 +419,22 @@ namespace hyperbrowse::services
                 else
                 {
                     const fs::path outputPath = MakeUniqueOutputPath(outputFolder, item, format);
+                    if (isCancelled())
+                    {
+                        postCancelled(completedCount, failedCount);
+                        return;
+                    }
+
                     if (!EncodeImage(*decodedImage, outputPath, format, &errorMessage))
                     {
                         ++failedCount;
                     }
+                }
+
+                if (isCancelled())
+                {
+                    postCancelled(completedCount, failedCount);
+                    return;
                 }
 
                 ++completedCount;
@@ -403,16 +450,33 @@ namespace hyperbrowse::services
                 progress->finished = completedCount == items.size();
                 PostUpdate(targetWindow, std::move(progress));
             }
-        });
+        }));
         return requestId;
     }
 
     void BatchConvertService::Cancel()
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
-        if (worker_.joinable())
+        ReapCompletedWorkers();
+    }
+
+    void BatchConvertService::ReapCompletedWorkers()
+    {
+        workers_.erase(std::remove_if(workers_.begin(), workers_.end(), [](std::future<void>& worker)
         {
-            worker_.join();
+            return !worker.valid() || worker.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
+        }), workers_.end());
+    }
+
+    void BatchConvertService::WaitForWorkers()
+    {
+        for (std::future<void>& worker : workers_)
+        {
+            if (worker.valid())
+            {
+                worker.wait();
+            }
         }
+        workers_.clear();
     }
 }

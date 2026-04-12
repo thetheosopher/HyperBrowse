@@ -21,7 +21,10 @@
 #include "browser/BrowserPane.h"
 #include "decode/ImageDecoder.h"
 #include "decode/WicThumbnailDecoder.h"
+#include "services/BatchConvertService.h"
 #include "services/FolderEnumerationService.h"
+#include "services/FolderWatchService.h"
+#include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "ui/MainWindow.h"
 #include "viewer/ViewerWindow.h"
@@ -490,6 +493,48 @@ namespace
         CheckHResult(encoder->Commit(), "Failed to commit the test image encoder");
     }
 
+    std::uint16_t ReadJpegOrientation(const fs::path& path)
+    {
+        ComPtr<IWICImagingFactory> factory;
+        CheckHResult(
+            CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)),
+            "Failed to create the WIC imaging factory for JPEG metadata inspection");
+
+        ComPtr<IWICBitmapDecoder> decoder;
+        CheckHResult(
+            factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &decoder),
+            "Failed to open the JPEG test image for metadata inspection");
+
+        ComPtr<IWICBitmapFrameDecode> frame;
+        CheckHResult(decoder->GetFrame(0, &frame), "Failed to read the JPEG frame for metadata inspection");
+
+        ComPtr<IWICMetadataQueryReader> metadataReader;
+        CheckHResult(frame->GetMetadataQueryReader(&metadataReader), "Failed to acquire the JPEG metadata reader");
+
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        CheckHResult(metadataReader->GetMetadataByName(L"/app1/ifd/{ushort=274}", &value), "Failed to read the JPEG orientation metadata");
+
+        std::uint16_t orientation = 1;
+        switch (value.vt)
+        {
+        case VT_UI1:
+            orientation = value.bVal;
+            break;
+        case VT_UI2:
+            orientation = value.uiVal;
+            break;
+        case VT_UI4:
+            orientation = static_cast<std::uint16_t>(value.ulVal);
+            break;
+        default:
+            break;
+        }
+
+        PropVariantClear(&value);
+        return orientation;
+    }
+
     hyperbrowse::cache::ThumbnailCacheKey MakeCacheKey(const fs::path& path,
                                                        std::uint64_t modifiedTimestampUtc,
                                                        int targetWidth = 160,
@@ -562,6 +607,49 @@ namespace
         Expect(state->enumerationResult.items.front().modifiedTimestampUtc != 0, "Enumeration did not capture the modified timestamp field");
     }
 
+    void RunFolderWatchStartStopScenario(HWND hwnd)
+    {
+        TempFolder root(L"HyperBrowseFolderWatchStop");
+        root.WriteFile(L"seed.jpg", 10);
+
+        hyperbrowse::services::FolderWatchService service;
+        for (int iteration = 0; iteration < 32; ++iteration)
+        {
+            service.StartWatching(hwnd, root.Root().wstring(), false);
+            root.WriteFile(L"image_" + std::to_wstring(iteration) + L".jpg", static_cast<std::size_t>(iteration + 1));
+            PumpMessagesFor(10);
+            service.Stop();
+        }
+    }
+
+    void RunThumbnailCacheNormalizationScenario()
+    {
+        TempFolder root(L"HyperBrowseThumbnailCacheNormalization");
+        const fs::path imagePath = root.Root() / L"MixedCase.png";
+        WriteTestImage(imagePath, TestImageFormat::Png, 96, 48);
+
+        hyperbrowse::decode::WicThumbnailDecoder decoder;
+        const auto insertedKey = MakeCacheKey(imagePath, 17);
+        const auto thumbnail = decoder.Decode(insertedKey);
+        Expect(thumbnail != nullptr, "Failed to create the thumbnail used for cache normalization testing");
+
+        hyperbrowse::cache::ThumbnailCache cache(4ULL * 1024ULL * 1024ULL);
+        cache.Insert(insertedKey, thumbnail);
+
+        auto lookupKey = insertedKey;
+        lookupKey.filePath = imagePath.wstring();
+        std::replace(lookupKey.filePath.begin(), lookupKey.filePath.end(), L'\\', L'/');
+        std::transform(lookupKey.filePath.begin(), lookupKey.filePath.end(), lookupKey.filePath.begin(), [](wchar_t character)
+        {
+            return static_cast<wchar_t>(towupper(character));
+        });
+
+        Expect(cache.Find(lookupKey) != nullptr, "Thumbnail cache lookup did not normalize slash and case differences");
+
+        cache.InvalidateFilePaths({lookupKey.filePath});
+        Expect(cache.Find(insertedKey) == nullptr, "Thumbnail cache invalidation did not normalize the supplied file path");
+    }
+
     void RunWicDecoderScenario()
     {
         TempFolder root(L"HyperBrowsePrompt5Decoder");
@@ -598,6 +686,53 @@ namespace
          Expect(tiffThumbnail != nullptr, "WIC failed to decode the TIFF first page thumbnail");
          Expect(tiffThumbnail->SourceWidth() == 18 && tiffThumbnail->SourceHeight() == 54,
              "WIC did not surface the TIFF source dimensions");
+    }
+
+    void RunJpegOrientationAdjustmentScenario()
+    {
+        TempFolder root(L"HyperBrowseJpegOrientation");
+
+        const auto runCase = [&](const wchar_t* fileName, int quarterTurnsDelta, std::uint16_t expectedOrientation)
+        {
+            const fs::path jpegPath = root.Root() / fileName;
+            WriteTestImage(jpegPath, TestImageFormat::Jpeg, 24, 48, 6);
+
+            std::wstring errorMessage;
+            Expect(hyperbrowse::services::AdjustJpegOrientation(jpegPath.wstring(), quarterTurnsDelta, &errorMessage),
+                   std::string("JPEG orientation adjustment failed: ") + Utf8FromWide(errorMessage));
+            Expect(ReadJpegOrientation(jpegPath) == expectedOrientation,
+                   "JPEG orientation adjustment wrote the wrong EXIF orientation value");
+        };
+
+        runCase(L"minus-one.jpg", -1, 1);
+        runCase(L"plus-one.jpg", +1, 3);
+        runCase(L"minus-three.jpg", -3, 3);
+        runCase(L"plus-three.jpg", +3, 1);
+    }
+
+    void RunBatchConvertCancellationScenario(HWND hwnd)
+    {
+        const fs::path fixtureRoot = TestSourceDirectory() / L"fixtures" / L"raw";
+        const fs::path nefPath = fixtureRoot / L"RAW_NIKON_D1.NEF";
+        const fs::path nrwPath = fixtureRoot / L"RAW_NIKON_P7000.NRW";
+
+        Expect(fs::exists(nefPath), "The NEF fixture is missing from tests/fixtures/raw");
+        Expect(fs::exists(nrwPath), "The NRW fixture is missing from tests/fixtures/raw");
+
+        std::vector<hyperbrowse::browser::BrowserItem> items;
+        items.push_back(hyperbrowse::browser::BuildBrowserItemFromPath(nefPath));
+        items.push_back(hyperbrowse::browser::BuildBrowserItemFromPath(nrwPath));
+        items.push_back(hyperbrowse::browser::BuildBrowserItemFromPath(nefPath));
+
+        TempFolder output(L"HyperBrowseBatchCancel");
+        hyperbrowse::services::BatchConvertService service;
+        service.Start(hwnd, std::move(items), output.Root().wstring(), hyperbrowse::services::BatchConvertFormat::Png);
+
+        PumpMessagesFor(100);
+        const ULONGLONG start = GetTickCount64();
+        service.Cancel();
+        const ULONGLONG elapsed = GetTickCount64() - start;
+        Expect(elapsed < 250, "Batch convert cancellation blocked instead of returning promptly");
     }
 
     void RunThumbnailSchedulerScenario(HWND hwnd, TestWindowState* state)
@@ -911,7 +1046,11 @@ int main()
         Expect(hwnd != nullptr, "Failed to create the hidden test window");
 
         RunEnumerationScenario(hwnd, &state);
+        RunFolderWatchStartStopScenario(hwnd);
+        RunThumbnailCacheNormalizationScenario();
         RunWicDecoderScenario();
+        RunJpegOrientationAdjustmentScenario();
+        RunBatchConvertCancellationScenario(hwnd);
         RunThumbnailSchedulerScenario(hwnd, &state);
         RunRawDecoderScenario();
         RunBrowserPaneScenario(instance);
