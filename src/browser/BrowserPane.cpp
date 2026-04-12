@@ -26,28 +26,36 @@ namespace
         if (darkTheme)
         {
             return hyperbrowse::browser::BrowserPane::ThemeColors{
-                RGB(24, 28, 32),
-                RGB(34, 38, 43),
-                RGB(234, 238, 242),
-                RGB(157, 165, 173),
-                RGB(86, 92, 101),
-                RGB(95, 160, 220),
-                RGB(40, 76, 114),
+                RGB(18, 22, 27),
+                RGB(31, 36, 42),
+                RGB(23, 27, 33),
+                RGB(34, 50, 68),
+                RGB(236, 240, 245),
+                RGB(152, 161, 171),
+                RGB(74, 82, 92),
+                RGB(112, 169, 227),
+                RGB(47, 68, 92),
                 RGB(244, 248, 252),
-                RGB(124, 182, 236),
+                RGB(138, 189, 239),
+                RGB(26, 31, 37),
+                RGB(27, 32, 38),
             };
         }
 
         return hyperbrowse::browser::BrowserPane::ThemeColors{
-            RGB(243, 245, 248),
-            RGB(255, 255, 255),
-            RGB(32, 36, 40),
-            RGB(103, 109, 116),
-            RGB(210, 215, 223),
-            RGB(36, 99, 178),
-            RGB(218, 233, 250),
-            RGB(28, 37, 52),
-            RGB(73, 132, 208),
+            RGB(236, 240, 245),
+            RGB(252, 253, 255),
+            RGB(228, 234, 242),
+            RGB(236, 243, 251),
+            RGB(27, 34, 43),
+            RGB(96, 105, 115),
+            RGB(201, 210, 220),
+            RGB(54, 114, 186),
+            RGB(220, 233, 247),
+            RGB(25, 35, 50),
+            RGB(90, 144, 214),
+            RGB(245, 248, 252),
+            RGB(241, 245, 250),
         };
     }
 
@@ -862,8 +870,11 @@ namespace hyperbrowse::browser
 
         backgroundBrush_ = CreateSolidBrush(colors_.windowBackground);
         surfaceBrush_ = CreateSolidBrush(colors_.surfaceBackground);
+        previewBrush_ = CreateSolidBrush(colors_.previewBackground);
         selectedCellBrush_ = CreateSolidBrush(colors_.accentFill);
-        selectedPreviewBrush_ = CreateSolidBrush(colors_.accent);
+        selectedPreviewBrush_ = CreateSolidBrush(colors_.selectedPreviewBackground);
+        accentBrush_ = CreateSolidBrush(colors_.accent);
+        placeholderBrush_ = CreateSolidBrush(colors_.placeholderBackground);
         borderPen_ = CreatePen(PS_SOLID, 1, colors_.border);
         selectedBorderPen_ = CreatePen(PS_SOLID, 1, colors_.accent);
         rubberBandPen_ = CreatePen(PS_DOT, 1, colors_.rubberBand);
@@ -883,6 +894,12 @@ namespace hyperbrowse::browser
             surfaceBrush_ = nullptr;
         }
 
+        if (previewBrush_)
+        {
+            DeleteObject(previewBrush_);
+            previewBrush_ = nullptr;
+        }
+
         if (selectedCellBrush_)
         {
             DeleteObject(selectedCellBrush_);
@@ -893,6 +910,18 @@ namespace hyperbrowse::browser
         {
             DeleteObject(selectedPreviewBrush_);
             selectedPreviewBrush_ = nullptr;
+        }
+
+        if (accentBrush_)
+        {
+            DeleteObject(accentBrush_);
+            accentBrush_ = nullptr;
+        }
+
+        if (placeholderBrush_)
+        {
+            DeleteObject(placeholderBrush_);
+            placeholderBrush_ = nullptr;
         }
 
         if (borderPen_)
@@ -929,10 +958,38 @@ namespace hyperbrowse::browser
             return;
         }
 
-        ListView_SetBkColor(detailsList_, colors_.surfaceBackground);
-        ListView_SetTextBkColor(detailsList_, colors_.surfaceBackground);
+        ListView_SetBkColor(detailsList_, colors_.windowBackground);
+        ListView_SetTextBkColor(detailsList_, colors_.windowBackground);
         ListView_SetTextColor(detailsList_, colors_.text);
+        if (HWND header = ListView_GetHeader(detailsList_))
+        {
+            InvalidateRect(header, nullptr, TRUE);
+        }
         InvalidateRect(detailsList_, nullptr, TRUE);
+    }
+
+    LRESULT BrowserPane::HandleDetailsListCustomDraw(LPARAM lParam) const
+    {
+        const auto* customDraw = reinterpret_cast<const NMLVCUSTOMDRAW*>(lParam);
+        switch (customDraw->nmcd.dwDrawStage)
+        {
+        case CDDS_PREPAINT:
+            return CDRF_NOTIFYITEMDRAW;
+        case CDDS_ITEMPREPAINT:
+        {
+            auto* mutableCustomDraw = reinterpret_cast<NMLVCUSTOMDRAW*>(lParam);
+            const int viewIndex = static_cast<int>(mutableCustomDraw->nmcd.dwItemSpec);
+            const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+            const bool selected = modelIndex >= 0 && selectedModelIndices_.contains(modelIndex);
+            mutableCustomDraw->clrText = selected ? colors_.selectionText : colors_.text;
+            mutableCustomDraw->clrTextBk = selected
+                ? colors_.accentFill
+                : ((viewIndex % 2) == 0 ? colors_.surfaceBackground : colors_.rowAlternateBackground);
+            return CDRF_NEWFONT;
+        }
+        default:
+            return CDRF_DODEFAULT;
+        }
     }
 
     void BrowserPane::RebuildSelectionFromDetailsList()
@@ -1348,20 +1405,56 @@ namespace hyperbrowse::browser
 
     void BrowserPane::DrawPlaceholderState(HDC hdc, const RECT& clientRect) const
     {
-        FillRect(hdc, &clientRect, surfaceBrush_);
+        FillRect(hdc, &clientRect, backgroundBrush_ ? backgroundBrush_ : surfaceBrush_);
 
-        RECT textRect = clientRect;
-        InflateRect(&textRect, -24, -24);
+        std::wstring title = L"Open a Folder";
+        if (model_ && !model_->FolderPath().empty())
+        {
+            if (model_->HasError())
+            {
+                title = L"Folder Load Failed";
+            }
+            else if (model_->IsEnumerating() && orderedModelIndices_.empty())
+            {
+                title = L"Scanning Folder";
+            }
+            else if (orderedModelIndices_.empty())
+            {
+                title = L"No Supported Images";
+            }
+        }
+
+        RECT panelRect = clientRect;
+        const int clientWidth = clientRect.right - clientRect.left;
+        const int clientHeight = clientRect.bottom - clientRect.top;
+        const int panelWidth = std::max(280, std::min(520, clientWidth - 56));
+        const int panelHeight = std::min(160, std::max(120, clientHeight - 56));
+        panelRect.left = clientRect.left + ((clientWidth - panelWidth) / 2);
+        panelRect.top = clientRect.top + ((clientHeight - panelHeight) / 2);
+        panelRect.right = panelRect.left + panelWidth;
+        panelRect.bottom = panelRect.top + panelHeight;
+
+        HGDIOBJ oldBrush = SelectObject(hdc, placeholderBrush_ ? placeholderBrush_ : surfaceBrush_);
+        HGDIOBJ oldPen = SelectObject(hdc, borderPen_ ? borderPen_ : GetStockObject(BLACK_PEN));
+        RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 18, 18);
+        SelectObject(hdc, oldPen);
+        SelectObject(hdc, oldBrush);
+
+        RECT titleRect{panelRect.left + 20, panelRect.top + 20, panelRect.right - 20, panelRect.top + 54};
+        RECT bodyRect{panelRect.left + 24, titleRect.bottom + 8, panelRect.right - 24, panelRect.bottom - 22};
 
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, colors_.text);
+        DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+        SetTextColor(hdc, colors_.mutedText);
         const std::wstring text = BuildPlaceholderText();
-        DrawTextW(hdc, text.c_str(), -1, &textRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+        DrawTextW(hdc, text.c_str(), -1, &bodyRect, DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
     }
 
     void BrowserPane::DrawThumbnailCells(HDC hdc, const RECT& clientRect) const
     {
-        FillRect(hdc, &clientRect, surfaceBrush_);
+        FillRect(hdc, &clientRect, backgroundBrush_ ? backgroundBrush_ : surfaceBrush_);
         if (orderedModelIndices_.empty())
         {
             DrawPlaceholderState(hdc, clientRect);
@@ -1390,35 +1483,68 @@ namespace hyperbrowse::browser
                 continue;
             }
 
-            const bool selected = selectedModelIndices_.contains(ModelIndexFromViewIndex(viewIndex));
+            const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+            const bool selected = selectedModelIndices_.contains(modelIndex);
 
             const HBRUSH cellBrush = selected
                 ? (selectedCellBrush_ ? selectedCellBrush_ : surfaceBrush_)
                 : surfaceBrush_;
-            FillRect(hdc, &cellRect, cellBrush);
-
             HGDIOBJ pen = selected
                 ? static_cast<HGDIOBJ>(selectedBorderPen_ ? selectedBorderPen_ : GetStockObject(BLACK_PEN))
                 : static_cast<HGDIOBJ>(borderPen_ ? borderPen_ : GetStockObject(BLACK_PEN));
             HGDIOBJ oldPen = SelectObject(hdc, pen);
-            HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
-            Rectangle(hdc, cellRect.left, cellRect.top, cellRect.right, cellRect.bottom);
+            HGDIOBJ oldBrush = SelectObject(hdc, cellBrush);
+            RoundRect(hdc, cellRect.left, cellRect.top, cellRect.right, cellRect.bottom, 16, 16);
+
+            if (selected && accentBrush_)
+            {
+                RECT accentRect{cellRect.left + 1, cellRect.top + 1, cellRect.right - 1, cellRect.top + 6};
+                FillRect(hdc, &accentRect, accentBrush_);
+            }
 
             RECT previewRect = GetThumbnailPreviewRect(cellRect);
             const HBRUSH previewBrush = selected
-                ? (selectedPreviewBrush_ ? selectedPreviewBrush_ : backgroundBrush_)
-                : backgroundBrush_;
-            FillRect(hdc, &previewRect, previewBrush);
-            Rectangle(hdc, previewRect.left, previewRect.top, previewRect.right, previewRect.bottom);
+                ? (selectedPreviewBrush_ ? selectedPreviewBrush_ : previewBrush_)
+                : (previewBrush_ ? previewBrush_ : backgroundBrush_);
+            SelectObject(hdc, previewBrush);
+            RoundRect(hdc, previewRect.left, previewRect.top, previewRect.right, previewRect.bottom, 12, 12);
 
             SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
             DrawPreviewThumbnail(hdc, previewRect, *item);
 
-            RECT nameRect{cellRect.left + 12, previewRect.bottom + 10, cellRect.right - 12, previewRect.bottom + 46};
+            SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
+            RECT nameRect{cellRect.left + 12, previewRect.bottom + 10, cellRect.right - 12, previewRect.bottom + 48};
             DrawTextW(hdc, item->fileName.c_str(), -1, &nameRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
 
+            std::wstring metaLine = FormatDimensionsForItem(*item);
+            if (selected && modelIndex >= 0)
+            {
+                const auto metadata = FindCachedMetadataForModelIndex(modelIndex);
+                if (metadata)
+                {
+                    const std::wstring cameraLabel = BuildCameraLabel(*metadata);
+                    if (!cameraLabel.empty())
+                    {
+                        metaLine.append(L"  |  ");
+                        metaLine.append(cameraLabel);
+                    }
+                    else if (!metadata->dateTaken.empty())
+                    {
+                        metaLine.append(L"  |  ");
+                        metaLine.append(metadata->dateTaken);
+                    }
+                }
+                else
+                {
+                    ScheduleMetadataForItem(modelIndex, *item);
+                }
+            }
+
             SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
-            RECT infoRect{cellRect.left + 12, cellRect.bottom - 42, cellRect.right - 12, cellRect.bottom - 12};
+            RECT metaRect{cellRect.left + 12, previewRect.bottom + 52, cellRect.right - 12, previewRect.bottom + 72};
+            DrawTextW(hdc, metaLine.c_str(), -1, &metaRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+            RECT infoRect{cellRect.left + 12, cellRect.bottom - 28, cellRect.right - 12, cellRect.bottom - 10};
             std::wstring info = item->fileType + L"  |  " + FormatByteSize(item->fileSizeBytes);
             DrawTextW(hdc, info.c_str(), -1, &infoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
@@ -1445,26 +1571,26 @@ namespace hyperbrowse::browser
 
         if (!thumbnailScheduler_ || !decode::CanDecodeThumbnail(item))
         {
-            RECT iconTextRect = previewRect;
-            const std::wstring placeholder = decode::IsRawFileType(item.fileType) ? item.fileType : std::wstring(L"IMG");
-            DrawTextW(hdc, placeholder.c_str(), -1, &iconTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            RECT dimTextRect = previewRect;
-            dimTextRect.top += ((previewRect.bottom - previewRect.top) / 2) + 6;
+            RECT iconTextRect{previewRect.left + 10, previewRect.top + 12, previewRect.right - 10, previewRect.top + 34};
+            const std::wstring placeholder = decode::IsRawFileType(item.fileType) ? item.fileType : std::wstring(L"IMAGE");
+            SetTextColor(hdc, colors_.mutedText);
+            DrawTextW(hdc, placeholder.c_str(), -1, &iconTextRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+            RECT dimTextRect{previewRect.left + 10, previewRect.bottom - 30, previewRect.right - 10, previewRect.bottom - 12};
             DrawTextW(hdc, FormatDimensionsForItem(item).c_str(), -1, &dimTextRect,
-                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             return;
         }
 
         const auto thumbnail = thumbnailScheduler_->FindCachedThumbnail(cacheKey);
         if (!thumbnail)
         {
-            RECT iconTextRect = previewRect;
-            const std::wstring placeholder = decode::IsRawFileType(item.fileType) ? item.fileType : std::wstring(L"IMG");
-            DrawTextW(hdc, placeholder.c_str(), -1, &iconTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            RECT dimTextRect = previewRect;
-            dimTextRect.top += ((previewRect.bottom - previewRect.top) / 2) + 6;
+            RECT iconTextRect{previewRect.left + 10, previewRect.top + 12, previewRect.right - 10, previewRect.top + 34};
+            const std::wstring placeholder = decode::IsRawFileType(item.fileType) ? item.fileType : std::wstring(L"IMAGE");
+            SetTextColor(hdc, colors_.mutedText);
+            DrawTextW(hdc, placeholder.c_str(), -1, &iconTextRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+            RECT dimTextRect{previewRect.left + 10, previewRect.bottom - 30, previewRect.right - 10, previewRect.bottom - 12};
             DrawTextW(hdc, FormatDimensionsForItem(item).c_str(), -1, &dimTextRect,
-                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             return;
         }
 
@@ -1807,6 +1933,8 @@ namespace hyperbrowse::browser
                 case LVN_ITEMCHANGED:
                     RebuildSelectionFromDetailsList();
                     return 0;
+                case NM_CUSTOMDRAW:
+                    return HandleDetailsListCustomDraw(lParam);
                 case LVN_KEYDOWN:
                 {
                     const auto* keyDown = reinterpret_cast<const NMLVKEYDOWN*>(lParam);

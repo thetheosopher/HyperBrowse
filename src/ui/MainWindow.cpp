@@ -19,6 +19,7 @@
 #include "browser/BrowserPane.h"
 #include "decode/ImageDecoder.h"
 #include "services/BatchConvertService.h"
+#include "services/FileOperationService.h"
 #include "services/FolderEnumerationService.h"
 #include "services/FolderWatchService.h"
 #include "services/JpegTransformService.h"
@@ -47,6 +48,11 @@ namespace
     constexpr UINT ID_FILE_EXIT = 1002;
     constexpr UINT ID_FILE_IMAGE_INFORMATION = 1003;
     constexpr UINT ID_FILE_OPEN_SELECTED = 1004;
+    constexpr UINT ID_FILE_COPY_SELECTION = 1005;
+    constexpr UINT ID_FILE_MOVE_SELECTION = 1006;
+    constexpr UINT ID_FILE_DELETE_SELECTION = 1007;
+    constexpr UINT ID_FILE_DELETE_SELECTION_PERMANENT = 1008;
+    constexpr UINT ID_FILE_REVEAL_IN_EXPLORER = 1009;
     constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_JPEG = 1010;
     constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_PNG = 1011;
     constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_TIFF = 1012;
@@ -56,6 +62,9 @@ namespace
     constexpr UINT ID_FILE_BATCH_CONVERT_CANCEL = 1016;
     constexpr UINT ID_FILE_ROTATE_JPEG_LEFT = 1017;
     constexpr UINT ID_FILE_ROTATE_JPEG_RIGHT = 1018;
+    constexpr UINT ID_FILE_OPEN_CONTAINING_FOLDER = 1019;
+    constexpr UINT ID_FILE_COPY_PATH = 1020;
+    constexpr UINT ID_FILE_PROPERTIES = 1021;
     constexpr UINT ID_VIEW_THUMBNAILS = 2001;
     constexpr UINT ID_VIEW_DETAILS = 2002;
     constexpr UINT ID_VIEW_RECURSIVE = 2003;
@@ -184,6 +193,162 @@ namespace
         const std::wstring normalizedLeft = NormalizeFolderPath(std::wstring(lhs));
         const std::wstring normalizedRight = NormalizeFolderPath(std::wstring(rhs));
         return _wcsicmp(normalizedLeft.c_str(), normalizedRight.c_str()) == 0;
+    }
+
+    bool CopyTextToClipboard(HWND ownerWindow, std::wstring_view text)
+    {
+        if (!OpenClipboard(ownerWindow))
+        {
+            return false;
+        }
+
+        if (!EmptyClipboard())
+        {
+            CloseClipboard();
+            return false;
+        }
+
+        const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+        HGLOBAL buffer = GlobalAlloc(GMEM_MOVEABLE, bytes);
+        if (!buffer)
+        {
+            CloseClipboard();
+            return false;
+        }
+
+        void* locked = GlobalLock(buffer);
+        if (!locked)
+        {
+            GlobalFree(buffer);
+            CloseClipboard();
+            return false;
+        }
+
+        memcpy(locked, text.data(), text.size() * sizeof(wchar_t));
+        static_cast<wchar_t*>(locked)[text.size()] = L'\0';
+        GlobalUnlock(buffer);
+
+        if (!SetClipboardData(CF_UNICODETEXT, buffer))
+        {
+            GlobalFree(buffer);
+            CloseClipboard();
+            return false;
+        }
+
+        CloseClipboard();
+        return true;
+    }
+
+    std::wstring BuildDeleteConfirmationMessage(std::size_t itemCount, bool permanent)
+    {
+        if (itemCount <= 1)
+        {
+            return permanent
+                ? L"Permanently delete the selected image?\n\nThis cannot be undone."
+                : L"Move the selected image to the Recycle Bin?";
+        }
+
+        return permanent
+            ? L"Permanently delete " + std::to_wstring(itemCount) + L" selected images?\n\nThis cannot be undone."
+            : L"Move " + std::to_wstring(itemCount) + L" selected images to the Recycle Bin?";
+    }
+
+    bool ConfirmFileDeletion(HWND ownerWindow, std::size_t itemCount, bool permanent)
+    {
+        const std::wstring prompt = BuildDeleteConfirmationMessage(itemCount, permanent);
+        const int result = MessageBoxW(ownerWindow,
+                                       prompt.c_str(),
+                                       permanent ? L"Permanent Delete" : L"Delete",
+                                       MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2);
+        return result == IDOK;
+    }
+
+    std::wstring JoinLines(const std::vector<std::wstring>& lines)
+    {
+        std::wstring combined;
+        for (std::size_t index = 0; index < lines.size(); ++index)
+        {
+            if (index > 0)
+            {
+                combined.append(L"\r\n");
+            }
+            combined.append(lines[index]);
+        }
+        return combined;
+    }
+
+    bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target)
+    {
+        if (target.empty())
+        {
+            return false;
+        }
+
+        const std::wstring path(target);
+        const HINSTANCE result = ShellExecuteW(ownerWindow, verb, path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return reinterpret_cast<INT_PTR>(result) > 32;
+    }
+
+    bool RevealPathsInExplorer(const std::vector<std::wstring>& selectedPaths)
+    {
+        if (selectedPaths.empty())
+        {
+            return false;
+        }
+
+        std::vector<std::wstring> revealPaths;
+        revealPaths.push_back(selectedPaths.front());
+
+        const std::wstring primaryParent = NormalizeFolderPath(fs::path(selectedPaths.front()).parent_path().wstring());
+        bool sameParent = !primaryParent.empty();
+        for (const std::wstring& path : selectedPaths)
+        {
+            if (!FolderPathsEqual(primaryParent, fs::path(path).parent_path().wstring()))
+            {
+                sameParent = false;
+                break;
+            }
+        }
+
+        if (sameParent)
+        {
+            revealPaths = selectedPaths;
+        }
+
+        PIDLIST_ABSOLUTE folderPidl = ILCreateFromPathW(primaryParent.c_str());
+        if (!folderPidl)
+        {
+            return false;
+        }
+
+        std::vector<PIDLIST_ABSOLUTE> itemPidls;
+        std::vector<PCUITEMID_CHILD> childPidls;
+        itemPidls.reserve(revealPaths.size());
+        childPidls.reserve(revealPaths.size());
+        for (const std::wstring& path : revealPaths)
+        {
+            PIDLIST_ABSOLUTE itemPidl = ILCreateFromPathW(path.c_str());
+            if (!itemPidl)
+            {
+                continue;
+            }
+
+            itemPidls.push_back(itemPidl);
+            childPidls.push_back(ILFindLastID(itemPidl));
+        }
+
+        const HRESULT result = SHOpenFolderAndSelectItems(folderPidl,
+                                                          static_cast<UINT>(childPidls.size()),
+                                                          childPidls.empty() ? nullptr : childPidls.data(),
+                                                          0);
+
+        for (PIDLIST_ABSOLUTE itemPidl : itemPidls)
+        {
+            ILFree(itemPidl);
+        }
+        ILFree(folderPidl);
+
+        return SUCCEEDED(result);
     }
 
     struct ShellTreeItemInfo
@@ -383,6 +548,7 @@ namespace hyperbrowse::ui
         , browserModel_(std::make_unique<browser::BrowserModel>())
         , browserPaneController_(std::make_unique<browser::BrowserPane>(instance))
         , batchConvertService_(std::make_unique<services::BatchConvertService>())
+        , fileOperationService_(std::make_unique<services::FileOperationService>())
         , folderEnumerationService_(std::make_unique<services::FolderEnumerationService>())
         , folderWatchService_(std::make_unique<services::FolderWatchService>())
         , viewerWindow_(std::make_unique<viewer::ViewerWindow>(instance))
@@ -498,6 +664,11 @@ namespace hyperbrowse::ui
             {FVIRTKEY | FCONTROL, static_cast<WORD>('O'), ID_FILE_OPEN_FOLDER},
             {FVIRTKEY, VK_F5, ID_FILE_REFRESH_TREE},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('I'), ID_FILE_IMAGE_INFORMATION},
+            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('C'), ID_FILE_COPY_PATH},
+            {FVIRTKEY | FCONTROL, static_cast<WORD>('E'), ID_FILE_REVEAL_IN_EXPLORER},
+            {FVIRTKEY | FALT, VK_RETURN, ID_FILE_PROPERTIES},
+            {FVIRTKEY, VK_DELETE, ID_FILE_DELETE_SELECTION},
+            {FVIRTKEY | FSHIFT, VK_DELETE, ID_FILE_DELETE_SELECTION_PERMANENT},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('1'), ID_VIEW_THUMBNAILS},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('2'), ID_VIEW_DETAILS},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('R'), ID_VIEW_RECURSIVE},
@@ -532,6 +703,16 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information\tCtrl+I");
+        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties\tAlt+Enter");
+        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete\tDel");
+        AppendMenuW(fileMenu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently\tShift+Del");
         AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_ROTATE_JPEG_LEFT, L"Adjust JPEG Orientation &Left");
         AppendMenuW(fileMenu, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
@@ -1036,6 +1217,12 @@ namespace hyperbrowse::ui
             progressText.append(std::to_wstring(batchConvertTotal_));
         }
 
+        if (fileOperationActive_ && !activeFileOperationLabel_.empty())
+        {
+            progressText.append(L" | File: ");
+            progressText.append(activeFileOperationLabel_);
+        }
+
         const std::uint64_t selectedCount = browserPaneController_ ? browserPaneController_->SelectedCount() : 0;
         const std::uint64_t selectedBytes = browserPaneController_ ? browserPaneController_->SelectedBytes() : 0;
         const std::wstring selectionText = L"Selection: " + std::to_wstring(selectedCount)
@@ -1252,6 +1439,7 @@ namespace hyperbrowse::ui
         const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
+        const bool allowMutatingFileCommands = hasSelection && !fileOperationActive_;
 
         HMENU menu = CreatePopupMenu();
         HMENU batchConvertSelectionMenu = CreatePopupMenu();
@@ -1275,8 +1463,17 @@ namespace hyperbrowse::ui
 
         AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
         AppendMenuW(menu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection");
+        AppendMenuW(menu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer");
+        AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
+        AppendMenuW(menu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h");
+        AppendMenuW(menu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
+        AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
+        AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete");
+        AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_JPEG, L"Selection to &JPEG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_PNG, L"Selection to &PNG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_TIFF, L"Selection to &TIFF");
@@ -1299,6 +1496,14 @@ namespace hyperbrowse::ui
 
         EnableMenuItem(menu, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_COPY_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_MOVE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_DELETE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_DELETE_SELECTION_PERMANENT, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_ROTATE_JPEG_LEFT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_ROTATE_JPEG_RIGHT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
@@ -1383,6 +1588,194 @@ namespace hyperbrowse::ui
 
         const std::wstring report = browserPaneController_->BuildMetadataReportForModelIndex(modelIndex);
         MessageBoxW(hwnd_, report.c_str(), L"Image Information", MB_OK | MB_ICONINFORMATION);
+    }
+
+    void MainWindow::StartCopySelection()
+    {
+        if (!browserPaneController_ || fileOperationActive_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> sourcePaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (sourcePaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more images first.", L"Copy Selection", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::wstring destinationFolder;
+        if (!ChooseFolder(&destinationFolder) || destinationFolder.empty())
+        {
+            return;
+        }
+
+        StartFileOperation(services::FileOperationType::Copy, std::vector<std::wstring>(sourcePaths), std::move(destinationFolder));
+    }
+
+    void MainWindow::StartMoveSelection()
+    {
+        if (!browserPaneController_ || fileOperationActive_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> sourcePaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (sourcePaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more images first.", L"Move Selection", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::wstring destinationFolder;
+        if (!ChooseFolder(&destinationFolder) || destinationFolder.empty())
+        {
+            return;
+        }
+
+        StartFileOperation(services::FileOperationType::Move, std::vector<std::wstring>(sourcePaths), std::move(destinationFolder));
+    }
+
+    void MainWindow::StartDeleteSelection(bool permanent)
+    {
+        if (!browserPaneController_ || fileOperationActive_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> sourcePaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (sourcePaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more images first.", permanent ? L"Permanent Delete" : L"Delete", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (!ConfirmFileDeletion(hwnd_, sourcePaths.size(), permanent))
+        {
+            return;
+        }
+
+        StartFileOperation(permanent ? services::FileOperationType::DeletePermanent : services::FileOperationType::DeleteRecycleBin,
+                           std::vector<std::wstring>(sourcePaths),
+                           {});
+    }
+
+    void MainWindow::StartFileOperation(services::FileOperationType type,
+                                        std::vector<std::wstring> sourcePaths,
+                                        std::wstring destinationFolder)
+    {
+        if (!fileOperationService_ || sourcePaths.empty() || fileOperationActive_)
+        {
+            return;
+        }
+
+        activeFileOperationLabel_ = services::FileOperationTypeToActivityLabel(type);
+        activeFileOperationLabel_.append(L" ");
+        activeFileOperationLabel_.append(std::to_wstring(sourcePaths.size()));
+        activeFileOperationLabel_.append(L" item(s)");
+        fileOperationActive_ = true;
+        activeFileOperationRequestId_ = fileOperationService_->Start(hwnd_, hwnd_, type, std::move(sourcePaths), std::move(destinationFolder));
+        UpdateStatusText();
+        UpdateMenuState();
+    }
+
+    void MainWindow::RevealSelectedInExplorer() const
+    {
+        if (!browserPaneController_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (selectedPaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select an image first.", L"Reveal in Explorer", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (!RevealPathsInExplorer(selectedPaths))
+        {
+            MessageBoxW(hwnd_, L"Failed to reveal the selected item in Explorer.", L"Reveal in Explorer", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void MainWindow::OpenSelectedContainingFolder() const
+    {
+        if (!browserPaneController_)
+        {
+            return;
+        }
+
+        std::wstring targetPath = browserPaneController_->FocusedFilePathSnapshot();
+        if (targetPath.empty())
+        {
+            const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+            if (!selectedPaths.empty())
+            {
+                targetPath = selectedPaths.front();
+            }
+        }
+
+        if (targetPath.empty())
+        {
+            MessageBoxW(hwnd_, L"Select an image first.", L"Open Containing Folder", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const std::wstring containingFolder = fs::path(targetPath).parent_path().wstring();
+        if (!LaunchShellTarget(hwnd_, L"open", containingFolder))
+        {
+            MessageBoxW(hwnd_, L"Failed to open the containing folder.", L"Open Containing Folder", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void MainWindow::CopySelectedPathsToClipboard() const
+    {
+        if (!browserPaneController_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (selectedPaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more images first.", L"Copy Path", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (!CopyTextToClipboard(hwnd_, JoinLines(selectedPaths)))
+        {
+            MessageBoxW(hwnd_, L"Failed to copy the selected file paths to the clipboard.", L"Copy Path", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void MainWindow::ShowSelectedFileProperties() const
+    {
+        if (!browserPaneController_)
+        {
+            return;
+        }
+
+        std::wstring targetPath = browserPaneController_->FocusedFilePathSnapshot();
+        if (targetPath.empty())
+        {
+            const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+            if (!selectedPaths.empty())
+            {
+                targetPath = selectedPaths.front();
+            }
+        }
+
+        if (targetPath.empty())
+        {
+            MessageBoxW(hwnd_, L"Select an image first.", L"Properties", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (!LaunchShellTarget(hwnd_, L"properties", targetPath))
+        {
+            MessageBoxW(hwnd_, L"Failed to open the file properties dialog.", L"Properties", MB_OK | MB_ICONERROR);
+        }
     }
 
     void MainWindow::StartSlideshow(bool selectionScope)
@@ -1511,6 +1904,108 @@ namespace hyperbrowse::ui
         MessageBoxW(hwnd_, summary.c_str(), L"Adjust JPEG Orientation", MB_OK | MB_ICONINFORMATION);
     }
 
+    void MainWindow::ApplyCompletedFileOperation(const services::FileOperationUpdate& update)
+    {
+        fileOperationActive_ = false;
+        activeFileOperationLabel_.clear();
+
+        bool modelChanged = false;
+        if (browserModel_ && browserPaneController_)
+        {
+            const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+            const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
+
+            auto upsertVisiblePath = [&](const std::wstring& path)
+            {
+                if (!IsPathInCurrentScope(path))
+                {
+                    return;
+                }
+
+                const fs::path filePath(path);
+                if (!browser::IsSupportedImageExtension(filePath.extension().wstring()))
+                {
+                    return;
+                }
+
+                std::error_code error;
+                if (!fs::is_regular_file(filePath, error) || error)
+                {
+                    return;
+                }
+
+                modelChanged = browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(filePath)) || modelChanged;
+            };
+
+            switch (update.type)
+            {
+            case services::FileOperationType::Copy:
+                for (const std::wstring& createdPath : update.createdPaths)
+                {
+                    upsertVisiblePath(createdPath);
+                }
+                break;
+            case services::FileOperationType::Move:
+                for (const std::wstring& sourcePath : update.succeededSourcePaths)
+                {
+                    modelChanged = browserModel_->RemoveItemByPath(sourcePath) || modelChanged;
+                }
+                for (const std::wstring& createdPath : update.createdPaths)
+                {
+                    upsertVisiblePath(createdPath);
+                }
+                break;
+            case services::FileOperationType::DeleteRecycleBin:
+            case services::FileOperationType::DeletePermanent:
+                for (const std::wstring& sourcePath : update.succeededSourcePaths)
+                {
+                    modelChanged = browserModel_->RemoveItemByPath(sourcePath) || modelChanged;
+                }
+                break;
+            default:
+                break;
+            }
+
+            std::vector<std::wstring> affectedPaths = update.succeededSourcePaths;
+            affectedPaths.insert(affectedPaths.end(), update.createdPaths.begin(), update.createdPaths.end());
+            if (!affectedPaths.empty())
+            {
+                browserPaneController_->InvalidateMediaCacheForPaths(affectedPaths);
+            }
+
+            if (modelChanged)
+            {
+                RefreshBrowserPane();
+                browserPaneController_->RestoreSelectionByFilePaths(selectedPaths, focusedPath);
+                UpdateWindowTitle();
+            }
+        }
+
+        UpdateStatusText();
+        UpdateMenuState();
+
+        if (!update.message.empty())
+        {
+            const UINT icon = (update.failedCount > 0 || update.aborted) ? MB_ICONWARNING : MB_ICONINFORMATION;
+            MessageBoxW(hwnd_, update.message.c_str(), L"File Operation", MB_OK | icon);
+        }
+    }
+
+    bool MainWindow::IsPathInCurrentScope(std::wstring_view path) const
+    {
+        if (!browserModel_ || browserModel_->FolderPath().empty() || path.empty())
+        {
+            return false;
+        }
+
+        if (browserModel_->IsRecursive())
+        {
+            return browser::PathHasPrefix(path, browserModel_->FolderPath());
+        }
+
+        return FolderPathsEqual(fs::path(path).parent_path().wstring(), browserModel_->FolderPath());
+    }
+
     void MainWindow::ApplyFolderWatchChanges(const services::FolderWatchUpdate& update)
     {
         if (!browserModel_ || !browserPaneController_)
@@ -1630,6 +2125,18 @@ namespace hyperbrowse::ui
 
         EnableMenuItem(menu_, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_COPY_SELECTION,
+                       MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_MOVE_SELECTION,
+                       MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_DELETE_SELECTION,
+                       MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_DELETE_SELECTION_PERMANENT,
+                       MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_ROTATE_JPEG_LEFT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_ROTATE_JPEG_RIGHT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_BATCH_CONVERT_SELECTION_JPEG,
@@ -1985,6 +2492,19 @@ namespace hyperbrowse::ui
         return 0;
     }
 
+    LRESULT MainWindow::OnFileOperationMessage(LPARAM lParam)
+    {
+        std::unique_ptr<services::FileOperationUpdate> update(
+            reinterpret_cast<services::FileOperationUpdate*>(lParam));
+        if (!update || update->requestId != activeFileOperationRequestId_)
+        {
+            return 0;
+        }
+
+        ApplyCompletedFileOperation(*update);
+        return 0;
+    }
+
     LRESULT MainWindow::OnViewerZoomMessage(LPARAM lParam)
     {
         viewerZoomPercent_ = static_cast<int>(lParam);
@@ -2025,6 +2545,30 @@ namespace hyperbrowse::ui
             return true;
         case ID_FILE_IMAGE_INFORMATION:
             ShowImageInformation();
+            return true;
+        case ID_FILE_COPY_SELECTION:
+            StartCopySelection();
+            return true;
+        case ID_FILE_MOVE_SELECTION:
+            StartMoveSelection();
+            return true;
+        case ID_FILE_DELETE_SELECTION:
+            StartDeleteSelection(false);
+            return true;
+        case ID_FILE_DELETE_SELECTION_PERMANENT:
+            StartDeleteSelection(true);
+            return true;
+        case ID_FILE_REVEAL_IN_EXPLORER:
+            RevealSelectedInExplorer();
+            return true;
+        case ID_FILE_OPEN_CONTAINING_FOLDER:
+            OpenSelectedContainingFolder();
+            return true;
+        case ID_FILE_COPY_PATH:
+            CopySelectedPathsToClipboard();
+            return true;
+        case ID_FILE_PROPERTIES:
+            ShowSelectedFileProperties();
             return true;
         case ID_FILE_ROTATE_JPEG_LEFT:
             AdjustSelectedJpegOrientation(-1);
@@ -2355,6 +2899,8 @@ namespace hyperbrowse::ui
             return OnBrowserPaneContextMenuMessage(wParam, lParam);
         case services::BatchConvertService::kMessageId:
             return OnBatchConvertMessage(lParam);
+        case services::FileOperationService::kMessageId:
+            return OnFileOperationMessage(lParam);
         case viewer::ViewerWindow::kZoomChangedMessage:
             return OnViewerZoomMessage(lParam);
         case viewer::ViewerWindow::kActivityChangedMessage:

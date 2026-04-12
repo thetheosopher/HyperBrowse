@@ -3,6 +3,7 @@
 This folder contains a repo-ready planning pack for building a high-performance native Windows image browser and viewer using a low-overhead pure native approach.
 
 ## Included documents
+
 - `01-product-spec.md`
 - `02-architecture.md`
 - `03-performance-strategy.md`
@@ -12,8 +13,12 @@ This folder contains a repo-ready planning pack for building a high-performance 
 - `07-copilot-prompt-sequence.md`
 - `08-issues-to-resolve.md`
 - `09-hardening-pass.md`
+- `10-prioritized-enhancements.md`
+- `11-file-management-workflow.md`
+- `12-visual-polish-pass.md`
 
 ## Intended stack
+
 - Win32 shell
 - Direct2D + Direct3D11 rendering
 - WIC for baseline common-format decoding
@@ -21,4 +26,5 @@ This folder contains a repo-ready planning pack for building a high-performance 
 - optional nvJPEG for accelerated JPEG thumbnail batches
 
 ## Suggested next step
+
 Start with `07-copilot-prompt-sequence.md` and run the prompts sequentially against an empty repository initialized with CMake.

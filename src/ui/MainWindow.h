@@ -20,7 +20,10 @@ namespace hyperbrowse::services
 {
     struct FolderWatchUpdate;
     enum class BatchConvertFormat : int;
+    enum class FileOperationType : int;
+    struct FileOperationUpdate;
     class BatchConvertService;
+    class FileOperationService;
     class FolderEnumerationService;
     class FolderWatchService;
 }
@@ -120,9 +123,21 @@ namespace hyperbrowse::ui
         void ShowDiagnosticsSnapshot() const;
         void ResetDiagnosticsState() const;
         void ShowImageInformation();
+        void StartCopySelection();
+        void StartMoveSelection();
+        void StartDeleteSelection(bool permanent);
+        void StartFileOperation(services::FileOperationType type,
+                    std::vector<std::wstring> sourcePaths,
+                    std::wstring destinationFolder);
+        void RevealSelectedInExplorer() const;
+        void OpenSelectedContainingFolder() const;
+        void CopySelectedPathsToClipboard() const;
+        void ShowSelectedFileProperties() const;
         void StartSlideshow(bool selectionScope);
         void StartBatchConvert(bool selectionScope, services::BatchConvertFormat format);
         void AdjustSelectedJpegOrientation(int quarterTurnsDelta);
+        void ApplyCompletedFileOperation(const services::FileOperationUpdate& update);
+        bool IsPathInCurrentScope(std::wstring_view path) const;
         void ApplyFolderWatchChanges(const services::FolderWatchUpdate& update);
         LRESULT OnFolderEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderWatchMessage(LPARAM lParam);
@@ -133,6 +148,7 @@ namespace hyperbrowse::ui
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBatchConvertMessage(LPARAM lParam);
+        LRESULT OnFileOperationMessage(LPARAM lParam);
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
         LRESULT OnViewerClosedMessage();
@@ -175,18 +191,22 @@ namespace hyperbrowse::ui
         std::unique_ptr<browser::BrowserModel> browserModel_;
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
         std::unique_ptr<services::BatchConvertService> batchConvertService_;
+        std::unique_ptr<services::FileOperationService> fileOperationService_;
         std::unique_ptr<services::FolderEnumerationService> folderEnumerationService_;
         std::unique_ptr<services::FolderWatchService> folderWatchService_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
         std::uint64_t activeEnumerationRequestId_{};
         std::uint64_t activeFolderWatchRequestId_{};
         std::uint64_t activeBatchConvertRequestId_{};
+        std::uint64_t activeFileOperationRequestId_{};
         bool batchConvertActive_{};
+        bool fileOperationActive_{};
         std::size_t batchConvertCompleted_{};
         std::size_t batchConvertTotal_{};
         std::size_t batchConvertFailed_{};
         std::wstring batchConvertOutputFolder_;
         std::wstring batchConvertCurrentFile_;
+        std::wstring activeFileOperationLabel_;
         int viewerZoomPercent_{};
         bool viewerWindowActive_{};
         bool nvJpegEnabled_{};

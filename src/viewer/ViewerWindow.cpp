@@ -40,6 +40,21 @@ namespace
     {
         return darkTheme ? RGB(236, 240, 244) : RGB(28, 33, 40);
     }
+
+    COLORREF MutedTextColor(bool darkTheme)
+    {
+        return darkTheme ? RGB(165, 176, 188) : RGB(96, 107, 118);
+    }
+
+    COLORREF PanelFillColor(bool darkTheme)
+    {
+        return darkTheme ? RGB(28, 33, 39) : RGB(255, 255, 255);
+    }
+
+    COLORREF PanelBorderColor(bool darkTheme)
+    {
+        return darkTheme ? RGB(70, 80, 94) : RGB(206, 215, 225);
+    }
 }
 
 namespace hyperbrowse::viewer
@@ -901,19 +916,54 @@ namespace hyperbrowse::viewer
             HDC hdc = BeginPaint(hwnd_, &paintStruct);
             RECT clientRect{};
             GetClientRect(hwnd_, &clientRect);
+            const int clientWidth = clientRect.right - clientRect.left;
+            const int clientHeight = clientRect.bottom - clientRect.top;
             FillRect(hdc, &clientRect, backgroundBrush_);
 
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, TextColor(darkTheme_));
 
+            const browser::BrowserItem* currentItem =
+                (currentIndex_ >= 0 && currentIndex_ < static_cast<int>(items_.size()))
+                ? &items_[static_cast<std::size_t>(currentIndex_)]
+                : nullptr;
+
             if (!currentImage_)
             {
-                RECT textRect = clientRect;
-                InflateRect(&textRect, -24, -24);
+                RECT panelRect = clientRect;
+                const int panelWidth = std::max(320, std::min(560, clientWidth - 64));
+                const int panelHeight = std::min(170, std::max(126, clientHeight - 64));
+                panelRect.left = clientRect.left + ((clientWidth - panelWidth) / 2);
+                panelRect.top = clientRect.top + ((clientHeight - panelHeight) / 2);
+                panelRect.right = panelRect.left + panelWidth;
+                panelRect.bottom = panelRect.top + panelHeight;
+
+                HBRUSH panelBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
+                HPEN panelPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
+                HGDIOBJ oldBrush = SelectObject(hdc, panelBrush);
+                HGDIOBJ oldPen = SelectObject(hdc, panelPen);
+                RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 18, 18);
+                SelectObject(hdc, oldPen);
+                SelectObject(hdc, oldBrush);
+
+                const std::wstring title = loading_
+                    ? L"Loading Image"
+                    : (errorMessage_.empty() ? L"No Image Loaded" : L"Unable to Open Image");
                 const std::wstring messageText = loading_
-                    ? L"Loading image..."
-                    : (errorMessage_.empty() ? L"No image is currently loaded." : errorMessage_);
-                DrawTextW(hdc, messageText.c_str(), -1, &textRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                    ? L"Decode and scaling work stay off the UI thread so navigation remains responsive."
+                    : (errorMessage_.empty()
+                        ? L"Choose another item from the browser to continue."
+                        : errorMessage_);
+
+                RECT titleRect{panelRect.left + 20, panelRect.top + 20, panelRect.right - 20, panelRect.top + 54};
+                RECT bodyRect{panelRect.left + 24, titleRect.bottom + 8, panelRect.right - 24, panelRect.bottom - 22};
+                SetTextColor(hdc, TextColor(darkTheme_));
+                DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                SetTextColor(hdc, MutedTextColor(darkTheme_));
+                DrawTextW(hdc, messageText.c_str(), -1, &bodyRect, DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+
+                DeleteObject(panelPen);
+                DeleteObject(panelBrush);
                 EndPaint(hwnd_, &paintStruct);
                 return 0;
             }
@@ -933,8 +983,6 @@ namespace hyperbrowse::viewer
             const int destinationWidth = std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedWidth) * scale)));
             const int destinationHeight = std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedHeight) * scale)));
 
-            const int clientWidth = clientRect.right - clientRect.left;
-            const int clientHeight = clientRect.bottom - clientRect.top;
             const int x = static_cast<int>(std::lround(((clientWidth - destinationWidth) / 2.0) + panOffsetX_));
             const int y = static_cast<int>(std::lround(((clientHeight - destinationHeight) / 2.0) + panOffsetY_));
 
@@ -975,6 +1023,53 @@ namespace hyperbrowse::viewer
 
             SelectObject(bitmapDc, oldBitmap);
             DeleteDC(bitmapDc);
+
+            HBRUSH panelBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
+            HPEN panelPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
+            HGDIOBJ oldBrush = SelectObject(hdc, panelBrush);
+            HGDIOBJ oldPen = SelectObject(hdc, panelPen);
+
+            const std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
+            std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
+                + std::to_wstring(static_cast<int>(items_.size()));
+            if (currentItem)
+            {
+                topLine.append(L"  |  ");
+                topLine.append(currentItem->fileType);
+                topLine.append(L"  |  ");
+                topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
+            }
+
+            std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
+            bottomLine.append(L"  |  ");
+            bottomLine.append(std::to_wstring(zoomPercent));
+            bottomLine.append(L"%");
+            bottomLine.append(L"  |  ");
+            bottomLine.append(zoomMode_ == ZoomMode::Fit ? L"Fit" : L"Custom");
+
+            const int availablePanelWidth = std::max(120, clientWidth - 32);
+            const int topPanelWidth = std::min(560, availablePanelWidth);
+            const int bottomPanelWidth = std::min(320, availablePanelWidth);
+            RECT topPanel{clientRect.left + 16, clientRect.top + 16, clientRect.left + 16 + topPanelWidth, clientRect.top + 74};
+            RECT bottomPanel{clientRect.right - 16 - bottomPanelWidth, clientRect.bottom - 52, clientRect.right - 16, clientRect.bottom - 16};
+
+            RoundRect(hdc, topPanel.left, topPanel.top, topPanel.right, topPanel.bottom, 16, 16);
+            RoundRect(hdc, bottomPanel.left, bottomPanel.top, bottomPanel.right, bottomPanel.bottom, 16, 16);
+            SelectObject(hdc, oldPen);
+            SelectObject(hdc, oldBrush);
+
+            RECT nameRect{topPanel.left + 14, topPanel.top + 10, topPanel.right - 14, topPanel.top + 34};
+            RECT topInfoRect{topPanel.left + 14, topPanel.top + 34, topPanel.right - 14, topPanel.bottom - 10};
+            RECT bottomInfoRect{bottomPanel.left + 12, bottomPanel.top + 10, bottomPanel.right - 12, bottomPanel.bottom - 10};
+
+            SetTextColor(hdc, TextColor(darkTheme_));
+            DrawTextW(hdc, fileName.c_str(), -1, &nameRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            SetTextColor(hdc, MutedTextColor(darkTheme_));
+            DrawTextW(hdc, topLine.c_str(), -1, &topInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            DrawTextW(hdc, bottomLine.c_str(), -1, &bottomInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+            DeleteObject(panelPen);
+            DeleteObject(panelBrush);
             EndPaint(hwnd_, &paintStruct);
             return 0;
         }

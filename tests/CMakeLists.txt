@@ -5,6 +5,7 @@ add_executable(HyperBrowseTests
     ../src/decode/ImageDecoder.cpp
     ../src/decode/WicThumbnailDecoder.cpp
     ../src/services/BatchConvertService.cpp
+    ../src/services/FileOperationService.cpp
     ../src/services/FolderEnumerationService.cpp
     ../src/services/FolderWatchService.cpp
     ../src/services/ImageMetadataService.cpp

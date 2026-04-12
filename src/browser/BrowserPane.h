@@ -50,6 +50,8 @@ namespace hyperbrowse::browser
         {
             COLORREF windowBackground;
             COLORREF surfaceBackground;
+            COLORREF previewBackground;
+            COLORREF selectedPreviewBackground;
             COLORREF text;
             COLORREF mutedText;
             COLORREF border;
@@ -57,6 +59,8 @@ namespace hyperbrowse::browser
             COLORREF accentFill;
             COLORREF selectionText;
             COLORREF rubberBand;
+            COLORREF placeholderBackground;
+            COLORREF rowAlternateBackground;
         };
 
         explicit BrowserPane(HINSTANCE instance);
@@ -88,11 +92,11 @@ namespace hyperbrowse::browser
 
     private:
         static constexpr const wchar_t* kClassName = L"HyperBrowseBrowserPane";
-        static constexpr int kItemPadding = 12;
-        static constexpr int kItemWidth = 184;
-        static constexpr int kItemHeight = 194;
+        static constexpr int kItemPadding = 14;
+        static constexpr int kItemWidth = 196;
+        static constexpr int kItemHeight = 220;
         static constexpr int kPreviewInset = 12;
-        static constexpr int kPreviewHeight = 112;
+        static constexpr int kPreviewHeight = 118;
 
         bool RegisterClass() const;
         bool CreateDetailsListView();
@@ -112,6 +116,7 @@ namespace hyperbrowse::browser
         void ApplyThemeToDetailsList() const;
         void RebuildThemeResources();
         void ReleaseThemeResources();
+        LRESULT HandleDetailsListCustomDraw(LPARAM lParam) const;
         void RebuildSelectionFromDetailsList();
         void SyncDetailsListSelectionFromModel();
         void UpdateSelectionBytes();
@@ -146,8 +151,11 @@ namespace hyperbrowse::browser
         bool ownsDetailsListFont_{};
         HBRUSH backgroundBrush_{};
         HBRUSH surfaceBrush_{};
+        HBRUSH previewBrush_{};
         HBRUSH selectedCellBrush_{};
         HBRUSH selectedPreviewBrush_{};
+        HBRUSH accentBrush_{};
+        HBRUSH placeholderBrush_{};
         HPEN borderPen_{};
         HPEN selectedBorderPen_{};
         HPEN rubberBandPen_{};
