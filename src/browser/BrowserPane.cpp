@@ -20,6 +20,10 @@ namespace
     constexpr int kWheelScrollAmount = 72;
     constexpr int kVisiblePriority = 0;
     constexpr int kNearVisiblePriority = 1;
+    constexpr int kProactivePrefetchPriority = 2;
+    constexpr int kNearVisiblePrefetchRows = 1;
+    constexpr int kMinimumTopOfFolderPrefetchRows = 6;
+    constexpr int kMaximumTopOfFolderPrefetchRows = 18;
 
     hyperbrowse::browser::BrowserPane::ThemeColors MakeThemeColors(bool darkTheme)
     {
@@ -1345,8 +1349,14 @@ namespace hyperbrowse::browser
         const int verticalStride = kItemHeight + kItemPadding;
         const int firstVisibleRow = std::max(0, scrollOffsetY_ / verticalStride);
         const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
-        const int requestStartRow = std::max(0, firstVisibleRow - 1);
-        const int requestEndRow = lastVisibleRow + 1;
+        const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
+        const int proactivePrefetchRows = scrollOffsetY_ == 0
+            ? std::clamp(visibleRowCount * 3,
+                         kMinimumTopOfFolderPrefetchRows,
+                         kMaximumTopOfFolderPrefetchRows)
+            : 0;
+        const int requestStartRow = std::max(0, firstVisibleRow - kNearVisiblePrefetchRows);
+        const int requestEndRow = lastVisibleRow + kNearVisiblePrefetchRows + proactivePrefetchRows;
         const int firstIndex = requestStartRow * columns;
         const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (requestEndRow + 1) * columns);
         const int targetWidth = kItemWidth - (2 * kPreviewInset);
@@ -1369,10 +1379,24 @@ namespace hyperbrowse::browser
             }
 
             const int row = viewIndex / columns;
+            int priority = kProactivePrefetchPriority;
+            if (row >= firstVisibleRow && row <= lastVisibleRow)
+            {
+                priority = kVisiblePriority;
+            }
+            else if (row >= (firstVisibleRow - kNearVisiblePrefetchRows)
+                && row <= (lastVisibleRow + kNearVisiblePrefetchRows))
+            {
+                priority = kNearVisiblePriority;
+            }
+
+            const bool preferCpu = priority <= kNearVisiblePriority;
+
             workItems.push_back(services::ThumbnailWorkItem{
                 modelIndex,
                 MakeThumbnailCacheKey(*item, targetWidth, targetHeight),
-                row >= firstVisibleRow && row <= lastVisibleRow ? kVisiblePriority : kNearVisiblePriority,
+                priority,
+                preferCpu,
             });
         }
 

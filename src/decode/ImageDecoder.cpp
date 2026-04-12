@@ -783,28 +783,11 @@ namespace hyperbrowse::decode
         return IsWicFileType(item.fileType) || IsRawFileType(item.fileType);
     }
 
-    std::shared_ptr<const cache::CachedThumbnail> DecodeThumbnail(const cache::ThumbnailCacheKey& key,
-                                                                  std::wstring* errorMessage)
+    std::shared_ptr<const cache::CachedThumbnail> DecodeThumbnailCpuOnly(const cache::ThumbnailCacheKey& key,
+                                                                         std::wstring* errorMessage)
     {
         hyperbrowse::util::Stopwatch stopwatch;
         const std::wstring fileType = FileTypeFromPath(key.filePath);
-        const bool isJpeg = fileType == L"jpg" || fileType == L"jpeg";
-        if (isJpeg && IsNvJpegAccelerationEnabled() && IsNvJpegRuntimeAvailable())
-        {
-            std::wstring nvJpegError;
-            auto thumbnail = NvJpegDecoder{}.Decode(key, &nvJpegError);
-            if (thumbnail)
-            {
-                hyperbrowse::util::RecordTiming(L"thumbnail.decode.nvjpeg", stopwatch.ElapsedMilliseconds());
-                return thumbnail;
-            }
-
-            if (errorMessage)
-            {
-                *errorMessage = std::move(nvJpegError);
-            }
-        }
-
         if (IsWicFileType(fileType))
         {
             auto thumbnail = WicThumbnailDecoder{}.Decode(key);
@@ -832,6 +815,127 @@ namespace hyperbrowse::decode
             *errorMessage = L"The selected file type is not supported for thumbnail decode.";
         }
         return {};
+    }
+
+    std::shared_ptr<const cache::CachedThumbnail> DecodeThumbnail(const cache::ThumbnailCacheKey& key,
+                                                                  std::wstring* errorMessage)
+    {
+        hyperbrowse::util::Stopwatch stopwatch;
+        const std::wstring fileType = FileTypeFromPath(key.filePath);
+        const bool isJpeg = fileType == L"jpg" || fileType == L"jpeg";
+        if (isJpeg && IsNvJpegAccelerationEnabled() && IsNvJpegRuntimeAvailable())
+        {
+            std::wstring nvJpegError;
+            auto thumbnail = NvJpegDecoder{}.Decode(key, &nvJpegError);
+            if (thumbnail)
+            {
+                hyperbrowse::util::RecordTiming(L"thumbnail.decode.nvjpeg", stopwatch.ElapsedMilliseconds());
+                return thumbnail;
+            }
+
+            if (errorMessage)
+            {
+                *errorMessage = std::move(nvJpegError);
+            }
+        }
+
+        return DecodeThumbnailCpuOnly(key, errorMessage);
+    }
+
+    std::vector<std::shared_ptr<const cache::CachedThumbnail>> DecodeThumbnailBatch(
+        const std::vector<cache::ThumbnailCacheKey>& keys,
+        std::vector<std::wstring>* errorMessages)
+    {
+        std::vector<std::shared_ptr<const cache::CachedThumbnail>> thumbnails(keys.size());
+        if (errorMessages)
+        {
+            errorMessages->assign(keys.size(), std::wstring{});
+        }
+
+        if (keys.empty())
+        {
+            return thumbnails;
+        }
+
+        bool canUseNvJpegBatch = keys.size() > 1
+            && IsNvJpegAccelerationEnabled()
+            && IsNvJpegRuntimeAvailable();
+        if (canUseNvJpegBatch)
+        {
+            for (const cache::ThumbnailCacheKey& key : keys)
+            {
+                const std::wstring fileType = FileTypeFromPath(key.filePath);
+                if (fileType != L"jpg" && fileType != L"jpeg")
+                {
+                    canUseNvJpegBatch = false;
+                    break;
+                }
+            }
+        }
+
+        if (canUseNvJpegBatch)
+        {
+            hyperbrowse::util::Stopwatch stopwatch;
+            std::vector<std::wstring> nvJpegErrors;
+            thumbnails = NvJpegDecoder{}.DecodeBatch(keys, &nvJpegErrors);
+
+            std::uint64_t successCount = 0;
+            for (const auto& thumbnail : thumbnails)
+            {
+                if (thumbnail)
+                {
+                    ++successCount;
+                }
+            }
+
+            const std::uint64_t batchImageCount = static_cast<std::uint64_t>(keys.size());
+            const std::uint64_t fallbackCount = batchImageCount - successCount;
+            hyperbrowse::util::RecordTiming(L"thumbnail.decode.nvjpeg.batch", stopwatch.ElapsedMilliseconds());
+            hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.batch.submissions");
+            hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.batch.images", batchImageCount);
+            std::wstring batchSizeCounter = L"thumbnail.decode.nvjpeg.batch.size.";
+            batchSizeCounter.append(std::to_wstring(static_cast<unsigned long long>(keys.size())));
+            hyperbrowse::util::IncrementCounter(batchSizeCounter);
+            hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.batch.success_images", successCount);
+            hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.batch.fallback_images", fallbackCount);
+            if (fallbackCount == 0)
+            {
+                hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.batch.full_success_submissions");
+            }
+            else
+            {
+                hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.batch.fallback_submissions");
+            }
+
+            for (std::size_t index = 0; index < keys.size(); ++index)
+            {
+                if (thumbnails[index])
+                {
+                    continue;
+                }
+
+                std::wstring fallbackError;
+                thumbnails[index] = DecodeThumbnail(keys[index], &fallbackError);
+                if (errorMessages)
+                {
+                    (*errorMessages)[index] = fallbackError.empty() ? nvJpegErrors[index] : std::move(fallbackError);
+                }
+            }
+
+            return thumbnails;
+        }
+
+        for (std::size_t index = 0; index < keys.size(); ++index)
+        {
+            std::wstring error;
+            thumbnails[index] = DecodeThumbnail(keys[index], &error);
+            if (errorMessages)
+            {
+                (*errorMessages)[index] = std::move(error);
+            }
+        }
+
+        return thumbnails;
     }
 
     std::shared_ptr<const cache::CachedThumbnail> DecodeFullImage(const browser::BrowserItem& item,

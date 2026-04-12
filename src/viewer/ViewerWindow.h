@@ -94,6 +94,7 @@ namespace hyperbrowse::viewer
         void ResetViewState();
         double FitScaleForClient(const RECT& clientRect) const;
         double EffectiveScaleForClient(const RECT& clientRect) const;
+        void RequestRepaint() const;
         void NotifyZoomChanged(int zoomPercent);
         void NotifyActivityChanged(bool isActive) const;
         LRESULT HandleDecodedImageMessage(LPARAM lParam);

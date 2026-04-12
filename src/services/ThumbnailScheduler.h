@@ -20,6 +20,7 @@ namespace hyperbrowse::services
         int modelIndex{};
         cache::ThumbnailCacheKey cacheKey;
         int priority{};
+        bool preferCpu{};
     };
 
     struct ThumbnailReadyUpdate

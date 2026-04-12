@@ -212,7 +212,7 @@ namespace hyperbrowse::viewer
         backgroundBrush_ = CreateSolidBrush(BackgroundColor(darkTheme_));
         if (hwnd_)
         {
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            RequestRepaint();
         }
     }
 
@@ -229,7 +229,7 @@ namespace hyperbrowse::viewer
         windowClass.hInstance = instance_;
         windowClass.lpszClassName = kWindowClassName;
         windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        windowClass.hbrBackground = nullptr;
         windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
         return RegisterClassExW(&windowClass) != 0;
     }
@@ -265,7 +265,7 @@ namespace hyperbrowse::viewer
         NotifyZoomChanged(0);
         if (hwnd_)
         {
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            RequestRepaint();
         }
     }
 
@@ -398,7 +398,7 @@ namespace hyperbrowse::viewer
                 ScheduleAdjacentPrefetch(navigationGeneration);
                 if (hwnd_)
                 {
-                    InvalidateRect(hwnd_, nullptr, TRUE);
+                    RequestRepaint();
                 }
                 return;
             }
@@ -425,7 +425,7 @@ namespace hyperbrowse::viewer
                 ScheduleAdjacentPrefetch(navigationGeneration);
                 if (hwnd_)
                 {
-                    InvalidateRect(hwnd_, nullptr, TRUE);
+                    RequestRepaint();
                 }
                 return;
             }
@@ -556,7 +556,7 @@ namespace hyperbrowse::viewer
         const double baseScale = zoomMode_ == ZoomMode::Fit ? FitScaleForClient(clientRect) : customZoomScale_;
         zoomMode_ = ZoomMode::Custom;
         customZoomScale_ = std::clamp(baseScale * factor, 0.05, 16.0);
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        RequestRepaint();
     }
 
     void ViewerWindow::FitToWindow()
@@ -566,7 +566,7 @@ namespace hyperbrowse::viewer
         panOffsetY_ = 0.0;
         if (hwnd_)
         {
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            RequestRepaint();
         }
     }
 
@@ -578,7 +578,7 @@ namespace hyperbrowse::viewer
         panOffsetY_ = 0.0;
         if (hwnd_)
         {
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            RequestRepaint();
         }
     }
 
@@ -589,7 +589,7 @@ namespace hyperbrowse::viewer
         panOffsetY_ = 0.0;
         if (hwnd_)
         {
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            RequestRepaint();
         }
     }
 
@@ -600,7 +600,7 @@ namespace hyperbrowse::viewer
         panOffsetY_ = 0.0;
         if (hwnd_)
         {
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            RequestRepaint();
         }
     }
 
@@ -691,6 +691,14 @@ namespace hyperbrowse::viewer
         return zoomMode_ == ZoomMode::Fit ? FitScaleForClient(clientRect) : customZoomScale_;
     }
 
+    void ViewerWindow::RequestRepaint() const
+    {
+        if (hwnd_)
+        {
+            RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE);
+        }
+    }
+
     void ViewerWindow::NotifyZoomChanged(int zoomPercent)
     {
         currentZoomPercent_ = zoomPercent;
@@ -746,7 +754,7 @@ namespace hyperbrowse::viewer
         }
         if (hwnd_)
         {
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            RequestRepaint();
         }
         return 0;
     }
@@ -801,7 +809,7 @@ namespace hyperbrowse::viewer
         switch (message)
         {
         case WM_SIZE:
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            RequestRepaint();
             return 0;
         case WM_ERASEBKGND:
             return 1;
@@ -879,7 +887,7 @@ namespace hyperbrowse::viewer
                 panOffsetX_ += static_cast<double>(currentPoint.x - lastPanPoint_.x);
                 panOffsetY_ += static_cast<double>(currentPoint.y - lastPanPoint_.y);
                 lastPanPoint_ = currentPoint;
-                InvalidateRect(hwnd_, nullptr, TRUE);
+                RequestRepaint();
                 return 0;
             }
             break;
@@ -918,10 +926,35 @@ namespace hyperbrowse::viewer
             GetClientRect(hwnd_, &clientRect);
             const int clientWidth = clientRect.right - clientRect.left;
             const int clientHeight = clientRect.bottom - clientRect.top;
-            FillRect(hdc, &clientRect, backgroundBrush_);
+            if (clientWidth <= 0 || clientHeight <= 0)
+            {
+                EndPaint(hwnd_, &paintStruct);
+                return 0;
+            }
 
-            SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, TextColor(darkTheme_));
+            HDC frameDc = hdc;
+            HDC backBufferDc = CreateCompatibleDC(hdc);
+            HBITMAP backBufferBitmap = nullptr;
+            HGDIOBJ oldBackBufferBitmap = nullptr;
+            if (backBufferDc)
+            {
+                backBufferBitmap = CreateCompatibleBitmap(hdc, std::max(1, clientWidth), std::max(1, clientHeight));
+                if (backBufferBitmap)
+                {
+                    oldBackBufferBitmap = SelectObject(backBufferDc, backBufferBitmap);
+                    frameDc = backBufferDc;
+                }
+                else
+                {
+                    DeleteDC(backBufferDc);
+                    backBufferDc = nullptr;
+                }
+            }
+
+            FillRect(frameDc, &clientRect, backgroundBrush_);
+
+            SetBkMode(frameDc, TRANSPARENT);
+            SetTextColor(frameDc, TextColor(darkTheme_));
 
             const browser::BrowserItem* currentItem =
                 (currentIndex_ >= 0 && currentIndex_ < static_cast<int>(items_.size()))
@@ -940,11 +973,11 @@ namespace hyperbrowse::viewer
 
                 HBRUSH panelBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
                 HPEN panelPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
-                HGDIOBJ oldBrush = SelectObject(hdc, panelBrush);
-                HGDIOBJ oldPen = SelectObject(hdc, panelPen);
-                RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 18, 18);
-                SelectObject(hdc, oldPen);
-                SelectObject(hdc, oldBrush);
+                HGDIOBJ oldBrush = SelectObject(frameDc, panelBrush);
+                HGDIOBJ oldPen = SelectObject(frameDc, panelPen);
+                RoundRect(frameDc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 18, 18);
+                SelectObject(frameDc, oldPen);
+                SelectObject(frameDc, oldBrush);
 
                 const std::wstring title = loading_
                     ? L"Loading Image"
@@ -957,119 +990,132 @@ namespace hyperbrowse::viewer
 
                 RECT titleRect{panelRect.left + 20, panelRect.top + 20, panelRect.right - 20, panelRect.top + 54};
                 RECT bodyRect{panelRect.left + 24, titleRect.bottom + 8, panelRect.right - 24, panelRect.bottom - 22};
-                SetTextColor(hdc, TextColor(darkTheme_));
-                DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-                SetTextColor(hdc, MutedTextColor(darkTheme_));
-                DrawTextW(hdc, messageText.c_str(), -1, &bodyRect, DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                SetTextColor(frameDc, TextColor(darkTheme_));
+                DrawTextW(frameDc, title.c_str(), -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                SetTextColor(frameDc, MutedTextColor(darkTheme_));
+                DrawTextW(frameDc, messageText.c_str(), -1, &bodyRect, DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
 
                 DeleteObject(panelPen);
                 DeleteObject(panelBrush);
-                EndPaint(hwnd_, &paintStruct);
-                return 0;
-            }
-
-            const double scale = EffectiveScaleForClient(clientRect);
-            const int zoomPercent = std::max(1, static_cast<int>(std::lround(scale * 100.0)));
-            if (zoomPercent != currentZoomPercent_)
-            {
-                NotifyZoomChanged(zoomPercent);
-            }
-
-            const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
-            const int sourceWidth = currentImage_->SourceWidth();
-            const int sourceHeight = currentImage_->SourceHeight();
-            const int rotatedWidth = swapDimensions ? sourceHeight : sourceWidth;
-            const int rotatedHeight = swapDimensions ? sourceWidth : sourceHeight;
-            const int destinationWidth = std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedWidth) * scale)));
-            const int destinationHeight = std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedHeight) * scale)));
-
-            const int x = static_cast<int>(std::lround(((clientWidth - destinationWidth) / 2.0) + panOffsetX_));
-            const int y = static_cast<int>(std::lround(((clientHeight - destinationHeight) / 2.0) + panOffsetY_));
-
-            HDC bitmapDc = CreateCompatibleDC(hdc);
-            HGDIOBJ oldBitmap = SelectObject(bitmapDc, currentImage_->Bitmap());
-            SetStretchBltMode(hdc, HALFTONE);
-
-            if (rotationQuarterTurns_ == 0)
-            {
-                StretchBlt(hdc, x, y, destinationWidth, destinationHeight, bitmapDc, 0, 0, sourceWidth, sourceHeight, SRCCOPY);
             }
             else
             {
-                POINT destination[3]{};
-                switch (rotationQuarterTurns_)
+                const double scale = EffectiveScaleForClient(clientRect);
+                const int zoomPercent = std::max(1, static_cast<int>(std::lround(scale * 100.0)));
+                if (zoomPercent != currentZoomPercent_)
                 {
-                case 1:
-                    destination[0] = POINT{x + destinationWidth, y};
-                    destination[1] = POINT{x + destinationWidth, y + destinationHeight};
-                    destination[2] = POINT{x, y};
-                    break;
-                case 2:
-                    destination[0] = POINT{x + destinationWidth, y + destinationHeight};
-                    destination[1] = POINT{x, y + destinationHeight};
-                    destination[2] = POINT{x + destinationWidth, y};
-                    break;
-                case 3:
-                    destination[0] = POINT{x, y + destinationHeight};
-                    destination[1] = POINT{x, y};
-                    destination[2] = POINT{x + destinationWidth, y + destinationHeight};
-                    break;
-                default:
-                    break;
+                    NotifyZoomChanged(zoomPercent);
                 }
 
-                PlgBlt(hdc, destination, bitmapDc, 0, 0, sourceWidth, sourceHeight, nullptr, 0, 0);
+                const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+                const int sourceWidth = currentImage_->SourceWidth();
+                const int sourceHeight = currentImage_->SourceHeight();
+                const int rotatedWidth = swapDimensions ? sourceHeight : sourceWidth;
+                const int rotatedHeight = swapDimensions ? sourceWidth : sourceHeight;
+                const int destinationWidth = std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedWidth) * scale)));
+                const int destinationHeight = std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedHeight) * scale)));
+
+                const int x = static_cast<int>(std::lround(((clientWidth - destinationWidth) / 2.0) + panOffsetX_));
+                const int y = static_cast<int>(std::lround(((clientHeight - destinationHeight) / 2.0) + panOffsetY_));
+
+                HDC bitmapDc = CreateCompatibleDC(frameDc);
+                if (bitmapDc)
+                {
+                    HGDIOBJ oldBitmap = SelectObject(bitmapDc, currentImage_->Bitmap());
+                    SetStretchBltMode(frameDc, HALFTONE);
+                    SetBrushOrgEx(frameDc, 0, 0, nullptr);
+
+                    if (rotationQuarterTurns_ == 0)
+                    {
+                        StretchBlt(frameDc, x, y, destinationWidth, destinationHeight, bitmapDc, 0, 0, sourceWidth, sourceHeight, SRCCOPY);
+                    }
+                    else
+                    {
+                        POINT destination[3]{};
+                        switch (rotationQuarterTurns_)
+                        {
+                        case 1:
+                            destination[0] = POINT{x + destinationWidth, y};
+                            destination[1] = POINT{x + destinationWidth, y + destinationHeight};
+                            destination[2] = POINT{x, y};
+                            break;
+                        case 2:
+                            destination[0] = POINT{x + destinationWidth, y + destinationHeight};
+                            destination[1] = POINT{x, y + destinationHeight};
+                            destination[2] = POINT{x + destinationWidth, y};
+                            break;
+                        case 3:
+                            destination[0] = POINT{x, y + destinationHeight};
+                            destination[1] = POINT{x, y};
+                            destination[2] = POINT{x + destinationWidth, y + destinationHeight};
+                            break;
+                        default:
+                            break;
+                        }
+
+                        PlgBlt(frameDc, destination, bitmapDc, 0, 0, sourceWidth, sourceHeight, nullptr, 0, 0);
+                    }
+
+                    SelectObject(bitmapDc, oldBitmap);
+                    DeleteDC(bitmapDc);
+                }
+
+                HBRUSH panelBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
+                HPEN panelPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
+                HGDIOBJ oldBrush = SelectObject(frameDc, panelBrush);
+                HGDIOBJ oldPen = SelectObject(frameDc, panelPen);
+
+                const std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
+                std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
+                    + std::to_wstring(static_cast<int>(items_.size()));
+                if (currentItem)
+                {
+                    topLine.append(L"  |  ");
+                    topLine.append(currentItem->fileType);
+                    topLine.append(L"  |  ");
+                    topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
+                }
+
+                std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
+                bottomLine.append(L"  |  ");
+                bottomLine.append(std::to_wstring(zoomPercent));
+                bottomLine.append(L"%");
+                bottomLine.append(L"  |  ");
+                bottomLine.append(zoomMode_ == ZoomMode::Fit ? L"Fit" : L"Custom");
+
+                const int availablePanelWidth = std::max(120, clientWidth - 32);
+                const int topPanelWidth = std::min(560, availablePanelWidth);
+                const int bottomPanelWidth = std::min(320, availablePanelWidth);
+                RECT topPanel{clientRect.left + 16, clientRect.top + 16, clientRect.left + 16 + topPanelWidth, clientRect.top + 74};
+                RECT bottomPanel{clientRect.right - 16 - bottomPanelWidth, clientRect.bottom - 52, clientRect.right - 16, clientRect.bottom - 16};
+
+                RoundRect(frameDc, topPanel.left, topPanel.top, topPanel.right, topPanel.bottom, 16, 16);
+                RoundRect(frameDc, bottomPanel.left, bottomPanel.top, bottomPanel.right, bottomPanel.bottom, 16, 16);
+                SelectObject(frameDc, oldPen);
+                SelectObject(frameDc, oldBrush);
+
+                RECT nameRect{topPanel.left + 14, topPanel.top + 10, topPanel.right - 14, topPanel.top + 34};
+                RECT topInfoRect{topPanel.left + 14, topPanel.top + 34, topPanel.right - 14, topPanel.bottom - 10};
+                RECT bottomInfoRect{bottomPanel.left + 12, bottomPanel.top + 10, bottomPanel.right - 12, bottomPanel.bottom - 10};
+
+                SetTextColor(frameDc, TextColor(darkTheme_));
+                DrawTextW(frameDc, fileName.c_str(), -1, &nameRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                SetTextColor(frameDc, MutedTextColor(darkTheme_));
+                DrawTextW(frameDc, topLine.c_str(), -1, &topInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                DrawTextW(frameDc, bottomLine.c_str(), -1, &bottomInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+                DeleteObject(panelPen);
+                DeleteObject(panelBrush);
             }
 
-            SelectObject(bitmapDc, oldBitmap);
-            DeleteDC(bitmapDc);
-
-            HBRUSH panelBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
-            HPEN panelPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
-            HGDIOBJ oldBrush = SelectObject(hdc, panelBrush);
-            HGDIOBJ oldPen = SelectObject(hdc, panelPen);
-
-            const std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
-            std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
-                + std::to_wstring(static_cast<int>(items_.size()));
-            if (currentItem)
+            if (backBufferDc)
             {
-                topLine.append(L"  |  ");
-                topLine.append(currentItem->fileType);
-                topLine.append(L"  |  ");
-                topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
+                BitBlt(hdc, 0, 0, clientWidth, clientHeight, backBufferDc, 0, 0, SRCCOPY);
+                SelectObject(backBufferDc, oldBackBufferBitmap);
+                DeleteObject(backBufferBitmap);
+                DeleteDC(backBufferDc);
             }
 
-            std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
-            bottomLine.append(L"  |  ");
-            bottomLine.append(std::to_wstring(zoomPercent));
-            bottomLine.append(L"%");
-            bottomLine.append(L"  |  ");
-            bottomLine.append(zoomMode_ == ZoomMode::Fit ? L"Fit" : L"Custom");
-
-            const int availablePanelWidth = std::max(120, clientWidth - 32);
-            const int topPanelWidth = std::min(560, availablePanelWidth);
-            const int bottomPanelWidth = std::min(320, availablePanelWidth);
-            RECT topPanel{clientRect.left + 16, clientRect.top + 16, clientRect.left + 16 + topPanelWidth, clientRect.top + 74};
-            RECT bottomPanel{clientRect.right - 16 - bottomPanelWidth, clientRect.bottom - 52, clientRect.right - 16, clientRect.bottom - 16};
-
-            RoundRect(hdc, topPanel.left, topPanel.top, topPanel.right, topPanel.bottom, 16, 16);
-            RoundRect(hdc, bottomPanel.left, bottomPanel.top, bottomPanel.right, bottomPanel.bottom, 16, 16);
-            SelectObject(hdc, oldPen);
-            SelectObject(hdc, oldBrush);
-
-            RECT nameRect{topPanel.left + 14, topPanel.top + 10, topPanel.right - 14, topPanel.top + 34};
-            RECT topInfoRect{topPanel.left + 14, topPanel.top + 34, topPanel.right - 14, topPanel.bottom - 10};
-            RECT bottomInfoRect{bottomPanel.left + 12, bottomPanel.top + 10, bottomPanel.right - 12, bottomPanel.bottom - 10};
-
-            SetTextColor(hdc, TextColor(darkTheme_));
-            DrawTextW(hdc, fileName.c_str(), -1, &nameRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            SetTextColor(hdc, MutedTextColor(darkTheme_));
-            DrawTextW(hdc, topLine.c_str(), -1, &topInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            DrawTextW(hdc, bottomLine.c_str(), -1, &bottomInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-
-            DeleteObject(panelPen);
-            DeleteObject(panelBrush);
             EndPaint(hwnd_, &paintStruct);
             return 0;
         }

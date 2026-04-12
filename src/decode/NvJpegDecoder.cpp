@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "decode/WicDecodeHelpers.h"
+#include "util/Diagnostics.h"
 
 namespace fs = std::filesystem;
 
@@ -56,7 +58,7 @@ namespace
     struct nvjpegImage_t
     {
         unsigned char* channel[kNvjpegMaxComponents]{};
-        unsigned int pitch[kNvjpegMaxComponents]{};
+        std::size_t pitch[kNvjpegMaxComponents]{};
     };
 
     using NvjpegCreateSimpleFn = nvjpegStatus_t(__cdecl*)(nvjpegHandle_t*);
@@ -77,6 +79,17 @@ namespace
                                                     nvjpegOutputFormat_t,
                                                     nvjpegImage_t*,
                                                     cudaStream_t);
+    using NvjpegDecodeBatchedInitializeFn = nvjpegStatus_t(__cdecl*)(nvjpegHandle_t,
+                                                                     nvjpegJpegState_t,
+                                                                     int,
+                                                                     int,
+                                                                     nvjpegOutputFormat_t);
+    using NvjpegDecodeBatchedFn = nvjpegStatus_t(__cdecl*)(nvjpegHandle_t,
+                                                           nvjpegJpegState_t,
+                                                           const unsigned char* const*,
+                                                           const std::size_t*,
+                                                           nvjpegImage_t*,
+                                                           cudaStream_t);
 
     using CudaGetDeviceCountFn = cudaError_t(__cdecl*)(int*);
     using CudaSetDeviceFn = cudaError_t(__cdecl*)(int);
@@ -102,10 +115,17 @@ namespace
         L"cudart64_100.dll",
     };
 
-    struct FloatPoint
+    struct PreparedDecodeRequest
     {
-        double x{};
-        double y{};
+        std::vector<std::uint8_t> fileBytes;
+        int sourceWidth{};
+        int sourceHeight{};
+        int orientedWidth{};
+        int orientedHeight{};
+        std::uint16_t orientation{1};
+        UINT scaledWidth{};
+        UINT scaledHeight{};
+        std::size_t sourceBufferSize{};
     };
 
     HMODULE LoadFirstAvailableModule(const wchar_t* const* candidateNames,
@@ -169,36 +189,6 @@ namespace
     std::uint16_t NormalizeOrientation(std::uint16_t orientation)
     {
         return orientation >= 1 && orientation <= 8 ? orientation : 1;
-    }
-
-    FloatPoint MapOrientedToSource(double orientedX,
-                                   double orientedY,
-                                   int sourceWidth,
-                                   int sourceHeight,
-                                   std::uint16_t orientation)
-    {
-        switch (NormalizeOrientation(orientation))
-        {
-        case 2:
-            return FloatPoint{static_cast<double>(sourceWidth - 1) - orientedX, orientedY};
-        case 3:
-            return FloatPoint{static_cast<double>(sourceWidth - 1) - orientedX,
-                              static_cast<double>(sourceHeight - 1) - orientedY};
-        case 4:
-            return FloatPoint{orientedX, static_cast<double>(sourceHeight - 1) - orientedY};
-        case 5:
-            return FloatPoint{orientedY, orientedX};
-        case 6:
-            return FloatPoint{orientedY, static_cast<double>(sourceHeight - 1) - orientedX};
-        case 7:
-            return FloatPoint{static_cast<double>(sourceWidth - 1) - orientedY,
-                              static_cast<double>(sourceHeight - 1) - orientedX};
-        case 8:
-            return FloatPoint{static_cast<double>(sourceWidth - 1) - orientedY, orientedX};
-        case 1:
-        default:
-            return FloatPoint{orientedX, orientedY};
-        }
     }
 
     bool ComputeBufferSize(int width, int height, int channels, std::size_t* bufferSize)
@@ -265,82 +255,289 @@ namespace
         return true;
     }
 
-    std::uint16_t ReadJpegOrientation(const std::wstring& filePath)
+    bool ReadBigEndian16(const std::vector<std::uint8_t>& bytes,
+                         std::size_t offset,
+                         std::uint16_t* value)
     {
-        namespace wic = hyperbrowse::decode::wic_support;
-        using Microsoft::WRL::ComPtr;
-
-        std::wstring ignoredError;
-        wic::ComInitializationScope comInitialization(
-            COINIT_MULTITHREADED,
-            &ignoredError,
-            L"Failed to initialize COM for JPEG metadata decode.");
-        if (!comInitialization.Succeeded())
+        if (!value || offset + 1 >= bytes.size())
         {
-            return 1;
+            return false;
         }
 
-        ComPtr<IWICImagingFactory> factory;
-        if (!wic::InitializeWicFactory(&factory, &ignoredError))
-        {
-            return 1;
-        }
-
-        ComPtr<IWICBitmapDecoder> decoder;
-        const HRESULT decoderResult = factory->CreateDecoderFromFilename(
-            filePath.c_str(),
-            nullptr,
-            GENERIC_READ,
-            WICDecodeMetadataCacheOnDemand,
-            &decoder);
-        if (FAILED(decoderResult) || !decoder)
-        {
-            return 1;
-        }
-
-        ComPtr<IWICBitmapFrameDecode> frame;
-        if (FAILED(decoder->GetFrame(0, &frame)) || !frame)
-        {
-            return 1;
-        }
-
-        return wic::ReadOrientation(frame.Get());
+        *value = static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[offset]) << 8)
+                                            | static_cast<std::uint16_t>(bytes[offset + 1]));
+        return true;
     }
 
-    double SampleBgrComponent(const std::vector<std::uint8_t>& sourcePixels,
-                              int sourceWidth,
-                              int sourceHeight,
-                              double sourceX,
-                              double sourceY,
-                              int componentIndex)
+    bool ReadTiff16(const std::uint8_t* bytes,
+                    std::size_t length,
+                    std::size_t offset,
+                    bool littleEndian,
+                    std::uint16_t* value)
     {
-        const int stride = sourceWidth * 3;
-        const double clampedX = std::clamp(sourceX, 0.0, static_cast<double>(sourceWidth - 1));
-        const double clampedY = std::clamp(sourceY, 0.0, static_cast<double>(sourceHeight - 1));
+        if (!bytes || !value || offset + 1 >= length)
+        {
+            return false;
+        }
 
-        const int x0 = static_cast<int>(std::floor(clampedX));
-        const int y0 = static_cast<int>(std::floor(clampedY));
-        const int x1 = std::min(sourceWidth - 1, x0 + 1);
-        const int y1 = std::min(sourceHeight - 1, y0 + 1);
+        if (littleEndian)
+        {
+            *value = static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[offset])
+                                                | (static_cast<std::uint16_t>(bytes[offset + 1]) << 8));
+        }
+        else
+        {
+            *value = static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[offset]) << 8)
+                                                | static_cast<std::uint16_t>(bytes[offset + 1]));
+        }
 
-        const double tx = clampedX - static_cast<double>(x0);
-        const double ty = clampedY - static_cast<double>(y0);
-
-        const double sample00 = sourcePixels[(y0 * stride) + (x0 * 3) + componentIndex];
-        const double sample10 = sourcePixels[(y0 * stride) + (x1 * 3) + componentIndex];
-        const double sample01 = sourcePixels[(y1 * stride) + (x0 * 3) + componentIndex];
-        const double sample11 = sourcePixels[(y1 * stride) + (x1 * 3) + componentIndex];
-
-        const double top = sample00 + ((sample10 - sample00) * tx);
-        const double bottom = sample01 + ((sample11 - sample01) * tx);
-        return top + ((bottom - top) * ty);
+        return true;
     }
 
-    std::uint8_t ClampToByte(double value)
+    bool ReadTiff32(const std::uint8_t* bytes,
+                    std::size_t length,
+                    std::size_t offset,
+                    bool littleEndian,
+                    std::uint32_t* value)
     {
-        const long rounded = std::lround(value);
-        const long clamped = std::clamp(rounded, 0L, 255L);
-        return static_cast<std::uint8_t>(clamped);
+        if (!bytes || !value || offset + 3 >= length)
+        {
+            return false;
+        }
+
+        if (littleEndian)
+        {
+            *value = static_cast<std::uint32_t>(bytes[offset])
+                | (static_cast<std::uint32_t>(bytes[offset + 1]) << 8)
+                | (static_cast<std::uint32_t>(bytes[offset + 2]) << 16)
+                | (static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
+        }
+        else
+        {
+            *value = (static_cast<std::uint32_t>(bytes[offset]) << 24)
+                | (static_cast<std::uint32_t>(bytes[offset + 1]) << 16)
+                | (static_cast<std::uint32_t>(bytes[offset + 2]) << 8)
+                | static_cast<std::uint32_t>(bytes[offset + 3]);
+        }
+
+        return true;
+    }
+
+    std::uint16_t ParseExifOrientationSegment(const std::uint8_t* bytes, std::size_t length)
+    {
+        if (!bytes || length < 14 || std::memcmp(bytes, "Exif\0\0", 6) != 0)
+        {
+            return 1;
+        }
+
+        const std::uint8_t* tiffData = bytes + 6;
+        const std::size_t tiffLength = length - 6;
+        const bool littleEndian = tiffLength >= 2 && tiffData[0] == 'I' && tiffData[1] == 'I';
+        const bool bigEndian = tiffLength >= 2 && tiffData[0] == 'M' && tiffData[1] == 'M';
+        if (!littleEndian && !bigEndian)
+        {
+            return 1;
+        }
+
+        std::uint16_t magic = 0;
+        if (!ReadTiff16(tiffData, tiffLength, 2, littleEndian, &magic) || magic != 42)
+        {
+            return 1;
+        }
+
+        std::uint32_t ifdOffset = 0;
+        if (!ReadTiff32(tiffData, tiffLength, 4, littleEndian, &ifdOffset) || ifdOffset + 2 > tiffLength)
+        {
+            return 1;
+        }
+
+        std::uint16_t entryCount = 0;
+        if (!ReadTiff16(tiffData, tiffLength, ifdOffset, littleEndian, &entryCount))
+        {
+            return 1;
+        }
+
+        std::size_t entryOffset = static_cast<std::size_t>(ifdOffset) + 2;
+        for (std::uint16_t entryIndex = 0; entryIndex < entryCount; ++entryIndex, entryOffset += 12)
+        {
+            if (entryOffset + 12 > tiffLength)
+            {
+                return 1;
+            }
+
+            std::uint16_t tag = 0;
+            std::uint16_t type = 0;
+            std::uint32_t count = 0;
+            if (!ReadTiff16(tiffData, tiffLength, entryOffset, littleEndian, &tag)
+                || !ReadTiff16(tiffData, tiffLength, entryOffset + 2, littleEndian, &type)
+                || !ReadTiff32(tiffData, tiffLength, entryOffset + 4, littleEndian, &count))
+            {
+                return 1;
+            }
+
+            if (tag != 0x0112 || type != 3 || count == 0)
+            {
+                continue;
+            }
+
+            std::uint16_t orientation = 1;
+            if (count == 1)
+            {
+                if (!ReadTiff16(tiffData, tiffLength, entryOffset + 8, littleEndian, &orientation))
+                {
+                    return 1;
+                }
+                return NormalizeOrientation(orientation);
+            }
+
+            std::uint32_t valueOffset = 0;
+            if (!ReadTiff32(tiffData, tiffLength, entryOffset + 8, littleEndian, &valueOffset)
+                || !ReadTiff16(tiffData, tiffLength, valueOffset, littleEndian, &orientation))
+            {
+                return 1;
+            }
+            return NormalizeOrientation(orientation);
+        }
+
+        return 1;
+    }
+
+    std::uint16_t ReadJpegOrientationFromBytes(const std::vector<std::uint8_t>& bytes)
+    {
+        if (bytes.size() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8)
+        {
+            return 1;
+        }
+
+        std::size_t offset = 2;
+        while (offset + 3 < bytes.size())
+        {
+            while (offset < bytes.size() && bytes[offset] != 0xFF)
+            {
+                ++offset;
+            }
+
+            while (offset < bytes.size() && bytes[offset] == 0xFF)
+            {
+                ++offset;
+            }
+
+            if (offset >= bytes.size())
+            {
+                break;
+            }
+
+            const std::uint8_t marker = bytes[offset++];
+            if (marker == 0xD9 || marker == 0xDA)
+            {
+                break;
+            }
+
+            if ((marker >= 0xD0 && marker <= 0xD7) || marker == 0x01)
+            {
+                continue;
+            }
+
+            std::uint16_t segmentLength = 0;
+            if (!ReadBigEndian16(bytes, offset, &segmentLength) || segmentLength < 2)
+            {
+                break;
+            }
+
+            const std::size_t segmentDataOffset = offset + 2;
+            const std::size_t segmentDataLength = static_cast<std::size_t>(segmentLength) - 2;
+            if (segmentDataOffset + segmentDataLength > bytes.size())
+            {
+                break;
+            }
+
+            if (marker == 0xE1)
+            {
+                const std::uint16_t orientation = ParseExifOrientationSegment(bytes.data() + segmentDataOffset,
+                                                                              segmentDataLength);
+                if (orientation != 1)
+                {
+                    return orientation;
+                }
+            }
+
+            offset = segmentDataOffset + segmentDataLength;
+        }
+
+        return 1;
+    }
+
+    struct AxisSample
+    {
+        int first{};
+        int second{};
+        std::uint16_t weight256{};
+    };
+
+    std::vector<AxisSample> BuildAxisSamples(int sourceExtent, int destinationExtent, bool reversed)
+    {
+        std::vector<AxisSample> samples(static_cast<std::size_t>(std::max(0, destinationExtent)));
+        if (sourceExtent <= 0 || destinationExtent <= 0)
+        {
+            return samples;
+        }
+
+        if (sourceExtent == 1)
+        {
+            for (AxisSample& sample : samples)
+            {
+                sample.first = 0;
+                sample.second = 0;
+                sample.weight256 = 0;
+            }
+            return samples;
+        }
+
+        const double scale = static_cast<double>(sourceExtent) / static_cast<double>(destinationExtent);
+        for (int destinationIndex = 0; destinationIndex < destinationExtent; ++destinationIndex)
+        {
+            double sourcePosition = ((static_cast<double>(destinationIndex) + 0.5) * scale) - 0.5;
+            if (reversed)
+            {
+                sourcePosition = static_cast<double>(sourceExtent - 1) - sourcePosition;
+            }
+
+            sourcePosition = std::clamp(sourcePosition, 0.0, static_cast<double>(sourceExtent - 1));
+            const int first = static_cast<int>(std::floor(sourcePosition));
+            const int second = std::min(sourceExtent - 1, first + 1);
+            const int weight256 = second == first
+                ? 0
+                : std::clamp(static_cast<int>(std::lround((sourcePosition - static_cast<double>(first)) * 256.0)), 0, 256);
+
+            samples[static_cast<std::size_t>(destinationIndex)] = AxisSample{
+                first,
+                second,
+                static_cast<std::uint16_t>(weight256),
+            };
+        }
+
+        return samples;
+    }
+
+    void CopyBgrToBgra(const std::vector<std::uint8_t>& sourcePixels,
+                      int width,
+                      int height,
+                      std::uint8_t* destinationPixels)
+    {
+        const int sourceStride = width * 3;
+        const int destinationStride = width * 4;
+        for (int y = 0; y < height; ++y)
+        {
+            const std::uint8_t* sourceRow = sourcePixels.data() + (y * sourceStride);
+            std::uint8_t* destinationRow = destinationPixels + (y * destinationStride);
+            for (int x = 0; x < width; ++x)
+            {
+                destinationRow[(x * 4) + 0] = sourceRow[(x * 3) + 0];
+                destinationRow[(x * 4) + 1] = sourceRow[(x * 3) + 1];
+                destinationRow[(x * 4) + 2] = sourceRow[(x * 3) + 2];
+                destinationRow[(x * 4) + 3] = 255;
+            }
+        }
     }
 
     void ResampleOrientedBgrToBgra(const std::vector<std::uint8_t>& sourcePixels,
@@ -356,31 +553,92 @@ namespace
             return;
         }
 
-        const int orientedWidth = OrientationSwapsDimensions(orientation) ? sourceHeight : sourceWidth;
-        const int orientedHeight = OrientationSwapsDimensions(orientation) ? sourceWidth : sourceHeight;
-        const double xScale = static_cast<double>(orientedWidth) / static_cast<double>(destinationWidth);
-        const double yScale = static_cast<double>(orientedHeight) / static_cast<double>(destinationHeight);
+        const std::uint16_t normalizedOrientation = NormalizeOrientation(orientation);
+        if (normalizedOrientation == 1 && destinationWidth == sourceWidth && destinationHeight == sourceHeight)
+        {
+            CopyBgrToBgra(sourcePixels, sourceWidth, sourceHeight, destinationPixels);
+            return;
+        }
+
+        const bool axisSwap = normalizedOrientation >= 5;
+        int xSourceExtent = sourceWidth;
+        int ySourceExtent = sourceHeight;
+        bool xReversed = false;
+        bool yReversed = false;
+        switch (normalizedOrientation)
+        {
+        case 2:
+            xReversed = true;
+            break;
+        case 3:
+            xReversed = true;
+            yReversed = true;
+            break;
+        case 4:
+            yReversed = true;
+            break;
+        case 5:
+            xSourceExtent = sourceHeight;
+            ySourceExtent = sourceWidth;
+            break;
+        case 6:
+            xSourceExtent = sourceHeight;
+            ySourceExtent = sourceWidth;
+            yReversed = true;
+            break;
+        case 7:
+            xSourceExtent = sourceHeight;
+            ySourceExtent = sourceWidth;
+            xReversed = true;
+            yReversed = true;
+            break;
+        case 8:
+            xSourceExtent = sourceHeight;
+            ySourceExtent = sourceWidth;
+            xReversed = true;
+            break;
+        default:
+            break;
+        }
+
+        const std::vector<AxisSample> xSamples = BuildAxisSamples(xSourceExtent, destinationWidth, xReversed);
+        const std::vector<AxisSample> ySamples = BuildAxisSamples(ySourceExtent, destinationHeight, yReversed);
+        const int sourceStride = sourceWidth * 3;
         const int destinationStride = destinationWidth * 4;
 
         for (int y = 0; y < destinationHeight; ++y)
         {
             std::uint8_t* destinationRow = destinationPixels + (y * destinationStride);
-            const double orientedY = ((static_cast<double>(y) + 0.5) * yScale) - 0.5;
+            const AxisSample& yAxis = ySamples[static_cast<std::size_t>(y)];
             for (int x = 0; x < destinationWidth; ++x)
             {
-                const double orientedX = ((static_cast<double>(x) + 0.5) * xScale) - 0.5;
-                const FloatPoint sourcePoint = MapOrientedToSource(orientedX,
-                                                                   orientedY,
-                                                                   sourceWidth,
-                                                                   sourceHeight,
-                                                                   orientation);
+                const AxisSample& xAxis = xSamples[static_cast<std::size_t>(x)];
+                const AxisSample& sourceXAxis = axisSwap ? yAxis : xAxis;
+                const AxisSample& sourceYAxis = axisSwap ? xAxis : yAxis;
 
-                destinationRow[(x * 4) + 0] = ClampToByte(
-                    SampleBgrComponent(sourcePixels, sourceWidth, sourceHeight, sourcePoint.x, sourcePoint.y, 0));
-                destinationRow[(x * 4) + 1] = ClampToByte(
-                    SampleBgrComponent(sourcePixels, sourceWidth, sourceHeight, sourcePoint.x, sourcePoint.y, 1));
-                destinationRow[(x * 4) + 2] = ClampToByte(
-                    SampleBgrComponent(sourcePixels, sourceWidth, sourceHeight, sourcePoint.x, sourcePoint.y, 2));
+                const int sourceX0 = sourceXAxis.first;
+                const int sourceX1 = sourceXAxis.second;
+                const int sourceY0 = sourceYAxis.first;
+                const int sourceY1 = sourceYAxis.second;
+                const int weightX = sourceXAxis.weight256;
+                const int weightY = sourceYAxis.weight256;
+
+                const std::uint8_t* sourceRow0 = sourcePixels.data() + (sourceY0 * sourceStride);
+                const std::uint8_t* sourceRow1 = sourcePixels.data() + (sourceY1 * sourceStride);
+                const int index00 = sourceX0 * 3;
+                const int index10 = sourceX1 * 3;
+                for (int componentIndex = 0; componentIndex < 3; ++componentIndex)
+                {
+                    const int sample00 = sourceRow0[index00 + componentIndex];
+                    const int sample10 = sourceRow0[index10 + componentIndex];
+                    const int sample01 = sourceRow1[index00 + componentIndex];
+                    const int sample11 = sourceRow1[index10 + componentIndex];
+
+                    const int top = (sample00 * (256 - weightX)) + (sample10 * weightX);
+                    const int bottom = (sample01 * (256 - weightX)) + (sample11 * weightX);
+                    destinationRow[(x * 4) + componentIndex] = static_cast<std::uint8_t>(
+                        ((top * (256 - weightY)) + (bottom * weightY) + 32768) >> 16);
+                }
                 destinationRow[(x * 4) + 3] = 255;
             }
         }
@@ -433,6 +691,8 @@ namespace
         NvjpegJpegStateDestroyFn nvjpegJpegStateDestroy_{};
         NvjpegGetImageInfoFn nvjpegGetImageInfo_{};
         NvjpegDecodeFn nvjpegDecode_{};
+        NvjpegDecodeBatchedInitializeFn nvjpegDecodeBatchedInitialize_{};
+        NvjpegDecodeBatchedFn nvjpegDecodeBatched_{};
         CudaSetDeviceFn cudaSetDevice_{};
         CudaStreamCreateFn cudaStreamCreate_{};
         CudaStreamCreateWithFlagsFn cudaStreamCreateWithFlags_{};
@@ -486,6 +746,9 @@ namespace
                 failureReason_ = L"Failed to resolve the required nvJPEG or CUDA runtime entry points.";
                 return;
             }
+
+            LoadProc(nvjpegModule_, "nvjpegDecodeBatchedInitialize", &nvjpegDecodeBatchedInitialize_);
+            LoadProc(nvjpegModule_, "nvjpegDecodeBatched", &nvjpegDecodeBatched_);
 
             if (!LoadProc(cudaRuntimeModule_, "cudaStreamCreateWithFlags", &cudaStreamCreateWithFlags_)
                 && !LoadProc(cudaRuntimeModule_, "cudaStreamCreate", &cudaStreamCreate_))
@@ -655,6 +918,150 @@ namespace
         NvJpegRuntime& runtime_;
         nvjpegJpegState_t state_{};
     };
+
+    void SetAllErrorMessages(std::vector<std::wstring>* errorMessages,
+                             std::size_t count,
+                             const std::wstring& message)
+    {
+        if (!errorMessages)
+        {
+            return;
+        }
+
+        errorMessages->assign(count, message);
+    }
+
+    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> BuildCachedThumbnailFromBgrPixels(
+        const std::vector<std::uint8_t>& sourcePixels,
+        int sourceWidth,
+        int sourceHeight,
+        std::uint16_t orientation,
+        UINT scaledWidth,
+        UINT scaledHeight,
+        std::wstring* errorMessage)
+    {
+        void* bitmapBits = nullptr;
+        HBITMAP bitmap = hyperbrowse::decode::wic_support::CreateBitmapBuffer(scaledWidth, scaledHeight, &bitmapBits);
+        if (!bitmap || !bitmapBits)
+        {
+            if (bitmap)
+            {
+                DeleteObject(bitmap);
+            }
+            if (errorMessage)
+            {
+                *errorMessage = L"Failed to allocate the output bitmap for the nvJPEG thumbnail.";
+            }
+            return {};
+        }
+
+        hyperbrowse::util::Stopwatch resampleStopwatch;
+        ResampleOrientedBgrToBgra(sourcePixels,
+                                  sourceWidth,
+                                  sourceHeight,
+                                  orientation,
+                                  static_cast<int>(scaledWidth),
+                                  static_cast<int>(scaledHeight),
+                                  static_cast<std::uint8_t*>(bitmapBits));
+        hyperbrowse::util::RecordTiming(L"thumbnail.decode.nvjpeg.resample", resampleStopwatch.ElapsedMilliseconds());
+
+        const int orientedWidth = OrientationSwapsDimensions(orientation) ? sourceHeight : sourceWidth;
+        const int orientedHeight = OrientationSwapsDimensions(orientation) ? sourceWidth : sourceHeight;
+        const std::size_t outputByteCount = static_cast<std::size_t>(scaledWidth) * static_cast<std::size_t>(scaledHeight) * 4ULL;
+        return std::make_shared<hyperbrowse::cache::CachedThumbnail>(bitmap,
+                                                                     static_cast<int>(scaledWidth),
+                                                                     static_cast<int>(scaledHeight),
+                                                                     outputByteCount,
+                                                                     orientedWidth,
+                                                                     orientedHeight);
+    }
+
+    bool PrepareDecodeRequest(NvJpegRuntime& runtime,
+                              const hyperbrowse::cache::ThumbnailCacheKey& key,
+                              PreparedDecodeRequest* request,
+                              std::wstring* errorMessage)
+    {
+        if (!request)
+        {
+            return false;
+        }
+
+        if (!IsJpegFilePath(key.filePath))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"nvJPEG only applies to JPEG thumbnails.";
+            }
+            return false;
+        }
+
+        if (!ReadFileBytes(key.filePath, &request->fileBytes, errorMessage))
+        {
+            return false;
+        }
+
+        int componentCount = 0;
+        int chromaSubsampling = 0;
+        std::array<int, kNvjpegMaxComponents> componentWidths{};
+        std::array<int, kNvjpegMaxComponents> componentHeights{};
+        if (runtime.nvjpegGetImageInfo_(runtime.Handle(),
+                                        request->fileBytes.data(),
+                                        request->fileBytes.size(),
+                                        &componentCount,
+                                        &chromaSubsampling,
+                                        componentWidths.data(),
+                                        componentHeights.data()) != kNvjpegStatusSuccess)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"nvJPEG failed to read JPEG image information.";
+            }
+            return false;
+        }
+
+        if (componentCount <= 0 || componentCount > 3 || componentWidths[0] <= 0 || componentHeights[0] <= 0)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"nvJPEG does not support this JPEG component layout.";
+            }
+            return false;
+        }
+
+        request->sourceWidth = componentWidths[0];
+        request->sourceHeight = componentHeights[0];
+    hyperbrowse::util::Stopwatch orientationStopwatch;
+    request->orientation = NormalizeOrientation(ReadJpegOrientationFromBytes(request->fileBytes));
+    hyperbrowse::util::RecordTiming(L"thumbnail.decode.nvjpeg.orientation", orientationStopwatch.ElapsedMilliseconds());
+        request->orientedWidth = OrientationSwapsDimensions(request->orientation) ? request->sourceHeight : request->sourceWidth;
+        request->orientedHeight = OrientationSwapsDimensions(request->orientation) ? request->sourceWidth : request->sourceHeight;
+
+        hyperbrowse::decode::wic_support::ComputeScaledSize(static_cast<UINT>(request->orientedWidth),
+                                                            static_cast<UINT>(request->orientedHeight),
+                                                            key.targetWidth,
+                                                            key.targetHeight,
+                                                            &request->scaledWidth,
+                                                            &request->scaledHeight);
+        if (request->scaledWidth == 0 || request->scaledHeight == 0)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"nvJPEG produced invalid thumbnail dimensions.";
+            }
+            return false;
+        }
+
+        if (!ComputeBufferSize(request->sourceWidth, request->sourceHeight, 3, &request->sourceBufferSize))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"The nvJPEG source buffer size overflowed the supported range.";
+            }
+            return false;
+        }
+
+        return true;
+    }
 #endif
 }
 
@@ -679,15 +1086,6 @@ namespace hyperbrowse::decode
         }
         return {};
 #else
-        if (!IsJpegFilePath(key.filePath))
-        {
-            if (errorMessage)
-            {
-                *errorMessage = L"nvJPEG only applies to JPEG thumbnails.";
-            }
-            return {};
-        }
-
         NvJpegRuntime& runtime = NvJpegRuntime::Instance();
         if (!runtime.Available())
         {
@@ -707,70 +1105,9 @@ namespace hyperbrowse::decode
             return {};
         }
 
-        std::vector<std::uint8_t> fileBytes;
-        if (!ReadFileBytes(key.filePath, &fileBytes, errorMessage))
+        PreparedDecodeRequest request;
+        if (!PrepareDecodeRequest(runtime, key, &request, errorMessage))
         {
-            return {};
-        }
-
-        int componentCount = 0;
-        int chromaSubsampling = 0;
-        std::array<int, kNvjpegMaxComponents> componentWidths{};
-        std::array<int, kNvjpegMaxComponents> componentHeights{};
-        if (runtime.nvjpegGetImageInfo_(runtime.Handle(),
-                                        fileBytes.data(),
-                                        fileBytes.size(),
-                                        &componentCount,
-                                        &chromaSubsampling,
-                                        componentWidths.data(),
-                                        componentHeights.data()) != kNvjpegStatusSuccess)
-        {
-            if (errorMessage)
-            {
-                *errorMessage = L"nvJPEG failed to read JPEG image information.";
-            }
-            return {};
-        }
-
-        if (componentCount <= 0 || componentCount > 3 || componentWidths[0] <= 0 || componentHeights[0] <= 0)
-        {
-            if (errorMessage)
-            {
-                *errorMessage = L"nvJPEG does not support this JPEG component layout.";
-            }
-            return {};
-        }
-
-        const int sourceWidth = componentWidths[0];
-        const int sourceHeight = componentHeights[0];
-        const std::uint16_t orientation = NormalizeOrientation(ReadJpegOrientation(key.filePath));
-        const int orientedWidth = OrientationSwapsDimensions(orientation) ? sourceHeight : sourceWidth;
-        const int orientedHeight = OrientationSwapsDimensions(orientation) ? sourceWidth : sourceHeight;
-
-        UINT scaledWidth = 0;
-        UINT scaledHeight = 0;
-        wic_support::ComputeScaledSize(static_cast<UINT>(orientedWidth),
-                                       static_cast<UINT>(orientedHeight),
-                                       key.targetWidth,
-                                       key.targetHeight,
-                                       &scaledWidth,
-                                       &scaledHeight);
-        if (scaledWidth == 0 || scaledHeight == 0)
-        {
-            if (errorMessage)
-            {
-                *errorMessage = L"nvJPEG produced invalid thumbnail dimensions.";
-            }
-            return {};
-        }
-
-        std::size_t sourceBufferSize = 0;
-        if (!ComputeBufferSize(sourceWidth, sourceHeight, 3, &sourceBufferSize))
-        {
-            if (errorMessage)
-            {
-                *errorMessage = L"The nvJPEG source buffer size overflowed the supported range.";
-            }
             return {};
         }
 
@@ -787,18 +1124,18 @@ namespace hyperbrowse::decode
         }
 
         ScopedCudaBuffer deviceBuffer(runtime);
-        if (!deviceBuffer.Allocate(sourceBufferSize, errorMessage))
+        if (!deviceBuffer.Allocate(request.sourceBufferSize, errorMessage))
         {
             return {};
         }
 
         nvjpegImage_t destination{};
         destination.channel[0] = static_cast<unsigned char*>(deviceBuffer.Get());
-        destination.pitch[0] = static_cast<unsigned int>(sourceWidth * 3);
+        destination.pitch[0] = static_cast<std::size_t>(request.sourceWidth) * 3ULL;
         if (runtime.nvjpegDecode_(runtime.Handle(),
                                   decodeState.Get(),
-                                  fileBytes.data(),
-                                  fileBytes.size(),
+                                  request.fileBytes.data(),
+                                  request.fileBytes.size(),
                                   NVJPEG_OUTPUT_BGRI,
                                   &destination,
                                   stream.Get()) != kNvjpegStatusSuccess)
@@ -819,10 +1156,10 @@ namespace hyperbrowse::decode
             return {};
         }
 
-        std::vector<std::uint8_t> sourcePixels(sourceBufferSize);
+        std::vector<std::uint8_t> sourcePixels(request.sourceBufferSize);
         if (runtime.cudaMemcpy_(sourcePixels.data(),
                                 deviceBuffer.Get(),
-                                sourceBufferSize,
+                                request.sourceBufferSize,
                                 cudaMemcpyDeviceToHost) != kCudaSuccess)
         {
             if (errorMessage)
@@ -832,36 +1169,155 @@ namespace hyperbrowse::decode
             return {};
         }
 
-        void* bitmapBits = nullptr;
-        HBITMAP bitmap = wic_support::CreateBitmapBuffer(scaledWidth, scaledHeight, &bitmapBits);
-        if (!bitmap || !bitmapBits)
+        return BuildCachedThumbnailFromBgrPixels(sourcePixels,
+                                                 request.sourceWidth,
+                                                 request.sourceHeight,
+                                                 request.orientation,
+                                                 request.scaledWidth,
+                                                 request.scaledHeight,
+                                                 errorMessage);
+#endif
+    }
+
+    std::vector<std::shared_ptr<const cache::CachedThumbnail>> NvJpegDecoder::DecodeBatch(
+        const std::vector<cache::ThumbnailCacheKey>& keys,
+        std::vector<std::wstring>* errorMessages) const
+    {
+#if !defined(HYPERBROWSE_ENABLE_NVJPEG)
+        SetAllErrorMessages(errorMessages, keys.size(), L"This build does not include nvJPEG support.");
+        return std::vector<std::shared_ptr<const cache::CachedThumbnail>>(keys.size());
+#else
+        std::vector<std::shared_ptr<const cache::CachedThumbnail>> thumbnails(keys.size());
+        if (errorMessages)
         {
-            if (bitmap)
-            {
-                DeleteObject(bitmap);
-            }
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to allocate the output bitmap for the nvJPEG thumbnail.";
-            }
-            return {};
+            errorMessages->assign(keys.size(), std::wstring{});
         }
 
-        ResampleOrientedBgrToBgra(sourcePixels,
-                                  sourceWidth,
-                                  sourceHeight,
-                                  orientation,
-                                  static_cast<int>(scaledWidth),
-                                  static_cast<int>(scaledHeight),
-                                  static_cast<std::uint8_t*>(bitmapBits));
+        if (keys.empty())
+        {
+            return thumbnails;
+        }
 
-        const std::size_t outputByteCount = static_cast<std::size_t>(scaledWidth) * static_cast<std::size_t>(scaledHeight) * 4ULL;
-        return std::make_shared<cache::CachedThumbnail>(bitmap,
-                                                        static_cast<int>(scaledWidth),
-                                                        static_cast<int>(scaledHeight),
-                                                        outputByteCount,
-                                                        orientedWidth,
-                                                        orientedHeight);
+        NvJpegRuntime& runtime = NvJpegRuntime::Instance();
+        if (!runtime.Available())
+        {
+            SetAllErrorMessages(errorMessages, keys.size(), runtime.FailureReason());
+            return thumbnails;
+        }
+
+        if (!runtime.nvjpegDecodeBatchedInitialize_ || !runtime.nvjpegDecodeBatched_)
+        {
+            SetAllErrorMessages(errorMessages, keys.size(), L"The active nvJPEG runtime does not expose batched decode APIs.");
+            return thumbnails;
+        }
+
+        if (runtime.cudaSetDevice_(0) != kCudaSuccess)
+        {
+            SetAllErrorMessages(errorMessages, keys.size(), L"Failed to select CUDA device 0 for nvJPEG decode.");
+            return thumbnails;
+        }
+
+        std::vector<PreparedDecodeRequest> requests(keys.size());
+        for (std::size_t index = 0; index < keys.size(); ++index)
+        {
+            std::wstring error;
+            if (!PrepareDecodeRequest(runtime, keys[index], &requests[index], &error))
+            {
+                if (errorMessages)
+                {
+                    (*errorMessages)[index] = std::move(error);
+                }
+                return thumbnails;
+            }
+        }
+
+        ScopedNvJpegState decodeState(runtime);
+        std::wstring batchError;
+        if (!decodeState.Create(&batchError))
+        {
+            SetAllErrorMessages(errorMessages, keys.size(), batchError);
+            return thumbnails;
+        }
+
+        ScopedCudaStream stream(runtime);
+        if (!stream.Create(&batchError))
+        {
+            SetAllErrorMessages(errorMessages, keys.size(), batchError);
+            return thumbnails;
+        }
+
+        if (runtime.nvjpegDecodeBatchedInitialize_(runtime.Handle(),
+                                                   decodeState.Get(),
+                                                   static_cast<int>(keys.size()),
+                                                   1,
+                                                   NVJPEG_OUTPUT_BGRI) != kNvjpegStatusSuccess)
+        {
+            SetAllErrorMessages(errorMessages, keys.size(), L"nvJPEG failed to initialize the batched JPEG decoder state.");
+            return thumbnails;
+        }
+
+        std::vector<std::unique_ptr<ScopedCudaBuffer>> deviceBuffers;
+        deviceBuffers.reserve(keys.size());
+        std::vector<nvjpegImage_t> destinations(keys.size());
+        std::vector<const unsigned char*> fileData(keys.size());
+        std::vector<std::size_t> fileLengths(keys.size());
+        for (std::size_t index = 0; index < keys.size(); ++index)
+        {
+            deviceBuffers.push_back(std::make_unique<ScopedCudaBuffer>(runtime));
+            if (!deviceBuffers.back()->Allocate(requests[index].sourceBufferSize, &batchError))
+            {
+                SetAllErrorMessages(errorMessages, keys.size(), batchError);
+                return thumbnails;
+            }
+
+            destinations[index].channel[0] = static_cast<unsigned char*>(deviceBuffers.back()->Get());
+            destinations[index].pitch[0] = static_cast<std::size_t>(requests[index].sourceWidth) * 3ULL;
+            fileData[index] = requests[index].fileBytes.data();
+            fileLengths[index] = requests[index].fileBytes.size();
+        }
+
+        if (runtime.nvjpegDecodeBatched_(runtime.Handle(),
+                                         decodeState.Get(),
+                                         fileData.data(),
+                                         fileLengths.data(),
+                                         destinations.data(),
+                                         stream.Get()) != kNvjpegStatusSuccess)
+        {
+            SetAllErrorMessages(errorMessages, keys.size(), L"nvJPEG failed to decode the JPEG thumbnail batch.");
+            return thumbnails;
+        }
+
+        if (runtime.cudaStreamSynchronize_(stream.Get()) != kCudaSuccess)
+        {
+            SetAllErrorMessages(errorMessages, keys.size(), L"The CUDA stream did not complete the nvJPEG thumbnail batch successfully.");
+            return thumbnails;
+        }
+
+        for (std::size_t index = 0; index < keys.size(); ++index)
+        {
+            std::vector<std::uint8_t> sourcePixels(requests[index].sourceBufferSize);
+            if (runtime.cudaMemcpy_(sourcePixels.data(),
+                                    deviceBuffers[index]->Get(),
+                                    requests[index].sourceBufferSize,
+                                    cudaMemcpyDeviceToHost) != kCudaSuccess)
+            {
+                if (errorMessages)
+                {
+                    (*errorMessages)[index] = L"Failed to copy the nvJPEG batch result back to host memory.";
+                }
+                continue;
+            }
+
+            thumbnails[index] = BuildCachedThumbnailFromBgrPixels(sourcePixels,
+                                                                  requests[index].sourceWidth,
+                                                                  requests[index].sourceHeight,
+                                                                  requests[index].orientation,
+                                                                  requests[index].scaledWidth,
+                                                                  requests[index].scaledHeight,
+                                                                  errorMessages ? &(*errorMessages)[index] : nullptr);
+        }
+
+        return thumbnails;
 #endif
     }
 }

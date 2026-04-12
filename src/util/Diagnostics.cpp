@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <iomanip>
 #include <limits>
 #include <map>
@@ -169,6 +170,16 @@ namespace hyperbrowse::util
             }
         }
 
+        std::wstring derived;
+        const auto appendDerivedMetric = [&derived](std::wstring_view name, const std::wstring& value)
+        {
+            derived.append(L"- ");
+            derived.append(name);
+            derived.append(L": ");
+            derived.append(value);
+            derived.append(L"\r\n");
+        };
+
         const auto hitsIterator = counters.find(L"viewer.prefetch.hit");
         const auto missesIterator = counters.find(L"viewer.prefetch.miss");
         if (hitsIterator != counters.end() || missesIterator != counters.end())
@@ -178,9 +189,93 @@ namespace hyperbrowse::util
             const double hitRate = (hits + misses) == 0
                 ? 0.0
                 : (static_cast<double>(hits) * 100.0) / static_cast<double>(hits + misses);
-            report.append(L"\r\nDerived\r\n- viewer.prefetch.hit_rate: ");
-            report.append(FormatMilliseconds(hitRate));
-            report.append(L"%\r\n");
+            std::wstring hitRateValue = FormatMilliseconds(hitRate);
+            hitRateValue.append(L"%");
+            appendDerivedMetric(L"viewer.prefetch.hit_rate", hitRateValue);
+        }
+
+        const auto batchSubmissionsIterator = counters.find(L"thumbnail.decode.nvjpeg.batch.submissions");
+        if (batchSubmissionsIterator != counters.end())
+        {
+            const std::uint64_t batchSubmissions = batchSubmissionsIterator->second;
+            const auto batchImagesIterator = counters.find(L"thumbnail.decode.nvjpeg.batch.images");
+            const auto successImagesIterator = counters.find(L"thumbnail.decode.nvjpeg.batch.success_images");
+            const auto fallbackImagesIterator = counters.find(L"thumbnail.decode.nvjpeg.batch.fallback_images");
+            const auto fullSuccessIterator = counters.find(L"thumbnail.decode.nvjpeg.batch.full_success_submissions");
+
+            const std::uint64_t batchImages = batchImagesIterator != counters.end() ? batchImagesIterator->second : 0;
+            const std::uint64_t successImages = successImagesIterator != counters.end() ? successImagesIterator->second : 0;
+            const std::uint64_t fallbackImages = fallbackImagesIterator != counters.end() ? fallbackImagesIterator->second : 0;
+            const std::uint64_t fullSuccessSubmissions = fullSuccessIterator != counters.end() ? fullSuccessIterator->second : 0;
+
+            if (batchSubmissions > 0)
+            {
+                appendDerivedMetric(L"thumbnail.decode.nvjpeg.batch.avg_size",
+                                    FormatMilliseconds(static_cast<double>(batchImages) / static_cast<double>(batchSubmissions)));
+
+                std::wstring fullSuccessRate = FormatMilliseconds(
+                    (static_cast<double>(fullSuccessSubmissions) * 100.0) / static_cast<double>(batchSubmissions));
+                fullSuccessRate.append(L"%");
+                appendDerivedMetric(L"thumbnail.decode.nvjpeg.batch.full_success_rate", fullSuccessRate);
+            }
+
+            if (batchImages > 0)
+            {
+                std::wstring fallbackRate = FormatMilliseconds(
+                    (static_cast<double>(fallbackImages) * 100.0) / static_cast<double>(batchImages));
+                fallbackRate.append(L"%");
+                appendDerivedMetric(L"thumbnail.decode.nvjpeg.batch.fallback_image_rate", fallbackRate);
+
+                std::wstring successRate = FormatMilliseconds(
+                    (static_cast<double>(successImages) * 100.0) / static_cast<double>(batchImages));
+                successRate.append(L"%");
+                appendDerivedMetric(L"thumbnail.decode.nvjpeg.batch.success_image_rate", successRate);
+            }
+
+            const std::wstring batchSizePrefix = L"thumbnail.decode.nvjpeg.batch.size.";
+            std::map<int, std::uint64_t> batchDistribution;
+            for (const auto& [name, value] : counters)
+            {
+                if (name.rfind(batchSizePrefix, 0) != 0)
+                {
+                    continue;
+                }
+
+                wchar_t* parseEnd = nullptr;
+                const long batchSize = std::wcstol(name.c_str() + batchSizePrefix.size(), &parseEnd, 10);
+                if (parseEnd == name.c_str() + batchSizePrefix.size() || *parseEnd != L'\0' || batchSize <= 0)
+                {
+                    continue;
+                }
+
+                batchDistribution[static_cast<int>(batchSize)] = value;
+            }
+
+            if (!batchDistribution.empty())
+            {
+                std::wstring distribution;
+                bool first = true;
+                for (const auto& [batchSize, count] : batchDistribution)
+                {
+                    if (!first)
+                    {
+                        distribution.append(L", ");
+                    }
+
+                    distribution.append(std::to_wstring(batchSize));
+                    distribution.append(L"=");
+                    distribution.append(std::to_wstring(count));
+                    first = false;
+                }
+
+                appendDerivedMetric(L"thumbnail.decode.nvjpeg.batch.distribution", distribution);
+            }
+        }
+
+        if (!derived.empty())
+        {
+            report.append(L"\r\nDerived\r\n");
+            report.append(derived);
         }
 
         return report;
