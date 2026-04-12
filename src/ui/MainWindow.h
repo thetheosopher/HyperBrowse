@@ -210,5 +210,6 @@ namespace hyperbrowse::ui
         int viewerZoomPercent_{};
         bool viewerWindowActive_{};
         bool nvJpegEnabled_{};
+        bool libRawOutOfProcessEnabled_{true};
     };
 }

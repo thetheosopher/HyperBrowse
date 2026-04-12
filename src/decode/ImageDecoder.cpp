@@ -18,6 +18,7 @@
 #endif
 
 #include "decode/NvJpegDecoder.h"
+#include "decode/RawHelperProtocol.h"
 #include "decode/WicDecodeHelpers.h"
 #include "decode/WicThumbnailDecoder.h"
 #include "util/Diagnostics.h"
@@ -31,6 +32,10 @@ namespace
     namespace wic = hyperbrowse::decode::wic_support;
 
     std::atomic_bool g_nvJpegEnabled{false};
+    std::atomic_bool g_libRawOutOfProcessEnabled{true};
+    constexpr DWORD kRawHelperThumbnailTimeoutMs = 8000;
+    constexpr DWORD kRawHelperFullImageTimeoutMs = 30000;
+    constexpr const wchar_t* kRawHelperExecutableName = L"HyperBrowseRawHelper.exe";
 
     std::wstring NormalizeFileType(std::wstring_view fileType)
     {
@@ -60,6 +65,122 @@ namespace
         }
 
         return std::wstring(message, message + std::strlen(message));
+    }
+
+    std::wstring CurrentModuleDirectory()
+    {
+        std::wstring path(MAX_PATH, L'\0');
+        while (true)
+        {
+            const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+            if (length == 0)
+            {
+                return {};
+            }
+
+            if (length < path.size() - 1)
+            {
+                path.resize(length);
+                return fs::path(path).parent_path().wstring();
+            }
+
+            path.resize(path.size() * 2);
+        }
+    }
+
+    std::wstring RawHelperExecutablePath()
+    {
+        const std::wstring moduleDirectory = CurrentModuleDirectory();
+        if (moduleDirectory.empty())
+        {
+            return {};
+        }
+
+        return (fs::path(moduleDirectory) / kRawHelperExecutableName).wstring();
+    }
+
+    bool IsLibRawHelperExecutableAvailable()
+    {
+#if defined(HYPERBROWSE_ENABLE_LIBRAW)
+        const std::wstring helperPath = RawHelperExecutablePath();
+        return !helperPath.empty() && fs::exists(fs::path(helperPath));
+#else
+        return false;
+#endif
+    }
+
+    std::wstring QuoteCommandLineArgument(std::wstring_view value)
+    {
+        std::wstring quoted;
+        quoted.reserve(value.size() + 2);
+        quoted.push_back(L'"');
+        for (wchar_t character : value)
+        {
+            if (character == L'"')
+            {
+                quoted.push_back(L'\\');
+            }
+            quoted.push_back(character);
+        }
+        quoted.push_back(L'"');
+        return quoted;
+    }
+
+    std::wstring CreateTemporaryOutputPath(std::wstring* errorMessage)
+    {
+        wchar_t tempDirectory[MAX_PATH]{};
+        const DWORD tempDirectoryLength = GetTempPathW(static_cast<DWORD>(std::size(tempDirectory)), tempDirectory);
+        if (tempDirectoryLength == 0 || tempDirectoryLength >= std::size(tempDirectory))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"Failed to resolve the temporary directory for the RAW helper.";
+            }
+            return {};
+        }
+
+        wchar_t tempFile[MAX_PATH]{};
+        if (GetTempFileNameW(tempDirectory, L"HBR", 0, tempFile) == 0)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"Failed to create a temporary output file for the RAW helper.";
+            }
+            return {};
+        }
+
+        return tempFile;
+    }
+
+    bool ExtractBgraPixelsFromBitmap(HBITMAP bitmap,
+                                     int width,
+                                     int height,
+                                     std::vector<unsigned char>* bgraPixels,
+                                     std::wstring* errorMessage)
+    {
+        if (!bitmap || !bgraPixels || width <= 0 || height <= 0)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"The RAW helper received an invalid bitmap surface.";
+            }
+            return false;
+        }
+
+        DIBSECTION dibSection{};
+        if (GetObjectW(bitmap, sizeof(dibSection), &dibSection) != sizeof(dibSection) || !dibSection.dsBm.bmBits)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"The RAW helper could not access the decoded bitmap pixels.";
+            }
+            return false;
+        }
+
+        const std::size_t pixelBytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
+        bgraPixels->resize(pixelBytes);
+        std::memcpy(bgraPixels->data(), dibSection.dsBm.bmBits, pixelBytes);
+        return true;
     }
 
     bool ProbeNvJpegRuntime()
@@ -303,6 +424,17 @@ namespace
         return DecodeWicSource(factory.Get(), decoder.Get(), 0, 0, 0, 0, errorMessage);
     }
 
+    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> TryDecodeRawThumbnailWithWic(const hyperbrowse::cache::ThumbnailCacheKey& key)
+    {
+        return hyperbrowse::decode::WicThumbnailDecoder{}.Decode(key);
+    }
+
+    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> TryDecodeRawFullImageWithWic(const hyperbrowse::browser::BrowserItem& item)
+    {
+        std::wstring ignoredError;
+        return DecodeWicFile(item, &ignoredError);
+    }
+
     std::vector<unsigned char> ScaleBgra(const std::vector<unsigned char>& sourcePixels,
                                          int sourceWidth,
                                          int sourceHeight,
@@ -385,6 +517,108 @@ namespace
     }
 
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
+    bool InvokeLibRawHelper(const hyperbrowse::decode::LibRawHelperInvocation& invocation,
+                            DWORD timeoutMs,
+                            hyperbrowse::decode::RawHelperDecodedPixels* payload,
+                            std::wstring* errorMessage)
+    {
+        if (!payload)
+        {
+            return false;
+        }
+
+        const std::wstring helperPath = RawHelperExecutablePath();
+        if (helperPath.empty() || !fs::exists(fs::path(helperPath)))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"The RAW helper executable is not available beside the current application binary.";
+            }
+            return false;
+        }
+
+        std::wstring commandLine = QuoteCommandLineArgument(helperPath);
+        commandLine.append(L" --mode ");
+        commandLine.append(invocation.mode == hyperbrowse::decode::LibRawHelperMode::Thumbnail ? L"thumbnail" : L"full");
+        commandLine.append(L" --input ");
+        commandLine.append(QuoteCommandLineArgument(invocation.filePath));
+        commandLine.append(L" --output ");
+        commandLine.append(QuoteCommandLineArgument(invocation.outputFilePath));
+        if (invocation.mode == hyperbrowse::decode::LibRawHelperMode::Thumbnail)
+        {
+            commandLine.append(L" --width ");
+            commandLine.append(std::to_wstring(invocation.targetWidth));
+            commandLine.append(L" --height ");
+            commandLine.append(std::to_wstring(invocation.targetHeight));
+        }
+
+        std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+        mutableCommandLine.push_back(L'\0');
+
+        STARTUPINFOW startupInfo{};
+        startupInfo.cb = sizeof(startupInfo);
+        PROCESS_INFORMATION processInfo{};
+        const std::wstring workingDirectory = fs::path(helperPath).parent_path().wstring();
+        const BOOL created = CreateProcessW(helperPath.c_str(),
+                                            mutableCommandLine.data(),
+                                            nullptr,
+                                            nullptr,
+                                            FALSE,
+                                            CREATE_NO_WINDOW,
+                                            nullptr,
+                                            workingDirectory.c_str(),
+                                            &startupInfo,
+                                            &processInfo);
+        if (!created)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"Failed to launch the RAW helper process.";
+            }
+            return false;
+        }
+
+        const DWORD waitResult = WaitForSingleObject(processInfo.hProcess, timeoutMs);
+        if (waitResult == WAIT_TIMEOUT)
+        {
+            TerminateProcess(processInfo.hProcess, WAIT_TIMEOUT);
+            WaitForSingleObject(processInfo.hProcess, 1000);
+            CloseHandle(processInfo.hThread);
+            CloseHandle(processInfo.hProcess);
+
+            if (errorMessage)
+            {
+                *errorMessage = L"The RAW helper timed out and was terminated.";
+            }
+            return false;
+        }
+
+        DWORD exitCode = 0;
+        GetExitCodeProcess(processInfo.hProcess, &exitCode);
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
+
+        if (waitResult != WAIT_OBJECT_0)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"The RAW helper did not finish normally.";
+            }
+            return false;
+        }
+
+        if (exitCode != 0)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"The RAW helper failed with exit code " + std::to_wstring(exitCode) + L".";
+            }
+            return false;
+        }
+
+        return hyperbrowse::decode::ReadRawHelperPayload(invocation.outputFilePath, payload, errorMessage);
+    }
+
     void ConfigureRawPostprocess(LibRaw& processor, bool halfSize)
     {
         processor.imgdata.params.output_bps = 8;
@@ -707,6 +941,80 @@ namespace
         }
         return decodedImage;
     }
+
+    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeRawThumbnailWithHelper(const hyperbrowse::cache::ThumbnailCacheKey& key,
+                                                                                             std::wstring* errorMessage)
+    {
+        std::wstring outputPath = CreateTemporaryOutputPath(errorMessage);
+        if (outputPath.empty())
+        {
+            return {};
+        }
+
+        hyperbrowse::decode::RawHelperDecodedPixels payload;
+        const hyperbrowse::decode::LibRawHelperInvocation invocation{
+            hyperbrowse::decode::LibRawHelperMode::Thumbnail,
+            key.filePath,
+            outputPath,
+            key.targetWidth,
+            key.targetHeight,
+        };
+
+        const bool success = InvokeLibRawHelper(invocation, kRawHelperThumbnailTimeoutMs, &payload, errorMessage);
+        DeleteFileW(outputPath.c_str());
+        if (!success)
+        {
+            hyperbrowse::util::IncrementCounter(L"thumbnail.decode.raw.helper.failures");
+            return {};
+        }
+
+        hyperbrowse::util::IncrementCounter(L"thumbnail.decode.raw.helper.successes");
+        return BuildCachedThumbnailFromBgra(std::move(payload.bgraPixels),
+                                            payload.bitmapWidth,
+                                            payload.bitmapHeight,
+                                            0,
+                                            0,
+                                            payload.sourceWidth,
+                                            payload.sourceHeight,
+                                            errorMessage);
+    }
+
+    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeRawFullImageWithHelper(const hyperbrowse::browser::BrowserItem& item,
+                                                                                             std::wstring* errorMessage)
+    {
+        std::wstring outputPath = CreateTemporaryOutputPath(errorMessage);
+        if (outputPath.empty())
+        {
+            return {};
+        }
+
+        hyperbrowse::decode::RawHelperDecodedPixels payload;
+        const hyperbrowse::decode::LibRawHelperInvocation invocation{
+            hyperbrowse::decode::LibRawHelperMode::FullImage,
+            item.filePath,
+            outputPath,
+            0,
+            0,
+        };
+
+        const bool success = InvokeLibRawHelper(invocation, kRawHelperFullImageTimeoutMs, &payload, errorMessage);
+        DeleteFileW(outputPath.c_str());
+        if (!success)
+        {
+            hyperbrowse::util::IncrementCounter(L"viewer.decode.raw.helper.failures");
+            return {};
+        }
+
+        hyperbrowse::util::IncrementCounter(L"viewer.decode.raw.helper.successes");
+        return BuildCachedThumbnailFromBgra(std::move(payload.bgraPixels),
+                                            payload.bitmapWidth,
+                                            payload.bitmapHeight,
+                                            0,
+                                            0,
+                                            payload.sourceWidth,
+                                            payload.sourceHeight,
+                                            errorMessage);
+    }
 #endif
 }
 
@@ -715,6 +1023,45 @@ namespace hyperbrowse::decode
     void SetNvJpegAccelerationEnabled(bool enabled)
     {
         g_nvJpegEnabled.store(enabled && IsNvJpegBuildEnabled(), std::memory_order_release);
+    }
+
+    bool IsLibRawBuildEnabled()
+    {
+#if defined(HYPERBROWSE_ENABLE_LIBRAW)
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    void SetLibRawOutOfProcessEnabled(bool enabled)
+    {
+        g_libRawOutOfProcessEnabled.store(enabled && IsLibRawBuildEnabled(), std::memory_order_release);
+    }
+
+    bool IsLibRawOutOfProcessEnabled()
+    {
+        return IsLibRawBuildEnabled() && g_libRawOutOfProcessEnabled.load(std::memory_order_acquire);
+    }
+
+    std::wstring DescribeRawDecodingState()
+    {
+        if (!IsLibRawBuildEnabled())
+        {
+            return L"WIC only (LibRaw build disabled)";
+        }
+
+        if (!IsLibRawOutOfProcessEnabled())
+        {
+            return L"WIC first, in-process LibRaw fallback";
+        }
+
+        if (!IsLibRawHelperExecutableAvailable())
+        {
+            return L"WIC first, in-process LibRaw fallback (helper unavailable)";
+        }
+
+        return L"WIC first, out-of-process LibRaw fallback";
     }
 
     bool IsNvJpegAccelerationEnabled()
@@ -735,6 +1082,59 @@ namespace hyperbrowse::decode
     {
         return IsNvJpegBuildEnabled() && ProbeNvJpegRuntime();
     }
+
+#if defined(HYPERBROWSE_ENABLE_LIBRAW)
+    bool RunLibRawHelperInvocation(const LibRawHelperInvocation& invocation,
+                                   std::wstring* errorMessage)
+    {
+        if (invocation.filePath.empty() || invocation.outputFilePath.empty())
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"The RAW helper invocation is missing the input or output path.";
+            }
+            return false;
+        }
+
+        std::shared_ptr<const cache::CachedThumbnail> decodedImage;
+        if (invocation.mode == LibRawHelperMode::Thumbnail)
+        {
+            cache::ThumbnailCacheKey cacheKey;
+            cacheKey.filePath = invocation.filePath;
+            cacheKey.targetWidth = invocation.targetWidth;
+            cacheKey.targetHeight = invocation.targetHeight;
+            decodedImage = DecodeRawThumbnail(cacheKey, errorMessage);
+        }
+        else
+        {
+            browser::BrowserItem item;
+            item.filePath = invocation.filePath;
+            item.fileType = fs::path(invocation.filePath).extension().wstring();
+            decodedImage = DecodeRawFullImage(item, errorMessage);
+        }
+
+        if (!decodedImage)
+        {
+            return false;
+        }
+
+        RawHelperDecodedPixels payload;
+        payload.bitmapWidth = decodedImage->Width();
+        payload.bitmapHeight = decodedImage->Height();
+        payload.sourceWidth = decodedImage->SourceWidth();
+        payload.sourceHeight = decodedImage->SourceHeight();
+        if (!ExtractBgraPixelsFromBitmap(decodedImage->Bitmap(),
+                                         decodedImage->Width(),
+                                         decodedImage->Height(),
+                                         &payload.bgraPixels,
+                                         errorMessage))
+        {
+            return false;
+        }
+
+        return WriteRawHelperPayload(invocation.outputFilePath, payload, errorMessage);
+    }
+#endif
 
     std::wstring DescribeJpegAccelerationState()
     {
@@ -797,8 +1197,16 @@ namespace hyperbrowse::decode
 
         if (IsRawFileType(fileType))
         {
+            if (auto thumbnail = TryDecodeRawThumbnailWithWic(key))
+            {
+                hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw.wic", stopwatch.ElapsedMilliseconds());
+                return thumbnail;
+            }
+
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
-            auto thumbnail = DecodeRawThumbnail(key, errorMessage);
+            auto thumbnail = IsLibRawOutOfProcessEnabled() && IsLibRawHelperExecutableAvailable()
+                ? DecodeRawThumbnailWithHelper(key, errorMessage)
+                : DecodeRawThumbnail(key, errorMessage);
             hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw", stopwatch.ElapsedMilliseconds());
             return thumbnail;
 #else
@@ -951,8 +1359,16 @@ namespace hyperbrowse::decode
 
         if (IsRawFileType(item.fileType))
         {
+            if (auto image = TryDecodeRawFullImageWithWic(item))
+            {
+                hyperbrowse::util::RecordTiming(L"viewer.decode.raw.wic", stopwatch.ElapsedMilliseconds());
+                return image;
+            }
+
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
-            auto image = DecodeRawFullImage(item, errorMessage);
+            auto image = IsLibRawOutOfProcessEnabled() && IsLibRawHelperExecutableAvailable()
+                ? DecodeRawFullImageWithHelper(item, errorMessage)
+                : DecodeRawFullImage(item, errorMessage);
             hyperbrowse::util::RecordTiming(L"viewer.decode.raw", stopwatch.ElapsedMilliseconds());
             return image;
 #else

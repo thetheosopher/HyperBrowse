@@ -35,9 +35,9 @@ namespace
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueLeftPaneWidth[] = L"LeftPaneWidth";
     constexpr wchar_t kRegistryValueBrowserMode[] = L"BrowserMode";
-    constexpr wchar_t kRegistryValueRecursiveBrowsing[] = L"RecursiveBrowsing";
     constexpr wchar_t kRegistryValueThemeMode[] = L"ThemeMode";
     constexpr wchar_t kRegistryValueNvJpegEnabled[] = L"NvJpegEnabled";
+    constexpr wchar_t kRegistryValueLibRawOutOfProcessEnabled[] = L"LibRawOutOfProcessEnabled";
     constexpr wchar_t kRegistryValueSelectedFolderPath[] = L"SelectedFolderPath";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
@@ -71,6 +71,7 @@ namespace
     constexpr UINT ID_VIEW_THEME_LIGHT = 2101;
     constexpr UINT ID_VIEW_THEME_DARK = 2102;
     constexpr UINT ID_VIEW_NVJPEG_ACCELERATION = 2103;
+    constexpr UINT ID_VIEW_LIBRAW_OUT_OF_PROCESS = 2104;
     constexpr UINT ID_VIEW_SORT_FILENAME = 2201;
     constexpr UINT ID_VIEW_SORT_MODIFIED = 2202;
     constexpr UINT ID_VIEW_SORT_SIZE = 2203;
@@ -755,6 +756,7 @@ namespace hyperbrowse::ui
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(themeMenu), L"&Theme");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
         AppendMenuW(helpMenu, MF_SEPARATOR, 0, nullptr);
@@ -818,6 +820,7 @@ namespace hyperbrowse::ui
             SHGFI_SYSICONINDEX | SHGFI_SMALLICON));
         if (treeImageList_)
         {
+            ImageList_SetBkColor(treeImageList_, CLR_NONE);
             TreeView_SetImageList(treePane_, treeImageList_, TVSIL_NORMAL);
         }
 
@@ -827,6 +830,7 @@ namespace hyperbrowse::ui
             : browser::BrowserViewMode::Details);
         browserPaneController_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
         decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);
+        decode::SetLibRawOutOfProcessEnabled(libRawOutOfProcessEnabled_);
 
         InitializeFolderTree();
         if (!startupFolderPath_.empty())
@@ -1562,6 +1566,8 @@ namespace hyperbrowse::ui
     {
         std::wstring report = L"HyperBrowse Diagnostics\r\n\r\nJPEG Path: ";
         report.append(decode::DescribeJpegAccelerationState());
+        report.append(L"\r\nRAW Path: ");
+        report.append(decode::DescribeRawDecodingState());
         report.append(L"\r\nFolder Scope: ");
         report.append(browserModel_ && !browserModel_->FolderPath().empty() ? browserModel_->FolderPath() : std::wstring(L"(none)"));
         report.append(L"\r\n\r\n");
@@ -2187,6 +2193,14 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_NVJPEG_ACCELERATION,
             MF_BYCOMMAND | (HasNvJpegCapability() ? MF_ENABLED : MF_GRAYED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_LIBRAW_OUT_OF_PROCESS,
+            MF_BYCOMMAND | ((libRawOutOfProcessEnabled_ && decode::IsLibRawBuildEnabled()) ? MF_CHECKED : MF_UNCHECKED));
+        EnableMenuItem(
+            menu_,
+            ID_VIEW_LIBRAW_OUT_OF_PROCESS,
+            MF_BYCOMMAND | (decode::IsLibRawBuildEnabled() ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
@@ -2253,6 +2267,10 @@ namespace hyperbrowse::ui
 
         if (treePane_)
         {
+            if (treeImageList_)
+            {
+                ImageList_SetBkColor(treeImageList_, CLR_NONE);
+            }
             TreeView_SetBkColor(treePane_, palette.paneBackground);
             TreeView_SetTextColor(treePane_, palette.text);
             TreeView_SetLineColor(treePane_, palette.treeLine);
@@ -2285,6 +2303,9 @@ namespace hyperbrowse::ui
 
     void MainWindow::LoadWindowState()
     {
+        // Always start non-recursive so restoring the last folder cannot trigger an expensive drive-wide scan.
+        recursiveBrowsingEnabled_ = false;
+
         HKEY key{};
         if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) == ERROR_SUCCESS)
         {
@@ -2305,14 +2326,14 @@ namespace hyperbrowse::ui
                 themeMode_ = static_cast<ThemeMode>(value);
             }
 
-            if (TryReadDwordValue(key, kRegistryValueRecursiveBrowsing, &value))
-            {
-                recursiveBrowsingEnabled_ = value != 0;
-            }
-
             if (TryReadDwordValue(key, kRegistryValueNvJpegEnabled, &value))
             {
                 nvJpegEnabled_ = value != 0;
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueLibRawOutOfProcessEnabled, &value))
+            {
+                libRawOutOfProcessEnabled_ = value != 0;
             }
 
             TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
@@ -2337,8 +2358,9 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueLeftPaneWidth, static_cast<DWORD>(leftPaneWidth_));
             WriteDwordValue(key, kRegistryValueBrowserMode, static_cast<DWORD>(browserMode_));
             WriteDwordValue(key, kRegistryValueThemeMode, static_cast<DWORD>(themeMode_));
-            WriteDwordValue(key, kRegistryValueRecursiveBrowsing, recursiveBrowsingEnabled_ ? 1UL : 0UL);
+            RegDeleteValueW(key, L"RecursiveBrowsing");
             WriteDwordValue(key, kRegistryValueNvJpegEnabled, nvJpegEnabled_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueLibRawOutOfProcessEnabled, libRawOutOfProcessEnabled_ ? 1UL : 0UL);
             WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
             RegCloseKey(key);
         }
@@ -2627,6 +2649,15 @@ namespace hyperbrowse::ui
                 UpdateMenuState();
             }
             return true;
+        case ID_VIEW_LIBRAW_OUT_OF_PROCESS:
+            if (decode::IsLibRawBuildEnabled())
+            {
+                libRawOutOfProcessEnabled_ = !libRawOutOfProcessEnabled_;
+                decode::SetLibRawOutOfProcessEnabled(libRawOutOfProcessEnabled_);
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+            return true;
         case ID_VIEW_SORT_FILENAME:
         case ID_VIEW_SORT_MODIFIED:
         case ID_VIEW_SORT_SIZE:
@@ -2771,6 +2802,8 @@ namespace hyperbrowse::ui
         shellState.append(themeMode_ == ThemeMode::Dark ? L"Dark" : L"Light");
         shellState.append(L" | JPEG: ");
         shellState.append(decode::DescribeJpegAccelerationState());
+        shellState.append(L" | RAW: ");
+        shellState.append(decode::DescribeRawDecodingState());
         if (viewerWindowActive_ && viewerZoomPercent_ > 0)
         {
             shellState.append(L" | Viewer Zoom: ");

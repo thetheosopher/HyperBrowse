@@ -10,6 +10,7 @@ namespace
 {
     namespace fs = std::filesystem;
 
+    constexpr std::size_t kDedicatedRawWorkerCount = 1;
     constexpr std::size_t kMinNvJpegBatchSize = 4;
     constexpr std::size_t kMaxNvJpegBatchSize = 12;
     constexpr int kNvJpegBatchPriorityWindow = 1;
@@ -18,12 +19,18 @@ namespace
     {
         if (requestedWorkerCount != 0)
         {
-            return requestedWorkerCount;
+            return std::max<std::size_t>(requestedWorkerCount, 2U);
         }
 
         const unsigned int hardwareConcurrency = std::thread::hardware_concurrency();
         const std::size_t normalized = hardwareConcurrency == 0 ? 2U : hardwareConcurrency;
-        return std::clamp<std::size_t>(normalized, 1U, 4U);
+        return std::clamp<std::size_t>(normalized, 2U, 4U);
+    }
+
+    std::size_t ResolveGeneralWorkerCount(std::size_t requestedWorkerCount)
+    {
+        const std::size_t totalWorkerCount = ResolveWorkerCount(requestedWorkerCount);
+        return std::max<std::size_t>(1U, totalWorkerCount - kDedicatedRawWorkerCount);
     }
 
     bool IsJpegCacheKey(const hyperbrowse::cache::ThumbnailCacheKey& cacheKey)
@@ -36,6 +43,17 @@ namespace
 
         return extension == L".jpg" || extension == L".jpeg";
     }
+
+    bool IsRawCacheKey(const hyperbrowse::cache::ThumbnailCacheKey& cacheKey)
+    {
+        std::wstring extension = fs::path(cacheKey.filePath).extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t value)
+        {
+            return static_cast<wchar_t>(towlower(value));
+        });
+
+        return extension == L".nef" || extension == L".nrw";
+    }
 }
 
 namespace hyperbrowse::services
@@ -43,13 +61,22 @@ namespace hyperbrowse::services
     ThumbnailScheduler::ThumbnailScheduler(std::size_t cacheCapacityBytes, std::size_t workerCount)
         : cache_(cacheCapacityBytes)
     {
-        const std::size_t resolvedWorkerCount = ResolveWorkerCount(workerCount);
-        workers_.reserve(resolvedWorkerCount);
-        for (std::size_t index = 0; index < resolvedWorkerCount; ++index)
+        const std::size_t generalWorkerCount = ResolveGeneralWorkerCount(workerCount);
+        generalWorkers_.reserve(generalWorkerCount);
+        for (std::size_t index = 0; index < generalWorkerCount; ++index)
         {
-            workers_.emplace_back([this]()
+            generalWorkers_.emplace_back([this]()
             {
-                WorkerLoop();
+                WorkerLoop(WorkerKind::General);
+            });
+        }
+
+        rawWorkers_.reserve(kDedicatedRawWorkerCount);
+        for (std::size_t index = 0; index < kDedicatedRawWorkerCount; ++index)
+        {
+            rawWorkers_.emplace_back([this]()
+            {
+                WorkerLoop(WorkerKind::Raw);
             });
         }
     }
@@ -65,7 +92,15 @@ namespace hyperbrowse::services
         }
 
         workAvailable_.notify_all();
-        for (std::thread& worker : workers_)
+        for (std::thread& worker : generalWorkers_)
+        {
+            if (worker.joinable())
+            {
+                worker.join();
+            }
+        }
+
+        for (std::thread& worker : rawWorkers_)
         {
             if (worker.joinable())
             {
@@ -145,7 +180,22 @@ namespace hyperbrowse::services
         return cache_.CapacityBytes();
     }
 
-    void ThumbnailScheduler::WorkerLoop()
+    bool ThumbnailScheduler::HasDispatchableWorkLocked(WorkerKind kind) const
+    {
+        for (const PendingJob& job : pendingJobs_)
+        {
+            const bool isRaw = IsRawCacheKey(job.workItem.cacheKey);
+            if ((kind == WorkerKind::Raw && isRaw)
+                || (kind == WorkerKind::General && !isRaw))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void ThumbnailScheduler::WorkerLoop(WorkerKind kind)
     {
         while (true)
         {
@@ -154,9 +204,9 @@ namespace hyperbrowse::services
                 && decode::IsNvJpegRuntimeAvailable();
             {
                 std::unique_lock lock(mutex_);
-                workAvailable_.wait(lock, [this]()
+                workAvailable_.wait(lock, [this, kind]()
                 {
-                    return shuttingDown_ || !pendingJobs_.empty();
+                    return shuttingDown_ || HasDispatchableWorkLocked(kind);
                 });
 
                 if (shuttingDown_)
@@ -178,32 +228,62 @@ namespace hyperbrowse::services
                         return lhs.sequence < rhs.sequence;
                     });
 
-                jobs.push_back(orderedJobs.front());
-                if (canUseNvJpegBatch
-                    && !jobs.front().workItem.preferCpu
-                    && IsJpegCacheKey(jobs.front().workItem.cacheKey))
+                if (kind == WorkerKind::Raw)
                 {
-                    const int highestPriority = jobs.front().workItem.priority;
-                    for (std::size_t index = 1; index < orderedJobs.size() && jobs.size() < kMaxNvJpegBatchSize; ++index)
+                    for (const PendingJob& candidate : orderedJobs)
                     {
-                        const PendingJob& candidate = orderedJobs[index];
-                        if (candidate.workItem.priority > highestPriority + kNvJpegBatchPriorityWindow)
+                        if (IsRawCacheKey(candidate.workItem.cacheKey))
                         {
+                            jobs.push_back(candidate);
                             break;
                         }
-
-                        if (candidate.workItem.preferCpu || !IsJpegCacheKey(candidate.workItem.cacheKey))
+                    }
+                }
+                else
+                {
+                    for (const PendingJob& candidate : orderedJobs)
+                    {
+                        if (!IsRawCacheKey(candidate.workItem.cacheKey))
                         {
-                            continue;
+                            jobs.push_back(candidate);
+                            break;
+                        }
+                    }
+
+                    if (!jobs.empty()
+                        && canUseNvJpegBatch
+                        && !jobs.front().workItem.preferCpu
+                        && IsJpegCacheKey(jobs.front().workItem.cacheKey))
+                    {
+                        const int highestPriority = jobs.front().workItem.priority;
+                        for (std::size_t index = 1; index < orderedJobs.size() && jobs.size() < kMaxNvJpegBatchSize; ++index)
+                        {
+                            const PendingJob& candidate = orderedJobs[index];
+                            if (candidate.workItem.priority > highestPriority + kNvJpegBatchPriorityWindow)
+                            {
+                                break;
+                            }
+
+                            if (IsRawCacheKey(candidate.workItem.cacheKey)
+                                || candidate.workItem.preferCpu
+                                || !IsJpegCacheKey(candidate.workItem.cacheKey))
+                            {
+                                continue;
+                            }
+
+                            jobs.push_back(candidate);
                         }
 
-                        jobs.push_back(candidate);
+                        if (jobs.size() < kMinNvJpegBatchSize)
+                        {
+                            jobs.resize(1);
+                        }
                     }
+                }
 
-                    if (jobs.size() < kMinNvJpegBatchSize)
-                    {
-                        jobs.resize(1);
-                    }
+                if (jobs.empty())
+                {
+                    continue;
                 }
 
                 std::vector<int> selectedSequences;

@@ -4,6 +4,7 @@ add_executable(HyperBrowseTests
     ../src/cache/ThumbnailCache.cpp
     ../src/decode/ImageDecoder.cpp
     ../src/decode/NvJpegDecoder.cpp
+    ../src/decode/RawHelperProtocol.cpp
     ../src/decode/WicThumbnailDecoder.cpp
     ../src/services/BatchConvertService.cpp
     ../src/services/FileOperationService.cpp
@@ -37,6 +38,14 @@ target_link_libraries(HyperBrowseTests PRIVATE
 if(HYPERBROWSE_ENABLE_LIBRAW)
     target_link_libraries(HyperBrowseTests PRIVATE HyperBrowse::LibRaw)
     target_compile_definitions(HyperBrowseTests PRIVATE HYPERBROWSE_ENABLE_LIBRAW=1)
+
+    if(TARGET HyperBrowseRawHelper)
+        add_dependencies(HyperBrowseTests HyperBrowseRawHelper)
+        add_custom_command(TARGET HyperBrowseTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:HyperBrowseRawHelper>"
+                "$<TARGET_FILE_DIR:HyperBrowseTests>")
+    endif()
 endif()
 
 if(HYPERBROWSE_ENABLE_NVJPEG)

@@ -93,10 +93,10 @@ namespace hyperbrowse::browser
     private:
         static constexpr const wchar_t* kClassName = L"HyperBrowseBrowserPane";
         static constexpr int kItemPadding = 14;
-        static constexpr int kItemWidth = 196;
-        static constexpr int kItemHeight = 220;
-        static constexpr int kPreviewInset = 12;
-        static constexpr int kPreviewHeight = 118;
+        static constexpr int kItemWidth = 202;
+        static constexpr int kItemHeight = 244;
+        static constexpr int kPreviewInset = 14;
+        static constexpr int kPreviewHeight = 124;
 
         bool RegisterClass() const;
         bool CreateDetailsListView();
@@ -116,6 +116,8 @@ namespace hyperbrowse::browser
         void ApplyThemeToDetailsList() const;
         void RebuildThemeResources();
         void ReleaseThemeResources();
+        void RebuildThumbnailFonts();
+        void ReleaseThumbnailFonts();
         LRESULT HandleDetailsListCustomDraw(LPARAM lParam) const;
         void RebuildSelectionFromDetailsList();
         void SyncDetailsListSelectionFromModel();
@@ -137,7 +139,7 @@ namespace hyperbrowse::browser
         void InvalidateThumbnailCellForModelIndex(int modelIndex) const;
         void DrawPlaceholderState(HDC hdc, const RECT& clientRect) const;
         void DrawThumbnailCells(HDC hdc, const RECT& clientRect) const;
-        void DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item) const;
+        void DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item, bool selected) const;
         std::wstring BuildListText(int viewIndex, int subItem) const;
         std::wstring BuildPlaceholderText() const;
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
@@ -148,6 +150,9 @@ namespace hyperbrowse::browser
         HWND hwnd_{};
         HWND detailsList_{};
         HFONT detailsListFont_{};
+        HFONT thumbnailTitleFont_{};
+        HFONT thumbnailMetaFont_{};
+        HFONT thumbnailStatusFont_{};
         bool ownsDetailsListFont_{};
         HBRUSH backgroundBrush_{};
         HBRUSH surfaceBrush_{};

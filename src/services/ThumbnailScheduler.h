@@ -53,6 +53,12 @@ namespace hyperbrowse::services
         std::size_t CacheCapacityBytes() const;
 
     private:
+        enum class WorkerKind
+        {
+            General,
+            Raw,
+        };
+
         struct PendingJob
         {
             std::uint64_t sessionId{};
@@ -61,7 +67,8 @@ namespace hyperbrowse::services
             ThumbnailWorkItem workItem;
         };
 
-        void WorkerLoop();
+        bool HasDispatchableWorkLocked(WorkerKind kind) const;
+        void WorkerLoop(WorkerKind kind);
         void PostReady(std::uint64_t sessionId,
                        std::uint64_t requestEpoch,
                        int modelIndex,
@@ -81,7 +88,8 @@ namespace hyperbrowse::services
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> queuedKeys_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> inflightKeys_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> requestedKeys_;
-        std::vector<std::thread> workers_;
+        std::vector<std::thread> generalWorkers_;
+        std::vector<std::thread> rawWorkers_;
         cache::ThumbnailCache cache_;
     };
 }

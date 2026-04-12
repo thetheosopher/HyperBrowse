@@ -10,6 +10,31 @@
 
 namespace hyperbrowse::decode
 {
+#if defined(HYPERBROWSE_ENABLE_LIBRAW)
+    enum class LibRawHelperMode
+    {
+        Thumbnail = 0,
+        FullImage = 1,
+    };
+
+    struct LibRawHelperInvocation
+    {
+        LibRawHelperMode mode{LibRawHelperMode::Thumbnail};
+        std::wstring filePath;
+        std::wstring outputFilePath;
+        int targetWidth{};
+        int targetHeight{};
+    };
+
+    bool RunLibRawHelperInvocation(const LibRawHelperInvocation& invocation,
+                                   std::wstring* errorMessage = nullptr);
+#endif
+
+    bool IsLibRawBuildEnabled();
+    void SetLibRawOutOfProcessEnabled(bool enabled);
+    bool IsLibRawOutOfProcessEnabled();
+    std::wstring DescribeRawDecodingState();
+
     void SetNvJpegAccelerationEnabled(bool enabled);
     bool IsNvJpegAccelerationEnabled();
     bool IsNvJpegBuildEnabled();

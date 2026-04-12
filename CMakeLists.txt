@@ -65,6 +65,7 @@ add_executable(HyperBrowse WIN32
     src/cache/ThumbnailCache.cpp
     src/decode/ImageDecoder.cpp
     src/decode/NvJpegDecoder.cpp
+    src/decode/RawHelperProtocol.cpp
     src/decode/WicThumbnailDecoder.cpp
     src/services/BatchConvertService.cpp
     src/services/FileOperationService.cpp
@@ -109,6 +110,52 @@ if(MSVC)
     target_compile_definitions(HyperBrowse PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+if(HYPERBROWSE_ENABLE_LIBRAW)
+    add_executable(HyperBrowseRawHelper
+        src/tools/RawHelperMain.cpp
+        src/cache/ThumbnailCache.cpp
+        src/decode/ImageDecoder.cpp
+        src/decode/NvJpegDecoder.cpp
+        src/decode/RawHelperProtocol.cpp
+        src/decode/WicThumbnailDecoder.cpp
+        src/util/Diagnostics.cpp
+    )
+
+    target_include_directories(HyperBrowseRawHelper PRIVATE
+        src
+    )
+
+    target_link_libraries(HyperBrowseRawHelper PRIVATE
+        msimg32
+        propsys
+        shell32
+        shlwapi
+        windowscodecs
+        HyperBrowse::LibRaw
+    )
+
+    target_compile_definitions(HyperBrowseRawHelper PRIVATE HYPERBROWSE_ENABLE_LIBRAW=1)
+
+    if(HYPERBROWSE_ENABLE_NVJPEG)
+        target_compile_definitions(HyperBrowseRawHelper PRIVATE HYPERBROWSE_ENABLE_NVJPEG=1)
+    endif()
+
+    if(MSVC)
+        target_compile_definitions(HyperBrowseRawHelper PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
+
+    set_target_properties(HyperBrowseRawHelper PROPERTIES
+        OUTPUT_NAME "HyperBrowseRawHelper"
+        VERSION ${PROJECT_VERSION}
+    )
+
+    add_dependencies(HyperBrowse HyperBrowseRawHelper)
+    add_custom_command(TARGET HyperBrowse POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:HyperBrowseRawHelper>"
+            "$<TARGET_FILE_DIR:HyperBrowse>")
+endif()
+
 set_target_properties(HyperBrowse PROPERTIES
     OUTPUT_NAME "HyperBrowse"
     VERSION ${PROJECT_VERSION}
@@ -130,6 +177,16 @@ install(TARGETS HyperBrowse
 install(TARGETS HyperBrowse
     RUNTIME DESTINATION "${HYPERBROWSE_INSTALLER_BIN_DIR}"
     COMPONENT Runtime)
+
+if(HYPERBROWSE_ENABLE_LIBRAW)
+    install(TARGETS HyperBrowseRawHelper
+        RUNTIME DESTINATION "."
+        COMPONENT Portable)
+
+    install(TARGETS HyperBrowseRawHelper
+        RUNTIME DESTINATION "${HYPERBROWSE_INSTALLER_BIN_DIR}"
+        COMPONENT Runtime)
+endif()
 
 install(FILES "${HYPERBROWSE_PORTABLE_README}"
     DESTINATION "."
