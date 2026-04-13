@@ -10,11 +10,13 @@
 #include <functional>
 #include <memory>
 
+#include "app/resource.h"
 #include "browser/BrowserModel.h"
 #include "cache/ThumbnailCache.h"
 #include "decode/ImageDecoder.h"
 #include "services/ImageMetadataService.h"
 #include "services/ThumbnailScheduler.h"
+#include "util/ResourcePng.h"
 
 namespace
 {
@@ -40,6 +42,7 @@ namespace
     constexpr int kMaximumDetailsMetadataTopOfFolderItems = 192;
     constexpr int kMinimumDetailsMetadataLookAheadItems = 12;
     constexpr int kMaximumDetailsMetadataLookAheadItems = 96;
+    constexpr int kPlaceholderBrandArtSize = 256;
 
     hyperbrowse::browser::BrowserPane::ThemeColors MakeThemeColors(bool darkTheme)
     {
@@ -199,6 +202,7 @@ namespace
         logFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
         return CreateFontIndirectW(&logFont);
     }
+
 }
 
 namespace hyperbrowse::browser
@@ -242,6 +246,10 @@ namespace hyperbrowse::browser
         , thumbnailScheduler_(std::make_unique<services::ThumbnailScheduler>())
         , metadataService_(std::make_unique<services::ImageMetadataService>())
     {
+        placeholderArt_ = util::LoadPngResourceBitmap(instance_,
+                                                      IDB_HYPERBROWSE_BRAND_PNG,
+                                                      kPlaceholderBrandArtSize,
+                                                      kPlaceholderBrandArtSize);
         RebuildThemeResources();
         RebuildThumbnailFonts();
     }
@@ -1980,28 +1988,70 @@ namespace hyperbrowse::browser
     {
         FillRect(hdc, &clientRect, backgroundBrush_ ? backgroundBrush_ : surfaceBrush_);
 
-        std::wstring title = L"Open a Folder";
-        if (model_ && !model_->FolderPath().empty())
+        const bool hasFolder = model_ && !model_->FolderPath().empty();
+        const bool hasError = hasFolder && model_->HasError();
+        const bool loadingFolder = hasFolder && model_->IsEnumerating() && orderedModelIndices_.empty();
+        const bool noMatches = hasFolder && !filterQuery_.empty() && orderedModelIndices_.empty();
+        const bool emptyFolder = hasFolder && !hasError && !loadingFolder && !noMatches && orderedModelIndices_.empty();
+        const bool showIcon = !hasError && (!hasFolder || loadingFolder || emptyFolder);
+
+        std::wstring title = L"HyperBrowse";
+        if (hasFolder)
         {
-            if (model_->HasError())
+            if (hasError)
             {
                 title = L"Folder Load Failed";
             }
-            else if (model_->IsEnumerating() && orderedModelIndices_.empty())
+            else if (loadingFolder)
             {
-                title = L"Scanning Folder";
+                title = L"Loading Images";
             }
-            else if (orderedModelIndices_.empty())
+            else if (noMatches)
             {
-                title = L"No Supported Images Found";
+                title = L"No Matches";
+            }
+            else if (emptyFolder)
+            {
+                title = L"Empty Folder";
             }
         }
 
         RECT panelRect = clientRect;
         const int clientWidth = clientRect.right - clientRect.left;
         const int clientHeight = clientRect.bottom - clientRect.top;
-        const int panelWidth = std::max(280, std::min(520, clientWidth - 56));
-        const int panelHeight = std::min(160, std::max(120, clientHeight - 56));
+        constexpr int kPanelMarginX = 20;
+        constexpr int kPanelMarginY = 16;
+        constexpr int kPanelPaddingLeft = 24;
+        constexpr int kPanelPaddingRight = 28;
+        constexpr int kPanelPaddingVertical = 16;
+        constexpr int kIconTextGap = 28;
+        constexpr int kDesiredTextBlockWidth = 300;
+        constexpr int kMinimumTextBlockWidth = 220;
+        constexpr int kTitleHeight = 34;
+        constexpr int kBodyHeight = 34;
+        constexpr int kTitleBodyGap = 8;
+
+        const int maxPanelWidth = std::max(280, clientWidth - (kPanelMarginX * 2));
+        const int maxPanelHeight = std::max(120, clientHeight - (kPanelMarginY * 2));
+
+        int renderedIconSize = 0;
+        int panelWidth = std::max(280, std::min(520, clientWidth - 56));
+        int panelHeight = showIcon
+            ? std::min(196, std::max(152, clientHeight - 56))
+            : std::min(160, std::max(120, clientHeight - 56));
+        if (showIcon && placeholderArt_)
+        {
+            const int maxIconWidth = std::max(96, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
+            const int maxIconHeight = std::max(96, maxPanelHeight - (kPanelPaddingVertical * 2));
+            renderedIconSize = std::min({placeholderArt_->Width(), maxIconWidth, maxIconHeight});
+
+            const int textBlockWidth = std::max(kMinimumTextBlockWidth,
+                                                std::min(kDesiredTextBlockWidth,
+                                                         maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - renderedIconSize));
+            panelWidth = std::min(maxPanelWidth,
+                                  kPanelPaddingLeft + renderedIconSize + kIconTextGap + textBlockWidth + kPanelPaddingRight);
+            panelHeight = std::min(maxPanelHeight, (kPanelPaddingVertical * 2) + renderedIconSize);
+        }
         panelRect.left = clientRect.left + ((clientWidth - panelWidth) / 2);
         panelRect.top = clientRect.top + ((clientHeight - panelHeight) / 2);
         panelRect.right = panelRect.left + panelWidth;
@@ -2009,17 +2059,36 @@ namespace hyperbrowse::browser
 
         HGDIOBJ oldBrush = SelectObject(hdc, placeholderBrush_ ? placeholderBrush_ : surfaceBrush_);
         HGDIOBJ oldPen = SelectObject(hdc, borderPen_ ? borderPen_ : GetStockObject(BLACK_PEN));
-        RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 18, 18);
+        RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 22, 22);
         SelectObject(hdc, oldPen);
         SelectObject(hdc, oldBrush);
 
-        RECT titleRect{panelRect.left + 20, panelRect.top + 20, panelRect.right - 20, panelRect.top + 54};
-        RECT bodyRect{panelRect.left + 24, titleRect.bottom + 8, panelRect.right - 24, panelRect.bottom - 22};
         const std::wstring text = BuildPlaceholderText();
-        if (text.empty())
+        RECT titleRect{};
+        RECT bodyRect{};
+        if (showIcon && placeholderArt_)
         {
-            titleRect.top = panelRect.top + ((panelRect.bottom - panelRect.top - 34) / 2);
-            titleRect.bottom = titleRect.top + 34;
+            const int iconX = panelRect.left + kPanelPaddingLeft;
+            const int iconY = panelRect.top + ((panelHeight - renderedIconSize) / 2);
+            util::DrawBitmapWithAlpha(hdc, *placeholderArt_, iconX, iconY, renderedIconSize, renderedIconSize);
+
+            const int contentLeft = iconX + renderedIconSize + kIconTextGap;
+            const int contentRight = panelRect.right - kPanelPaddingRight;
+            const int textBlockHeight = kTitleHeight + kTitleBodyGap + kBodyHeight;
+            const int contentTop = panelRect.top + std::max(kPanelPaddingVertical,
+                                                            (panelHeight - textBlockHeight) / 2);
+            titleRect = RECT{contentLeft, contentTop, contentRight, contentTop + kTitleHeight};
+            bodyRect = RECT{contentLeft, titleRect.bottom + kTitleBodyGap, contentRight, titleRect.bottom + kTitleBodyGap + kBodyHeight};
+        }
+        else
+        {
+            titleRect = RECT{panelRect.left + 20, panelRect.top + 20, panelRect.right - 20, panelRect.top + 54};
+            bodyRect = RECT{panelRect.left + 24, titleRect.bottom + 8, panelRect.right - 24, panelRect.bottom - 22};
+            if (text.empty())
+            {
+                titleRect.top = panelRect.top + ((panelRect.bottom - panelRect.top - 34) / 2);
+                titleRect.bottom = titleRect.top + 34;
+            }
         }
 
         SetBkMode(hdc, TRANSPARENT);
@@ -2465,26 +2534,26 @@ namespace hyperbrowse::browser
     {
         if (!model_ || model_->FolderPath().empty())
         {
-            return L"Open a folder to start browsing.\r\n\r\nThumbnail mode is virtualized and paints only visible cells. Details mode uses an owner-data list view for thousands of items.";
+            return L"Select a folder to begin browsing.";
         }
 
         if (model_->HasError())
         {
-            return L"Enumeration failed:\r\n\r\n" + model_->ErrorMessage();
+            return L"Unable to load this folder.\r\n\r\n" + model_->ErrorMessage();
         }
 
         if (model_->IsEnumerating() && orderedModelIndices_.empty())
         {
-            return L"Scanning the selected folder asynchronously...\r\n\r\nSupported formats: jpg, jpeg, png, gif, tif, tiff, arw, cr2, cr3, dng, nef, nrw, raf, rw2";
+            return L"Scanning folder...";
         }
 
         if (!filterQuery_.empty() && orderedModelIndices_.empty())
         {
-            return L"No images match \"" + filterQuery_ + L"\".\r\n\r\nTry a shorter filename fragment or clear the filter.";
+            return L"No images match \"" + filterQuery_ + L"\".";
         }
 
         return orderedModelIndices_.empty()
-            ? L""
+            ? L"No supported images found."
             : L"";
     }
 

@@ -197,8 +197,6 @@ namespace hyperbrowse::ui
         void ShowThemeActionMenu();
         void UpdateDetailsStripText();
         ThemePalette GetThemePalette() const;
-        std::wstring BuildShellStateText() const;
-        std::wstring GetCurrentFolderDisplayName() const;
         bool DrawActionButton(const DRAWITEMSTRUCT& drawItem) const;
 
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);

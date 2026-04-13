@@ -35,7 +35,6 @@ A multi-resolution application icon was created and integrated:
 
 - No custom non-client title bar rendering was added.
 - No splash screen was added.
-- No in-app logo rendering was added (e.g. empty-state branding).
 
 ## 3. UI Layout Assessment
 
@@ -195,12 +194,12 @@ is reaching the threshold where users may struggle to find commands quickly.
 
 #### H. Empty State Branding
 
-The centered placeholder states ("No folder selected", "Loading", "No images")
-are clean but plain text.  With the new icon, the empty state could render the
-icon as a watermark or header to reinforce branding on the initial launch screen.
+This is now addressed.  The browser pane renders the HyperBrowse icon above the
+short no-folder, loading, and empty-folder placeholder copy, and the viewer
+uses the same icon treatment for its loading panel.
 
-**Recommendation (low priority):** Render a muted version of the icon above the
-"Select a folder to begin browsing" text in the no-folder placeholder.
+**Result:** Initial-launch and loading states feel more intentional without
+adding a splash screen or heavier chrome.
 
 ## 4. Visual Polish Status
 
@@ -216,6 +215,7 @@ items are **complete**:
 - [x] Viewer HUD overlay (filename, index, zoom, dimensions)
 - [x] Compact top action strip for high-frequency browse controls
 - [x] In-folder filename filter integrated into the action strip
+- [x] Branded empty/loading states with concise status copy and app icon
 
 These follow-up items from the visual polish spec are **not yet implemented**:
 
@@ -230,7 +230,6 @@ These follow-up items from the visual polish spec are **not yet implemented**:
 3. **Add a selected-item details strip or side panel** for richer metadata and
   action visibility without opening the viewer.
 4. *(Low priority)* Create a custom About dialog with the app icon.
-5. *(Low priority)* Add a muted icon watermark to the no-folder placeholder.
 
 ## 6. What Should Not Change
 

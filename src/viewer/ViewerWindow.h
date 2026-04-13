@@ -124,6 +124,7 @@ namespace hyperbrowse::viewer
         CachedImageSlot nextSlot_;
         std::shared_ptr<AsyncState> asyncState_;
         HBRUSH backgroundBrush_{};
+        std::shared_ptr<const cache::CachedThumbnail> statusArt_;
         ZoomMode zoomMode_{ZoomMode::Fit};
         double customZoomScale_{1.0};
         int currentZoomPercent_{};

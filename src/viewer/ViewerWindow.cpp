@@ -10,6 +10,7 @@
 
 #include "app/resource.h"
 #include "decode/ImageDecoder.h"
+#include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
 
@@ -17,6 +18,7 @@ namespace
 {
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
+    constexpr int kPlaceholderBrandArtSize = 256;
 
     struct DecodedImageResult
     {
@@ -107,6 +109,7 @@ namespace
         WriteDwordValue(key, kRegistryValueViewerInfoOverlaysVisible, visible ? 1UL : 0UL);
         RegCloseKey(key);
     }
+
 }
 
 namespace hyperbrowse::viewer
@@ -117,6 +120,10 @@ namespace hyperbrowse::viewer
         , infoOverlaysVisible_(LoadViewerInfoOverlaysVisibleSetting())
     {
         backgroundBrush_ = CreateSolidBrush(BackgroundColor(false));
+        statusArt_ = util::LoadPngResourceBitmap(instance_,
+                                                 IDB_HYPERBROWSE_BRAND_PNG,
+                                                 kPlaceholderBrandArtSize,
+                                                 kPlaceholderBrandArtSize);
     }
 
     ViewerWindow::~ViewerWindow()
@@ -1124,9 +1131,40 @@ namespace hyperbrowse::viewer
 
             if (!currentImage_)
             {
+                const bool showIcon = loading_ || errorMessage_.empty();
                 RECT panelRect = clientRect;
-                const int panelWidth = std::max(320, std::min(560, clientWidth - 64));
-                const int panelHeight = std::min(170, std::max(126, clientHeight - 64));
+                constexpr int kPanelMarginX = 24;
+                constexpr int kPanelMarginY = 18;
+                constexpr int kPanelPaddingLeft = 28;
+                constexpr int kPanelPaddingRight = 32;
+                constexpr int kPanelPaddingVertical = 16;
+                constexpr int kIconTextGap = 30;
+                constexpr int kDesiredTextBlockWidth = 320;
+                constexpr int kMinimumTextBlockWidth = 240;
+                constexpr int kTitleHeight = 34;
+                constexpr int kBodyHeight = 34;
+                constexpr int kTitleBodyGap = 8;
+
+                const int maxPanelWidth = std::max(320, clientWidth - (kPanelMarginX * 2));
+                const int maxPanelHeight = std::max(140, clientHeight - (kPanelMarginY * 2));
+                int renderedIconSize = 0;
+                int panelWidth = std::max(320, std::min(560, clientWidth - 64));
+                int panelHeight = showIcon
+                    ? std::min(198, std::max(152, clientHeight - 64))
+                    : std::min(170, std::max(126, clientHeight - 64));
+                if (showIcon && statusArt_)
+                {
+                    const int maxIconWidth = std::max(96, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
+                    const int maxIconHeight = std::max(96, maxPanelHeight - (kPanelPaddingVertical * 2));
+                    renderedIconSize = std::min({statusArt_->Width(), maxIconWidth, maxIconHeight});
+
+                    const int textBlockWidth = std::max(kMinimumTextBlockWidth,
+                                                        std::min(kDesiredTextBlockWidth,
+                                                                 maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - renderedIconSize));
+                    panelWidth = std::min(maxPanelWidth,
+                                          kPanelPaddingLeft + renderedIconSize + kIconTextGap + textBlockWidth + kPanelPaddingRight);
+                    panelHeight = std::min(maxPanelHeight, (kPanelPaddingVertical * 2) + renderedIconSize);
+                }
                 panelRect.left = clientRect.left + ((clientWidth - panelWidth) / 2);
                 panelRect.top = clientRect.top + ((clientHeight - panelHeight) / 2);
                 panelRect.right = panelRect.left + panelWidth;
@@ -1136,7 +1174,7 @@ namespace hyperbrowse::viewer
                 HPEN panelPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
                 HGDIOBJ oldBrush = SelectObject(frameDc, panelBrush);
                 HGDIOBJ oldPen = SelectObject(frameDc, panelPen);
-                RoundRect(frameDc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 18, 18);
+                RoundRect(frameDc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 22, 22);
                 SelectObject(frameDc, oldPen);
                 SelectObject(frameDc, oldBrush);
 
@@ -1144,13 +1182,32 @@ namespace hyperbrowse::viewer
                     ? L"Loading Image"
                     : (errorMessage_.empty() ? L"No Image Loaded" : L"Unable to Open Image");
                 const std::wstring messageText = loading_
-                    ? L"Decode and scaling work stay off the UI thread so navigation remains responsive."
+                    ? L"Opening image..."
                     : (errorMessage_.empty()
-                        ? L"Choose another item from the browser to continue."
+                        ? L"Choose an image to continue."
                         : errorMessage_);
 
-                RECT titleRect{panelRect.left + 20, panelRect.top + 20, panelRect.right - 20, panelRect.top + 54};
-                RECT bodyRect{panelRect.left + 24, titleRect.bottom + 8, panelRect.right - 24, panelRect.bottom - 22};
+                RECT titleRect{};
+                RECT bodyRect{};
+                if (showIcon && statusArt_)
+                {
+                    const int iconX = panelRect.left + kPanelPaddingLeft;
+                    const int iconY = panelRect.top + ((panelHeight - renderedIconSize) / 2);
+                    util::DrawBitmapWithAlpha(frameDc, *statusArt_, iconX, iconY, renderedIconSize, renderedIconSize);
+
+                    const int contentLeft = iconX + renderedIconSize + kIconTextGap;
+                    const int contentRight = panelRect.right - kPanelPaddingRight;
+                    const int textBlockHeight = kTitleHeight + kTitleBodyGap + kBodyHeight;
+                    const int contentTop = panelRect.top + std::max(kPanelPaddingVertical,
+                                                                    (panelHeight - textBlockHeight) / 2);
+                    titleRect = RECT{contentLeft, contentTop, contentRight, contentTop + kTitleHeight};
+                    bodyRect = RECT{contentLeft, titleRect.bottom + kTitleBodyGap, contentRight, titleRect.bottom + kTitleBodyGap + kBodyHeight};
+                }
+                else
+                {
+                    titleRect = RECT{panelRect.left + 20, panelRect.top + 20, panelRect.right - 20, panelRect.top + 54};
+                    bodyRect = RECT{panelRect.left + 24, titleRect.bottom + 8, panelRect.right - 24, panelRect.bottom - 22};
+                }
                 SetTextColor(frameDc, TextColor(darkTheme_));
                 DrawTextW(frameDc, title.c_str(), -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                 SetTextColor(frameDc, MutedTextColor(darkTheme_));

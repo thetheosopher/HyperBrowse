@@ -279,16 +279,6 @@ namespace
         return leaf.empty() ? std::wstring(folderPath) : leaf;
     }
 
-    std::wstring TrimForStatus(std::wstring_view value, std::size_t maxLength)
-    {
-        if (value.size() <= maxLength)
-        {
-            return std::wstring(value);
-        }
-
-        return std::wstring(value.substr(0, maxLength > 3 ? maxLength - 3 : maxLength)) + L"...";
-    }
-
     std::wstring CompactSortLabel(hyperbrowse::browser::BrowserSortMode sortMode)
     {
         switch (sortMode)
@@ -1631,71 +1621,30 @@ namespace hyperbrowse::ui
             return;
         }
 
-        int parts[] = {240, 650, 930, -1};
+        RECT statusBarRect{};
+        GetClientRect(statusBar_, &statusBarRect);
+        const int firstPartWidth = statusBarRect.right > statusBarRect.left
+            ? (statusBarRect.right - statusBarRect.left) / 2
+            : 420;
+        int parts[] = {firstPartWidth, -1};
         SendMessageW(statusBar_, SB_SETPARTS, static_cast<WPARAM>(std::size(parts)), reinterpret_cast<LPARAM>(parts));
 
-        const std::wstring folderText = browserModel_ && !browserModel_->FolderPath().empty()
-            ? L"Folder: " + TrimForStatus(GetCurrentFolderDisplayName(), 28)
-            : L"Folder: none selected";
-
-        std::wstring progressText = L"Folder totals: n/a";
-        if (browserModel_ && !browserModel_->FolderPath().empty())
-        {
-            if (browserModel_->HasError())
-            {
-                progressText = L"Load failed: " + TrimForStatus(browserModel_->ErrorMessage(), 60);
-            }
-            else
-            {
-                const std::uint64_t displayedCount = browserPaneController_
-                    ? browserPaneController_->DisplayedItemCount()
-                    : browserModel_->TotalCount();
-                const bool hasFilter = browserPaneController_ && browserPaneController_->HasActiveFilter();
-                progressText = L"Images: " + std::to_wstring(displayedCount);
-                if (hasFilter)
-                {
-                    progressText.append(L" of ");
-                    progressText.append(std::to_wstring(browserModel_->TotalCount()));
-                }
-
-                progressText.append(L" | Size: ");
-                progressText.append(browser::FormatByteSize(browserModel_->TotalBytes()));
-                progressText.append(L" | ");
-                progressText.append(browserModel_->IsEnumerating() ? L"Loading..." : L"Loaded");
-
-                if (hasFilter)
-                {
-                    progressText.append(L" | Filter: ");
-                    progressText.append(TrimForStatus(browserPaneController_->GetFilterQuery(), 22));
-                }
-            }
-        }
-
-        if (batchConvertActive_)
-        {
-            progressText.append(L" | Convert: ");
-            progressText.append(std::to_wstring(batchConvertCompleted_));
-            progressText.append(L"/");
-            progressText.append(std::to_wstring(batchConvertTotal_));
-        }
-
-        if (fileOperationActive_ && !activeFileOperationLabel_.empty())
-        {
-            progressText.append(L" | File: ");
-            progressText.append(activeFileOperationLabel_);
-        }
+        const std::uint64_t folderCount = browserModel_ && !browserModel_->FolderPath().empty()
+            ? browserModel_->TotalCount()
+            : 0;
+        const std::uint64_t folderBytes = browserModel_ && !browserModel_->FolderPath().empty()
+            ? browserModel_->TotalBytes()
+            : 0;
+        const std::wstring folderText = L"Folder: " + std::to_wstring(folderCount)
+            + L" files | " + browser::FormatByteSize(folderBytes);
 
         const std::uint64_t selectedCount = browserPaneController_ ? browserPaneController_->SelectedCount() : 0;
         const std::uint64_t selectedBytes = browserPaneController_ ? browserPaneController_->SelectedBytes() : 0;
-        const std::wstring selectionText = L"Selection: " + std::to_wstring(selectedCount)
-            + L" images | " + browser::FormatByteSize(selectedBytes);
-
-        const std::wstring shellStateText = BuildShellStateText();
+        const std::wstring selectionText = L"Selected: " + std::to_wstring(selectedCount)
+            + L" items | " + browser::FormatByteSize(selectedBytes);
 
         SendMessageW(statusBar_, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(folderText.c_str()));
-        SendMessageW(statusBar_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(progressText.c_str()));
-        SendMessageW(statusBar_, SB_SETTEXTW, 2, reinterpret_cast<LPARAM>(selectionText.c_str()));
-        SendMessageW(statusBar_, SB_SETTEXTW, 3, reinterpret_cast<LPARAM>(shellStateText.c_str()));
+        SendMessageW(statusBar_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(selectionText.c_str()));
     }
 
     void MainWindow::UpdateDetailsStripText()
@@ -2994,7 +2943,7 @@ namespace hyperbrowse::ui
         if (browserModel_ && !browserModel_->FolderPath().empty())
         {
             title.append(L" - ");
-            title.append(GetCurrentFolderDisplayName());
+            title.append(browserModel_->FolderPath());
         }
         SetWindowTextW(hwnd_, title.c_str());
     }
@@ -3838,37 +3787,6 @@ namespace hyperbrowse::ui
                 RGB(25, 35, 50),
             };
         }
-    }
-
-    std::wstring MainWindow::BuildShellStateText() const
-    {
-        std::wstring shellState = L"JPEG: ";
-        shellState.append(decode::DescribeJpegAccelerationState());
-        shellState.append(L" | RAW: ");
-        shellState.append(decode::DescribeRawDecodingState());
-        if (viewerWindowActive_ && viewerZoomPercent_ > 0)
-        {
-            shellState.append(L" | Viewer Zoom: ");
-            shellState.append(std::to_wstring(viewerZoomPercent_));
-            shellState.append(L"%");
-        }
-        if (viewerWindow_ && viewerWindow_->IsSlideshowActive())
-        {
-            shellState.append(L" | Slideshow: On");
-        }
-        if (batchConvertActive_)
-        {
-            shellState.append(L" | Convert: ");
-            shellState.append(std::to_wstring(batchConvertCompleted_));
-            shellState.append(L"/");
-            shellState.append(std::to_wstring(batchConvertTotal_));
-        }
-        return shellState;
-    }
-
-    std::wstring MainWindow::GetCurrentFolderDisplayName() const
-    {
-        return browserModel_ ? GetFolderDisplayName(browserModel_->FolderPath()) : L"No Folder";
     }
 
     bool MainWindow::DrawActionButton(const DRAWITEMSTRUCT& drawItem) const

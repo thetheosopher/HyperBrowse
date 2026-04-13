@@ -48,6 +48,11 @@ namespace hyperbrowse::services
     class ImageMetadataService;
 }
 
+namespace hyperbrowse::cache
+{
+    class CachedThumbnail;
+}
+
 namespace hyperbrowse::browser
 {
     class BrowserPane
@@ -216,6 +221,7 @@ namespace hyperbrowse::browser
         HPEN borderPen_{};
         HPEN selectedBorderPen_{};
         HPEN rubberBandPen_{};
+        std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> placeholderArt_;
         ThemeColors colors_{};
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
