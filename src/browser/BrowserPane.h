@@ -144,6 +144,7 @@ namespace hyperbrowse::browser
 
         bool RegisterClass() const;
         bool CreateDetailsListView();
+        void CreateThumbnailTooltip();
         ThumbnailLayoutMetrics CurrentThumbnailLayout() const;
         void LayoutChildren();
         void RebuildOrder();
@@ -180,13 +181,17 @@ namespace hyperbrowse::browser
         POINT ContextMenuAnchorScreenPoint() const;
         void ShowContextMenu(POINT screenPoint) const;
         void ScheduleVisibleThumbnailWork();
+        void ScheduleVisibleMetadataWork() const;
         void ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const;
         void CancelThumbnailWork();
         void InvalidateThumbnailCellForModelIndex(int modelIndex) const;
+        void UpdateThumbnailTooltip(POINT point, WPARAM wParam, LPARAM lParam);
+        void HideThumbnailTooltip();
         void DrawPlaceholderState(HDC hdc, const RECT& clientRect) const;
         void DrawThumbnailCells(HDC hdc, const RECT& clientRect) const;
         void DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item, bool selected) const;
         std::wstring BuildListText(int viewIndex, int subItem) const;
+        std::wstring BuildThumbnailTooltipText(int viewIndex) const;
         std::wstring BuildPlaceholderText() const;
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -195,6 +200,7 @@ namespace hyperbrowse::browser
         HWND parent_{};
         HWND hwnd_{};
         HWND detailsList_{};
+        HWND thumbnailTooltip_{};
         HFONT detailsListFont_{};
         HFONT thumbnailTitleFont_{};
         HFONT thumbnailMetaFont_{};
@@ -232,12 +238,15 @@ namespace hyperbrowse::browser
         int anchorModelIndex_{-1};
         int focusedModelIndex_{-1};
         bool rubberBandActive_{};
+        bool trackingMouseLeave_{};
         POINT rubberBandStart_{};
         RECT rubberBandRect_{};
+        int hoveredTooltipViewIndex_{-1};
         std::uint64_t thumbnailSessionId_{1};
         std::uint64_t metadataSessionId_{1};
         std::uint64_t thumbnailRequestEpoch_{};
         mutable std::wstring listViewTextBuffer_;
+        mutable std::wstring tooltipTextBuffer_;
     };
 
     std::wstring BrowserSortModeToLabel(BrowserSortMode sortMode);

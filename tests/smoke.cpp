@@ -1262,8 +1262,8 @@ namespace
 
          Expect(browserPane.GetThumbnailSizePreset() == hyperbrowse::browser::ThumbnailSizePreset::Pixels192,
              "BrowserPane did not default to the expected thumbnail size preset");
-         Expect(!browserPane.IsCompactThumbnailLayoutEnabled(),
-             "BrowserPane should default to the standard thumbnail layout");
+         Expect(browserPane.IsCompactThumbnailLayoutEnabled(),
+             "BrowserPane should default to the compact thumbnail layout");
          Expect(browserPane.AreThumbnailDetailsVisible(),
              "BrowserPane should default to showing thumbnail details");
 
@@ -1292,8 +1292,8 @@ namespace
          SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(40, 40));
          Expect(browserPane.GetThumbnailSizePreset() == hyperbrowse::browser::ThumbnailSizePreset::Pixels320,
              "BrowserPane did not store the large thumbnail size preset");
-         Expect(!browserPane.IsCompactThumbnailLayoutEnabled(),
-             "BrowserPane did not restore the standard thumbnail layout");
+         Expect(browserPane.IsCompactThumbnailLayoutEnabled(),
+             "BrowserPane should remain in the compact thumbnail layout");
          Expect(browserPane.AreThumbnailDetailsVisible(),
              "BrowserPane did not restore thumbnail details visibility");
          Expect(browserPane.SelectedCount() == 1,

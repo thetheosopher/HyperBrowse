@@ -25,9 +25,21 @@ namespace
     constexpr int kVisiblePriority = 0;
     constexpr int kNearVisiblePriority = 1;
     constexpr int kProactivePrefetchPriority = 2;
-    constexpr int kNearVisiblePrefetchRows = 1;
-    constexpr int kMinimumTopOfFolderPrefetchRows = 6;
-    constexpr int kMaximumTopOfFolderPrefetchRows = 18;
+    constexpr int kThumbnailNearVisiblePrefetchRows = 2;
+    constexpr int kThumbnailMinimumTopOfFolderPrefetchRows = 10;
+    constexpr int kThumbnailMaximumTopOfFolderPrefetchRows = 40;
+    constexpr int kThumbnailMinimumLookAheadPrefetchRows = 4;
+    constexpr int kThumbnailMaximumLookAheadPrefetchRows = 20;
+    constexpr int kMetadataNearVisiblePrefetchRows = 2;
+    constexpr int kMetadataMinimumTopOfFolderPrefetchRows = 12;
+    constexpr int kMetadataMaximumTopOfFolderPrefetchRows = 48;
+    constexpr int kMetadataMinimumLookAheadPrefetchRows = 8;
+    constexpr int kMetadataMaximumLookAheadPrefetchRows = 32;
+    constexpr int kMinimumDetailsMetadataNearVisibleItems = 12;
+    constexpr int kMinimumDetailsMetadataTopOfFolderItems = 24;
+    constexpr int kMaximumDetailsMetadataTopOfFolderItems = 192;
+    constexpr int kMinimumDetailsMetadataLookAheadItems = 12;
+    constexpr int kMaximumDetailsMetadataLookAheadItems = 96;
 
     hyperbrowse::browser::BrowserPane::ThemeColors MakeThemeColors(bool darkTheme)
     {
@@ -295,6 +307,7 @@ namespace hyperbrowse::browser
         model_ = model;
         ++thumbnailSessionId_;
         ++metadataSessionId_;
+        HideThumbnailTooltip();
         CancelThumbnailWork();
         if (metadataService_)
         {
@@ -304,6 +317,7 @@ namespace hyperbrowse::browser
 
     void BrowserPane::RefreshFromModel()
     {
+        HideThumbnailTooltip();
         RebuildOrder();
         UpdateSelectionBytes();
         UpdateDetailsListView();
@@ -321,6 +335,7 @@ namespace hyperbrowse::browser
             return;
         }
 
+        HideThumbnailTooltip();
         viewMode_ = mode;
         LayoutChildren();
         if (viewMode_ == BrowserViewMode::Thumbnails)
@@ -439,6 +454,7 @@ namespace hyperbrowse::browser
 
     void BrowserPane::SetCompactThumbnailLayout(bool enabled)
     {
+        enabled = true;
         if (compactThumbnailLayout_ == enabled)
         {
             return;
@@ -454,7 +470,7 @@ namespace hyperbrowse::browser
 
     bool BrowserPane::IsCompactThumbnailLayoutEnabled() const noexcept
     {
-        return compactThumbnailLayout_;
+        return true;
     }
 
     void BrowserPane::SetThumbnailDetailsVisible(bool visible)
@@ -775,11 +791,50 @@ namespace hyperbrowse::browser
         return true;
     }
 
+    void BrowserPane::CreateThumbnailTooltip()
+    {
+        if (thumbnailTooltip_ || !hwnd_)
+        {
+            return;
+        }
+
+        thumbnailTooltip_ = CreateWindowExW(
+            WS_EX_TOPMOST,
+            TOOLTIPS_CLASSW,
+            nullptr,
+            WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            hwnd_,
+            nullptr,
+            instance_,
+            nullptr);
+        if (!thumbnailTooltip_)
+        {
+            return;
+        }
+
+        SetWindowPos(thumbnailTooltip_, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        SendMessageW(thumbnailTooltip_, TTM_SETMAXTIPWIDTH, 0, 420);
+
+        TOOLINFOW toolInfo{};
+        toolInfo.cbSize = sizeof(toolInfo);
+        toolInfo.uFlags = TTF_SUBCLASS;
+        toolInfo.hwnd = hwnd_;
+        toolInfo.uId = 1;
+        SetRectEmpty(&toolInfo.rect);
+        toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+        SendMessageW(thumbnailTooltip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+    }
+
     BrowserPane::ThumbnailLayoutMetrics BrowserPane::CurrentThumbnailLayout() const
     {
         const int previewWidth = ThumbnailSizePresetToPixels(thumbnailSizePreset_);
         const int previewHeight = std::max(72, static_cast<int>(std::lround(static_cast<double>(previewWidth) * kThumbnailPreviewAspectRatio)));
-        const bool compact = compactThumbnailLayout_;
+        const bool compact = true;
         const bool showDetails = thumbnailDetailsVisible_;
 
         ThumbnailLayoutMetrics layout;
@@ -788,12 +843,12 @@ namespace hyperbrowse::browser
         layout.previewWidth = previewWidth;
         layout.previewHeight = previewHeight;
         layout.textInset = compact ? std::max(8, previewWidth / 22) : std::max(12, previewWidth / 16);
-        layout.titleTopGap = showDetails ? (compact ? std::max(4, previewWidth / 40) : std::max(8, previewWidth / 24)) : 0;
-        layout.titleHeight = showDetails ? std::clamp(previewWidth / 6, compact ? 20 : 26, compact ? 32 : 38) : 0;
-        layout.metaTopGap = showDetails ? (compact ? 3 : 5) : 0;
-        layout.metaHeight = showDetails ? std::clamp(previewWidth / 12, compact ? 10 : 12, compact ? 12 : 14) : 0;
-        layout.infoBottomInset = showDetails ? (compact ? 6 : 10) : 0;
-        layout.infoHeight = showDetails ? std::clamp(previewWidth / 10, compact ? 12 : 16, compact ? 14 : 18) : 0;
+        layout.titleTopGap = showDetails ? std::max(2, previewWidth / 56) : 0;
+        layout.titleHeight = showDetails ? std::clamp(previewWidth / 8, 16, 22) : 0;
+        layout.metaTopGap = 0;
+        layout.metaHeight = 0;
+        layout.infoBottomInset = showDetails ? 4 : 0;
+        layout.infoHeight = showDetails ? std::clamp(previewWidth / 13, 12, 14) : 0;
         layout.badgeHorizontalPadding = compact ? 6 : 8;
         layout.badgeGap = compact ? 6 : 10;
         layout.badgeCornerRadius = compact ? 6 : 8;
@@ -1079,6 +1134,7 @@ namespace hyperbrowse::browser
             return;
         }
 
+        HideThumbnailTooltip();
         scrollOffsetY_ = clampedValue;
         SCROLLINFO scrollInfo{};
         scrollInfo.cbSize = sizeof(scrollInfo);
@@ -1693,8 +1749,131 @@ namespace hyperbrowse::browser
         metadataService_->Schedule(metadataSessionId_, services::MetadataWorkItem{modelIndex, item, 0});
     }
 
+    void BrowserPane::ScheduleVisibleMetadataWork() const
+    {
+        if (!metadataService_ || !model_ || orderedModelIndices_.empty())
+        {
+            return;
+        }
+
+        std::vector<services::MetadataWorkItem> workItems;
+        workItems.reserve(128);
+
+        if (viewMode_ == BrowserViewMode::Thumbnails)
+        {
+            if (!hwnd_)
+            {
+                return;
+            }
+
+            RECT clientRect{};
+            GetClientRect(hwnd_, &clientRect);
+            const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+            const int clientHeight = clientRect.bottom - clientRect.top;
+            const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
+            const int verticalStride = layout.itemHeight + layout.cellPadding;
+            const int firstVisibleRow = std::max(0, scrollOffsetY_ / verticalStride);
+            const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
+            const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
+            const int proactivePrefetchRows = scrollOffsetY_ == 0
+                ? std::clamp(visibleRowCount * 6,
+                             kMetadataMinimumTopOfFolderPrefetchRows,
+                             kMetadataMaximumTopOfFolderPrefetchRows)
+                : std::clamp(visibleRowCount * 3,
+                             kMetadataMinimumLookAheadPrefetchRows,
+                             kMetadataMaximumLookAheadPrefetchRows);
+            const int requestStartRow = std::max(0, firstVisibleRow - kMetadataNearVisiblePrefetchRows);
+            const int requestEndRow = lastVisibleRow + kMetadataNearVisiblePrefetchRows + proactivePrefetchRows;
+            const int firstIndex = requestStartRow * columns;
+            const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (requestEndRow + 1) * columns);
+
+            workItems.reserve(static_cast<std::size_t>(std::max(0, lastIndex - firstIndex)));
+            for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
+            {
+                const BrowserItem* item = ItemFromViewIndex(viewIndex);
+                if (!item)
+                {
+                    continue;
+                }
+
+                const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+                if (modelIndex < 0)
+                {
+                    continue;
+                }
+
+                const int row = viewIndex / columns;
+                int priority = kProactivePrefetchPriority;
+                if (row >= firstVisibleRow && row <= lastVisibleRow)
+                {
+                    priority = kVisiblePriority;
+                }
+                else if (row >= (firstVisibleRow - kMetadataNearVisiblePrefetchRows)
+                    && row <= (lastVisibleRow + kMetadataNearVisiblePrefetchRows))
+                {
+                    priority = kNearVisiblePriority;
+                }
+
+                workItems.push_back(services::MetadataWorkItem{modelIndex, *item, priority});
+            }
+        }
+        else if (viewMode_ == BrowserViewMode::Details && detailsList_)
+        {
+            const int topIndex = std::max(0, ListView_GetTopIndex(detailsList_));
+            const int visibleCount = std::max(1, ListView_GetCountPerPage(detailsList_));
+            const int nearVisibleCount = std::max(visibleCount, kMinimumDetailsMetadataNearVisibleItems);
+            const int proactivePrefetchCount = topIndex == 0
+                ? std::clamp(visibleCount * 6,
+                             kMinimumDetailsMetadataTopOfFolderItems,
+                             kMaximumDetailsMetadataTopOfFolderItems)
+                : std::clamp(visibleCount * 3,
+                             kMinimumDetailsMetadataLookAheadItems,
+                             kMaximumDetailsMetadataLookAheadItems);
+            const int firstIndex = std::max(0, topIndex - nearVisibleCount);
+            const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()),
+                                           topIndex + visibleCount + nearVisibleCount + proactivePrefetchCount);
+            const int visibleEndIndex = std::min(lastIndex - 1, topIndex + visibleCount - 1);
+            const int nearEndIndex = std::min(lastIndex - 1, topIndex + visibleCount + nearVisibleCount - 1);
+
+            workItems.reserve(static_cast<std::size_t>(std::max(0, lastIndex - firstIndex)));
+            for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
+            {
+                const BrowserItem* item = ItemFromViewIndex(viewIndex);
+                if (!item)
+                {
+                    continue;
+                }
+
+                const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+                if (modelIndex < 0)
+                {
+                    continue;
+                }
+
+                int priority = kProactivePrefetchPriority;
+                if (viewIndex >= topIndex && viewIndex <= visibleEndIndex)
+                {
+                    priority = kVisiblePriority;
+                }
+                else if (viewIndex >= firstIndex && viewIndex <= nearEndIndex)
+                {
+                    priority = kNearVisiblePriority;
+                }
+
+                workItems.push_back(services::MetadataWorkItem{modelIndex, *item, priority});
+            }
+        }
+
+        if (!workItems.empty())
+        {
+            metadataService_->Schedule(metadataSessionId_, std::move(workItems));
+        }
+    }
+
     void BrowserPane::ScheduleVisibleThumbnailWork()
     {
+        ScheduleVisibleMetadataWork();
+
         if (!thumbnailScheduler_)
         {
             return;
@@ -1716,12 +1895,14 @@ namespace hyperbrowse::browser
         const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
         const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
         const int proactivePrefetchRows = scrollOffsetY_ == 0
-            ? std::clamp(visibleRowCount * 3,
-                         kMinimumTopOfFolderPrefetchRows,
-                         kMaximumTopOfFolderPrefetchRows)
-            : 0;
-        const int requestStartRow = std::max(0, firstVisibleRow - kNearVisiblePrefetchRows);
-        const int requestEndRow = lastVisibleRow + kNearVisiblePrefetchRows + proactivePrefetchRows;
+            ? std::clamp(visibleRowCount * 5,
+                         kThumbnailMinimumTopOfFolderPrefetchRows,
+                         kThumbnailMaximumTopOfFolderPrefetchRows)
+            : std::clamp(visibleRowCount * 2,
+                         kThumbnailMinimumLookAheadPrefetchRows,
+                         kThumbnailMaximumLookAheadPrefetchRows);
+        const int requestStartRow = std::max(0, firstVisibleRow - kThumbnailNearVisiblePrefetchRows);
+        const int requestEndRow = lastVisibleRow + kThumbnailNearVisiblePrefetchRows + proactivePrefetchRows;
         const int firstIndex = requestStartRow * columns;
         const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (requestEndRow + 1) * columns);
         const int targetWidth = layout.previewWidth;
@@ -1749,8 +1930,8 @@ namespace hyperbrowse::browser
             {
                 priority = kVisiblePriority;
             }
-            else if (row >= (firstVisibleRow - kNearVisiblePrefetchRows)
-                && row <= (lastVisibleRow + kNearVisiblePrefetchRows))
+            else if (row >= (firstVisibleRow - kThumbnailNearVisiblePrefetchRows)
+                && row <= (lastVisibleRow + kThumbnailNearVisiblePrefetchRows))
             {
                 priority = kNearVisiblePriority;
             }
@@ -1944,114 +2125,77 @@ namespace hyperbrowse::browser
                           displayTitle.c_str(),
                           -1,
                           &nameRect,
-                          DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS | DT_NOPREFIX);
+                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
                 if (oldFont)
                 {
                     SelectObject(hdc, oldFont);
                 }
-
-                std::wstring metaLine = FormatDimensionsForItem(*item);
-                if (selected && modelIndex >= 0)
-                {
-                    const auto metadata = FindCachedMetadataForModelIndex(modelIndex);
-                    if (metadata)
-                    {
-                        const std::wstring cameraLabel = BuildCameraLabel(*metadata);
-                        if (!cameraLabel.empty())
-                        {
-                            metaLine.append(L"  |  ");
-                            metaLine.append(cameraLabel);
-                        }
-                        else if (!metadata->dateTaken.empty())
-                        {
-                            metaLine.append(L"  |  ");
-                            metaLine.append(metadata->dateTaken);
-                        }
-                    }
-                    else
-                    {
-                        ScheduleMetadataForItem(modelIndex, *item);
-                    }
-                }
-
-                SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
-                oldFont = thumbnailMetaFont_
-                    ? SelectObject(hdc, thumbnailMetaFont_)
-                    : static_cast<HGDIOBJ>(nullptr);
-                const int metaTop = nameRect.bottom + layout.metaTopGap;
-                RECT metaRect{cellRect.left + layout.textInset,
-                              metaTop,
-                              cellRect.right - layout.textInset,
-                              metaTop + layout.metaHeight};
-                DrawTextW(hdc, metaLine.c_str(), -1, &metaRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
                 RECT infoRect{cellRect.left + layout.textInset,
                               cellRect.bottom - layout.infoBottomInset - layout.infoHeight,
                               cellRect.right - layout.textInset,
                               cellRect.bottom - layout.infoBottomInset};
                 const std::wstring typeLabel = ToUppercase(item->fileType);
-                const std::wstring sizeLabel = FormatByteSize(item->fileSizeBytes);
+                const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
+                HGDIOBJ footerFont = thumbnailMetaFont_
+                    ? SelectObject(hdc, thumbnailMetaFont_)
+                    : static_cast<HGDIOBJ>(nullptr);
 
-                SIZE badgeTextExtent{};
+                SIZE typeTextExtent{};
                 if (!typeLabel.empty())
                 {
                     GetTextExtentPoint32W(hdc,
                                           typeLabel.c_str(),
                                           static_cast<int>(typeLabel.size()),
-                                          &badgeTextExtent);
+                                          &typeTextExtent);
+                }
+
+                SIZE dimensionTextExtent{};
+                if (!dimensionLabel.empty())
+                {
+                    GetTextExtentPoint32W(hdc,
+                                          dimensionLabel.c_str(),
+                                          static_cast<int>(dimensionLabel.size()),
+                                          &dimensionTextExtent);
                 }
 
                 const int footerWidth = infoRect.right - infoRect.left;
-                const int badgeTextWidth = static_cast<int>(badgeTextExtent.cx);
-                const int badgePreferredWidth = badgeTextWidth + (layout.badgeHorizontalPadding * 2);
-                const int badgeMaxWidth = std::min(footerWidth, (footerWidth * 2) / 5);
-                const int badgeWidth = typeLabel.empty()
+                const int gapWidth = typeLabel.empty() ? 0 : std::max(4, layout.badgeGap - 2);
+                const int typeTextWidth = static_cast<int>(typeTextExtent.cx);
+                const int preferredTypeWidth = typeLabel.empty() ? 0 : (typeTextWidth + 2);
+                const int requiredDimensionsWidth = static_cast<int>(dimensionTextExtent.cx) + 2;
+                const int maxTypeWidth = std::max(0, footerWidth - requiredDimensionsWidth - gapWidth);
+                const int typeWidth = typeLabel.empty()
                     ? 0
-                    : std::min(footerWidth,
-                               std::max(42,
-                                        std::min(badgeMaxWidth,
-                                                 badgePreferredWidth)));
+                    : std::max(0, std::min(preferredTypeWidth, maxTypeWidth));
+                RECT dimensionsRect{infoRect.left,
+                                    infoRect.top,
+                                    std::max(infoRect.left, infoRect.right - typeWidth - (typeWidth > 0 ? gapWidth : 0)),
+                                    infoRect.bottom};
+                RECT typeRect{std::max(infoRect.left, infoRect.right - typeWidth),
+                              infoRect.top,
+                              infoRect.right,
+                              infoRect.bottom};
 
-                if (badgeWidth > 0)
+                SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
+                DrawTextW(hdc,
+                          dimensionLabel.c_str(),
+                          -1,
+                          &dimensionsRect,
+                          DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+                if (typeWidth > 0)
                 {
-                    const HBRUSH badgeBrush = selected
-                        ? (selectedPreviewBrush_ ? selectedPreviewBrush_ : previewBrush_)
-                        : (placeholderBrush_ ? placeholderBrush_ : previewBrush_);
-                    HGDIOBJ oldBadgePen = SelectObject(hdc, GetStockObject(NULL_PEN));
-                    HGDIOBJ oldBadgeBrush = SelectObject(hdc, badgeBrush);
-                    RECT badgeRect{infoRect.left, infoRect.top, infoRect.left + badgeWidth, infoRect.bottom};
-                    RoundRect(hdc,
-                              badgeRect.left,
-                              badgeRect.top,
-                              badgeRect.right,
-                              badgeRect.bottom,
-                              layout.badgeCornerRadius,
-                              layout.badgeCornerRadius);
-                    SelectObject(hdc, oldBadgeBrush);
-                    SelectObject(hdc, oldBadgePen);
-
                     SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
                     DrawTextW(hdc,
                               typeLabel.c_str(),
                               -1,
-                              &badgeRect,
-                              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                              &typeRect,
+                              DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
                 }
-
-                const int sizeLeft = badgeWidth > 0 ? (infoRect.left + badgeWidth + layout.badgeGap) : infoRect.left;
-                RECT sizeRect{sizeLeft, infoRect.top, infoRect.right, infoRect.bottom};
-                SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
-                HGDIOBJ footerFont = thumbnailMetaFont_
-                    ? SelectObject(hdc, thumbnailMetaFont_)
-                    : static_cast<HGDIOBJ>(nullptr);
-                DrawTextW(hdc, sizeLabel.c_str(), -1, &sizeRect, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
                 if (footerFont)
                 {
                     SelectObject(hdc, footerFont);
-                }
-                if (oldFont)
-                {
-                    SelectObject(hdc, oldFont);
                 }
             }
 
@@ -2089,19 +2233,6 @@ namespace hyperbrowse::browser
                 ? SelectObject(hdc, thumbnailStatusFont_)
                 : static_cast<HGDIOBJ>(nullptr);
             DrawTextW(hdc, placeholder.c_str(), -1, &iconTextRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
-
-            if (thumbnailDetailsVisible_)
-            {
-                RECT dimTextRect{previewRect.left + layout.textInset,
-                                 previewRect.bottom - layout.infoBottomInset - layout.infoHeight,
-                                 previewRect.right - layout.textInset,
-                                 previewRect.bottom - layout.infoBottomInset};
-                DrawTextW(hdc,
-                          FormatDimensionsForItem(item).c_str(),
-                          -1,
-                          &dimTextRect,
-                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            }
 
             if (oldFont)
             {
@@ -2216,6 +2347,120 @@ namespace hyperbrowse::browser
         }
     }
 
+    std::wstring BrowserPane::BuildThumbnailTooltipText(int viewIndex) const
+    {
+        const BrowserItem* item = ItemFromViewIndex(viewIndex);
+        if (!item)
+        {
+            return {};
+        }
+
+        std::wstring tooltip = item->fileName;
+        tooltip.append(L"\r\nType: ");
+        tooltip.append(ToUppercase(item->fileType));
+        tooltip.append(L"\r\nDimensions: ");
+        tooltip.append(FormatDimensionsForItem(*item));
+        tooltip.append(L"\r\nSize: ");
+        tooltip.append(FormatByteSize(item->fileSizeBytes));
+        tooltip.append(L"\r\nModified: ");
+        tooltip.append(item->modifiedDate);
+
+        const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+        const auto metadata = modelIndex >= 0 ? FindCachedMetadataForModelIndex(modelIndex) : nullptr;
+        if (metadata)
+        {
+            const std::wstring cameraLabel = BuildCameraLabel(*metadata);
+            if (!cameraLabel.empty())
+            {
+                tooltip.append(L"\r\nCamera: ");
+                tooltip.append(cameraLabel);
+            }
+            if (!metadata->dateTaken.empty())
+            {
+                tooltip.append(L"\r\nTaken: ");
+                tooltip.append(metadata->dateTaken);
+            }
+        }
+        else if (modelIndex >= 0)
+        {
+            ScheduleMetadataForItem(modelIndex, *item);
+        }
+
+        return tooltip;
+    }
+
+    void BrowserPane::UpdateThumbnailTooltip(POINT point, WPARAM wParam, LPARAM lParam)
+    {
+        if (!thumbnailTooltip_)
+        {
+            return;
+        }
+
+        if (!trackingMouseLeave_)
+        {
+            TRACKMOUSEEVENT trackMouseEvent{};
+            trackMouseEvent.cbSize = sizeof(trackMouseEvent);
+            trackMouseEvent.dwFlags = TME_LEAVE;
+            trackMouseEvent.hwndTrack = hwnd_;
+            if (TrackMouseEvent(&trackMouseEvent) != FALSE)
+            {
+                trackingMouseLeave_ = true;
+            }
+        }
+
+        const int viewIndex = HitTestThumbnailItem(point);
+        if (viewIndex != hoveredTooltipViewIndex_)
+        {
+            hoveredTooltipViewIndex_ = viewIndex;
+
+            TOOLINFOW toolInfo{};
+            toolInfo.cbSize = sizeof(toolInfo);
+            toolInfo.hwnd = hwnd_;
+            toolInfo.uId = 1;
+            toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+            if (viewIndex >= 0)
+            {
+                toolInfo.rect = GetThumbnailCellRect(viewIndex);
+            }
+            else
+            {
+                SetRectEmpty(&toolInfo.rect);
+            }
+
+            SendMessageW(thumbnailTooltip_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+            SendMessageW(thumbnailTooltip_, TTM_POP, 0, 0);
+        }
+
+        MSG relayMessage{};
+        relayMessage.hwnd = hwnd_;
+        relayMessage.message = WM_MOUSEMOVE;
+        relayMessage.wParam = wParam;
+        relayMessage.lParam = lParam;
+        SendMessageW(thumbnailTooltip_, TTM_RELAYEVENT, 0, reinterpret_cast<LPARAM>(&relayMessage));
+    }
+
+    void BrowserPane::HideThumbnailTooltip()
+    {
+        if (!thumbnailTooltip_)
+        {
+            hoveredTooltipViewIndex_ = -1;
+            trackingMouseLeave_ = false;
+            return;
+        }
+
+        hoveredTooltipViewIndex_ = -1;
+        trackingMouseLeave_ = false;
+
+        TOOLINFOW toolInfo{};
+        toolInfo.cbSize = sizeof(toolInfo);
+        toolInfo.hwnd = hwnd_;
+        toolInfo.uId = 1;
+        toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+        SetRectEmpty(&toolInfo.rect);
+        SendMessageW(thumbnailTooltip_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+        SendMessageW(thumbnailTooltip_, TTM_POP, 0, 0);
+    }
+
     std::wstring BrowserPane::BuildPlaceholderText() const
     {
         if (!model_ || model_->FolderPath().empty())
@@ -2248,7 +2493,12 @@ namespace hyperbrowse::browser
         switch (message)
         {
         case WM_CREATE:
-            return CreateDetailsListView() ? 0 : -1;
+            if (!CreateDetailsListView())
+            {
+                return -1;
+            }
+            CreateThumbnailTooltip();
+            return 0;
         case WM_SIZE:
             LayoutChildren();
             return 0;
@@ -2289,6 +2539,7 @@ namespace hyperbrowse::browser
         case WM_VSCROLL:
             if (viewMode_ == BrowserViewMode::Thumbnails)
             {
+                HideThumbnailTooltip();
                 SCROLLINFO scrollInfo{};
                 scrollInfo.cbSize = sizeof(scrollInfo);
                 scrollInfo.fMask = SIF_ALL;
@@ -2329,6 +2580,7 @@ namespace hyperbrowse::browser
         case WM_MOUSEWHEEL:
             if (viewMode_ == BrowserViewMode::Thumbnails)
             {
+                HideThumbnailTooltip();
                 const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
                 SetScrollOffset(scrollOffsetY_ - ((delta / WHEEL_DELTA) * kWheelScrollAmount));
                 return 0;
@@ -2337,6 +2589,7 @@ namespace hyperbrowse::browser
         case WM_LBUTTONDOWN:
             if (viewMode_ == BrowserViewMode::Thumbnails)
             {
+                HideThumbnailTooltip();
                 SetFocus(hwnd_);
                 const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
                 const int viewIndex = HitTestThumbnailItem(point);
@@ -2378,12 +2631,23 @@ namespace hyperbrowse::browser
             }
             break;
         case WM_MOUSEMOVE:
-            if (viewMode_ == BrowserViewMode::Thumbnails && rubberBandActive_)
+            if (viewMode_ == BrowserViewMode::Thumbnails)
             {
-                UpdateRubberBandSelection(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)});
+                if (rubberBandActive_)
+                {
+                    HideThumbnailTooltip();
+                    UpdateRubberBandSelection(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)});
+                }
+                else
+                {
+                    UpdateThumbnailTooltip(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)}, wParam, lParam);
+                }
                 return 0;
             }
             break;
+        case WM_MOUSELEAVE:
+            HideThumbnailTooltip();
+            return 0;
         case WM_LBUTTONUP:
             if (rubberBandActive_)
             {
@@ -2392,11 +2656,13 @@ namespace hyperbrowse::browser
             }
             break;
         case WM_CAPTURECHANGED:
+            HideThumbnailTooltip();
             EndRubberBandSelection();
             return 0;
         case WM_CONTEXTMENU:
             if (viewMode_ == BrowserViewMode::Thumbnails && reinterpret_cast<HWND>(wParam) == hwnd_)
             {
+                HideThumbnailTooltip();
                 POINT screenPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
                 if (screenPoint.x == -1 && screenPoint.y == -1)
                 {
@@ -2473,6 +2739,10 @@ namespace hyperbrowse::browser
             {
                 InvalidateRect(detailsList_, nullptr, FALSE);
             }
+            if (update->modelIndex == ModelIndexFromViewIndex(hoveredTooltipViewIndex_))
+            {
+                SendMessageW(thumbnailTooltip_, TTM_UPDATE, 0, 0);
+            }
             if (update->modelIndex == focusedModelIndex_)
             {
                 NotifyStateChanged();
@@ -2480,6 +2750,19 @@ namespace hyperbrowse::browser
             return 0;
         }
         case WM_NOTIFY:
+            if (thumbnailTooltip_ && reinterpret_cast<const NMHDR*>(lParam)->hwndFrom == thumbnailTooltip_)
+            {
+                const NMHDR* header = reinterpret_cast<const NMHDR*>(lParam);
+                if (header->code == TTN_GETDISPINFOW)
+                {
+                    auto* displayInfo = reinterpret_cast<NMTTDISPINFOW*>(lParam);
+                    tooltipTextBuffer_ = BuildThumbnailTooltipText(hoveredTooltipViewIndex_);
+                    displayInfo->lpszText = tooltipTextBuffer_.empty()
+                        ? const_cast<wchar_t*>(L"")
+                        : tooltipTextBuffer_.data();
+                    return 0;
+                }
+            }
             if (reinterpret_cast<NMHDR*>(lParam)->hwndFrom == detailsList_)
             {
                 const NMHDR* header = reinterpret_cast<NMHDR*>(lParam);

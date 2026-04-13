@@ -147,6 +147,63 @@ namespace
         RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
     }
 
+    std::wstring ReadWindowText(HWND hwnd)
+    {
+        if (!hwnd)
+        {
+            return {};
+        }
+
+        const int textLength = GetWindowTextLengthW(hwnd);
+        std::wstring text(static_cast<std::size_t>(textLength) + 1, L'\0');
+        GetWindowTextW(hwnd, text.data(), static_cast<int>(text.size()));
+        text.resize(wcslen(text.c_str()));
+        return text;
+    }
+
+    bool SetWindowTextIfDifferent(HWND hwnd, const std::wstring& text)
+    {
+        if (!hwnd)
+        {
+            return false;
+        }
+
+        if (ReadWindowText(hwnd) == text)
+        {
+            return false;
+        }
+
+        SetWindowTextW(hwnd, text.c_str());
+        return true;
+    }
+
+    bool SetWindowEnabledIfDifferent(HWND hwnd, bool enabled)
+    {
+        if (!hwnd)
+        {
+            return false;
+        }
+
+        const bool currentlyEnabled = IsWindowEnabled(hwnd) != FALSE;
+        if (currentlyEnabled == enabled)
+        {
+            return false;
+        }
+
+        EnableWindow(hwnd, enabled ? TRUE : FALSE);
+        return true;
+    }
+
+    void RedrawWindowNoErase(HWND hwnd)
+    {
+        if (!hwnd)
+        {
+            return;
+        }
+
+        RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+    }
+
     bool TryReadStringValue(HKEY key, const wchar_t* valueName, std::wstring* value)
     {
         value->clear();
@@ -925,7 +982,6 @@ namespace hyperbrowse::ui
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_256, L"2&56 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_320, L"3&20 px");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"&Compact Thumbnail Layout");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Info Strip");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
@@ -1100,7 +1156,7 @@ namespace hyperbrowse::ui
         }
 
         browserPaneController_->SetThumbnailSizePreset(thumbnailSizePreset_);
-        browserPaneController_->SetCompactThumbnailLayout(compactThumbnailLayout_);
+        browserPaneController_->SetCompactThumbnailLayout(true);
         browserPaneController_->SetThumbnailDetailsVisible(thumbnailDetailsVisible_);
     }
 
@@ -1559,7 +1615,12 @@ namespace hyperbrowse::ui
         const int filterRight = std::min(clientWidth - kActionStripPaddingX, filterLeft + filterWidth);
         MoveWindow(filterEdit_, filterLeft + 10, buttonTop + 4, std::max(0, filterRight - filterLeft - 20), kActionButtonHeight - 8, TRUE);
 
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        RECT actionStripRect{0, 0, clientWidth, kActionStripHeight};
+        InvalidateRect(hwnd_, &actionStripRect, FALSE);
+
+        RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
+        InvalidateRect(hwnd_, &splitterRect, FALSE);
+
         UpdateStatusText();
     }
 
@@ -2556,10 +2617,9 @@ namespace hyperbrowse::ui
         UpdateStatusText();
         UpdateMenuState();
 
-        if (!update.message.empty())
+        if (!update.message.empty() && update.failedCount > 0)
         {
-            const UINT icon = (update.failedCount > 0 || update.aborted) ? MB_ICONWARNING : MB_ICONINFORMATION;
-            MessageBoxW(hwnd_, update.message.c_str(), L"File Operation", MB_OK | icon);
+            MessageBoxW(hwnd_, update.message.c_str(), L"File Operation", MB_OK | MB_ICONWARNING);
         }
     }
 
@@ -2698,9 +2758,6 @@ namespace hyperbrowse::ui
         const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
             ? browserPaneController_->GetThumbnailSizePreset()
             : thumbnailSizePreset_;
-        const bool compactThumbnailLayout = browserPaneController_
-            ? browserPaneController_->IsCompactThumbnailLayoutEnabled()
-            : compactThumbnailLayout_;
         const bool thumbnailDetailsVisible = browserPaneController_
             ? browserPaneController_->AreThumbnailDetailsVisible()
             : thumbnailDetailsVisible_;
@@ -2781,10 +2838,6 @@ namespace hyperbrowse::ui
             MF_BYCOMMAND);
         CheckMenuItem(
             menu_,
-            ID_VIEW_THUMBNAIL_LAYOUT_COMPACT,
-            MF_BYCOMMAND | (compactThumbnailLayout ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(
-            menu_,
             ID_VIEW_THUMBNAIL_DETAILS,
             MF_BYCOMMAND | (thumbnailDetailsVisible ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(
@@ -2847,36 +2900,87 @@ namespace hyperbrowse::ui
         const std::wstring sizeText = std::to_wstring(static_cast<int>(thumbnailSizePreset)) + L" px";
         const std::wstring themeText = themeMode_ == ThemeMode::Dark ? L"Dark" : L"Light";
 
-        SetWindowTextW(sortMenuButton_, sortLabel.c_str());
-        SetWindowTextW(sizeMenuButton_, sizeText.c_str());
-        SetWindowTextW(themeMenuButton_, themeText.c_str());
+        const bool sizeButtonEnabled = browserMode_ == BrowserMode::Thumbnails;
+        const bool selectionActionsEnabled = hasSelection && !fileOperationActive_;
 
-        EnableWindow(sizeMenuButton_, browserMode_ == BrowserMode::Thumbnails);
-        EnableWindow(copyButton_, hasSelection && !fileOperationActive_);
-        EnableWindow(moveButton_, hasSelection && !fileOperationActive_);
-        EnableWindow(deleteButton_, hasSelection && !fileOperationActive_);
-
-        const HWND actionButtons[] = {
-            openFolderButton_,
-            recursiveButton_,
-            thumbnailModeButton_,
-            detailsModeButton_,
-            sortMenuButton_,
-            sizeMenuButton_,
-            themeMenuButton_,
-            filterEdit_,
-            copyButton_,
-            moveButton_,
-            deleteButton_,
+        const ActionStripVisualState currentState{
+            sortLabel,
+            sizeText,
+            themeText,
+            recursiveBrowsingEnabled_,
+            browserMode_ == BrowserMode::Thumbnails,
+            browserMode_ == BrowserMode::Details,
+            sizeButtonEnabled,
+            selectionActionsEnabled,
+            themeMode_,
         };
 
-        for (HWND button : actionButtons)
+        const bool themeChanged = !actionStripVisualStateInitialized_
+            || actionStripVisualState_.themeMode != currentState.themeMode;
+
+        if (themeChanged)
         {
-            if (button)
-            {
-                InvalidateRect(button, nullptr, TRUE);
-            }
+            RedrawWindowNoErase(openFolderButton_);
         }
+
+        if (themeChanged
+            || !actionStripVisualStateInitialized_
+            || actionStripVisualState_.recursiveChecked != currentState.recursiveChecked)
+        {
+            RedrawWindowNoErase(recursiveButton_);
+        }
+
+        if (themeChanged
+            || !actionStripVisualStateInitialized_
+            || actionStripVisualState_.thumbnailsChecked != currentState.thumbnailsChecked)
+        {
+            RedrawWindowNoErase(thumbnailModeButton_);
+        }
+
+        if (themeChanged
+            || !actionStripVisualStateInitialized_
+            || actionStripVisualState_.detailsChecked != currentState.detailsChecked)
+        {
+            RedrawWindowNoErase(detailsModeButton_);
+        }
+
+        if (SetWindowTextIfDifferent(sortMenuButton_, currentState.sortLabel) || themeChanged)
+        {
+            RedrawWindowNoErase(sortMenuButton_);
+        }
+
+        const bool sizeTextChanged = SetWindowTextIfDifferent(sizeMenuButton_, currentState.sizeText);
+        const bool sizeEnabledChanged = SetWindowEnabledIfDifferent(sizeMenuButton_, currentState.sizeButtonEnabled);
+        if (sizeTextChanged || sizeEnabledChanged || themeChanged)
+        {
+            RedrawWindowNoErase(sizeMenuButton_);
+        }
+
+        if (SetWindowTextIfDifferent(themeMenuButton_, currentState.themeText) || themeChanged)
+        {
+            RedrawWindowNoErase(themeMenuButton_);
+        }
+
+        const bool copyEnabledChanged = SetWindowEnabledIfDifferent(copyButton_, currentState.selectionActionsEnabled);
+        if (copyEnabledChanged || themeChanged)
+        {
+            RedrawWindowNoErase(copyButton_);
+        }
+
+        const bool moveEnabledChanged = SetWindowEnabledIfDifferent(moveButton_, currentState.selectionActionsEnabled);
+        if (moveEnabledChanged || themeChanged)
+        {
+            RedrawWindowNoErase(moveButton_);
+        }
+
+        const bool deleteEnabledChanged = SetWindowEnabledIfDifferent(deleteButton_, currentState.selectionActionsEnabled);
+        if (deleteEnabledChanged || themeChanged)
+        {
+            RedrawWindowNoErase(deleteButton_);
+        }
+
+        actionStripVisualState_ = currentState;
+        actionStripVisualStateInitialized_ = true;
     }
 
     void MainWindow::UpdateWindowTitle() const
@@ -3000,11 +3104,6 @@ namespace hyperbrowse::ui
                 TryParseThumbnailSizePreset(value, &thumbnailSizePreset_);
             }
 
-            if (TryReadDwordValue(key, kRegistryValueCompactThumbnailLayout, &value))
-            {
-                compactThumbnailLayout_ = value != 0;
-            }
-
             if (TryReadDwordValue(key, kRegistryValueThumbnailDetailsVisible, &value))
             {
                 thumbnailDetailsVisible_ = value != 0;
@@ -3056,7 +3155,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueNvJpegEnabled, nvJpegEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueLibRawOutOfProcessEnabled, libRawOutOfProcessEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueThumbnailSizePreset, static_cast<DWORD>(thumbnailSizePreset_));
-            WriteDwordValue(key, kRegistryValueCompactThumbnailLayout, compactThumbnailLayout_ ? 1UL : 0UL);
+            RegDeleteValueW(key, kRegistryValueCompactThumbnailLayout);
             WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
             WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
             if (browserPaneController_)
@@ -3245,22 +3344,24 @@ namespace hyperbrowse::ui
             batchConvertActive_ = false;
             UpdateMenuState();
 
-            std::wstring summary;
-            if (update->cancelled)
+            if (!update->cancelled && update->failedCount > 0)
             {
-                summary = L"Batch conversion was cancelled.";
-            }
-            else
-            {
-                summary = L"Batch conversion completed. Converted ";
+                std::wstring summary;
+                if (!update->message.empty())
+                {
+                    summary = update->message;
+                    summary.append(L"\n\n");
+                }
+
+                summary.append(L"Batch conversion completed. Converted ");
                 summary.append(std::to_wstring(update->completedCount - update->failedCount));
                 summary.append(L" of ");
                 summary.append(std::to_wstring(update->totalCount));
                 summary.append(L" image(s).\nFailures: ");
                 summary.append(std::to_wstring(update->failedCount));
                 summary.append(L".");
+                MessageBoxW(hwnd_, summary.c_str(), L"Batch Convert", MB_OK | MB_ICONWARNING);
             }
-            MessageBoxW(hwnd_, summary.c_str(), L"Batch Convert", MB_OK | MB_ICONINFORMATION);
         }
 
         UpdateStatusText();
@@ -3424,12 +3525,6 @@ namespace hyperbrowse::ui
         case ID_VIEW_THUMBNAIL_SIZE_256:
         case ID_VIEW_THUMBNAIL_SIZE_320:
             thumbnailSizePreset_ = ThumbnailSizePresetFromCommandId(commandId);
-            ApplyThumbnailDisplaySettings();
-            UpdateStatusText();
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_THUMBNAIL_LAYOUT_COMPACT:
-            compactThumbnailLayout_ = !compactThumbnailLayout_;
             ApplyThumbnailDisplaySettings();
             UpdateStatusText();
             UpdateMenuState();

@@ -23,6 +23,8 @@ option(HYPERBROWSE_ENABLE_LIBRAW "Build with vendored LibRaw support" ON)
 option(HYPERBROWSE_ENABLE_NVJPEG "Enable optional nvJPEG acceleration plumbing" ON)
 option(HYPERBROWSE_BUNDLE_CUDA_REDIST "Download and bundle NVIDIA CUDA runtime redistributables with HyperBrowse" ON)
 
+include(CTest)
+
 set(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS "")
 set(HYPERBROWSE_BUNDLED_CUDA_LICENSE_FILES "")
 set(HYPERBROWSE_PORTABLE_NVIDIA_RUNTIME_LINE "The app uses WIC by default and only uses nvJPEG when that optional runtime is available.")
@@ -253,7 +255,6 @@ if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
         COMPONENT Runtime)
 endif()
 
-if(HYPERBROWSE_BUILD_TESTS)
-    enable_testing()
+if(HYPERBROWSE_BUILD_TESTS AND BUILD_TESTING)
     add_subdirectory(tests)
 endif()

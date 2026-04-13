@@ -102,6 +102,19 @@ namespace hyperbrowse::ui
             COLORREF accentText;
         };
 
+        struct ActionStripVisualState
+        {
+            std::wstring sortLabel;
+            std::wstring sizeText;
+            std::wstring themeText;
+            bool recursiveChecked{};
+            bool thumbnailsChecked{};
+            bool detailsChecked{};
+            bool sizeButtonEnabled{};
+            bool selectionActionsEnabled{};
+            ThemeMode themeMode{ThemeMode::Light};
+        };
+
         bool RegisterWindowClass() const;
         bool CreateAccelerators();
         bool CreateMenuBar();
@@ -263,5 +276,7 @@ namespace hyperbrowse::ui
         bool thumbnailDetailsVisible_{true};
         UINT slideshowIntervalMs_{3000};
         bool detailsStripVisible_{true};
+        mutable bool actionStripVisualStateInitialized_{};
+        mutable ActionStripVisualState actionStripVisualState_{};
     };
 }

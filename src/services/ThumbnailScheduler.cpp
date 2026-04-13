@@ -1,11 +1,13 @@
 #include "services/ThumbnailScheduler.h"
 
 #include <algorithm>
+#include <limits>
 #include <cwctype>
 #include <filesystem>
 
 #include "decode/ImageDecoder.h"
 #include "util/Diagnostics.h"
+#include "util/ResourceSizing.h"
 
 namespace
 {
@@ -16,6 +18,31 @@ namespace
     constexpr std::size_t kMinNvJpegBatchSize = 4;
     constexpr std::size_t kMaxNvJpegBatchSize = 12;
     constexpr int kNvJpegBatchPriorityWindow = 1;
+    constexpr std::uint64_t kDefaultThumbnailCacheCapacityBytes = 96ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kMinimumThumbnailCacheCapacityBytes = 128ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kMaximumThumbnailCacheCapacityBytes = 1024ULL * 1024ULL * 1024ULL;
+
+    std::size_t ResolveThumbnailCacheCapacityBytes(std::size_t requestedCapacityBytes)
+    {
+        if (requestedCapacityBytes != 0)
+        {
+            return requestedCapacityBytes;
+        }
+
+        const auto memorySnapshot = hyperbrowse::util::QueryMemorySnapshot();
+        if (!memorySnapshot.IsValid() || memorySnapshot.availablePhysicalBytes == 0)
+        {
+            return static_cast<std::size_t>(kDefaultThumbnailCacheCapacityBytes);
+        }
+
+        const std::uint64_t availabilityBudget = memorySnapshot.availablePhysicalBytes / 5ULL;
+        const std::uint64_t totalBudget = memorySnapshot.totalPhysicalBytes / 8ULL;
+        const std::uint64_t preferredBudget = std::min(availabilityBudget, totalBudget);
+        const std::uint64_t clampedBudget = std::clamp(preferredBudget,
+                                                       kMinimumThumbnailCacheCapacityBytes,
+                                                       kMaximumThumbnailCacheCapacityBytes);
+        return hyperbrowse::util::SaturatingCastToSizeT(clampedBudget);
+    }
 
     std::size_t ResolveWorkerCount(std::size_t requestedWorkerCount)
     {
@@ -60,12 +87,13 @@ namespace
     {
         return hyperbrowse::decode::IsRawFileType(fs::path(cacheKey.filePath).extension().wstring());
     }
+
 }
 
 namespace hyperbrowse::services
 {
     ThumbnailScheduler::ThumbnailScheduler(std::size_t cacheCapacityBytes, std::size_t workerCount)
-        : cache_(cacheCapacityBytes)
+        : cache_(ResolveThumbnailCacheCapacityBytes(cacheCapacityBytes))
     {
         const std::size_t totalWorkerCount = ResolveWorkerCount(workerCount);
         const std::size_t rawWorkerCount = ResolveRawWorkerCount(totalWorkerCount);
@@ -97,6 +125,7 @@ namespace hyperbrowse::services
             shuttingDown_ = true;
             pendingJobs_.clear();
             queuedKeys_.clear();
+            inflightJobs_.clear();
             requestedKeys_.clear();
         }
 
@@ -142,9 +171,28 @@ namespace hyperbrowse::services
                     continue;
                 }
 
-                if (inflightKeys_.contains(workItem.cacheKey))
+                const auto inflight = inflightJobs_.find(workItem.cacheKey);
+                if (inflight != inflightJobs_.end())
                 {
-                    continue;
+                    int bestInflightPriority = std::numeric_limits<int>::max();
+                    bool hasInflightCpuDecode = false;
+                    for (const InflightDecode& inflightDecode : inflight->second)
+                    {
+                        bestInflightPriority = std::min(bestInflightPriority, inflightDecode.priority);
+                        hasInflightCpuDecode = hasInflightCpuDecode || inflightDecode.preferCpu;
+                    }
+
+                    if (!(workItem.priority < bestInflightPriority
+                        || (workItem.preferCpu && !hasInflightCpuDecode)))
+                    {
+                        continue;
+                    }
+
+                    hyperbrowse::util::IncrementCounter(L"thumbnail.promote.inflight_override");
+                    if (workItem.preferCpu)
+                    {
+                        hyperbrowse::util::IncrementCounter(L"thumbnail.promote.inflight_cpu_override");
+                    }
                 }
 
                 pendingJobs_.push_back(PendingJob{
@@ -319,7 +367,10 @@ namespace hyperbrowse::services
                 {
                     selectedSequences.push_back(job.sequence);
                     queuedKeys_.erase(job.workItem.cacheKey);
-                    inflightKeys_.insert(job.workItem.cacheKey);
+                    inflightJobs_[job.workItem.cacheKey].push_back(InflightDecode{
+                        job.workItem.priority,
+                        job.workItem.preferCpu,
+                    });
                 }
 
                 pendingJobs_.erase(
@@ -395,7 +446,25 @@ namespace hyperbrowse::services
                 bool shouldNotify = false;
                 {
                     std::scoped_lock lock(mutex_);
-                    inflightKeys_.erase(jobs[index].workItem.cacheKey);
+                    const auto inflight = inflightJobs_.find(jobs[index].workItem.cacheKey);
+                    if (inflight != inflightJobs_.end())
+                    {
+                        auto& activeDecodes = inflight->second;
+                        const auto decode = std::find_if(activeDecodes.begin(), activeDecodes.end(), [&](const InflightDecode& inflightDecode)
+                        {
+                            return inflightDecode.priority == jobs[index].workItem.priority
+                                && inflightDecode.preferCpu == jobs[index].workItem.preferCpu;
+                        });
+                        if (decode != activeDecodes.end())
+                        {
+                            activeDecodes.erase(decode);
+                        }
+                        if (activeDecodes.empty())
+                        {
+                            inflightJobs_.erase(inflight);
+                        }
+                    }
+
                     shouldNotify = targetWindow_ != nullptr
                         && thumbnail != nullptr
                         && jobs[index].sessionId == activeSessionId_

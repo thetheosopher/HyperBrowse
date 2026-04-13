@@ -85,7 +85,7 @@ The application wins on user-perceived speed, not on theoretical throughput alon
 ## 6.1 Thumbnail grid
 - virtualized item model
 - only visible + near-visible cells generate live thumbnail requests
-- maintain a small lookahead region
+- maintain a viewport-scaled lookahead region with a larger top-of-folder warmup window
 - avoid child window per item
 
 ## 6.2 Details mode
@@ -107,8 +107,8 @@ Use reusable pools where profiling justifies them for:
 
 ## 7.3 Cache policy
 Use bounded LRU-style caches for:
-- thumbnails (default 96 MB, LRU eviction by byte count)
-- metadata (default 512 entries, LRU eviction by count)
+- thumbnails (runtime-adaptive default budget based on available physical memory, minimum 128 MB and capped at 1 GB, LRU eviction by byte count)
+- metadata (runtime-adaptive default budget based on available physical memory, minimum 2,048 entries and capped at 65,536, LRU eviction by count)
 - viewer current/next/previous images (3-slot adjacent cache, no eviction)
 
 Note: Segmented-LRU and memory pool strategies from the original spec are deferred. Basic LRU eviction is sufficient for current workloads.
@@ -132,6 +132,7 @@ Use separate logical queues for:
 ### Runtime-adaptive worker count
 - Total thumbnail worker count defaults to `std::thread::hardware_concurrency()` (falls back to 2 if unavailable)
 - Raw workers: `max(1, total / 4)`, remaining slots assigned to General workers
+- Metadata workers default to `clamp(std::thread::hardware_concurrency() / 4, 2, 8)` and fall back to 1 if hardware concurrency is unavailable
 - Explicit worker counts can be supplied to override auto-configuration
 
 ### Cross-queue work stealing

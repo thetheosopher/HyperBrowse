@@ -392,6 +392,11 @@ namespace hyperbrowse::browser
 
     std::wstring FormatDimensionsForItem(const BrowserItem& item)
     {
-        return FormatDimensions(EffectiveImageWidth(item), EffectiveImageHeight(item));
+        if (item.imageWidth <= 0 || item.imageHeight <= 0)
+        {
+            return L"...";
+        }
+
+        return FormatDimensions(item.imageWidth, item.imageHeight);
     }
 }

@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -39,7 +40,7 @@ namespace hyperbrowse::services
     public:
         static constexpr UINT kMessageId = WM_APP + 43;
 
-        explicit ThumbnailScheduler(std::size_t cacheCapacityBytes = 96ULL * 1024ULL * 1024ULL,
+        explicit ThumbnailScheduler(std::size_t cacheCapacityBytes = 0,
                                     std::size_t workerCount = 0);
         ~ThumbnailScheduler();
 
@@ -71,6 +72,12 @@ namespace hyperbrowse::services
             ThumbnailWorkItem workItem;
         };
 
+        struct InflightDecode
+        {
+            int priority{};
+            bool preferCpu{};
+        };
+
         bool HasDispatchableWorkLocked(WorkerKind kind) const;
         void WorkerLoop(WorkerKind kind);
         void PostReady(std::uint64_t sessionId,
@@ -90,7 +97,7 @@ namespace hyperbrowse::services
         int nextSequence_{};
         std::vector<PendingJob> pendingJobs_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> queuedKeys_;
-        std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> inflightKeys_;
+        std::unordered_map<cache::ThumbnailCacheKey, std::vector<InflightDecode>, cache::ThumbnailCacheKeyHasher> inflightJobs_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> requestedKeys_;
         std::vector<std::thread> generalWorkers_;
         std::vector<std::thread> rawWorkers_;

@@ -66,13 +66,14 @@ namespace hyperbrowse::services
 
         using MetadataExtractor = std::function<std::shared_ptr<const ImageMetadata>(const browser::BrowserItem&, std::wstring*)>;
 
-        explicit ImageMetadataService(std::size_t workerCount = 1,
-                                      std::size_t cacheCapacityEntries = 512,
+        explicit ImageMetadataService(std::size_t workerCount = 0,
+                          std::size_t cacheCapacityEntries = 0,
                                       MetadataExtractor extractor = ExtractImageMetadata);
         ~ImageMetadataService();
 
         void BindTargetWindow(HWND targetWindow);
         void Schedule(std::uint64_t sessionId, MetadataWorkItem workItem);
+        void Schedule(std::uint64_t sessionId, std::vector<MetadataWorkItem> workItems);
         void CancelOutstanding();
         std::shared_ptr<const ImageMetadata> FindCachedMetadata(const browser::BrowserItem& item) const;
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);

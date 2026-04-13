@@ -16,10 +16,57 @@
 
 #include "decode/ImageDecoder.h"
 #include "util/HashUtils.h"
+#include "util/ResourceSizing.h"
 
 namespace
 {
     using Microsoft::WRL::ComPtr;
+
+    constexpr std::size_t kDefaultMetadataWorkerCount = 1;
+    constexpr std::size_t kMinimumMetadataWorkerCount = 2;
+    constexpr std::size_t kMaximumMetadataWorkerCount = 8;
+    constexpr std::size_t kDefaultMetadataCacheCapacityEntries = 512;
+    constexpr std::uint64_t kMinimumMetadataCacheCapacityEntries = 2048;
+    constexpr std::uint64_t kMaximumMetadataCacheCapacityEntries = 65536;
+
+    std::size_t ResolveMetadataWorkerCount(std::size_t requestedWorkerCount)
+    {
+        if (requestedWorkerCount != 0)
+        {
+            return std::max<std::size_t>(1, requestedWorkerCount);
+        }
+
+        const unsigned int hardwareConcurrency = std::thread::hardware_concurrency();
+        if (hardwareConcurrency == 0)
+        {
+            return kDefaultMetadataWorkerCount;
+        }
+
+        const std::size_t preferredWorkerCount = std::max<std::size_t>(
+            kMinimumMetadataWorkerCount,
+            static_cast<std::size_t>(hardwareConcurrency) / 4U);
+        return std::min(preferredWorkerCount, kMaximumMetadataWorkerCount);
+    }
+
+    std::size_t ResolveMetadataCacheCapacityEntries(std::size_t requestedCapacityEntries)
+    {
+        if (requestedCapacityEntries != 0)
+        {
+            return std::max<std::size_t>(1, requestedCapacityEntries);
+        }
+
+        const auto memorySnapshot = hyperbrowse::util::QueryMemorySnapshot();
+        if (!memorySnapshot.IsValid() || memorySnapshot.availablePhysicalBytes == 0)
+        {
+            return kDefaultMetadataCacheCapacityEntries;
+        }
+
+        const std::uint64_t preferredEntryCount = memorySnapshot.availablePhysicalBytes / (256ULL * 1024ULL);
+        const std::uint64_t clampedEntryCount = std::clamp(preferredEntryCount,
+                                                           kMinimumMetadataCacheCapacityEntries,
+                                                           kMaximumMetadataCacheCapacityEntries);
+        return hyperbrowse::util::SaturatingCastToSizeT(clampedEntryCount);
+    }
 
     class ComScope
     {
@@ -366,10 +413,10 @@ namespace hyperbrowse::services
     ImageMetadataService::ImageMetadataService(std::size_t workerCount,
                                                std::size_t cacheCapacityEntries,
                                                MetadataExtractor extractor)
-        : cacheCapacityEntries_(std::max<std::size_t>(1, cacheCapacityEntries))
+        : cacheCapacityEntries_(ResolveMetadataCacheCapacityEntries(cacheCapacityEntries))
         , extractor_(extractor ? std::move(extractor) : MetadataExtractor{ExtractImageMetadata})
     {
-        const std::size_t resolvedWorkerCount = std::max<std::size_t>(1, workerCount);
+        const std::size_t resolvedWorkerCount = ResolveMetadataWorkerCount(workerCount);
         workers_.reserve(resolvedWorkerCount);
         for (std::size_t index = 0; index < resolvedWorkerCount; ++index)
         {
@@ -433,6 +480,39 @@ namespace hyperbrowse::services
         }
 
         workAvailable_.notify_one();
+    }
+
+    void ImageMetadataService::Schedule(std::uint64_t sessionId, std::vector<MetadataWorkItem> workItems)
+    {
+        {
+            std::scoped_lock lock(mutex_);
+            activeSessionId_ = sessionId;
+            pendingJobs_.clear();
+            queuedKeys_.clear();
+
+            for (MetadataWorkItem& workItem : workItems)
+            {
+                MetadataCacheKey key{workItem.item.filePath, workItem.item.modifiedTimestampUtc};
+                key.filePath = util::NormalizePathForComparison(key.filePath);
+
+                if (cache_.contains(key) || queuedKeys_.contains(key) || inflightKeys_.contains(key))
+                {
+                    continue;
+                }
+
+                const auto generation = pathGenerations_.find(key.filePath);
+                pendingJobs_.push_back(PendingJob{
+                    sessionId,
+                    nextSequence_++,
+                    generation == pathGenerations_.end() ? 0 : generation->second,
+                    key,
+                    std::move(workItem),
+                });
+                queuedKeys_.insert(key);
+            }
+        }
+
+        workAvailable_.notify_all();
     }
 
     void ImageMetadataService::CancelOutstanding()
