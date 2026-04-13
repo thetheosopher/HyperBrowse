@@ -110,6 +110,23 @@ namespace hyperbrowse::browser
         return true;
     }
 
+    bool BrowserModel::UpdateDateTakenTimestamp(int modelIndex, std::int64_t timestampUtc)
+    {
+        if (modelIndex < 0 || modelIndex >= static_cast<int>(items_.size()))
+        {
+            return false;
+        }
+
+        BrowserItem& item = items_[static_cast<std::size_t>(modelIndex)];
+        if (item.dateTakenTimestampUtc == timestampUtc)
+        {
+            return false;
+        }
+
+        item.dateTakenTimestampUtc = timestampUtc;
+        return true;
+    }
+
     int BrowserModel::FindItemIndexByPath(std::wstring_view filePath) const noexcept
     {
         for (std::size_t index = 0; index < items_.size(); ++index)

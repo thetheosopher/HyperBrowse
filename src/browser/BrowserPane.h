@@ -27,6 +27,7 @@ namespace hyperbrowse::browser
         Dimensions = 3,
         FileType = 4,
         Random = 5,
+        DateTaken = 6,
     };
 
     enum class ThumbnailSizePreset : int
@@ -85,6 +86,12 @@ namespace hyperbrowse::browser
         BrowserViewMode GetViewMode() const noexcept;
         void SetSortMode(BrowserSortMode sortMode);
         BrowserSortMode GetSortMode() const noexcept;
+        void SetSortAscending(bool ascending);
+        bool IsSortAscending() const noexcept;
+        void SetFilterQuery(std::wstring query);
+        const std::wstring& GetFilterQuery() const noexcept;
+        bool HasActiveFilter() const noexcept;
+        std::uint64_t DisplayedItemCount() const noexcept;
         void SetThumbnailSizePreset(ThumbnailSizePreset preset);
         ThumbnailSizePreset GetThumbnailSizePreset() const noexcept;
         void SetCompactThumbnailLayout(bool enabled);
@@ -140,6 +147,7 @@ namespace hyperbrowse::browser
         ThumbnailLayoutMetrics CurrentThumbnailLayout() const;
         void LayoutChildren();
         void RebuildOrder();
+        void PruneSelectionToVisibleItems();
         void UpdateDetailsListView();
         void UpdateVerticalScrollBar();
         void SetScrollOffset(int value);
@@ -209,6 +217,9 @@ namespace hyperbrowse::browser
         bool syncingDetailsSelection_{};
         BrowserViewMode viewMode_{BrowserViewMode::Thumbnails};
         BrowserSortMode sortMode_{BrowserSortMode::FileName};
+        bool sortAscending_{true};
+        std::wstring filterQuery_;
+        std::wstring filterQueryLower_;
         ThumbnailSizePreset thumbnailSizePreset_{ThumbnailSizePreset::Pixels192};
         bool compactThumbnailLayout_{};
         bool thumbnailDetailsVisible_{true};

@@ -87,6 +87,33 @@ namespace
         return PropertyToString(propertyStore, key);
     }
 
+    std::int64_t PropertyToFileTime(IPropertyStore* propertyStore, PCWSTR canonicalName)
+    {
+        if (!propertyStore)
+        {
+            return 0;
+        }
+
+        PROPERTYKEY key{};
+        if (FAILED(PSGetPropertyKeyFromName(canonicalName, &key)))
+        {
+            return 0;
+        }
+
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        const HRESULT getResult = propertyStore->GetValue(key, &value);
+        if (FAILED(getResult) || value.vt != VT_FILETIME)
+        {
+            PropVariantClear(&value);
+            return 0;
+        }
+
+        const ULARGE_INTEGER fileTime{value.filetime.dwLowDateTime, value.filetime.dwHighDateTime};
+        PropVariantClear(&value);
+        return static_cast<std::int64_t>(fileTime.QuadPart);
+    }
+
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
     std::wstring WideText(const char* value)
     {
@@ -156,6 +183,10 @@ namespace
         {
             metadata->dateTaken = FormatTimestamp(processor.imgdata.other.timestamp);
         }
+        if (metadata->dateTakenTimestampUtc == 0 && processor.imgdata.other.timestamp > 0)
+        {
+            metadata->dateTakenTimestampUtc = static_cast<std::int64_t>(processor.imgdata.other.timestamp);
+        }
         if (metadata->exposureTime.empty() && processor.imgdata.other.shutter > 0.0f)
         {
             metadata->exposureTime = std::to_wstring(processor.imgdata.other.shutter) + L" s";
@@ -223,6 +254,7 @@ namespace hyperbrowse::services
             metadata->author = PropertyToString(propertyStore.Get(), L"System.Author");
             metadata->keywords = PropertyToString(propertyStore.Get(), L"System.Keywords");
             metadata->comment = PropertyToString(propertyStore.Get(), L"System.Comment");
+            metadata->dateTakenTimestampUtc = PropertyToFileTime(propertyStore.Get(), L"System.Photo.DateTaken");
         }
 
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
@@ -279,6 +311,48 @@ namespace hyperbrowse::services
         report.append(JoinLine(L"Keywords: ", metadata.keywords));
         report.append(JoinLine(L"Comment: ", metadata.comment));
         return report;
+    }
+
+    std::wstring FormatImageInfoContent(const browser::BrowserItem& item)
+    {
+        std::wstring content;
+        content.reserve(512);
+        content.append(L"Path: ");
+        content.append(item.filePath);
+        content.append(L"\r\nType: ");
+        content.append(item.fileType);
+        content.append(L"\r\nSize: ");
+        content.append(browser::FormatByteSize(item.fileSizeBytes));
+        content.append(L"\r\nDimensions: ");
+        content.append(browser::FormatDimensionsForItem(item));
+        content.append(L"\r\nModified: ");
+        content.append(item.modifiedDate);
+        return content;
+    }
+
+    std::wstring FormatImageInfoExpanded(const ImageMetadata& metadata)
+    {
+        std::wstring expanded;
+        expanded.reserve(512);
+        expanded.append(L"EXIF\r\n");
+        expanded.append(JoinLine(L"Camera Make: ", metadata.cameraMake));
+        expanded.append(JoinLine(L"Camera Model: ", metadata.cameraModel));
+        expanded.append(JoinLine(L"Date Taken: ", metadata.dateTaken));
+        expanded.append(JoinLine(L"Exposure: ", metadata.exposureTime));
+        expanded.append(JoinLine(L"Aperture: ", metadata.fNumber));
+        expanded.append(JoinLine(L"ISO: ", metadata.isoSpeed));
+        expanded.append(JoinLine(L"Focal Length: ", metadata.focalLength));
+        expanded.append(L"\r\nIPTC / XMP\r\n");
+        expanded.append(JoinLine(L"Title: ", metadata.title));
+        expanded.append(JoinLine(L"Author: ", metadata.author));
+        expanded.append(JoinLine(L"Keywords: ", metadata.keywords));
+        expanded.append(JoinLine(L"Comment: ", metadata.comment));
+        // Trim any trailing whitespace
+        while (!expanded.empty() && (expanded.back() == L'\r' || expanded.back() == L'\n'))
+        {
+            expanded.pop_back();
+        }
+        return expanded;
     }
 
     std::size_t ImageMetadataService::MetadataCacheKeyHasher::operator()(const MetadataCacheKey& key) const noexcept

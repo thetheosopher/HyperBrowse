@@ -1,4 +1,8 @@
 #include <winver.h>
+#include "app/resource.h"
+
+// Application icon – ID 1 so the shell uses it as the default .exe icon
+IDI_HYPERBROWSE  ICON  "@CMAKE_CURRENT_SOURCE_DIR@/assets/HyperBrowse.ico"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0

@@ -8,12 +8,16 @@
 #include <future>
 #include <memory>
 
+#include "app/resource.h"
 #include "decode/ImageDecoder.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
 
 namespace
 {
+    constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
+    constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
+
     struct DecodedImageResult
     {
         std::uint64_t requestId{};
@@ -55,6 +59,54 @@ namespace
     {
         return darkTheme ? RGB(70, 80, 94) : RGB(206, 215, 225);
     }
+
+    bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
+    {
+        DWORD size = sizeof(*value);
+        DWORD type = REG_DWORD;
+        return RegQueryValueExW(key, valueName, nullptr, &type, reinterpret_cast<LPBYTE>(value), &size) == ERROR_SUCCESS
+            && type == REG_DWORD;
+    }
+
+    void WriteDwordValue(HKEY key, const wchar_t* valueName, DWORD value)
+    {
+        RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+    }
+
+    bool LoadViewerInfoOverlaysVisibleSetting()
+    {
+        HKEY key{};
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        {
+            return true;
+        }
+
+        DWORD value = 1;
+        const bool foundValue = TryReadDwordValue(key, kRegistryValueViewerInfoOverlaysVisible, &value);
+        RegCloseKey(key);
+        return !foundValue || value != 0;
+    }
+
+    void SaveViewerInfoOverlaysVisibleSetting(bool visible)
+    {
+        HKEY key{};
+        DWORD disposition = 0;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                            kRegistryPath,
+                            0,
+                            nullptr,
+                            0,
+                            KEY_WRITE,
+                            nullptr,
+                            &key,
+                            &disposition) != ERROR_SUCCESS)
+        {
+            return;
+        }
+
+        WriteDwordValue(key, kRegistryValueViewerInfoOverlaysVisible, visible ? 1UL : 0UL);
+        RegCloseKey(key);
+    }
 }
 
 namespace hyperbrowse::viewer
@@ -62,6 +114,7 @@ namespace hyperbrowse::viewer
     ViewerWindow::ViewerWindow(HINSTANCE instance)
         : instance_(instance)
         , asyncState_(std::make_shared<AsyncState>())
+        , infoOverlaysVisible_(LoadViewerInfoOverlaysVisibleSetting())
     {
         backgroundBrush_ = CreateSolidBrush(BackgroundColor(false));
     }
@@ -182,6 +235,11 @@ namespace hyperbrowse::viewer
         };
     }
 
+    bool ViewerWindow::AreInfoOverlaysVisible() const noexcept
+    {
+        return infoOverlaysVisible_;
+    }
+
     void ViewerWindow::StartSlideshow(UINT intervalMs)
     {
         if (!hwnd_ || items_.size() < 2)
@@ -240,6 +298,11 @@ namespace hyperbrowse::viewer
         windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         windowClass.hbrBackground = nullptr;
         windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+        windowClass.hIcon = LoadIconW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE));
+        windowClass.hIconSm = static_cast<HICON>(
+            LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE),
+                       IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                       GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
         return RegisterClassExW(&windowClass) != 0;
     }
 
@@ -555,14 +618,36 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ZoomBy(double factor)
     {
-        if (!currentImage_ || factor <= 0.0)
+        if (!currentImage_ || factor <= 0.0 || !hwnd_)
         {
             return;
         }
 
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
-        const double baseScale = zoomMode_ == ZoomMode::Fit ? FitScaleForClient(clientRect) : customZoomScale_;
+        const double fitScale = FitScaleForClient(clientRect);
+        const double baseScale = zoomMode_ == ZoomMode::Fit ? fitScale : customZoomScale_;
+        if (factor < 1.0)
+        {
+            const double minimumScale = std::min(baseScale, fitScale);
+            const double targetScale = std::clamp(baseScale * factor, minimumScale, 16.0);
+            if (std::abs(targetScale - baseScale) < 0.0001)
+            {
+                return;
+            }
+
+            if (std::abs(targetScale - fitScale) < 0.0001)
+            {
+                FitToWindow();
+                return;
+            }
+
+            zoomMode_ = ZoomMode::Custom;
+            customZoomScale_ = targetScale;
+            RequestRepaint();
+            return;
+        }
+
         zoomMode_ = ZoomMode::Custom;
         customZoomScale_ = std::clamp(baseScale * factor, 0.05, 16.0);
         RequestRepaint();
@@ -607,6 +692,16 @@ namespace hyperbrowse::viewer
         rotationQuarterTurns_ = (rotationQuarterTurns_ + 1) % 4;
         panOffsetX_ = 0.0;
         panOffsetY_ = 0.0;
+        if (hwnd_)
+        {
+            RequestRepaint();
+        }
+    }
+
+    void ViewerWindow::ToggleInfoOverlays()
+    {
+        infoOverlaysVisible_ = !infoOverlaysVisible_;
+        SaveViewerInfoOverlaysVisibleSetting(infoOverlaysVisible_);
         if (hwnd_)
         {
             RequestRepaint();
@@ -887,6 +982,9 @@ namespace hyperbrowse::viewer
             case VK_LEFT:
                 Navigate(-1);
                 return 0;
+            case VK_TAB:
+                ToggleInfoOverlays();
+                return 0;
             case VK_ADD:
             case VK_OEM_PLUS:
                 ZoomBy(1.25);
@@ -926,7 +1024,8 @@ namespace hyperbrowse::viewer
                     ToggleFullScreen();
                     return 0;
                 }
-                break;
+                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+                return 0;
             default:
                 break;
             }
@@ -1122,52 +1221,55 @@ namespace hyperbrowse::viewer
                     DeleteDC(bitmapDc);
                 }
 
-                HBRUSH panelBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
-                HPEN panelPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
-                HGDIOBJ oldBrush = SelectObject(frameDc, panelBrush);
-                HGDIOBJ oldPen = SelectObject(frameDc, panelPen);
-
-                const std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
-                std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
-                    + std::to_wstring(static_cast<int>(items_.size()));
-                if (currentItem)
+                if (infoOverlaysVisible_)
                 {
-                    topLine.append(L"  |  ");
-                    topLine.append(currentItem->fileType);
-                    topLine.append(L"  |  ");
-                    topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
+                    HBRUSH panelBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
+                    HPEN panelPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
+                    HGDIOBJ oldBrush = SelectObject(frameDc, panelBrush);
+                    HGDIOBJ oldPen = SelectObject(frameDc, panelPen);
+
+                    const std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
+                    std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
+                        + std::to_wstring(static_cast<int>(items_.size()));
+                    if (currentItem)
+                    {
+                        topLine.append(L"  |  ");
+                        topLine.append(currentItem->fileType);
+                        topLine.append(L"  |  ");
+                        topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
+                    }
+
+                    std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
+                    bottomLine.append(L"  |  ");
+                    bottomLine.append(std::to_wstring(zoomPercent));
+                    bottomLine.append(L"%");
+                    bottomLine.append(L"  |  ");
+                    bottomLine.append(zoomMode_ == ZoomMode::Fit ? L"Fit" : L"Custom");
+
+                    const int availablePanelWidth = std::max(120, clientWidth - 32);
+                    const int topPanelWidth = std::min(560, availablePanelWidth);
+                    const int bottomPanelWidth = std::min(320, availablePanelWidth);
+                    RECT topPanel{clientRect.left + 16, clientRect.top + 16, clientRect.left + 16 + topPanelWidth, clientRect.top + 74};
+                    RECT bottomPanel{clientRect.right - 16 - bottomPanelWidth, clientRect.bottom - 52, clientRect.right - 16, clientRect.bottom - 16};
+
+                    RoundRect(frameDc, topPanel.left, topPanel.top, topPanel.right, topPanel.bottom, 16, 16);
+                    RoundRect(frameDc, bottomPanel.left, bottomPanel.top, bottomPanel.right, bottomPanel.bottom, 16, 16);
+                    SelectObject(frameDc, oldPen);
+                    SelectObject(frameDc, oldBrush);
+
+                    RECT nameRect{topPanel.left + 14, topPanel.top + 10, topPanel.right - 14, topPanel.top + 34};
+                    RECT topInfoRect{topPanel.left + 14, topPanel.top + 34, topPanel.right - 14, topPanel.bottom - 10};
+                    RECT bottomInfoRect{bottomPanel.left + 12, bottomPanel.top + 10, bottomPanel.right - 12, bottomPanel.bottom - 10};
+
+                    SetTextColor(frameDc, TextColor(darkTheme_));
+                    DrawTextW(frameDc, fileName.c_str(), -1, &nameRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                    SetTextColor(frameDc, MutedTextColor(darkTheme_));
+                    DrawTextW(frameDc, topLine.c_str(), -1, &topInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                    DrawTextW(frameDc, bottomLine.c_str(), -1, &bottomInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+                    DeleteObject(panelPen);
+                    DeleteObject(panelBrush);
                 }
-
-                std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
-                bottomLine.append(L"  |  ");
-                bottomLine.append(std::to_wstring(zoomPercent));
-                bottomLine.append(L"%");
-                bottomLine.append(L"  |  ");
-                bottomLine.append(zoomMode_ == ZoomMode::Fit ? L"Fit" : L"Custom");
-
-                const int availablePanelWidth = std::max(120, clientWidth - 32);
-                const int topPanelWidth = std::min(560, availablePanelWidth);
-                const int bottomPanelWidth = std::min(320, availablePanelWidth);
-                RECT topPanel{clientRect.left + 16, clientRect.top + 16, clientRect.left + 16 + topPanelWidth, clientRect.top + 74};
-                RECT bottomPanel{clientRect.right - 16 - bottomPanelWidth, clientRect.bottom - 52, clientRect.right - 16, clientRect.bottom - 16};
-
-                RoundRect(frameDc, topPanel.left, topPanel.top, topPanel.right, topPanel.bottom, 16, 16);
-                RoundRect(frameDc, bottomPanel.left, bottomPanel.top, bottomPanel.right, bottomPanel.bottom, 16, 16);
-                SelectObject(frameDc, oldPen);
-                SelectObject(frameDc, oldBrush);
-
-                RECT nameRect{topPanel.left + 14, topPanel.top + 10, topPanel.right - 14, topPanel.top + 34};
-                RECT topInfoRect{topPanel.left + 14, topPanel.top + 34, topPanel.right - 14, topPanel.bottom - 10};
-                RECT bottomInfoRect{bottomPanel.left + 12, bottomPanel.top + 10, bottomPanel.right - 12, bottomPanel.bottom - 10};
-
-                SetTextColor(frameDc, TextColor(darkTheme_));
-                DrawTextW(frameDc, fileName.c_str(), -1, &nameRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-                SetTextColor(frameDc, MutedTextColor(darkTheme_));
-                DrawTextW(frameDc, topLine.c_str(), -1, &topInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-                DrawTextW(frameDc, bottomLine.c_str(), -1, &bottomInfoRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-
-                DeleteObject(panelPen);
-                DeleteObject(panelBrush);
             }
 
             if (backBufferDc)

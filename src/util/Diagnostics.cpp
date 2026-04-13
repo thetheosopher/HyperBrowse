@@ -113,7 +113,7 @@ namespace hyperbrowse::util
         store.counters.clear();
     }
 
-    std::wstring BuildDiagnosticsReport()
+    DiagnosticsSnapshot CaptureDiagnosticsSnapshot()
     {
         DiagnosticsStore& store = GetStore();
         std::map<std::wstring, TimingStats, std::less<>> timings;
@@ -124,60 +124,33 @@ namespace hyperbrowse::util
             counters = store.counters;
         }
 
-        std::wstring report = L"Diagnostics Snapshot";
-        report.append(L"\r\n\r\nTimings\r\n");
-        if (timings.empty())
+        DiagnosticsSnapshot snapshot;
+        snapshot.timings.reserve(timings.size());
+        snapshot.counters.reserve(counters.size());
+
+        for (const auto& [name, stats] : timings)
         {
-            report.append(L"- No timings recorded yet.\r\n");
-        }
-        else
-        {
-            for (const auto& [name, stats] : timings)
-            {
-                const double averageMs = stats.count == 0
-                    ? 0.0
-                    : stats.totalMs / static_cast<double>(stats.count);
-                report.append(L"- ");
-                report.append(name);
-                report.append(L": count=");
-                report.append(std::to_wstring(stats.count));
-                report.append(L", avg=");
-                report.append(FormatMilliseconds(averageMs));
-                report.append(L" ms, last=");
-                report.append(FormatMilliseconds(stats.lastMs));
-                report.append(L" ms, min=");
-                report.append(FormatMilliseconds(std::isfinite(stats.minMs) ? stats.minMs : 0.0));
-                report.append(L" ms, max=");
-                report.append(FormatMilliseconds(stats.maxMs));
-                report.append(L" ms\r\n");
-            }
+            const double averageMs = stats.count == 0
+                ? 0.0
+                : stats.totalMs / static_cast<double>(stats.count);
+            snapshot.timings.push_back(DiagnosticTimingRow{
+                name,
+                stats.count,
+                averageMs,
+                stats.lastMs,
+                std::isfinite(stats.minMs) ? stats.minMs : 0.0,
+                stats.maxMs,
+            });
         }
 
-        report.append(L"\r\nCounters\r\n");
-        if (counters.empty())
+        for (const auto& [name, value] : counters)
         {
-            report.append(L"- No counters recorded yet.\r\n");
-        }
-        else
-        {
-            for (const auto& [name, value] : counters)
-            {
-                report.append(L"- ");
-                report.append(name);
-                report.append(L": ");
-                report.append(std::to_wstring(value));
-                report.append(L"\r\n");
-            }
+            snapshot.counters.push_back(DiagnosticCounterRow{name, value});
         }
 
-        std::wstring derived;
-        const auto appendDerivedMetric = [&derived](std::wstring_view name, const std::wstring& value)
+        const auto appendDerivedMetric = [&snapshot](std::wstring_view name, const std::wstring& value)
         {
-            derived.append(L"- ");
-            derived.append(name);
-            derived.append(L": ");
-            derived.append(value);
-            derived.append(L"\r\n");
+            snapshot.derived.push_back(DiagnosticValueRow{std::wstring(name), value});
         };
 
         const auto hitsIterator = counters.find(L"viewer.prefetch.hit");
@@ -272,10 +245,106 @@ namespace hyperbrowse::util
             }
         }
 
-        if (!derived.empty())
+        const auto cpuJpegTimingIterator = timings.find(L"thumbnail.decode.jpeg.cpu");
+        const auto gpuBatchTimingIterator = timings.find(L"thumbnail.decode.nvjpeg.batch");
+        const auto gpuBatchImagesIterator = counters.find(L"thumbnail.decode.nvjpeg.batch.images");
+        if (cpuJpegTimingIterator != timings.end()
+            && gpuBatchTimingIterator != timings.end()
+            && gpuBatchImagesIterator != counters.end())
+        {
+            const TimingStats& cpuStats = cpuJpegTimingIterator->second;
+            const TimingStats& gpuStats = gpuBatchTimingIterator->second;
+            const std::uint64_t gpuImageCount = gpuBatchImagesIterator->second;
+
+            const bool hasCpuImages = cpuStats.count > 0;
+            const bool hasGpuImages = gpuImageCount > 0;
+            if (hasCpuImages && hasGpuImages)
+            {
+                const double cpuPerImageMs = cpuStats.totalMs / static_cast<double>(cpuStats.count);
+                const double gpuPerImageMs = gpuStats.totalMs / static_cast<double>(gpuImageCount);
+
+                std::wstring cpuLabel = FormatMilliseconds(cpuPerImageMs);
+                cpuLabel.append(L" ms/image");
+                appendDerivedMetric(L"thumbnail.decode.compare.cpu_jpeg.per_image", cpuLabel);
+
+                std::wstring gpuLabel = FormatMilliseconds(gpuPerImageMs);
+                gpuLabel.append(L" ms/image");
+                appendDerivedMetric(L"thumbnail.decode.compare.nvjpeg_batch.per_image", gpuLabel);
+
+                if (gpuPerImageMs > 0.0)
+                {
+                    std::wstring speedup = FormatMilliseconds(cpuPerImageMs / gpuPerImageMs);
+                    speedup.append(L"x");
+                    appendDerivedMetric(L"thumbnail.decode.compare.nvjpeg_batch.speedup_vs_cpu", speedup);
+                }
+
+                std::wstring delta = FormatMilliseconds(cpuPerImageMs - gpuPerImageMs);
+                delta.append(L" ms/image");
+                appendDerivedMetric(L"thumbnail.decode.compare.cpu_minus_gpu", delta);
+            }
+        }
+
+        return snapshot;
+    }
+
+    std::wstring BuildDiagnosticsReport()
+    {
+        const DiagnosticsSnapshot snapshot = CaptureDiagnosticsSnapshot();
+
+        std::wstring report = L"Diagnostics Snapshot";
+        report.append(L"\r\n\r\nTimings\r\n");
+        if (snapshot.timings.empty())
+        {
+            report.append(L"- No timings recorded yet.\r\n");
+        }
+        else
+        {
+            for (const DiagnosticTimingRow& row : snapshot.timings)
+            {
+                report.append(L"- ");
+                report.append(row.name);
+                report.append(L": count=");
+                report.append(std::to_wstring(row.count));
+                report.append(L", avg=");
+                report.append(FormatMilliseconds(row.averageMs));
+                report.append(L" ms, last=");
+                report.append(FormatMilliseconds(row.lastMs));
+                report.append(L" ms, min=");
+                report.append(FormatMilliseconds(row.minMs));
+                report.append(L" ms, max=");
+                report.append(FormatMilliseconds(row.maxMs));
+                report.append(L" ms\r\n");
+            }
+        }
+
+        report.append(L"\r\nCounters\r\n");
+        if (snapshot.counters.empty())
+        {
+            report.append(L"- No counters recorded yet.\r\n");
+        }
+        else
+        {
+            for (const DiagnosticCounterRow& row : snapshot.counters)
+            {
+                report.append(L"- ");
+                report.append(row.name);
+                report.append(L": ");
+                report.append(std::to_wstring(row.value));
+                report.append(L"\r\n");
+            }
+        }
+
+        if (!snapshot.derived.empty())
         {
             report.append(L"\r\nDerived\r\n");
-            report.append(derived);
+            for (const DiagnosticValueRow& row : snapshot.derived)
+            {
+                report.append(L"- ");
+                report.append(row.name);
+                report.append(L": ");
+                report.append(row.value);
+                report.append(L"\r\n");
+            }
         }
 
         return report;

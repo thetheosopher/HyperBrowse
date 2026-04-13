@@ -9,9 +9,11 @@ add_executable(HyperBrowseTests
     ../src/services/BatchConvertService.cpp
     ../src/services/FileOperationService.cpp
     ../src/services/FolderEnumerationService.cpp
+    ../src/services/FolderTreeEnumerationService.cpp
     ../src/services/FolderWatchService.cpp
     ../src/services/ImageMetadataService.cpp
     ../src/services/JpegTransformService.cpp
+    ../src/ui/DiagnosticsWindow.cpp
     ../src/ui/MainWindow.cpp
     ../src/services/ThumbnailScheduler.cpp
     ../src/util/Diagnostics.cpp

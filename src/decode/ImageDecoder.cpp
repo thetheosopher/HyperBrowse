@@ -1198,7 +1198,12 @@ namespace hyperbrowse::decode
         if (IsWicFileType(fileType))
         {
             auto thumbnail = WicThumbnailDecoder{}.Decode(key);
-            hyperbrowse::util::RecordTiming(L"thumbnail.decode.wic", stopwatch.ElapsedMilliseconds());
+            const double elapsedMs = stopwatch.ElapsedMilliseconds();
+            hyperbrowse::util::RecordTiming(L"thumbnail.decode.wic", elapsedMs);
+            if (fileType == L"jpg" || fileType == L"jpeg")
+            {
+                hyperbrowse::util::RecordTiming(L"thumbnail.decode.jpeg.cpu", elapsedMs);
+            }
             return thumbnail;
         }
 

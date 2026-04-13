@@ -51,6 +51,9 @@ namespace hyperbrowse::services
         std::shared_ptr<const cache::CachedThumbnail> FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const;
         std::size_t CacheBytes() const;
         std::size_t CacheCapacityBytes() const;
+        std::size_t WorkerCount() const;
+        std::size_t GeneralWorkerCount() const;
+        std::size_t RawWorkerCount() const;
 
     private:
         enum class WorkerKind
@@ -64,6 +67,7 @@ namespace hyperbrowse::services
             std::uint64_t sessionId{};
             std::uint64_t requestEpoch{};
             int sequence{};
+            std::uint64_t enqueuedTickCount{};
             ThumbnailWorkItem workItem;
         };
 

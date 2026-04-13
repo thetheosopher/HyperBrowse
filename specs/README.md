@@ -16,13 +16,15 @@ This folder contains a repo-ready planning pack for building a high-performance 
 - `10-prioritized-enhancements.md`
 - `11-file-management-workflow.md`
 - `12-visual-polish-pass.md`
+- `13-branding-and-ui-assessment.md`
+- `14-todo.md`
 
-## Intended stack
+## Rendering stack
 
 - Win32 shell
-- Direct2D + Direct3D11 rendering
+- GDI rendering (double-buffered StretchBlt/PlgBlt) — D2D/D3D11 deferred
 - WIC for baseline common-format decoding
-- LibRaw for supported mainstream RAW formats
+- LibRaw for supported mainstream RAW formats (in-process or out-of-process)
 - optional nvJPEG for accelerated JPEG thumbnail batches
 
 ## Suggested next step

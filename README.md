@@ -60,7 +60,21 @@ Create the installer-friendly staging layout after building:
 cmake --install build --config Debug --component Runtime --prefix build/dist/HyperBrowse-0.1.0-installer-layout
 ```
 
+Create a full Release packaging set, including a zipped portable package and a
+self-extracting per-user installer executable:
+
+```powershell
+powershell -ExecutionPolicy Bypass -NoProfile -File .\tools\PackageRelease.ps1
+```
+
 The portable layout stages `HyperBrowse.exe`, the required VC runtime DLLs for the active MSVC toolchain when needed, and a short `README.txt`. The installer-friendly layout stages the executable under `bin/` and documentation under `docs/` so an external installer step can consume a predictable layout.
+
+`tools/PackageRelease.ps1` builds the `release` preset, runs the `release-tests`
+smoke check, stages both install components under `build/dist/`, zips the
+portable package, and generates `HyperBrowse-<version>-installer.exe` using the
+built-in Windows IExpress packager. The generated installer is a per-user
+installer that expands the runtime layout under `%LOCALAPPDATA%\Programs\HyperBrowse`
+and creates a Start Menu shortcut.
 
 When nvJPEG support is enabled, CMake now downloads the official NVIDIA `cuda_cudart` and `libnvjpeg` redistributable archives, verifies their SHA256 hashes, copies the runtime DLLs beside the built executables, and installs those DLLs and license files into the portable and installer layouts. The application no longer relies on CUDA or nvJPEG being present on `PATH`.
 

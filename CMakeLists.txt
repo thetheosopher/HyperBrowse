@@ -70,10 +70,12 @@ add_executable(HyperBrowse WIN32
     src/services/BatchConvertService.cpp
     src/services/FileOperationService.cpp
     src/services/FolderEnumerationService.cpp
+    src/services/FolderTreeEnumerationService.cpp
     src/services/FolderWatchService.cpp
     src/services/ImageMetadataService.cpp
     src/services/JpegTransformService.cpp
     src/services/ThumbnailScheduler.cpp
+    src/ui/DiagnosticsWindow.cpp
     src/ui/MainWindow.cpp
     src/util/Diagnostics.cpp
     src/util/Log.cpp

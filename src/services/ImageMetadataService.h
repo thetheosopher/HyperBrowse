@@ -35,6 +35,7 @@ namespace hyperbrowse::services
         std::wstring author;
         std::wstring keywords;
         std::wstring comment;
+        std::int64_t dateTakenTimestampUtc{};
     };
 
     struct MetadataWorkItem
@@ -55,6 +56,8 @@ namespace hyperbrowse::services
     std::shared_ptr<const ImageMetadata> ExtractImageMetadata(const browser::BrowserItem& item,
                                                               std::wstring* errorMessage = nullptr);
     std::wstring FormatImageMetadataReport(const browser::BrowserItem& item, const ImageMetadata& metadata);
+    std::wstring FormatImageInfoContent(const browser::BrowserItem& item);
+    std::wstring FormatImageInfoExpanded(const ImageMetadata& metadata);
 
     class ImageMetadataService
     {

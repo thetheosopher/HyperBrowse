@@ -7,12 +7,14 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "browser/BrowserModel.h"
 
 namespace hyperbrowse::browser
 {
+    enum class BrowserSortMode : int;
     enum class ThumbnailSizePreset : int;
     class BrowserPane;
 }
@@ -26,6 +28,7 @@ namespace hyperbrowse::services
     class BatchConvertService;
     class FileOperationService;
     class FolderEnumerationService;
+    class FolderTreeEnumerationService;
     class FolderWatchService;
 }
 
@@ -36,6 +39,8 @@ namespace hyperbrowse::viewer
 
 namespace hyperbrowse::ui
 {
+    class DiagnosticsWindow;
+
     class MainWindow
     {
     public:
@@ -51,9 +56,12 @@ namespace hyperbrowse::ui
         {
             std::wstring path;
             bool childrenLoaded{};
+            bool childrenLoading{};
+            std::uint64_t childEnumerationRequestId{};
         };
 
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
+        static constexpr int kActionStripHeight = 44;
         static constexpr int kMinLeftPaneWidth = 180;
         static constexpr int kMinRightPaneWidth = 240;
         static constexpr int kSplitterWidth = 6;
@@ -86,6 +94,12 @@ namespace hyperbrowse::ui
             COLORREF text;
             COLORREF treeLine;
             COLORREF splitter;
+            COLORREF actionStripBackground;
+            COLORREF actionStripBorder;
+            COLORREF actionFieldBackground;
+            COLORREF accent;
+            COLORREF accentFill;
+            COLORREF accentText;
         };
 
         bool RegisterWindowClass() const;
@@ -98,15 +112,18 @@ namespace hyperbrowse::ui
         void RefreshFolderTree();
         HTREEITEM InsertFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath);
         void AddFolderTreePlaceholder(HTREEITEM parentItem);
-        void EnsureFolderTreeChildren(HTREEITEM item);
+        void RequestFolderTreeChildren(HTREEITEM item);
+        void ApplyFolderTreeChildren(HTREEITEM item, std::vector<std::wstring> childFolderPaths);
         void ShowSelectedFolderInTree();
         void SelectFolderInTree(const std::wstring& folderPath);
+        void ContinueSelectingFolderInTree();
         HTREEITEM FindChildFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath) const;
         FolderTreeNodeData* GetFolderTreeNodeData(HTREEITEM item) const;
         std::wstring GetSelectedFolderTreePath() const;
         void LayoutChildren();
         void UpdateStatusText() const;
         void UpdateMenuState() const;
+        void UpdateActionStripState() const;
         void UpdateWindowTitle() const;
         void ApplyTheme();
         void LoadWindowState();
@@ -124,8 +141,8 @@ namespace hyperbrowse::ui
         bool ChooseFolder(std::wstring* folderPath) const;
         bool HasSelectedJpegItems() const;
         void ShowBrowserContextMenu(POINT screenPoint);
-        void ShowDiagnosticsSnapshot() const;
-        void ResetDiagnosticsState() const;
+        void ShowDiagnosticsSnapshot();
+        void ResetDiagnosticsState();
         void ShowImageInformation();
         void StartCopySelection();
         void StartMoveSelection();
@@ -144,6 +161,7 @@ namespace hyperbrowse::ui
         bool IsPathInCurrentScope(std::wstring_view path) const;
         void ApplyFolderWatchChanges(const services::FolderWatchUpdate& update);
         LRESULT OnFolderEnumerationMessage(LPARAM lParam);
+        LRESULT OnFolderTreeEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderWatchMessage(LPARAM lParam);
         LRESULT OnFolderTreeNotify(LPARAM lParam);
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
@@ -161,9 +179,14 @@ namespace hyperbrowse::ui
         void ToggleRecursiveBrowsing();
         void ApplyThumbnailDisplaySettings();
         void SetThemeMode(ThemeMode themeMode);
+        void ShowSortActionMenu();
+        void ShowThumbnailSizeActionMenu();
+        void ShowThemeActionMenu();
+        void UpdateDetailsStripText();
         ThemePalette GetThemePalette() const;
         std::wstring BuildShellStateText() const;
         std::wstring GetCurrentFolderDisplayName() const;
+        bool DrawActionButton(const DRAWITEMSTRUCT& drawItem) const;
 
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -178,9 +201,21 @@ namespace hyperbrowse::ui
 
         HINSTANCE instance_{};
         HWND hwnd_{};
+        HWND openFolderButton_{};
+        HWND recursiveButton_{};
+        HWND thumbnailModeButton_{};
+        HWND detailsModeButton_{};
+        HWND sortMenuButton_{};
+        HWND sizeMenuButton_{};
+        HWND themeMenuButton_{};
+        HWND filterEdit_{};
+        HWND copyButton_{};
+        HWND moveButton_{};
+        HWND deleteButton_{};
         HWND treePane_{};
         HWND browserPane_{};
         HWND statusBar_{};
+        HWND detailsStrip_{};
         HIMAGELIST treeImageList_{};
         HMENU menu_{};
         HACCEL accelerators_{};
@@ -191,6 +226,7 @@ namespace hyperbrowse::ui
         bool suppressTreeSelectionChange_{};
         DragMode dragMode_{DragMode::None};
         HBRUSH backgroundBrush_{};
+        HBRUSH actionFieldBrush_{};
         std::wstring startupFolderPath_;
         std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
         std::unique_ptr<browser::BrowserModel> browserModel_;
@@ -198,8 +234,12 @@ namespace hyperbrowse::ui
         std::unique_ptr<services::BatchConvertService> batchConvertService_;
         std::unique_ptr<services::FileOperationService> fileOperationService_;
         std::unique_ptr<services::FolderEnumerationService> folderEnumerationService_;
+        std::unique_ptr<services::FolderTreeEnumerationService> folderTreeEnumerationService_;
         std::unique_ptr<services::FolderWatchService> folderWatchService_;
+        std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
+        std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
+        std::wstring pendingTreeSelectionPath_;
         std::uint64_t activeEnumerationRequestId_{};
         std::uint64_t activeFolderWatchRequestId_{};
         std::uint64_t activeBatchConvertRequestId_{};
@@ -217,7 +257,11 @@ namespace hyperbrowse::ui
         bool nvJpegEnabled_{};
         bool libRawOutOfProcessEnabled_{true};
         browser::ThumbnailSizePreset thumbnailSizePreset_{static_cast<browser::ThumbnailSizePreset>(192)};
+        browser::BrowserSortMode sortMode_{static_cast<browser::BrowserSortMode>(0)};
+        bool sortAscending_{true};
         bool compactThumbnailLayout_{};
         bool thumbnailDetailsVisible_{true};
+        UINT slideshowIntervalMs_{3000};
+        bool detailsStripVisible_{true};
     };
 }

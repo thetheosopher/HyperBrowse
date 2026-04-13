@@ -36,6 +36,7 @@ namespace hyperbrowse::viewer
         int CurrentZoomPercent() const noexcept;
         int RotationQuarterTurns() const noexcept;
         POINT PanOffset() const noexcept;
+        bool AreInfoOverlaysVisible() const noexcept;
         void StartSlideshow(UINT intervalMs = 3000);
         void StopSlideshow();
         bool IsSlideshowActive() const noexcept;
@@ -93,6 +94,7 @@ namespace hyperbrowse::viewer
         void SetActualSize();
         void RotateLeft();
         void RotateRight();
+        void ToggleInfoOverlays();
         HMONITOR ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept;
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
         void ToggleFullScreen();
@@ -128,6 +130,7 @@ namespace hyperbrowse::viewer
         int rotationQuarterTurns_{};
         double panOffsetX_{};
         double panOffsetY_{};
+        bool infoOverlaysVisible_{true};
         bool panning_{};
         POINT lastPanPoint_{};
         bool fullScreen_{};

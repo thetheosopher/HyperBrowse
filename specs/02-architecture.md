@@ -5,12 +5,13 @@
 Use a **low-overhead pure native Windows architecture**:
 
 - Win32 application shell
-- Direct2D rendering for 2D image presentation
-- Direct3D 11 for texture/resource management and GPU interop
+- GDI rendering for all 2D image presentation (double-buffered `StretchBlt`/`PlgBlt`)
 - WIC for baseline common-format decode
-- LibRaw for supported mainstream RAW formats
+- LibRaw for supported mainstream RAW formats (in-process or out-of-process via helper executable)
 - nvJPEG as an optional accelerated JPEG thumbnail path
 - CMake-based build
+
+Note: Direct2D and Direct3D 11 are listed as link dependencies but are not currently used for rendering. All painting uses GDI. D2D/D3D11 rendering paths are deferred to a future release if profiling justifies the migration.
 
 This avoids the extra shell/framework overhead of larger UI stacks and keeps control over rendering, virtualization, threading, and memory behavior.
 
@@ -44,56 +45,56 @@ Single-process desktop app.
 ## 4. Core Modules
 
 ### App shell and UI
-- `AppShell`
-- `MainWindow`
-- `MenuController`
-- `CommandRouter`
-- `ThemeManager`
-- `StatusBarController`
+- `Application` — app lifecycle, message loop, accelerator translation
+- `MainWindow` — window procedure, input handling, layout, command routing, presentation coordination, folder tree management, action strip, filter, status bar, theme management, settings persistence
+- `DiagnosticsWindow` — timing/counter/derived metric display window
+
+Note: The original modular decomposition (`AppShell`, `MenuController`, `CommandRouter`, `ThemeManager`, `StatusBarController`) was consolidated into `MainWindow` for pragmatic simplicity. The current implementation handles all shell concerns in a single ~3900 line translation unit.
 
 ### Browser UI
-- `FolderTreePane`
-- `BrowserPane`
-- `ThumbnailGridView`
-- `DetailsListView`
-- `SelectionModel`
-- `SortController`
-- `LayoutController`
+- `BrowserPane` — virtualized thumbnail grid and details list, selection model, sort, filter, rubber-band selection, thumbnail scheduling integration, metadata integration
+- `BrowserModel` — item storage, incremental append, upsert/remove operations, path-based updates
+
+Note: The original modular decomposition (`FolderTreePane`, `ThumbnailGridView`, `DetailsListView`, `SelectionModel`, `SortController`, `LayoutController`) was consolidated into `BrowserPane` and `BrowserModel`. Folder tree management lives in `MainWindow`.
 
 ### Viewer
-- `ViewerWindow`
-- `ViewerNavigationController`
-- `ZoomPanController`
-- `FullscreenController`
-- `SlideshowController`
+- `ViewerWindow` — all viewer concerns: navigation, zoom/pan/rotate, fullscreen, slideshow, prefetch (3-slot adjacent cache), info overlay HUD, multi-monitor support, async decode coordination
+
+Note: The original modular decomposition (`ViewerNavigationController`, `ZoomPanController`, `FullscreenController`, `SlideshowController`) was consolidated into `ViewerWindow` for pragmatic simplicity.
 
 ### Services
-- `FileEnumerationService`
-- `FolderWatchService`
-- `MetadataService`
-- `ThumbnailScheduler`
-- `ViewerPrefetchService`
-- `BatchConvertService`
-- `SettingsService`
-- `DiagnosticsService`
+- `FolderEnumerationService` — async file enumeration for browser model
+- `FolderTreeEnumerationService` — async child directory enumeration for folder tree lazy loading
+- `FolderWatchService` — file system change monitoring via `ReadDirectoryChangesW`
+- `MetadataService` (`ImageMetadataService`) — async metadata extraction with bounded LRU cache
+- `ThumbnailScheduler` — priority-based thumbnail decode with separate General/Raw worker pools, cross-queue work stealing, runtime-adaptive worker count via `std::thread::hardware_concurrency()`
+- `BatchConvertService` — async format conversion (JPEG/PNG/TIFF output)
+- `FileOperationService` — async native file operations via `IFileOperation` (copy/move/delete)
+- `JpegTransformService` — EXIF orientation adjustment via WIC metadata writer
+- `DiagnosticsService` (implemented as `Diagnostics` utility) — timing spans, counters, snapshots
 
 ### Decode backends
-- `DecodeServiceWIC`
-- `DecodeServiceNvJpeg`
-- `DecodeServiceRawLibRaw`
+- `ImageDecoder` — unified decode entry points (`DecodeThumbnail`, `DecodeFullImage`, `DecodeThumbnailBatch`)
+- `WicThumbnailDecoder` — WIC-based thumbnail decode with EXIF orientation handling
+- `NvJpegDecoder` — optional GPU-accelerated JPEG decode with runtime capability detection
+- `RawHelperProtocol` — binary protocol for out-of-process RAW decode via `HyperBrowseRawHelper.exe`
+- `WicDecodeHelpers` — shared EXIF orientation parsing and WIC pipeline utilities
+
+Note: The decode layer uses free functions and static methods rather than a formal polymorphic interface. The decode chain is: nvJPEG → WIC → LibRaw (in-process or out-of-process) with per-image fallback.
 
 ### Caching
-- `FileListCache`
-- `MetadataCache`
-- `ThumbnailMemoryCache`
-- `ViewerImageCache`
-- `RawPreviewCache`
+- `ThumbnailCache` — LRU eviction by byte count (default 96 MB), normalized path keys
+- Metadata LRU cache — 512-entry bounded cache inside `ImageMetadataService`
+- Viewer 3-slot adjacent image cache — current/previous/next prefetch slots inside `ViewerWindow`
+
+Note: `FileListCache`, `ViewerImageCache`, and `RawPreviewCache` from the original design are not implemented as separate modules. Caching is handled inline by the owning components.
 
 ### Rendering
-- `RenderBackendD2D`
-- `GpuResourceManager`
-- `TexturePool`
-- `PresentationSurface`
+- All rendering currently uses GDI (double-buffered `CreateCompatibleDC`/`CreateCompatibleBitmap`, `StretchBlt` with `HALFTONE` mode, `PlgBlt` for rotation, `DrawText`, `FillRect`, `RoundRect`)
+- `BrowserPane` owns thumbnail grid and details list rendering
+- `ViewerWindow` owns full-image rendering with zoom/pan/rotate
+
+Note: The original `RenderBackendD2D`, `GpuResourceManager`, `TexturePool`, and `PresentationSurface` modules are not implemented. D2D/D3D11 rendering is deferred.
 
 ## 5. Decoder Abstraction
 

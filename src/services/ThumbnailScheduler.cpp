@@ -5,12 +5,14 @@
 #include <filesystem>
 
 #include "decode/ImageDecoder.h"
+#include "util/Diagnostics.h"
 
 namespace
 {
     namespace fs = std::filesystem;
 
-    constexpr std::size_t kDedicatedRawWorkerCount = 1;
+    constexpr std::size_t kMinWorkerCount = 2;
+    constexpr std::size_t kRawWorkerDivisor = 4;
     constexpr std::size_t kMinNvJpegBatchSize = 4;
     constexpr std::size_t kMaxNvJpegBatchSize = 12;
     constexpr int kNvJpegBatchPriorityWindow = 1;
@@ -19,18 +21,28 @@ namespace
     {
         if (requestedWorkerCount != 0)
         {
-            return std::max<std::size_t>(requestedWorkerCount, 2U);
+            return std::max<std::size_t>(requestedWorkerCount, kMinWorkerCount);
         }
 
         const unsigned int hardwareConcurrency = std::thread::hardware_concurrency();
-        const std::size_t normalized = hardwareConcurrency == 0 ? 2U : hardwareConcurrency;
-        return std::clamp<std::size_t>(normalized, 2U, 4U);
+        const std::size_t normalized = hardwareConcurrency == 0 ? kMinWorkerCount : hardwareConcurrency;
+        return std::max<std::size_t>(normalized, kMinWorkerCount);
     }
 
-    std::size_t ResolveGeneralWorkerCount(std::size_t requestedWorkerCount)
+    std::size_t ResolveRawWorkerCount(std::size_t totalWorkerCount)
     {
-        const std::size_t totalWorkerCount = ResolveWorkerCount(requestedWorkerCount);
-        return std::max<std::size_t>(1U, totalWorkerCount - kDedicatedRawWorkerCount);
+        if (totalWorkerCount <= kMinWorkerCount)
+        {
+            return 1U;
+        }
+
+        const std::size_t rawWorkerCount = std::max<std::size_t>(1U, totalWorkerCount / kRawWorkerDivisor);
+        return std::min(rawWorkerCount, totalWorkerCount - 1U);
+    }
+
+    std::size_t ResolveGeneralWorkerCount(std::size_t totalWorkerCount)
+    {
+        return totalWorkerCount - ResolveRawWorkerCount(totalWorkerCount);
     }
 
     bool IsJpegCacheKey(const hyperbrowse::cache::ThumbnailCacheKey& cacheKey)
@@ -55,7 +67,10 @@ namespace hyperbrowse::services
     ThumbnailScheduler::ThumbnailScheduler(std::size_t cacheCapacityBytes, std::size_t workerCount)
         : cache_(cacheCapacityBytes)
     {
-        const std::size_t generalWorkerCount = ResolveGeneralWorkerCount(workerCount);
+        const std::size_t totalWorkerCount = ResolveWorkerCount(workerCount);
+        const std::size_t rawWorkerCount = ResolveRawWorkerCount(totalWorkerCount);
+        const std::size_t generalWorkerCount = ResolveGeneralWorkerCount(totalWorkerCount);
+
         generalWorkers_.reserve(generalWorkerCount);
         for (std::size_t index = 0; index < generalWorkerCount; ++index)
         {
@@ -65,8 +80,8 @@ namespace hyperbrowse::services
             });
         }
 
-        rawWorkers_.reserve(kDedicatedRawWorkerCount);
-        for (std::size_t index = 0; index < kDedicatedRawWorkerCount; ++index)
+        rawWorkers_.reserve(rawWorkerCount);
+        for (std::size_t index = 0; index < rawWorkerCount; ++index)
         {
             rawWorkers_.emplace_back([this]()
             {
@@ -136,6 +151,7 @@ namespace hyperbrowse::services
                     sessionId,
                     requestEpoch,
                     nextSequence_++,
+                    static_cast<std::uint64_t>(GetTickCount64()),
                     std::move(workItem),
                 });
                 queuedKeys_.insert(pendingJobs_.back().workItem.cacheKey);
@@ -174,19 +190,25 @@ namespace hyperbrowse::services
         return cache_.CapacityBytes();
     }
 
+    std::size_t ThumbnailScheduler::WorkerCount() const
+    {
+        return GeneralWorkerCount() + RawWorkerCount();
+    }
+
+    std::size_t ThumbnailScheduler::GeneralWorkerCount() const
+    {
+        return generalWorkers_.size();
+    }
+
+    std::size_t ThumbnailScheduler::RawWorkerCount() const
+    {
+        return rawWorkers_.size();
+    }
+
     bool ThumbnailScheduler::HasDispatchableWorkLocked(WorkerKind kind) const
     {
-        for (const PendingJob& job : pendingJobs_)
-        {
-            const bool isRaw = IsRawCacheKey(job.workItem.cacheKey);
-            if ((kind == WorkerKind::Raw && isRaw)
-                || (kind == WorkerKind::General && !isRaw))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        (void)kind;
+        return !pendingJobs_.empty();
     }
 
     void ThumbnailScheduler::WorkerLoop(WorkerKind kind)
@@ -222,19 +244,21 @@ namespace hyperbrowse::services
                         return lhs.sequence < rhs.sequence;
                     });
 
-                if (kind == WorkerKind::Raw)
+                const auto selectJobsForKind = [&](WorkerKind jobKind)
                 {
-                    for (const PendingJob& candidate : orderedJobs)
+                    if (jobKind == WorkerKind::Raw)
                     {
-                        if (IsRawCacheKey(candidate.workItem.cacheKey))
+                        for (const PendingJob& candidate : orderedJobs)
                         {
-                            jobs.push_back(candidate);
-                            break;
+                            if (IsRawCacheKey(candidate.workItem.cacheKey))
+                            {
+                                jobs.push_back(candidate);
+                                break;
+                            }
                         }
+                        return;
                     }
-                }
-                else
-                {
+
                     for (const PendingJob& candidate : orderedJobs)
                     {
                         if (!IsRawCacheKey(candidate.workItem.cacheKey))
@@ -273,6 +297,15 @@ namespace hyperbrowse::services
                             jobs.resize(1);
                         }
                     }
+                };
+
+                selectJobsForKind(kind);
+                if (jobs.empty())
+                {
+                    const WorkerKind fallbackKind = kind == WorkerKind::Raw
+                        ? WorkerKind::General
+                        : WorkerKind::Raw;
+                    selectJobsForKind(fallbackKind);
                 }
 
                 if (jobs.empty())
@@ -300,6 +333,20 @@ namespace hyperbrowse::services
                                              pendingJob.sequence) != selectedSequences.end();
                         }),
                     pendingJobs_.end());
+            }
+
+            const std::uint64_t dispatchTickCount = static_cast<std::uint64_t>(GetTickCount64());
+            for (const PendingJob& job : jobs)
+            {
+                const double queueWaitMs = static_cast<double>(dispatchTickCount - job.enqueuedTickCount);
+                if (IsRawCacheKey(job.workItem.cacheKey))
+                {
+                    hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.raw", queueWaitMs);
+                }
+                else
+                {
+                    hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.general", queueWaitMs);
+                }
             }
 
             std::vector<std::shared_ptr<const cache::CachedThumbnail>> thumbnails(jobs.size());

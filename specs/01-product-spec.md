@@ -60,7 +60,7 @@ The application is intentionally scoped as a **pure viewer/browser** rather than
 - Recursive browsing support, default off
 - Folder watching / live refresh
 - Slideshow
-- Lossless JPEG rotate
+- JPEG orientation adjustment (EXIF metadata-only rotation)
 - Batch convert
 - Metadata support:
   - EXIF
@@ -82,6 +82,12 @@ The application is intentionally scoped as a **pure viewer/browser** rather than
 - Animated GIF thumbnails
 - Multipage TIFF navigation
 - Per-image zoom/pan persistence
+- Sort direction toggle (ascending/descending)
+- Configurable mouse wheel behavior in viewer
+- In-app rename (F2)
+- Batch rename
+- RAW+JPEG paired operations
+- Drag-and-drop file operations
 
 ## 6. Main Window Layout
 
@@ -123,6 +129,8 @@ Support custom sort options:
 - type
 - random
 
+Note: Sort direction toggle (ascending/descending) is deferred to a future release.
+
 ### Selection modes
 Support:
 - single selection
@@ -162,7 +170,7 @@ Support:
 
 ### JPEG
 - always apply EXIF orientation automatically
-- support lossless JPEG rotate
+- support JPEG orientation adjustment (EXIF metadata-only rotation)
 
 ### GIF
 - use first frame for thumbnails
@@ -176,6 +184,7 @@ Support:
 - support thumbnail generation from embedded preview when available
 - support full-image viewing through RAW decode path when supported
 - degrade gracefully for unsupported RAW variants
+- RAW decode available in-process or out-of-process (via HyperBrowseRawHelper.exe, default)
 
 ## 10. Metadata
 

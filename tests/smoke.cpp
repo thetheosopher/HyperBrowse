@@ -1,6 +1,9 @@
 #include <windows.h>
 
 #include <commctrl.h>
+
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+
 #include <objbase.h>
 #include <propvarutil.h>
 #include <shlobj.h>
@@ -26,6 +29,7 @@
 #include "decode/WicThumbnailDecoder.h"
 #include "services/BatchConvertService.h"
 #include "services/FolderEnumerationService.h"
+#include "services/FolderTreeEnumerationService.h"
 #include "services/FolderWatchService.h"
 #include "services/ImageMetadataService.h"
 #include "services/JpegTransformService.h"
@@ -40,6 +44,8 @@ namespace
     using Microsoft::WRL::ComPtr;
 
     constexpr wchar_t kTestWindowClassName[] = L"HyperBrowseFolderEnumerationTestWindow";
+    constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
+    constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
 
     struct EnumerationResult
     {
@@ -58,11 +64,21 @@ namespace
         std::vector<std::wstring> readyPaths;
     };
 
+    struct FolderTreeEnumerationResult
+    {
+        std::uint64_t expectedRequestId{};
+        std::vector<std::wstring> childFolders;
+        std::wstring errorMessage;
+        bool completed{};
+        bool failed{};
+    };
+
     struct TestWindowState
     {
         std::uint64_t expectedRequestId{};
         EnumerationResult enumerationResult;
         ThumbnailResult thumbnailResult;
+        FolderTreeEnumerationResult folderTreeEnumerationResult;
     };
 
     class ComScope
@@ -125,6 +141,72 @@ namespace
         fs::path root_;
     };
 
+    class ScopedRegistryDwordBackup
+    {
+    public:
+        ScopedRegistryDwordBackup(const wchar_t* path, const wchar_t* valueName)
+            : path_(path)
+            , valueName_(valueName)
+        {
+            HKEY key{};
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, path_, 0, KEY_READ, &key) != ERROR_SUCCESS)
+            {
+                return;
+            }
+
+            DWORD size = sizeof(value_);
+            DWORD type = REG_DWORD;
+            hadValue_ = RegQueryValueExW(key,
+                                         valueName_,
+                                         nullptr,
+                                         &type,
+                                         reinterpret_cast<LPBYTE>(&value_),
+                                         &size) == ERROR_SUCCESS
+                && type == REG_DWORD;
+            RegCloseKey(key);
+        }
+
+        ~ScopedRegistryDwordBackup()
+        {
+            HKEY key{};
+            DWORD disposition = 0;
+            if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                                path_,
+                                0,
+                                nullptr,
+                                0,
+                                KEY_WRITE,
+                                nullptr,
+                                &key,
+                                &disposition) != ERROR_SUCCESS)
+            {
+                return;
+            }
+
+            if (hadValue_)
+            {
+                RegSetValueExW(key,
+                               valueName_,
+                               0,
+                               REG_DWORD,
+                               reinterpret_cast<const BYTE*>(&value_),
+                               sizeof(value_));
+            }
+            else
+            {
+                RegDeleteValueW(key, valueName_);
+            }
+
+            RegCloseKey(key);
+        }
+
+    private:
+        const wchar_t* path_{};
+        const wchar_t* valueName_{};
+        DWORD value_{};
+        bool hadValue_{};
+    };
+
     enum class TestImageFormat
     {
         Jpeg,
@@ -182,6 +264,11 @@ namespace
     {
         state->thumbnailResult = ThumbnailResult{};
         state->thumbnailResult.expectedSessionId = expectedSessionId;
+    }
+
+    void ResetFolderTreeEnumerationResult(TestWindowState* state)
+    {
+        state->folderTreeEnumerationResult = FolderTreeEnumerationResult{};
     }
 
     bool PumpMessagesUntil(const std::function<bool()>& predicate, DWORD timeoutMs)
@@ -356,6 +443,30 @@ namespace
                 state->thumbnailResult.readyPaths.push_back(update->cacheKey.filePath);
             }
             return 0;
+        }
+
+        if (message == hyperbrowse::services::FolderTreeEnumerationService::kMessageId)
+        {
+            std::unique_ptr<hyperbrowse::services::FolderTreeEnumerationUpdate> update(
+                reinterpret_cast<hyperbrowse::services::FolderTreeEnumerationUpdate*>(lParam));
+            if (!state || !update || update->requestId != state->folderTreeEnumerationResult.expectedRequestId)
+            {
+                return 0;
+            }
+
+            switch (update->kind)
+            {
+            case hyperbrowse::services::FolderTreeEnumerationUpdateKind::Completed:
+                state->folderTreeEnumerationResult.childFolders = std::move(update->childFolders);
+                state->folderTreeEnumerationResult.completed = true;
+                return 0;
+            case hyperbrowse::services::FolderTreeEnumerationUpdateKind::Failed:
+                state->folderTreeEnumerationResult.errorMessage = update->message;
+                state->folderTreeEnumerationResult.failed = true;
+                return 0;
+            default:
+                return 0;
+            }
         }
 
         return DefWindowProcW(hwnd, message, wParam, lParam);
@@ -637,6 +748,34 @@ namespace
         Expect(state->enumerationResult.items.front().modifiedTimestampUtc != 0, "Enumeration did not capture the modified timestamp field");
     }
 
+        void RunFolderTreeEnumerationScenario(HWND hwnd, TestWindowState* state)
+        {
+         hyperbrowse::services::FolderTreeEnumerationService service;
+
+         TempFolder root(L"HyperBrowseFolderTreeEnumeration");
+         fs::create_directories(root.Root() / L"gamma");
+         fs::create_directories(root.Root() / L"alpha");
+         fs::create_directories(root.Root() / L"beta");
+         root.WriteFile(L"alpha\\image.jpg", 1);
+
+         ResetFolderTreeEnumerationResult(state);
+         state->folderTreeEnumerationResult.expectedRequestId = service.EnumerateChildDirectoriesAsync(hwnd, root.Root().wstring());
+         Expect(PumpMessagesUntil([&]()
+         {
+             return state->folderTreeEnumerationResult.completed || state->folderTreeEnumerationResult.failed;
+         }, 5000), "Folder-tree enumeration timed out or failed");
+         Expect(!state->folderTreeEnumerationResult.failed,
+             std::string("Folder-tree enumeration failed: ") + Utf8FromWide(state->folderTreeEnumerationResult.errorMessage));
+         Expect(state->folderTreeEnumerationResult.childFolders.size() == 3,
+             "Folder-tree enumeration returned the wrong number of child directories");
+         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[0]).filename().wstring() == L"alpha",
+             "Folder-tree enumeration did not sort child folders alphabetically");
+         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[1]).filename().wstring() == L"beta",
+             "Folder-tree enumeration did not preserve the expected alphabetical order");
+         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[2]).filename().wstring() == L"gamma",
+             "Folder-tree enumeration omitted the last child folder");
+        }
+
     void RunFolderWatchStartStopScenario(HWND hwnd)
     {
         TempFolder root(L"HyperBrowseFolderWatchStop");
@@ -818,6 +957,25 @@ namespace
         PumpMessagesFor(300);
         Expect(state->thumbnailResult.readyCount == 0, "Cached thumbnails should not be re-decoded on the next schedule pass");
     }
+
+        void RunThumbnailSchedulerWorkerAllocationScenario()
+        {
+         hyperbrowse::services::ThumbnailScheduler minimumScheduler(8ULL * 1024ULL * 1024ULL, 1);
+         Expect(minimumScheduler.WorkerCount() == 2,
+             "Thumbnail scheduler should preserve two lanes when configured below the minimum worker count");
+         Expect(minimumScheduler.GeneralWorkerCount() == 1,
+             "Thumbnail scheduler should preserve a general worker when configured below the minimum worker count");
+         Expect(minimumScheduler.RawWorkerCount() == 1,
+             "Thumbnail scheduler should preserve a RAW worker when configured below the minimum worker count");
+
+         hyperbrowse::services::ThumbnailScheduler scaledScheduler(8ULL * 1024ULL * 1024ULL, 8);
+         Expect(scaledScheduler.WorkerCount() == 8,
+             "Thumbnail scheduler did not preserve the requested worker count for a larger pool");
+         Expect(scaledScheduler.GeneralWorkerCount() == 6,
+             "Thumbnail scheduler did not allocate the expected number of general workers");
+         Expect(scaledScheduler.RawWorkerCount() == 2,
+             "Thumbnail scheduler did not scale the RAW worker allocation above one lane");
+        }
 
     void RunImageMetadataServiceScenario()
     {
@@ -1170,6 +1328,8 @@ namespace
 
     void RunViewerWindowScenario(HINSTANCE instance, HWND ownerWindow)
     {
+        ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
+
         TempFolder root(L"HyperBrowsePrompt6Viewer");
         const fs::path firstPath = root.Root() / L"first.jpg";
         const fs::path secondPath = root.Root() / L"second.png";
@@ -1185,14 +1345,24 @@ namespace
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
                "Viewer window did not finish the initial image decode");
          Expect(viewer.IsFullScreen(), "Viewer should open in full screen by default");
+         Expect(viewer.AreInfoOverlaysVisible(), "Viewer should default to showing info overlays when no persisted preference exists");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
                "Viewer next-image navigation failed");
 
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
+         PumpMessagesFor(100);
+         Expect(!viewer.AreInfoOverlaysVisible(), "Viewer Tab key did not hide the info overlays");
+
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, '1', 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == 100; }, 1000),
                "Viewer actual-size mode did not set zoom to 100%");
+
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_MINUS, 0);
+         PumpMessagesFor(100);
+         Expect(viewer.CurrentZoomPercent() == 100,
+             "Viewer zoom-out should not shrink the image below the current window-fit bound");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'R', 0);
         PumpMessagesFor(100);
@@ -1219,6 +1389,17 @@ namespace
 
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);
+
+         hyperbrowse::viewer::ViewerWindow restoredViewer(instance);
+         Expect(restoredViewer.Open(ownerWindow, items, 0, false), "Restored viewer window failed to open");
+         Expect(PumpMessagesUntil([&]() { return restoredViewer.CurrentZoomPercent() > 0; }, 5000),
+             "Restored viewer window did not finish the initial image decode");
+         Expect(!restoredViewer.AreInfoOverlaysVisible(), "Viewer did not restore the persisted info-overlay visibility");
+         SendMessageW(restoredViewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
+         PumpMessagesFor(100);
+         Expect(restoredViewer.AreInfoOverlaysVisible(), "Viewer Tab key did not restore the info overlays after reopening");
+         SendMessageW(restoredViewer.Hwnd(), WM_CLOSE, 0, 0);
+         PumpMessagesFor(100);
     }
 
     void RunMainWindowFolderTreeScenario(HINSTANCE instance)
@@ -1309,11 +1490,13 @@ int main()
         Expect(hwnd != nullptr, "Failed to create the hidden test window");
 
         RunEnumerationScenario(hwnd, &state);
+        RunFolderTreeEnumerationScenario(hwnd, &state);
         RunFolderWatchStartStopScenario(hwnd);
         RunThumbnailCacheNormalizationScenario();
         RunWicDecoderScenario();
         RunJpegOrientationAdjustmentScenario();
         RunBatchConvertCancellationScenario(hwnd);
+        RunThumbnailSchedulerWorkerAllocationScenario();
         RunThumbnailSchedulerScenario(hwnd, &state);
         RunImageMetadataServiceScenario();
         RunRawFormatAllowlistScenario();

@@ -21,12 +21,17 @@
 #include "services/BatchConvertService.h"
 #include "services/FileOperationService.h"
 #include "services/FolderEnumerationService.h"
+#include "services/FolderTreeEnumerationService.h"
 #include "services/FolderWatchService.h"
+#include "services/ImageMetadataService.h"
 #include "services/JpegTransformService.h"
+#include "ui/DiagnosticsWindow.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
 #include "util/Timing.h"
 #include "viewer/ViewerWindow.h"
+
+#include "app/resource.h"
 
 namespace fs = std::filesystem;
 
@@ -42,6 +47,10 @@ namespace
     constexpr wchar_t kRegistryValueCompactThumbnailLayout[] = L"CompactThumbnailLayout";
     constexpr wchar_t kRegistryValueThumbnailDetailsVisible[] = L"ThumbnailDetailsVisible";
     constexpr wchar_t kRegistryValueSelectedFolderPath[] = L"SelectedFolderPath";
+    constexpr wchar_t kRegistryValueSortMode[] = L"SortMode";
+    constexpr wchar_t kRegistryValueSortAscending[] = L"SortAscending";
+    constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
+    constexpr wchar_t kRegistryValueDetailsStripVisible[] = L"DetailsStripVisible";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -90,11 +99,34 @@ namespace
     constexpr UINT ID_VIEW_SORT_DIMENSIONS = 2204;
     constexpr UINT ID_VIEW_SORT_TYPE = 2205;
     constexpr UINT ID_VIEW_SORT_RANDOM = 2206;
+    constexpr UINT ID_VIEW_SORT_DATETAKEN = 2207;
+    constexpr UINT ID_VIEW_SORT_DIRECTION = 2208;
+    constexpr UINT ID_VIEW_DETAILS_STRIP = 2209;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
+    constexpr UINT ID_ACTION_SORT_MENU = 2401;
+    constexpr UINT ID_ACTION_THUMBNAIL_SIZE_MENU = 2402;
+    constexpr UINT ID_ACTION_THEME_MENU = 2403;
+    constexpr UINT ID_ACTION_FILTER_EDIT = 2404;
     constexpr UINT ID_HELP_ABOUT = 9001;
     constexpr UINT ID_HELP_DIAGNOSTICS_SNAPSHOT = 9002;
     constexpr UINT ID_HELP_DIAGNOSTICS_RESET = 9003;
+
+    constexpr int kActionStripPaddingX = 12;
+    constexpr int kActionStripPaddingY = 8;
+    constexpr int kActionButtonHeight = 28;
+    constexpr int kActionButtonGap = 8;
+    constexpr int kOpenFolderButtonWidth = 88;
+    constexpr int kRecursiveButtonWidth = 76;
+    constexpr int kThumbnailButtonWidth = 78;
+    constexpr int kDetailsButtonWidth = 64;
+    constexpr int kSortButtonWidth = 92;
+    constexpr int kSizeButtonWidth = 72;
+    constexpr int kThemeButtonWidth = 78;
+    constexpr int kSelectionActionButtonWidth = 52;
+    constexpr int kDeleteButtonWidth = 58;
+    constexpr int kFilterEditMinWidth = 160;
+    constexpr int kDetailsStripHeight = 22;
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
     {
@@ -169,6 +201,15 @@ namespace
         }
     }
 
+    COLORREF BlendColor(COLORREF baseColor, COLORREF mixColor, BYTE mixAmount)
+    {
+        const BYTE baseAmount = static_cast<BYTE>(255 - mixAmount);
+        return RGB(
+            (GetRValue(baseColor) * baseAmount + GetRValue(mixColor) * mixAmount) / 255,
+            (GetGValue(baseColor) * baseAmount + GetGValue(mixColor) * mixAmount) / 255,
+            (GetBValue(baseColor) * baseAmount + GetBValue(mixColor) * mixAmount) / 255);
+    }
+
     std::wstring GetFolderDisplayName(std::wstring_view folderPath)
     {
         if (folderPath.empty())
@@ -189,6 +230,28 @@ namespace
         }
 
         return std::wstring(value.substr(0, maxLength > 3 ? maxLength - 3 : maxLength)) + L"...";
+    }
+
+    std::wstring CompactSortLabel(hyperbrowse::browser::BrowserSortMode sortMode)
+    {
+        switch (sortMode)
+        {
+        case hyperbrowse::browser::BrowserSortMode::FileName:
+            return L"Name";
+        case hyperbrowse::browser::BrowserSortMode::ModifiedDate:
+            return L"Date";
+        case hyperbrowse::browser::BrowserSortMode::FileSize:
+            return L"Size";
+        case hyperbrowse::browser::BrowserSortMode::Dimensions:
+            return L"Pixels";
+        case hyperbrowse::browser::BrowserSortMode::FileType:
+            return L"Type";
+        case hyperbrowse::browser::BrowserSortMode::DateTaken:
+            return L"Taken";
+        case hyperbrowse::browser::BrowserSortMode::Random:
+        default:
+            return L"Random";
+        }
     }
 
     std::wstring NormalizeFolderPath(std::wstring path)
@@ -457,62 +520,6 @@ namespace
         return info;
     }
 
-    bool FolderHasChildDirectories(const std::wstring& folderPath)
-    {
-        std::error_code error;
-        const fs::directory_options options = fs::directory_options::skip_permission_denied;
-        for (fs::directory_iterator iterator(fs::path(folderPath), options, error), end;
-             iterator != end;
-             iterator.increment(error))
-        {
-            if (error)
-            {
-                error.clear();
-                continue;
-            }
-
-            std::error_code statusError;
-            if (iterator->is_directory(statusError) && !statusError)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    std::vector<std::wstring> EnumerateChildDirectories(const std::wstring& folderPath)
-    {
-        std::vector<std::wstring> childFolders;
-        std::error_code error;
-        const fs::directory_options options = fs::directory_options::skip_permission_denied;
-        for (fs::directory_iterator iterator(fs::path(folderPath), options, error), end;
-             iterator != end;
-             iterator.increment(error))
-        {
-            if (error)
-            {
-                error.clear();
-                continue;
-            }
-
-            std::error_code statusError;
-            if (!iterator->is_directory(statusError) || statusError)
-            {
-                continue;
-            }
-
-            childFolders.push_back(NormalizeFolderPath(iterator->path().wstring()));
-        }
-
-        std::sort(childFolders.begin(), childFolders.end(), [](const std::wstring& lhs, const std::wstring& rhs)
-        {
-            return _wcsicmp(lhs.c_str(), rhs.c_str()) < 0;
-        });
-
-        return childFolders;
-    }
-
     hyperbrowse::browser::BrowserSortMode SortModeFromCommandId(UINT commandId)
     {
         switch (commandId)
@@ -527,6 +534,8 @@ namespace
             return hyperbrowse::browser::BrowserSortMode::Dimensions;
         case ID_VIEW_SORT_TYPE:
             return hyperbrowse::browser::BrowserSortMode::FileType;
+        case ID_VIEW_SORT_DATETAKEN:
+            return hyperbrowse::browser::BrowserSortMode::DateTaken;
         case ID_VIEW_SORT_RANDOM:
         default:
             return hyperbrowse::browser::BrowserSortMode::Random;
@@ -547,6 +556,8 @@ namespace
             return ID_VIEW_SORT_DIMENSIONS;
         case hyperbrowse::browser::BrowserSortMode::FileType:
             return ID_VIEW_SORT_TYPE;
+        case hyperbrowse::browser::BrowserSortMode::DateTaken:
+            return ID_VIEW_SORT_DATETAKEN;
         case hyperbrowse::browser::BrowserSortMode::Random:
         default:
             return ID_VIEW_SORT_RANDOM;
@@ -694,7 +705,9 @@ namespace hyperbrowse::ui
         , batchConvertService_(std::make_unique<services::BatchConvertService>())
         , fileOperationService_(std::make_unique<services::FileOperationService>())
         , folderEnumerationService_(std::make_unique<services::FolderEnumerationService>())
+        , folderTreeEnumerationService_(std::make_unique<services::FolderTreeEnumerationService>())
         , folderWatchService_(std::make_unique<services::FolderWatchService>())
+        , diagnosticsWindow_(std::make_unique<DiagnosticsWindow>(instance))
         , viewerWindow_(std::make_unique<viewer::ViewerWindow>(instance))
     {
     }
@@ -704,6 +717,11 @@ namespace hyperbrowse::ui
         if (folderEnumerationService_)
         {
             folderEnumerationService_->Cancel();
+        }
+
+        if (folderTreeEnumerationService_)
+        {
+            folderTreeEnumerationService_->CancelAll();
         }
 
         if (folderWatchService_)
@@ -719,6 +737,11 @@ namespace hyperbrowse::ui
         if (backgroundBrush_)
         {
             DeleteObject(backgroundBrush_);
+        }
+
+        if (actionFieldBrush_)
+        {
+            DeleteObject(actionFieldBrush_);
         }
 
         if (accelerators_)
@@ -792,6 +815,11 @@ namespace hyperbrowse::ui
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
         wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+        wc.hIcon = LoadIconW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE));
+        wc.hIconSm = static_cast<HICON>(
+            LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE),
+                       IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                       GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
 
         return RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
     }
@@ -885,7 +913,10 @@ namespace hyperbrowse::ui
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_SIZE, L"By File &Size");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIMENSIONS, L"By &Dimensions");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_TYPE, L"By &Type");
+        AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DATETAKEN, L"By Date &Taken");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By &Random");
+        AppendMenuW(sortMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"&Descending");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(sortMenu), L"&Sort By");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_96, L"&96 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_128, L"1&28 px");
@@ -896,6 +927,7 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"&Compact Thumbnail Layout");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Info Strip");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection\tCtrl+Shift+S");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder");
@@ -920,6 +952,54 @@ namespace hyperbrowse::ui
 
     bool MainWindow::CreateChildWindows()
     {
+        const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        auto createActionButton = [this, defaultGuiFont](UINT commandId, const wchar_t* text) -> HWND
+        {
+            HWND button = CreateWindowExW(
+                0,
+                L"BUTTON",
+                text,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                0, 0, 100, kActionButtonHeight,
+                hwnd_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(commandId)),
+                instance_,
+                nullptr);
+            if (button)
+            {
+                SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
+            }
+            return button;
+        };
+
+        openFolderButton_ = createActionButton(ID_FILE_OPEN_FOLDER, L"Open Folder");
+        recursiveButton_ = createActionButton(ID_VIEW_RECURSIVE, L"Recursive");
+        thumbnailModeButton_ = createActionButton(ID_VIEW_THUMBNAILS, L"Thumbnails");
+        detailsModeButton_ = createActionButton(ID_VIEW_DETAILS, L"Details");
+        sortMenuButton_ = createActionButton(ID_ACTION_SORT_MENU, L"Sort");
+        sizeMenuButton_ = createActionButton(ID_ACTION_THUMBNAIL_SIZE_MENU, L"Tiles");
+        themeMenuButton_ = createActionButton(ID_ACTION_THEME_MENU, L"Theme");
+        filterEdit_ = CreateWindowExW(
+            0,
+            L"EDIT",
+            L"",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+            0, 0, 120, kActionButtonHeight - 8,
+            hwnd_,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_ACTION_FILTER_EDIT)),
+            instance_,
+            nullptr);
+        copyButton_ = createActionButton(ID_FILE_COPY_SELECTION, L"Copy");
+        moveButton_ = createActionButton(ID_FILE_MOVE_SELECTION, L"Move");
+        deleteButton_ = createActionButton(ID_FILE_DELETE_SELECTION, L"Delete");
+
+        if (filterEdit_)
+        {
+            SendMessageW(filterEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
+            SendMessageW(filterEdit_, EM_LIMITTEXT, 260, 0);
+            SendMessageW(filterEdit_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"Filter filenames"));
+        }
+
         treePane_ = CreateWindowExW(
             WS_EX_CLIENTEDGE,
             WC_TREEVIEWW,
@@ -942,11 +1022,27 @@ namespace hyperbrowse::ui
             instance_,
             nullptr);
 
-        if (!treePane_ || !statusBar_)
+        detailsStrip_ = CreateWindowExW(
+            0,
+            L"STATIC",
+            L"",
+            WS_CHILD | (detailsStripVisible_ ? WS_VISIBLE : 0) | SS_LEFT | SS_ENDELLIPSIS | SS_NOPREFIX,
+            0, 0, 100, kDetailsStripHeight,
+            hwnd_,
+            nullptr,
+            instance_,
+            nullptr);
+
+        if (!openFolderButton_ || !recursiveButton_ || !thumbnailModeButton_ || !detailsModeButton_
+            || !sortMenuButton_ || !sizeMenuButton_ || !themeMenuButton_ || !filterEdit_
+            || !copyButton_ || !moveButton_ || !deleteButton_
+            || !treePane_ || !statusBar_ || !detailsStrip_)
         {
             util::LogLastError(L"CreateChildWindows");
             return false;
         }
+
+        SendMessageW(detailsStrip_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
 
         if (!browserPaneController_ || !browserPaneController_->Create(hwnd_))
         {
@@ -956,7 +1052,6 @@ namespace hyperbrowse::ui
 
         browserPane_ = browserPaneController_->Hwnd();
 
-        const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         SendMessageW(treePane_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
 
         SHFILEINFOW shellInfo{};
@@ -992,6 +1087,7 @@ namespace hyperbrowse::ui
         }
         RefreshBrowserPane();
         UpdateStatusText();
+        UpdateActionStripState();
         LayoutChildren();
         return true;
     }
@@ -1014,6 +1110,14 @@ namespace hyperbrowse::ui
         {
             return;
         }
+
+        if (folderTreeEnumerationService_)
+        {
+            folderTreeEnumerationService_->CancelAll();
+        }
+
+        pendingFolderTreeEnumerationItems_.clear();
+        pendingTreeSelectionPath_.clear();
 
         suppressTreeSelectionChange_ = true;
         TreeView_DeleteAllItems(treePane_);
@@ -1094,6 +1198,8 @@ namespace hyperbrowse::ui
         auto nodeData = std::make_unique<FolderTreeNodeData>();
         nodeData->path = normalizedPath;
         nodeData->childrenLoaded = false;
+        nodeData->childrenLoading = false;
+        nodeData->childEnumerationRequestId = 0;
         FolderTreeNodeData* rawNodeData = nodeData.get();
         folderTreeNodes_.push_back(std::move(nodeData));
 
@@ -1107,7 +1213,7 @@ namespace hyperbrowse::ui
         item.item.lParam = reinterpret_cast<LPARAM>(rawNodeData);
 
         const HTREEITEM insertedItem = TreeView_InsertItem(treePane_, &item);
-        if (insertedItem && FolderHasChildDirectories(normalizedPath))
+        if (insertedItem)
         {
             AddFolderTreePlaceholder(insertedItem);
         }
@@ -1117,6 +1223,22 @@ namespace hyperbrowse::ui
 
     void MainWindow::AddFolderTreePlaceholder(HTREEITEM parentItem)
     {
+        if (!treePane_ || !parentItem)
+        {
+            return;
+        }
+
+        HTREEITEM childItem = TreeView_GetChild(treePane_, parentItem);
+        while (childItem)
+        {
+            if (!GetFolderTreeNodeData(childItem))
+            {
+                return;
+            }
+
+            childItem = TreeView_GetNextSibling(treePane_, childItem);
+        }
+
         TVINSERTSTRUCTW placeholder{};
         placeholder.hParent = parentItem;
         placeholder.hInsertAfter = TVI_LAST;
@@ -1125,28 +1247,41 @@ namespace hyperbrowse::ui
         TreeView_InsertItem(treePane_, &placeholder);
     }
 
-    void MainWindow::EnsureFolderTreeChildren(HTREEITEM item)
+    void MainWindow::RequestFolderTreeChildren(HTREEITEM item)
     {
         FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
-        if (!nodeData || nodeData->childrenLoaded)
+        if (!nodeData || nodeData->childrenLoaded || nodeData->childrenLoading || !folderTreeEnumerationService_)
+        {
+            return;
+        }
+
+        nodeData->childrenLoading = true;
+        const std::uint64_t requestId = folderTreeEnumerationService_->EnumerateChildDirectoriesAsync(hwnd_, nodeData->path);
+        nodeData->childEnumerationRequestId = requestId;
+        pendingFolderTreeEnumerationItems_[requestId] = item;
+    }
+
+    void MainWindow::ApplyFolderTreeChildren(HTREEITEM item, std::vector<std::wstring> childFolderPaths)
+    {
+        FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+        if (!nodeData)
         {
             return;
         }
 
         nodeData->childrenLoaded = true;
+        nodeData->childrenLoading = false;
+        nodeData->childEnumerationRequestId = 0;
 
         HTREEITEM childItem = TreeView_GetChild(treePane_, item);
         while (childItem)
         {
             HTREEITEM nextSibling = TreeView_GetNextSibling(treePane_, childItem);
-            if (!GetFolderTreeNodeData(childItem))
-            {
-                TreeView_DeleteItem(treePane_, childItem);
-            }
+            TreeView_DeleteItem(treePane_, childItem);
             childItem = nextSibling;
         }
 
-        for (const std::wstring& childFolderPath : EnumerateChildDirectories(nodeData->path))
+        for (const std::wstring& childFolderPath : childFolderPaths)
         {
             InsertFolderTreeItem(item, childFolderPath);
         }
@@ -1169,7 +1304,18 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::wstring normalizedPath = NormalizeFolderPath(folderPath);
+        pendingTreeSelectionPath_ = NormalizeFolderPath(folderPath);
+        ContinueSelectingFolderInTree();
+    }
+
+    void MainWindow::ContinueSelectingFolderInTree()
+    {
+        if (!treePane_ || pendingTreeSelectionPath_.empty())
+        {
+            return;
+        }
+
+        const std::wstring normalizedPath = pendingTreeSelectionPath_;
         HTREEITEM currentItem = FindChildFolderTreeItem(nullptr, normalizedPath);
         if (currentItem)
         {
@@ -1177,6 +1323,7 @@ namespace hyperbrowse::ui
             TreeView_SelectItem(treePane_, currentItem);
             TreeView_EnsureVisible(treePane_, currentItem);
             suppressTreeSelectionChange_ = false;
+            pendingTreeSelectionPath_.clear();
             return;
         }
 
@@ -1205,11 +1352,23 @@ namespace hyperbrowse::ui
 
                 currentPath /= segment;
                 TreeView_Expand(treePane_, currentItem, TVE_EXPAND);
-                EnsureFolderTreeChildren(currentItem);
+
+                FolderTreeNodeData* nodeData = GetFolderTreeNodeData(currentItem);
+                if (!nodeData)
+                {
+                    return;
+                }
+
+                if (!nodeData->childrenLoaded)
+                {
+                    RequestFolderTreeChildren(currentItem);
+                    return;
+                }
 
                 currentItem = FindChildFolderTreeItem(currentItem, currentPath.wstring());
                 if (!currentItem)
                 {
+                    pendingTreeSelectionPath_.clear();
                     return;
                 }
             }
@@ -1219,6 +1378,7 @@ namespace hyperbrowse::ui
         TreeView_SelectItem(treePane_, currentItem);
         TreeView_EnsureVisible(treePane_, currentItem);
         suppressTreeSelectionChange_ = false;
+        pendingTreeSelectionPath_.clear();
     }
 
     HTREEITEM MainWindow::FindChildFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath) const
@@ -1315,7 +1475,7 @@ namespace hyperbrowse::ui
     {
         if ((treeView.action & TVE_EXPAND) != 0)
         {
-            EnsureFolderTreeChildren(treeView.itemNew.hItem);
+            RequestFolderTreeChildren(treeView.itemNew.hItem);
         }
 
         return 0;
@@ -1338,14 +1498,66 @@ namespace hyperbrowse::ui
         const int statusHeight = statusRect.bottom - statusRect.top;
 
         const int clientWidth = client.right - client.left;
-        const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top) - statusHeight);
+        const int detailsStripHeight = detailsStripVisible_ ? kDetailsStripHeight : 0;
+        const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top) - statusHeight - kActionStripHeight - detailsStripHeight);
+        const int contentTop = kActionStripHeight;
 
         const int maxLeft = std::max(kMinLeftPaneWidth, clientWidth - kMinRightPaneWidth - kSplitterWidth);
         leftPaneWidth_ = std::clamp(leftPaneWidth_, kMinLeftPaneWidth, maxLeft);
 
-        MoveWindow(treePane_, 0, 0, leftPaneWidth_, clientHeight, TRUE);
-        MoveWindow(browserPane_, leftPaneWidth_ + kSplitterWidth, 0,
+        MoveWindow(treePane_, 0, contentTop, leftPaneWidth_, clientHeight, TRUE);
+        MoveWindow(browserPane_, leftPaneWidth_ + kSplitterWidth, contentTop,
                    clientWidth - leftPaneWidth_ - kSplitterWidth, clientHeight, TRUE);
+
+        if (detailsStrip_)
+        {
+            const int stripTop = contentTop + clientHeight;
+            MoveWindow(detailsStrip_, 0, stripTop, clientWidth, detailsStripHeight, TRUE);
+        }
+
+        const int buttonTop = kActionStripPaddingY;
+        int buttonLeft = kActionStripPaddingX;
+        auto placeLeftButton = [&buttonLeft, buttonTop](HWND button, int width)
+        {
+            if (!button)
+            {
+                return;
+            }
+
+            MoveWindow(button, buttonLeft, buttonTop, width, kActionButtonHeight, TRUE);
+            buttonLeft += width + kActionButtonGap;
+        };
+
+        int buttonRight = clientWidth - kActionStripPaddingX;
+        auto placeRightButton = [&buttonRight, buttonTop](HWND button, int width)
+        {
+            if (!button)
+            {
+                return;
+            }
+
+            buttonRight -= width;
+            MoveWindow(button, buttonRight, buttonTop, width, kActionButtonHeight, TRUE);
+            buttonRight -= kActionButtonGap;
+        };
+
+        placeLeftButton(openFolderButton_, kOpenFolderButtonWidth);
+        placeLeftButton(recursiveButton_, kRecursiveButtonWidth);
+        placeLeftButton(thumbnailModeButton_, kThumbnailButtonWidth);
+        placeLeftButton(detailsModeButton_, kDetailsButtonWidth);
+        placeLeftButton(sortMenuButton_, kSortButtonWidth);
+        placeLeftButton(sizeMenuButton_, kSizeButtonWidth);
+        placeLeftButton(themeMenuButton_, kThemeButtonWidth);
+
+        placeRightButton(deleteButton_, kDeleteButtonWidth);
+        placeRightButton(moveButton_, kSelectionActionButtonWidth);
+        placeRightButton(copyButton_, kSelectionActionButtonWidth);
+
+        const int filterLeft = buttonLeft;
+        const int availableFilterWidth = std::max(0, buttonRight - filterLeft);
+        const int filterWidth = availableFilterWidth >= kFilterEditMinWidth ? availableFilterWidth : availableFilterWidth;
+        const int filterRight = std::min(clientWidth - kActionStripPaddingX, filterLeft + filterWidth);
+        MoveWindow(filterEdit_, filterLeft + 10, buttonTop + 4, std::max(0, filterRight - filterLeft - 20), kActionButtonHeight - 8, TRUE);
 
         InvalidateRect(hwnd_, nullptr, TRUE);
         UpdateStatusText();
@@ -1374,9 +1586,27 @@ namespace hyperbrowse::ui
             }
             else
             {
-                progressText = L"Images: " + std::to_wstring(browserModel_->TotalCount())
-                    + L" | Size: " + browser::FormatByteSize(browserModel_->TotalBytes())
-                    + L" | " + std::wstring(browserModel_->IsEnumerating() ? L"Loading..." : L"Loaded");
+                const std::uint64_t displayedCount = browserPaneController_
+                    ? browserPaneController_->DisplayedItemCount()
+                    : browserModel_->TotalCount();
+                const bool hasFilter = browserPaneController_ && browserPaneController_->HasActiveFilter();
+                progressText = L"Images: " + std::to_wstring(displayedCount);
+                if (hasFilter)
+                {
+                    progressText.append(L" of ");
+                    progressText.append(std::to_wstring(browserModel_->TotalCount()));
+                }
+
+                progressText.append(L" | Size: ");
+                progressText.append(browser::FormatByteSize(browserModel_->TotalBytes()));
+                progressText.append(L" | ");
+                progressText.append(browserModel_->IsEnumerating() ? L"Loading..." : L"Loaded");
+
+                if (hasFilter)
+                {
+                    progressText.append(L" | Filter: ");
+                    progressText.append(TrimForStatus(browserPaneController_->GetFilterQuery(), 22));
+                }
             }
         }
 
@@ -1407,6 +1637,54 @@ namespace hyperbrowse::ui
         SendMessageW(statusBar_, SB_SETTEXTW, 3, reinterpret_cast<LPARAM>(shellStateText.c_str()));
     }
 
+    void MainWindow::UpdateDetailsStripText()
+    {
+        if (!detailsStrip_ || !detailsStripVisible_)
+        {
+            return;
+        }
+
+        if (!browserPaneController_ || !browserModel_)
+        {
+            SetWindowTextW(detailsStrip_, L"");
+            return;
+        }
+
+        const int modelIndex = browserPaneController_->PrimarySelectedModelIndex();
+        if (modelIndex < 0 || modelIndex >= static_cast<int>(browserModel_->Items().size()))
+        {
+            SetWindowTextW(detailsStrip_, L"");
+            return;
+        }
+
+        const browser::BrowserItem& item = browserModel_->Items()[static_cast<std::size_t>(modelIndex)];
+        std::wstring text = L"  ";
+        text.append(item.fileName);
+        text.append(L"  |  ");
+        text.append(item.fileType);
+        text.append(L"  |  ");
+        text.append(browser::FormatByteSize(item.fileSizeBytes));
+        text.append(L"  |  ");
+        text.append(browser::FormatDimensionsForItem(item));
+
+        const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex);
+        if (metadata)
+        {
+            if (!metadata->cameraModel.empty())
+            {
+                text.append(L"  |  ");
+                text.append(metadata->cameraModel);
+            }
+            if (!metadata->dateTaken.empty())
+            {
+                text.append(L"  |  ");
+                text.append(metadata->dateTaken);
+            }
+        }
+
+        SetWindowTextW(detailsStrip_, text.c_str());
+    }
+
     void MainWindow::RefreshBrowserPane()
     {
         if (!browserPaneController_)
@@ -1418,6 +1696,8 @@ namespace hyperbrowse::ui
         browserPaneController_->SetViewMode(browserMode_ == BrowserMode::Thumbnails
             ? browser::BrowserViewMode::Thumbnails
             : browser::BrowserViewMode::Details);
+        browserPaneController_->SetSortMode(sortMode_);
+        browserPaneController_->SetSortAscending(sortAscending_);
         browserPaneController_->RefreshFromModel();
     }
 
@@ -1493,7 +1773,7 @@ namespace hyperbrowse::ui
         {
             if (startSlideshow)
             {
-                viewerWindow_->StartSlideshow();
+                viewerWindow_->StartSlideshow(slideshowIntervalMs_);
             }
             viewerWindowActive_ = true;
             UpdateStatusText();
@@ -1674,7 +1954,10 @@ namespace hyperbrowse::ui
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_SIZE, L"By File &Size");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIMENSIONS, L"By &Dimensions");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_TYPE, L"By &Type");
+        AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DATETAKEN, L"By Date &Taken");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By &Random");
+        AppendMenuW(sortMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"&Descending");
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(sortMenu), L"&Sort By");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_FOLDER, L"Open &Folder...");
@@ -1703,6 +1986,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(sortMenu, ID_VIEW_SORT_DIMENSIONS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(sortMenu, ID_VIEW_SORT_TYPE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(sortMenu, ID_VIEW_SORT_RANDOM, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(sortMenu, ID_VIEW_SORT_DATETAKEN, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(batchConvertSelectionMenu, ID_FILE_BATCH_CONVERT_SELECTION_JPEG,
                        MF_BYCOMMAND | (hasSelection && !batchConvertActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(batchConvertSelectionMenu, ID_FILE_BATCH_CONVERT_SELECTION_PNG,
@@ -1720,12 +2004,19 @@ namespace hyperbrowse::ui
         const browser::BrowserSortMode sortMode = browserPaneController_
             ? browserPaneController_->GetSortMode()
             : browser::BrowserSortMode::FileName;
+        const bool sortAscending = browserPaneController_
+            ? browserPaneController_->IsSortAscending()
+            : true;
         CheckMenuRadioItem(
             sortMenu,
             ID_VIEW_SORT_FILENAME,
             ID_VIEW_SORT_RANDOM,
             CommandIdFromSortMode(sortMode),
             MF_BYCOMMAND);
+        CheckMenuItem(
+            sortMenu,
+            ID_VIEW_SORT_DIRECTION,
+            MF_BYCOMMAND | (sortAscending ? MF_UNCHECKED : MF_CHECKED));
 
         SetForegroundWindow(hwnd_);
         TrackPopupMenu(
@@ -1740,25 +2031,39 @@ namespace hyperbrowse::ui
         DestroyMenu(menu);
     }
 
-    void MainWindow::ShowDiagnosticsSnapshot() const
+    void MainWindow::ShowDiagnosticsSnapshot()
     {
-        std::wstring report = L"HyperBrowse Diagnostics\r\n\r\nJPEG Path: ";
-        report.append(decode::DescribeJpegAccelerationState());
-        report.append(L"\r\nRAW Path: ");
-        report.append(decode::DescribeRawDecodingState());
-        report.append(L"\r\nFolder Scope: ");
-        report.append(browserModel_ && !browserModel_->FolderPath().empty() ? browserModel_->FolderPath() : std::wstring(L"(none)"));
-        report.append(L"\r\n\r\n");
-        report.append(util::BuildDiagnosticsReport());
+        if (!diagnosticsWindow_)
+        {
+            return;
+        }
 
-        util::LogInfo(report);
-        MessageBoxW(hwnd_, report.c_str(), L"Diagnostics Snapshot", MB_OK | MB_ICONINFORMATION);
+        diagnosticsWindow_->Show(
+            hwnd_,
+            decode::DescribeJpegAccelerationState(),
+            decode::DescribeRawDecodingState(),
+            browserModel_ && !browserModel_->FolderPath().empty() ? browserModel_->FolderPath() : std::wstring(L"(none)"),
+            util::CaptureDiagnosticsSnapshot(),
+            themeMode_ == ThemeMode::Dark);
+        util::LogInfo(L"Opened diagnostics snapshot window.");
     }
 
-    void MainWindow::ResetDiagnosticsState() const
+    void MainWindow::ResetDiagnosticsState()
     {
         util::ResetDiagnostics();
         util::LogInfo(L"Diagnostics timings and counters were reset.");
+
+        if (diagnosticsWindow_ && diagnosticsWindow_->IsOpen())
+        {
+            diagnosticsWindow_->Show(
+                hwnd_,
+                decode::DescribeJpegAccelerationState(),
+                decode::DescribeRawDecodingState(),
+                browserModel_ && !browserModel_->FolderPath().empty() ? browserModel_->FolderPath() : std::wstring(L"(none)"),
+                util::CaptureDiagnosticsSnapshot(),
+                themeMode_ == ThemeMode::Dark);
+        }
+
         MessageBoxW(hwnd_, L"Diagnostics timings and counters were reset.", L"Diagnostics", MB_OK | MB_ICONINFORMATION);
     }
 
@@ -1776,8 +2081,45 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::wstring report = browserPaneController_->BuildMetadataReportForModelIndex(modelIndex);
-        MessageBoxW(hwnd_, report.c_str(), L"Image Information", MB_OK | MB_ICONINFORMATION);
+        const auto& items = browserModel_->Items();
+        if (modelIndex >= static_cast<int>(items.size()))
+        {
+            return;
+        }
+
+        const browser::BrowserItem& item = items[static_cast<std::size_t>(modelIndex)];
+        std::wstring errorMessage;
+        const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex)
+            ? browserPaneController_->FindCachedMetadataForModelIndex(modelIndex)
+            : services::ExtractImageMetadata(item, &errorMessage);
+
+        if (!metadata)
+        {
+            MessageBoxW(hwnd_,
+                        errorMessage.empty() ? L"No metadata is available for the selected image." : errorMessage.c_str(),
+                        L"Image Information",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const std::wstring content = services::FormatImageInfoContent(item);
+        const std::wstring expanded = services::FormatImageInfoExpanded(*metadata);
+
+        TASKDIALOGCONFIG config{};
+        config.cbSize = sizeof(config);
+        config.hwndParent = hwnd_;
+        config.hInstance = instance_;
+        config.dwFlags = TDF_EXPAND_FOOTER_AREA;
+        config.dwCommonButtons = TDCBF_OK_BUTTON;
+        config.pszWindowTitle = L"Image Information";
+        config.pszMainIcon = MAKEINTRESOURCEW(IDI_HYPERBROWSE);
+        config.pszMainInstruction = item.fileName.c_str();
+        config.pszContent = content.c_str();
+        config.pszExpandedInformation = expanded.c_str();
+        config.pszCollapsedControlText = L"Show EXIF / IPTC details";
+        config.pszExpandedControlText = L"Hide EXIF / IPTC details";
+
+        TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
     }
 
     void MainWindow::StartCopySelection()
@@ -1983,6 +2325,46 @@ namespace hyperbrowse::ui
                         L"Slideshow",
                         MB_OK | MB_ICONINFORMATION);
             return;
+        }
+
+        TASKDIALOG_BUTTON buttons[] = {
+            {1001, L"1 second"},
+            {1002, L"2 seconds"},
+            {1003, L"3 seconds"},
+            {1005, L"5 seconds"},
+            {1010, L"10 seconds"},
+        };
+
+        TASKDIALOGCONFIG config{};
+        config.cbSize = sizeof(config);
+        config.hwndParent = hwnd_;
+        config.dwFlags = TDF_USE_COMMAND_LINKS;
+        config.pszWindowTitle = L"Slideshow";
+        config.pszMainInstruction = L"Choose slideshow interval";
+        config.pszContent = L"Press Space in the viewer to pause/resume.";
+        config.cButtons = static_cast<UINT>(std::size(buttons));
+        config.pButtons = buttons;
+        config.nDefaultButton = slideshowIntervalMs_ <= 1000 ? 1001
+            : slideshowIntervalMs_ <= 2000 ? 1002
+            : slideshowIntervalMs_ <= 3000 ? 1003
+            : slideshowIntervalMs_ <= 5000 ? 1005
+            : 1010;
+
+        int clickedButton = 0;
+        const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
+        if (FAILED(dialogResult) || clickedButton == IDCANCEL)
+        {
+            return;
+        }
+
+        switch (clickedButton)
+        {
+        case 1001: slideshowIntervalMs_ = 1000; break;
+        case 1002: slideshowIntervalMs_ = 2000; break;
+        case 1003: slideshowIntervalMs_ = 3000; break;
+        case 1005: slideshowIntervalMs_ = 5000; break;
+        case 1010: slideshowIntervalMs_ = 10000; break;
+        default:   slideshowIntervalMs_ = 3000; break;
         }
 
         int selectedIndex = 0;
@@ -2405,6 +2787,10 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_THUMBNAIL_DETAILS,
             MF_BYCOMMAND | (thumbnailDetailsVisible ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_DETAILS_STRIP,
+            MF_BYCOMMAND | (detailsStripVisible_ ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
@@ -2413,16 +2799,83 @@ namespace hyperbrowse::ui
         const browser::BrowserSortMode sortMode = browserPaneController_
             ? browserPaneController_->GetSortMode()
             : browser::BrowserSortMode::FileName;
+        const bool sortAscending = browserPaneController_
+            ? browserPaneController_->IsSortAscending()
+            : true;
         CheckMenuRadioItem(
             menu_,
             ID_VIEW_SORT_FILENAME,
             ID_VIEW_SORT_RANDOM,
             CommandIdFromSortMode(sortMode),
             MF_BYCOMMAND);
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_SORT_DIRECTION,
+            MF_BYCOMMAND | (sortAscending ? MF_UNCHECKED : MF_CHECKED));
 
         if (hwnd_)
         {
             DrawMenuBar(hwnd_);
+        }
+
+        UpdateActionStripState();
+    }
+
+    void MainWindow::UpdateActionStripState() const
+    {
+        if (!openFolderButton_)
+        {
+            return;
+        }
+
+        const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
+        const browser::BrowserSortMode sortMode = browserPaneController_
+            ? browserPaneController_->GetSortMode()
+            : browser::BrowserSortMode::FileName;
+        const bool sortAscending = browserPaneController_
+            ? browserPaneController_->IsSortAscending()
+            : true;
+        const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
+            ? browserPaneController_->GetThumbnailSizePreset()
+            : thumbnailSizePreset_;
+
+        std::wstring sortLabel = CompactSortLabel(sortMode);
+        if (sortMode != browser::BrowserSortMode::Random)
+        {
+            sortLabel += sortAscending ? L" \u2191" : L" \u2193";
+        }
+        const std::wstring sizeText = std::to_wstring(static_cast<int>(thumbnailSizePreset)) + L" px";
+        const std::wstring themeText = themeMode_ == ThemeMode::Dark ? L"Dark" : L"Light";
+
+        SetWindowTextW(sortMenuButton_, sortLabel.c_str());
+        SetWindowTextW(sizeMenuButton_, sizeText.c_str());
+        SetWindowTextW(themeMenuButton_, themeText.c_str());
+
+        EnableWindow(sizeMenuButton_, browserMode_ == BrowserMode::Thumbnails);
+        EnableWindow(copyButton_, hasSelection && !fileOperationActive_);
+        EnableWindow(moveButton_, hasSelection && !fileOperationActive_);
+        EnableWindow(deleteButton_, hasSelection && !fileOperationActive_);
+
+        const HWND actionButtons[] = {
+            openFolderButton_,
+            recursiveButton_,
+            thumbnailModeButton_,
+            detailsModeButton_,
+            sortMenuButton_,
+            sizeMenuButton_,
+            themeMenuButton_,
+            filterEdit_,
+            copyButton_,
+            moveButton_,
+            deleteButton_,
+        };
+
+        for (HWND button : actionButtons)
+        {
+            if (button)
+            {
+                InvalidateRect(button, nullptr, TRUE);
+            }
         }
     }
 
@@ -2439,16 +2892,6 @@ namespace hyperbrowse::ui
             title.append(L" - ");
             title.append(GetCurrentFolderDisplayName());
         }
-
-        title.append(L" - ");
-        title.append(browserMode_ == BrowserMode::Thumbnails ? L"Thumbnail Shell" : L"Details Shell");
-        if (recursiveBrowsingEnabled_)
-        {
-            title.append(L" - Recursive");
-        }
-
-        title.append(L" - ");
-        title.append(themeMode_ == ThemeMode::Dark ? L"Dark" : L"Light");
         SetWindowTextW(hwnd_, title.c_str());
     }
 
@@ -2462,7 +2905,14 @@ namespace hyperbrowse::ui
             backgroundBrush_ = nullptr;
         }
 
+        if (actionFieldBrush_)
+        {
+            DeleteObject(actionFieldBrush_);
+            actionFieldBrush_ = nullptr;
+        }
+
         backgroundBrush_ = CreateSolidBrush(palette.windowBackground);
+        actionFieldBrush_ = CreateSolidBrush(palette.actionFieldBackground);
 
         if (hwnd_)
         {
@@ -2489,6 +2939,11 @@ namespace hyperbrowse::ui
         if (viewerWindow_)
         {
             viewerWindow_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
+        }
+
+        if (diagnosticsWindow_)
+        {
+            diagnosticsWindow_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
         }
 
         if (hwnd_)
@@ -2557,6 +3012,26 @@ namespace hyperbrowse::ui
 
             TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
 
+            if (TryReadDwordValue(key, kRegistryValueSortMode, &value) && value <= static_cast<DWORD>(browser::BrowserSortMode::DateTaken))
+            {
+                sortMode_ = static_cast<browser::BrowserSortMode>(value);
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueSortAscending, &value))
+            {
+                sortAscending_ = value != 0;
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueSlideshowInterval, &value) && value >= 1000 && value <= 60000)
+            {
+                slideshowIntervalMs_ = static_cast<UINT>(value);
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueDetailsStripVisible, &value))
+            {
+                detailsStripVisible_ = value != 0;
+            }
+
             RegCloseKey(key);
         }
 
@@ -2584,6 +3059,13 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueCompactThumbnailLayout, compactThumbnailLayout_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
             WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
+            if (browserPaneController_)
+            {
+                WriteDwordValue(key, kRegistryValueSortMode, static_cast<DWORD>(browserPaneController_->GetSortMode()));
+                WriteDwordValue(key, kRegistryValueSortAscending, browserPaneController_->IsSortAscending() ? 1UL : 0UL);
+            }
+            WriteDwordValue(key, kRegistryValueSlideshowInterval, static_cast<DWORD>(slideshowIntervalMs_));
+            WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
             RegCloseKey(key);
         }
     }
@@ -2651,6 +3133,48 @@ namespace hyperbrowse::ui
         return 0;
     }
 
+    LRESULT MainWindow::OnFolderTreeEnumerationMessage(LPARAM lParam)
+    {
+        std::unique_ptr<services::FolderTreeEnumerationUpdate> update(
+            reinterpret_cast<services::FolderTreeEnumerationUpdate*>(lParam));
+        if (!update)
+        {
+            return 0;
+        }
+
+        const auto pendingItem = pendingFolderTreeEnumerationItems_.find(update->requestId);
+        if (pendingItem == pendingFolderTreeEnumerationItems_.end())
+        {
+            return 0;
+        }
+
+        const HTREEITEM item = pendingItem->second;
+        pendingFolderTreeEnumerationItems_.erase(pendingItem);
+
+        FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+        if (!nodeData || nodeData->childEnumerationRequestId != update->requestId)
+        {
+            return 0;
+        }
+
+        switch (update->kind)
+        {
+        case services::FolderTreeEnumerationUpdateKind::Completed:
+            ApplyFolderTreeChildren(item, std::move(update->childFolders));
+            ContinueSelectingFolderInTree();
+            return 0;
+        case services::FolderTreeEnumerationUpdateKind::Failed:
+            nodeData->childrenLoading = false;
+            nodeData->childEnumerationRequestId = 0;
+            nodeData->childrenLoaded = false;
+            AddFolderTreePlaceholder(item);
+            util::LogError(update->message);
+            return 0;
+        default:
+            return 0;
+        }
+    }
+
     LRESULT MainWindow::OnFolderWatchMessage(LPARAM lParam)
     {
         std::unique_ptr<services::FolderWatchUpdate> update(
@@ -2674,6 +3198,7 @@ namespace hyperbrowse::ui
 
         UpdateStatusText();
         UpdateMenuState();
+        UpdateDetailsStripText();
         return 0;
     }
 
@@ -2862,6 +3387,15 @@ namespace hyperbrowse::ui
         case ID_VIEW_DETAILS:
             SetBrowserMode(BrowserMode::Details);
             return true;
+        case ID_ACTION_SORT_MENU:
+            ShowSortActionMenu();
+            return true;
+        case ID_ACTION_THUMBNAIL_SIZE_MENU:
+            ShowThumbnailSizeActionMenu();
+            return true;
+        case ID_ACTION_THEME_MENU:
+            ShowThemeActionMenu();
+            return true;
         case ID_VIEW_RECURSIVE:
             ToggleRecursiveBrowsing();
             return true;
@@ -2906,15 +3440,34 @@ namespace hyperbrowse::ui
             UpdateStatusText();
             UpdateMenuState();
             return true;
+        case ID_VIEW_DETAILS_STRIP:
+            detailsStripVisible_ = !detailsStripVisible_;
+            if (detailsStrip_)
+            {
+                ShowWindow(detailsStrip_, detailsStripVisible_ ? SW_SHOW : SW_HIDE);
+            }
+            LayoutChildren();
+            UpdateDetailsStripText();
+            UpdateMenuState();
+            return true;
         case ID_VIEW_SORT_FILENAME:
         case ID_VIEW_SORT_MODIFIED:
         case ID_VIEW_SORT_SIZE:
         case ID_VIEW_SORT_DIMENSIONS:
         case ID_VIEW_SORT_TYPE:
+        case ID_VIEW_SORT_DATETAKEN:
         case ID_VIEW_SORT_RANDOM:
             if (browserPaneController_)
             {
                 browserPaneController_->SetSortMode(SortModeFromCommandId(commandId));
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+            return true;
+        case ID_VIEW_SORT_DIRECTION:
+            if (browserPaneController_)
+            {
+                browserPaneController_->SetSortAscending(!browserPaneController_->IsSortAscending());
                 UpdateStatusText();
                 UpdateMenuState();
             }
@@ -2934,7 +3487,11 @@ namespace hyperbrowse::ui
         case ID_HELP_ABOUT:
             MessageBoxW(
                 hwnd_,
-                L"HyperBrowse native Win32 image browser\n\nThe current build includes async folder browsing, virtualized thumbnail and details views, a separate viewer, RAW support, metadata, slideshow, batch convert, live folder refresh, and Prompt 13 menu and shortcut polish.",
+                L"HyperBrowse\nVersion " L"0.1.0" L"\n\n"
+                L"A fast, native Win32 image browser.\n\n"
+                L"Features: async folder browsing, virtualized thumbnails, "
+                L"RAW support, metadata, slideshow, batch convert, "
+                L"and GPU-accelerated JPEG decoding.",
                 L"About HyperBrowse",
                 MB_OK | MB_ICONINFORMATION);
             return true;
@@ -3011,6 +3568,147 @@ namespace hyperbrowse::ui
         UpdateWindowTitle();
     }
 
+    void MainWindow::ShowSortActionMenu()
+    {
+        if (!sortMenuButton_)
+        {
+            return;
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By Filename");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_MODIFIED, L"By Modified Date");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_SIZE, L"By File Size");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DIMENSIONS, L"By Dimensions");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_TYPE, L"By Type");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DATETAKEN, L"By Date Taken");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By Random");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"Descending");
+
+        const bool sortAscending = browserPaneController_
+            ? browserPaneController_->IsSortAscending()
+            : true;
+        const UINT checkedCommand = browserPaneController_
+            ? CommandIdFromSortMode(browserPaneController_->GetSortMode())
+            : ID_VIEW_SORT_FILENAME;
+        CheckMenuRadioItem(menu, ID_VIEW_SORT_FILENAME, ID_VIEW_SORT_RANDOM, checkedCommand, MF_BYCOMMAND);
+        CheckMenuItem(menu, ID_VIEW_SORT_DIRECTION, MF_BYCOMMAND | (sortAscending ? MF_UNCHECKED : MF_CHECKED));
+
+        RECT buttonRect{};
+        GetWindowRect(sortMenuButton_, &buttonRect);
+        SetForegroundWindow(hwnd_);
+        const UINT commandId = TrackPopupMenuEx(
+            menu,
+            TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+            buttonRect.left,
+            buttonRect.bottom,
+            hwnd_,
+            nullptr);
+        DestroyMenu(menu);
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+
+        if (commandId != 0)
+        {
+            HandleCommand(commandId);
+        }
+    }
+
+    void MainWindow::ShowThumbnailSizeActionMenu()
+    {
+        if (!sizeMenuButton_ || browserMode_ != BrowserMode::Thumbnails)
+        {
+            return;
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_96, L"96 px");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_128, L"128 px");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_160, L"160 px");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_192, L"192 px");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_256, L"256 px");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_320, L"320 px");
+
+        const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
+            ? browserPaneController_->GetThumbnailSizePreset()
+            : thumbnailSizePreset_;
+        CheckMenuRadioItem(
+            menu,
+            ID_VIEW_THUMBNAIL_SIZE_96,
+            ID_VIEW_THUMBNAIL_SIZE_320,
+            CommandIdFromThumbnailSizePreset(thumbnailSizePreset),
+            MF_BYCOMMAND);
+
+        RECT buttonRect{};
+        GetWindowRect(sizeMenuButton_, &buttonRect);
+        SetForegroundWindow(hwnd_);
+        const UINT commandId = TrackPopupMenuEx(
+            menu,
+            TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+            buttonRect.left,
+            buttonRect.bottom,
+            hwnd_,
+            nullptr);
+        DestroyMenu(menu);
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+
+        if (commandId != 0)
+        {
+            HandleCommand(commandId);
+        }
+    }
+
+    void MainWindow::ShowThemeActionMenu()
+    {
+        if (!themeMenuButton_)
+        {
+            return;
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        AppendMenuW(menu, MF_STRING, ID_VIEW_THEME_LIGHT, L"Light");
+        AppendMenuW(menu, MF_STRING, ID_VIEW_THEME_DARK, L"Dark");
+        CheckMenuRadioItem(
+            menu,
+            ID_VIEW_THEME_LIGHT,
+            ID_VIEW_THEME_DARK,
+            themeMode_ == ThemeMode::Light ? ID_VIEW_THEME_LIGHT : ID_VIEW_THEME_DARK,
+            MF_BYCOMMAND);
+
+        RECT buttonRect{};
+        GetWindowRect(themeMenuButton_, &buttonRect);
+        SetForegroundWindow(hwnd_);
+        const UINT commandId = TrackPopupMenuEx(
+            menu,
+            TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+            buttonRect.left,
+            buttonRect.bottom,
+            hwnd_,
+            nullptr);
+        DestroyMenu(menu);
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+
+        if (commandId != 0)
+        {
+            HandleCommand(commandId);
+        }
+    }
+
     MainWindow::ThemePalette MainWindow::GetThemePalette() const
     {
         switch (themeMode_)
@@ -3022,6 +3720,12 @@ namespace hyperbrowse::ui
                 RGB(234, 238, 242),
                 RGB(96, 102, 110),
                 RGB(78, 84, 92),
+                RGB(29, 33, 38),
+                RGB(74, 82, 92),
+                RGB(21, 25, 30),
+                RGB(112, 169, 227),
+                RGB(47, 68, 92),
+                RGB(244, 248, 252),
             };
         case ThemeMode::Light:
         default:
@@ -3031,42 +3735,19 @@ namespace hyperbrowse::ui
                 RGB(32, 36, 40),
                 RGB(198, 204, 212),
                 RGB(210, 215, 223),
+                RGB(249, 250, 252),
+                RGB(210, 215, 223),
+                RGB(255, 255, 255),
+                RGB(54, 114, 186),
+                RGB(220, 233, 247),
+                RGB(25, 35, 50),
             };
         }
     }
 
     std::wstring MainWindow::BuildShellStateText() const
     {
-        const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
-            ? browserPaneController_->GetThumbnailSizePreset()
-            : thumbnailSizePreset_;
-        const bool compactThumbnailLayout = browserPaneController_
-            ? browserPaneController_->IsCompactThumbnailLayoutEnabled()
-            : compactThumbnailLayout_;
-        const bool thumbnailDetailsVisible = browserPaneController_
-            ? browserPaneController_->AreThumbnailDetailsVisible()
-            : thumbnailDetailsVisible_;
-
-        std::wstring shellState = L"View: ";
-        shellState.append(browserMode_ == BrowserMode::Thumbnails ? L"Thumbnails" : L"Details");
-        shellState.append(L" | Sort: ");
-        const std::wstring sortLabel = browserPaneController_
-            ? browser::BrowserSortModeToLabel(browserPaneController_->GetSortMode())
-            : std::wstring(L"Filename");
-        shellState.append(sortLabel);
-        if (browserMode_ == BrowserMode::Thumbnails)
-        {
-            shellState.append(L" | Tiles: ");
-            shellState.append(std::to_wstring(static_cast<int>(thumbnailSizePreset)));
-            shellState.append(L" px");
-            shellState.append(compactThumbnailLayout ? L", Compact" : L", Standard");
-            shellState.append(thumbnailDetailsVisible ? L", Details" : L", Thumbnail Only");
-        }
-        shellState.append(L" | Recursive: ");
-        shellState.append(recursiveBrowsingEnabled_ ? L"On" : L"Off");
-        shellState.append(L" | Theme: ");
-        shellState.append(themeMode_ == ThemeMode::Dark ? L"Dark" : L"Light");
-        shellState.append(L" | JPEG: ");
+        std::wstring shellState = L"JPEG: ";
         shellState.append(decode::DescribeJpegAccelerationState());
         shellState.append(L" | RAW: ");
         shellState.append(decode::DescribeRawDecodingState());
@@ -3093,6 +3774,109 @@ namespace hyperbrowse::ui
     std::wstring MainWindow::GetCurrentFolderDisplayName() const
     {
         return browserModel_ ? GetFolderDisplayName(browserModel_->FolderPath()) : L"No Folder";
+    }
+
+    bool MainWindow::DrawActionButton(const DRAWITEMSTRUCT& drawItem) const
+    {
+        if (drawItem.CtlType != ODT_BUTTON)
+        {
+            return false;
+        }
+
+        const UINT controlId = drawItem.CtlID;
+        switch (controlId)
+        {
+        case ID_FILE_OPEN_FOLDER:
+        case ID_VIEW_RECURSIVE:
+        case ID_VIEW_THUMBNAILS:
+        case ID_VIEW_DETAILS:
+        case ID_ACTION_SORT_MENU:
+        case ID_ACTION_THUMBNAIL_SIZE_MENU:
+        case ID_ACTION_THEME_MENU:
+        case ID_FILE_COPY_SELECTION:
+        case ID_FILE_MOVE_SELECTION:
+        case ID_FILE_DELETE_SELECTION:
+            break;
+        default:
+            return false;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        const bool enabled = (drawItem.itemState & ODS_DISABLED) == 0;
+        const bool pressed = (drawItem.itemState & ODS_SELECTED) != 0;
+        const bool checked = (controlId == ID_VIEW_RECURSIVE && recursiveBrowsingEnabled_)
+            || (controlId == ID_VIEW_THUMBNAILS && browserMode_ == BrowserMode::Thumbnails)
+            || (controlId == ID_VIEW_DETAILS && browserMode_ == BrowserMode::Details);
+
+        COLORREF fillColor = BlendColor(palette.paneBackground, palette.windowBackground, themeMode_ == ThemeMode::Dark ? 84 : 92);
+        COLORREF borderColor = palette.actionStripBorder;
+        COLORREF textColor = palette.text;
+
+        if (checked)
+        {
+            fillColor = palette.accentFill;
+            borderColor = palette.accent;
+            textColor = palette.accentText;
+        }
+
+        if (pressed)
+        {
+            fillColor = BlendColor(fillColor, palette.accent, checked ? 48 : 28);
+            borderColor = palette.accent;
+        }
+
+        if (!enabled)
+        {
+            fillColor = BlendColor(fillColor, palette.windowBackground, 108);
+            borderColor = BlendColor(borderColor, palette.windowBackground, 128);
+            textColor = BlendColor(palette.text, fillColor, 148);
+        }
+
+        RECT bounds = drawItem.rcItem;
+        const HBRUSH stripBrush = CreateSolidBrush(palette.actionStripBackground);
+        FillRect(drawItem.hDC, &bounds, stripBrush);
+        DeleteObject(stripBrush);
+
+        RECT buttonRect = bounds;
+        InflateRect(&buttonRect, -1, -1);
+
+        const HBRUSH fillBrush = CreateSolidBrush(fillColor);
+        const HPEN borderPen = CreatePen(PS_SOLID, 1, borderColor);
+        const HGDIOBJ oldBrush = SelectObject(drawItem.hDC, fillBrush);
+        const HGDIOBJ oldPen = SelectObject(drawItem.hDC, borderPen);
+        RoundRect(drawItem.hDC, buttonRect.left, buttonRect.top, buttonRect.right, buttonRect.bottom, 14, 14);
+        SelectObject(drawItem.hDC, oldPen);
+        SelectObject(drawItem.hDC, oldBrush);
+        DeleteObject(borderPen);
+        DeleteObject(fillBrush);
+
+        HFONT font = reinterpret_cast<HFONT>(SendMessageW(drawItem.hwndItem, WM_GETFONT, 0, 0));
+        const HGDIOBJ oldFont = font ? SelectObject(drawItem.hDC, font) : nullptr;
+        SetBkMode(drawItem.hDC, TRANSPARENT);
+        SetTextColor(drawItem.hDC, textColor);
+
+        const int textLength = GetWindowTextLengthW(drawItem.hwndItem);
+        std::wstring text(static_cast<std::size_t>(textLength) + 1, L'\0');
+        GetWindowTextW(drawItem.hwndItem, text.data(), static_cast<int>(text.size()));
+        text.resize(wcslen(text.c_str()));
+
+        RECT textRect = buttonRect;
+        InflateRect(&textRect, -8, 0);
+        DrawTextW(drawItem.hDC, text.c_str(), -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        if (oldFont)
+        {
+            SelectObject(drawItem.hDC, oldFont);
+        }
+
+        if ((drawItem.itemState & ODS_FOCUS) != 0)
+        {
+            RECT focusRect = buttonRect;
+            InflateRect(&focusRect, -4, -4);
+            DrawFocusRect(drawItem.hDC, &focusRect);
+        }
+
+        return true;
     }
 
     void MainWindow::OnSize()
@@ -3194,6 +3978,8 @@ namespace hyperbrowse::ui
         }
         case services::FolderEnumerationService::kMessageId:
             return OnFolderEnumerationMessage(lParam);
+        case services::FolderTreeEnumerationService::kMessageId:
+            return OnFolderTreeEnumerationMessage(lParam);
         case services::FolderWatchService::kMessageId:
             return OnFolderWatchMessage(lParam);
         case browser::BrowserPane::kStateChangedMessage:
@@ -3212,9 +3998,42 @@ namespace hyperbrowse::ui
             return OnViewerActivityMessage(lParam);
         case viewer::ViewerWindow::kClosedMessage:
             return OnViewerClosedMessage();
+        case WM_DRAWITEM:
+            if (DrawActionButton(*reinterpret_cast<const DRAWITEMSTRUCT*>(lParam)))
+            {
+                return TRUE;
+            }
+            break;
         case WM_NOTIFY:
             return OnFolderTreeNotify(lParam);
+        case WM_CTLCOLOREDIT:
+            if (reinterpret_cast<HWND>(lParam) == filterEdit_)
+            {
+                const ThemePalette palette = GetThemePalette();
+                SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
+                SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionFieldBackground);
+                return reinterpret_cast<INT_PTR>(actionFieldBrush_ ? actionFieldBrush_ : backgroundBrush_);
+            }
+            break;
+        case WM_CTLCOLORSTATIC:
+            if (reinterpret_cast<HWND>(lParam) == detailsStrip_)
+            {
+                const ThemePalette palette = GetThemePalette();
+                SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
+                SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionStripBackground);
+                return reinterpret_cast<INT_PTR>(backgroundBrush_);
+            }
+            break;
         case WM_COMMAND:
+            if (LOWORD(wParam) == ID_ACTION_FILTER_EDIT && HIWORD(wParam) == EN_CHANGE && browserPaneController_)
+            {
+                const int textLength = GetWindowTextLengthW(filterEdit_);
+                std::wstring filterText(static_cast<std::size_t>(textLength) + 1, L'\0');
+                GetWindowTextW(filterEdit_, filterText.data(), static_cast<int>(filterText.size()));
+                filterText.resize(wcslen(filterText.c_str()));
+                browserPaneController_->SetFilterQuery(std::move(filterText));
+                return 0;
+            }
             if (HandleCommand(LOWORD(wParam)))
             {
                 return 0;
@@ -3236,7 +4055,40 @@ namespace hyperbrowse::ui
             HDC hdc = BeginPaint(hwnd_, &ps);
             RECT client{};
             GetClientRect(hwnd_, &client);
-            RECT splitterRect{leftPaneWidth_, 0, leftPaneWidth_ + kSplitterWidth, client.bottom};
+            const ThemePalette palette = GetThemePalette();
+
+            RECT stripRect{0, 0, client.right, kActionStripHeight};
+            const HBRUSH stripBrush = CreateSolidBrush(palette.actionStripBackground);
+            FillRect(hdc, &stripRect, stripBrush);
+            DeleteObject(stripBrush);
+
+            if (filterEdit_)
+            {
+                RECT filterRect{};
+                GetWindowRect(filterEdit_, &filterRect);
+                MapWindowPoints(HWND_DESKTOP, hwnd_, reinterpret_cast<LPPOINT>(&filterRect), 2);
+                InflateRect(&filterRect, 10, 4);
+
+                const bool filterFocused = GetFocus() == filterEdit_;
+                const HBRUSH fieldBrush = CreateSolidBrush(palette.actionFieldBackground);
+                const HPEN fieldPen = CreatePen(PS_SOLID, 1, filterFocused ? palette.accent : palette.actionStripBorder);
+                const HGDIOBJ oldFieldBrush = SelectObject(hdc, fieldBrush);
+                const HGDIOBJ oldFieldPen = SelectObject(hdc, fieldPen);
+                RoundRect(hdc, filterRect.left, filterRect.top, filterRect.right, filterRect.bottom, 14, 14);
+                SelectObject(hdc, oldFieldPen);
+                SelectObject(hdc, oldFieldBrush);
+                DeleteObject(fieldPen);
+                DeleteObject(fieldBrush);
+            }
+
+            const HPEN borderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
+            const HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+            MoveToEx(hdc, stripRect.left, stripRect.bottom - 1, nullptr);
+            LineTo(hdc, stripRect.right, stripRect.bottom - 1);
+            SelectObject(hdc, oldPen);
+            DeleteObject(borderPen);
+
+            RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
             const HBRUSH splitterBrush = CreateSolidBrush(GetThemePalette().splitter);
             FillRect(hdc, &splitterRect, splitterBrush);
             DeleteObject(splitterBrush);
@@ -3247,6 +4099,10 @@ namespace hyperbrowse::ui
             if (folderEnumerationService_)
             {
                 folderEnumerationService_->Cancel();
+            }
+            if (folderTreeEnumerationService_)
+            {
+                folderTreeEnumerationService_->CancelAll();
             }
             if (folderWatchService_)
             {

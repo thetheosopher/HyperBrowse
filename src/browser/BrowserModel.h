@@ -20,6 +20,7 @@ namespace hyperbrowse::browser
         int placeholderHeight{};
         int imageWidth{};
         int imageHeight{};
+        std::int64_t dateTakenTimestampUtc{};
     };
 
     class BrowserModel
@@ -30,6 +31,7 @@ namespace hyperbrowse::browser
         void Complete();
         void Fail(std::wstring errorMessage);
         bool UpdateDecodedDimensions(int modelIndex, int width, int height);
+        bool UpdateDateTakenTimestamp(int modelIndex, std::int64_t timestampUtc);
         int FindItemIndexByPath(std::wstring_view filePath) const noexcept;
         bool UpsertItem(BrowserItem item);
         bool RemoveItemByPath(std::wstring_view filePath);

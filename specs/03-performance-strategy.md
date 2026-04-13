@@ -107,10 +107,11 @@ Use reusable pools where profiling justifies them for:
 
 ## 7.3 Cache policy
 Use bounded LRU-style caches for:
-- thumbnails
-- metadata
-- viewer current/next/previous images
-- RAW embedded previews
+- thumbnails (default 96 MB, LRU eviction by byte count)
+- metadata (default 512 entries, LRU eviction by count)
+- viewer current/next/previous images (3-slot adjacent cache, no eviction)
+
+Note: Segmented-LRU and memory pool strategies from the original spec are deferred. Basic LRU eviction is sufficient for current workloads.
 
 ## 7.4 Memory pressure response
 - evict far-offscreen thumbnails first
@@ -122,10 +123,20 @@ Use bounded LRU-style caches for:
 
 ## 8.1 Thread pools
 Use separate logical queues for:
-- enumeration
-- metadata
-- thumbnail decode
-- viewer decode / prefetch
+- enumeration (async per-request futures)
+- folder tree enumeration (async per-request futures)
+- metadata (dedicated worker threads with condition variable signaling)
+- thumbnail decode (two pools: General and Raw workers)
+- viewer decode / prefetch (async per-request futures)
+
+### Runtime-adaptive worker count
+- Total thumbnail worker count defaults to `std::thread::hardware_concurrency()` (falls back to 2 if unavailable)
+- Raw workers: `max(1, total / 4)`, remaining slots assigned to General workers
+- Explicit worker counts can be supplied to override auto-configuration
+
+### Cross-queue work stealing
+- When a worker's primary queue (General or Raw) is empty, it steals jobs from the other queue
+- This prevents idle workers when the workload is skewed toward one format type
 
 ## 8.2 Avoiding contention
 - keep lock scopes short

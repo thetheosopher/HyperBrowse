@@ -4,6 +4,7 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <atomic>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -14,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "decode/WicDecodeHelpers.h"
@@ -24,6 +26,8 @@ namespace fs = std::filesystem;
 namespace
 {
 #if defined(HYPERBROWSE_ENABLE_NVJPEG)
+    std::atomic_int g_activeNvJpegBatchDecodes{0};
+
     using nvjpegHandle_t = void*;
     using nvjpegJpegState_t = void*;
     using cudaStream_t = void*;
@@ -976,6 +980,35 @@ namespace
                                                                      orientedHeight);
     }
 
+    class ScopedNvJpegBatchReservation
+    {
+    public:
+        ScopedNvJpegBatchReservation()
+            : activeBatchCount_(g_activeNvJpegBatchDecodes.fetch_add(1, std::memory_order_acq_rel) + 1)
+        {
+        }
+
+        ~ScopedNvJpegBatchReservation()
+        {
+            g_activeNvJpegBatchDecodes.fetch_sub(1, std::memory_order_acq_rel);
+        }
+
+        int ResolveCpuThreadCount(std::size_t batchSize) const
+        {
+            const unsigned int hardwareConcurrency = std::thread::hardware_concurrency();
+            const int totalCpuThreads = hardwareConcurrency == 0
+                ? static_cast<int>(std::max<std::size_t>(1U, batchSize))
+                : static_cast<int>(hardwareConcurrency);
+            const int perBatchBudget = (totalCpuThreads + activeBatchCount_ - 1) / activeBatchCount_;
+            return std::clamp(perBatchBudget,
+                              1,
+                              static_cast<int>(std::max<std::size_t>(1U, batchSize)));
+        }
+
+    private:
+        int activeBatchCount_{1};
+    };
+
     bool PrepareDecodeRequest(NvJpegRuntime& runtime,
                               const hyperbrowse::cache::ThumbnailCacheKey& key,
                               PreparedDecodeRequest* request,
@@ -1246,10 +1279,16 @@ namespace hyperbrowse::decode
             return thumbnails;
         }
 
+        ScopedNvJpegBatchReservation batchReservation;
+        const int batchCpuThreadCount = batchReservation.ResolveCpuThreadCount(keys.size());
+        std::wstring cpuThreadCounter = L"thumbnail.decode.nvjpeg.batch.cpu_threads.";
+        cpuThreadCounter.append(std::to_wstring(static_cast<unsigned long long>(batchCpuThreadCount)));
+        hyperbrowse::util::IncrementCounter(cpuThreadCounter);
+
         if (runtime.nvjpegDecodeBatchedInitialize_(runtime.Handle(),
                                                    decodeState.Get(),
                                                    static_cast<int>(keys.size()),
-                                                   1,
+                                                   batchCpuThreadCount,
                                                    NVJPEG_OUTPUT_BGRI) != kNvjpegStatusSuccess)
         {
             SetAllErrorMessages(errorMessages, keys.size(), L"nvJPEG failed to initialize the batched JPEG decoder state.");

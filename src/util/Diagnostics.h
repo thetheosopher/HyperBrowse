@@ -5,9 +5,39 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace hyperbrowse::util
 {
+    struct DiagnosticTimingRow
+    {
+        std::wstring name;
+        std::uint64_t count{};
+        double averageMs{};
+        double lastMs{};
+        double minMs{};
+        double maxMs{};
+    };
+
+    struct DiagnosticCounterRow
+    {
+        std::wstring name;
+        std::uint64_t value{};
+    };
+
+    struct DiagnosticValueRow
+    {
+        std::wstring name;
+        std::wstring value;
+    };
+
+    struct DiagnosticsSnapshot
+    {
+        std::vector<DiagnosticTimingRow> timings;
+        std::vector<DiagnosticCounterRow> counters;
+        std::vector<DiagnosticValueRow> derived;
+    };
+
     class Stopwatch
     {
     public:
@@ -37,5 +67,6 @@ namespace hyperbrowse::util
     void RecordTiming(std::wstring_view metricName, double milliseconds);
     void IncrementCounter(std::wstring_view counterName, std::uint64_t delta = 1);
     void ResetDiagnostics();
+    DiagnosticsSnapshot CaptureDiagnosticsSnapshot();
     std::wstring BuildDiagnosticsReport();
 }

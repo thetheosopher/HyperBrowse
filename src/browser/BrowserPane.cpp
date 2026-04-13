@@ -85,6 +85,23 @@ namespace
         return value;
     }
 
+    std::wstring TrimWhitespace(std::wstring value)
+    {
+        const auto isSpace = [](wchar_t character)
+        {
+            return iswspace(character) != 0;
+        };
+
+        const auto first = std::find_if_not(value.begin(), value.end(), isSpace);
+        const auto last = std::find_if_not(value.rbegin(), value.rend(), isSpace).base();
+        if (first >= last)
+        {
+            return {};
+        }
+
+        return std::wstring(first, last);
+    }
+
     int CompareCaseInsensitive(const std::wstring& lhs, const std::wstring& rhs)
     {
         return _wcsicmp(lhs.c_str(), rhs.c_str());
@@ -190,6 +207,8 @@ namespace hyperbrowse::browser
             return L"Type";
         case BrowserSortMode::Random:
             return L"Random";
+        case BrowserSortMode::DateTaken:
+            return L"Date Taken";
         default:
             return L"Unknown";
         }
@@ -288,8 +307,10 @@ namespace hyperbrowse::browser
         RebuildOrder();
         UpdateSelectionBytes();
         UpdateDetailsListView();
+        SyncDetailsListSelectionFromModel();
         UpdateVerticalScrollBar();
         ScheduleVisibleThumbnailWork();
+        NotifyStateChanged();
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
@@ -337,6 +358,63 @@ namespace hyperbrowse::browser
     BrowserSortMode BrowserPane::GetSortMode() const noexcept
     {
         return sortMode_;
+    }
+
+    void BrowserPane::SetSortAscending(bool ascending)
+    {
+        if (sortAscending_ == ascending)
+        {
+            return;
+        }
+
+        sortAscending_ = ascending;
+        RebuildOrder();
+        UpdateDetailsListView();
+        UpdateVerticalScrollBar();
+        ScheduleVisibleThumbnailWork();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    bool BrowserPane::IsSortAscending() const noexcept
+    {
+        return sortAscending_;
+    }
+
+    void BrowserPane::SetFilterQuery(std::wstring query)
+    {
+        query = TrimWhitespace(std::move(query));
+        const std::wstring queryLower = ToLowercase(query);
+        if (filterQuery_ == query && filterQueryLower_ == queryLower)
+        {
+            return;
+        }
+
+        filterQuery_ = std::move(query);
+        filterQueryLower_ = std::move(queryLower);
+        RebuildOrder();
+        UpdateSelectionBytes();
+        UpdateDetailsListView();
+        SyncDetailsListSelectionFromModel();
+        UpdateVerticalScrollBar();
+        ScheduleVisibleThumbnailWork();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    const std::wstring& BrowserPane::GetFilterQuery() const noexcept
+    {
+        return filterQuery_;
+    }
+
+    bool BrowserPane::HasActiveFilter() const noexcept
+    {
+        return !filterQuery_.empty();
+    }
+
+    std::uint64_t BrowserPane::DisplayedItemCount() const noexcept
+    {
+        return static_cast<std::uint64_t>(orderedModelIndices_.size());
     }
 
     void BrowserPane::SetThumbnailSizePreset(ThumbnailSizePreset preset)
@@ -780,6 +858,15 @@ namespace hyperbrowse::browser
         orderedModelIndices_.reserve(items.size());
         for (std::size_t index = 0; index < items.size(); ++index)
         {
+            if (!filterQueryLower_.empty())
+            {
+                const BrowserItem& item = items[index];
+                if (ToLowercase(item.fileName).find(filterQueryLower_) == std::wstring::npos)
+                {
+                    continue;
+                }
+            }
+
             orderedModelIndices_.push_back(static_cast<int>(index));
         }
 
@@ -799,69 +886,131 @@ namespace hyperbrowse::browser
                 return lhs.filePath < rhs.filePath;
             };
 
-            switch (sortMode_)
+            auto compareAscending = [&]() -> bool
             {
-            case BrowserSortMode::FileName:
-                return tieBreakByName();
-            case BrowserSortMode::ModifiedDate:
-                if (lhs.modifiedTimestampUtc != rhs.modifiedTimestampUtc)
+                switch (sortMode_)
                 {
-                    return lhs.modifiedTimestampUtc < rhs.modifiedTimestampUtc;
-                }
-                return tieBreakByName();
-            case BrowserSortMode::FileSize:
-                if (lhs.fileSizeBytes != rhs.fileSizeBytes)
+                case BrowserSortMode::FileName:
+                    return tieBreakByName();
+                case BrowserSortMode::ModifiedDate:
+                    if (lhs.modifiedTimestampUtc != rhs.modifiedTimestampUtc)
+                    {
+                        return lhs.modifiedTimestampUtc < rhs.modifiedTimestampUtc;
+                    }
+                    return tieBreakByName();
+                case BrowserSortMode::FileSize:
+                    if (lhs.fileSizeBytes != rhs.fileSizeBytes)
+                    {
+                        return lhs.fileSizeBytes < rhs.fileSizeBytes;
+                    }
+                    return tieBreakByName();
+                case BrowserSortMode::Dimensions:
                 {
-                    return lhs.fileSizeBytes < rhs.fileSizeBytes;
+                    const int lhsWidth = EffectiveImageWidth(lhs);
+                    const int lhsHeight = EffectiveImageHeight(lhs);
+                    const int rhsWidth = EffectiveImageWidth(rhs);
+                    const int rhsHeight = EffectiveImageHeight(rhs);
+                    const auto lhsArea = static_cast<long long>(lhsWidth) * static_cast<long long>(lhsHeight);
+                    const auto rhsArea = static_cast<long long>(rhsWidth) * static_cast<long long>(rhsHeight);
+                    if (lhsArea != rhsArea)
+                    {
+                        return lhsArea < rhsArea;
+                    }
+                    if (lhsWidth != rhsWidth)
+                    {
+                        return lhsWidth < rhsWidth;
+                    }
+                    if (lhsHeight != rhsHeight)
+                    {
+                        return lhsHeight < rhsHeight;
+                    }
+                    return tieBreakByName();
                 }
-                return tieBreakByName();
-            case BrowserSortMode::Dimensions:
+                case BrowserSortMode::FileType:
+                {
+                    const int typeCompare = CompareCaseInsensitive(lhs.fileType, rhs.fileType);
+                    if (typeCompare != 0)
+                    {
+                        return typeCompare < 0;
+                    }
+                    return tieBreakByName();
+                }
+                case BrowserSortMode::DateTaken:
+                {
+                    const bool lhsHas = lhs.dateTakenTimestampUtc != 0;
+                    const bool rhsHas = rhs.dateTakenTimestampUtc != 0;
+                    if (lhsHas != rhsHas)
+                    {
+                        return lhsHas;
+                    }
+                    if (lhsHas && lhs.dateTakenTimestampUtc != rhs.dateTakenTimestampUtc)
+                    {
+                        return lhs.dateTakenTimestampUtc < rhs.dateTakenTimestampUtc;
+                    }
+                    return tieBreakByName();
+                }
+                case BrowserSortMode::Random:
+                {
+                    const auto lhsHash = std::hash<std::wstring>{}(lhs.filePath);
+                    const auto rhsHash = std::hash<std::wstring>{}(rhs.filePath);
+                    if (lhsHash != rhsHash)
+                    {
+                        return lhsHash < rhsHash;
+                    }
+                    return tieBreakByName();
+                }
+                default:
+                    return tieBreakByName();
+                }
+            };
+
+            const bool ascending = compareAscending();
+            if (!sortAscending_ && sortMode_ != BrowserSortMode::Random)
             {
-                const int lhsWidth = EffectiveImageWidth(lhs);
-                const int lhsHeight = EffectiveImageHeight(lhs);
-                const int rhsWidth = EffectiveImageWidth(rhs);
-                const int rhsHeight = EffectiveImageHeight(rhs);
-                const auto lhsArea = static_cast<long long>(lhsWidth) * static_cast<long long>(lhsHeight);
-                const auto rhsArea = static_cast<long long>(rhsWidth) * static_cast<long long>(rhsHeight);
-                if (lhsArea != rhsArea)
-                {
-                    return lhsArea < rhsArea;
-                }
-                if (lhsWidth != rhsWidth)
-                {
-                    return lhsWidth < rhsWidth;
-                }
-                if (lhsHeight != rhsHeight)
-                {
-                    return lhsHeight < rhsHeight;
-                }
-                return tieBreakByName();
+                return !ascending && !(lhs.filePath == rhs.filePath);
             }
-            case BrowserSortMode::FileType:
-            {
-                const int typeCompare = CompareCaseInsensitive(lhs.fileType, rhs.fileType);
-                if (typeCompare != 0)
-                {
-                    return typeCompare < 0;
-                }
-                return tieBreakByName();
-            }
-            case BrowserSortMode::Random:
-            {
-                const auto lhsHash = std::hash<std::wstring>{}(lhs.filePath);
-                const auto rhsHash = std::hash<std::wstring>{}(rhs.filePath);
-                if (lhsHash != rhsHash)
-                {
-                    return lhsHash < rhsHash;
-                }
-                return tieBreakByName();
-            }
-            default:
-                return tieBreakByName();
-            }
+            return ascending;
         };
 
         std::sort(orderedModelIndices_.begin(), orderedModelIndices_.end(), comparator);
+        PruneSelectionToVisibleItems();
+    }
+
+    void BrowserPane::PruneSelectionToVisibleItems()
+    {
+        if (selectedModelIndices_.empty())
+        {
+            return;
+        }
+
+        std::unordered_set<int> visibleModelIndices;
+        visibleModelIndices.reserve(orderedModelIndices_.size());
+        for (const int modelIndex : orderedModelIndices_)
+        {
+            visibleModelIndices.insert(modelIndex);
+        }
+
+        for (auto iterator = selectedModelIndices_.begin(); iterator != selectedModelIndices_.end();)
+        {
+            if (!visibleModelIndices.contains(*iterator))
+            {
+                iterator = selectedModelIndices_.erase(iterator);
+            }
+            else
+            {
+                ++iterator;
+            }
+        }
+
+        if (focusedModelIndex_ >= 0 && !visibleModelIndices.contains(focusedModelIndex_))
+        {
+            focusedModelIndex_ = selectedModelIndices_.empty() ? -1 : *selectedModelIndices_.begin();
+        }
+
+        if (anchorModelIndex_ >= 0 && !visibleModelIndices.contains(anchorModelIndex_))
+        {
+            anchorModelIndex_ = focusedModelIndex_;
+        }
     }
 
     void BrowserPane::UpdateDetailsListView()
@@ -2084,6 +2233,11 @@ namespace hyperbrowse::browser
             return L"Scanning the selected folder asynchronously...\r\n\r\nSupported formats: jpg, jpeg, png, gif, tif, tiff, arw, cr2, cr3, dng, nef, nrw, raf, rw2";
         }
 
+        if (!filterQuery_.empty() && orderedModelIndices_.empty())
+        {
+            return L"No images match \"" + filterQuery_ + L"\".\r\n\r\nTry a shorter filename fragment or clear the filter.";
+        }
+
         return orderedModelIndices_.empty()
             ? L""
             : L"";
@@ -2306,9 +2460,22 @@ namespace hyperbrowse::browser
                 return 0;
             }
 
+            if (model_ && metadataService_)
+            {
+                auto metadata = metadataService_->FindCachedMetadata(update->item);
+                if (metadata && metadata->dateTakenTimestampUtc != 0)
+                {
+                    model_->UpdateDateTakenTimestamp(update->modelIndex, metadata->dateTakenTimestampUtc);
+                }
+            }
+
             if (detailsList_ && viewMode_ == BrowserViewMode::Details)
             {
                 InvalidateRect(detailsList_, nullptr, FALSE);
+            }
+            if (update->modelIndex == focusedModelIndex_)
+            {
+                NotifyStateChanged();
             }
             return 0;
         }
