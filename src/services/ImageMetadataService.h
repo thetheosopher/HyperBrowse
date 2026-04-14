@@ -24,6 +24,8 @@ namespace hyperbrowse::services
         bool hasExif{};
         bool hasIptc{};
         bool hasXmp{};
+        int imageWidth{};
+        int imageHeight{};
         std::wstring cameraMake;
         std::wstring cameraModel;
         std::wstring dateTaken;

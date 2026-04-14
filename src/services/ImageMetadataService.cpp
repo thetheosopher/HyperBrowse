@@ -161,6 +161,34 @@ namespace
         return static_cast<std::int64_t>(fileTime.QuadPart);
     }
 
+    int PropertyToInt32(IPropertyStore* propertyStore, PCWSTR canonicalName)
+    {
+        if (!propertyStore)
+        {
+            return 0;
+        }
+
+        PROPERTYKEY key{};
+        if (FAILED(PSGetPropertyKeyFromName(canonicalName, &key)))
+        {
+            return 0;
+        }
+
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        const HRESULT getResult = propertyStore->GetValue(key, &value);
+        if (FAILED(getResult) || value.vt == VT_EMPTY)
+        {
+            PropVariantClear(&value);
+            return 0;
+        }
+
+        ULONG convertedValue = 0;
+        const HRESULT convertResult = PropVariantToUInt32(value, &convertedValue);
+        PropVariantClear(&value);
+        return SUCCEEDED(convertResult) ? static_cast<int>(convertedValue) : 0;
+    }
+
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
     std::wstring WideText(const char* value)
     {
@@ -290,6 +318,8 @@ namespace hyperbrowse::services
                                                                       IID_PPV_ARGS(propertyStore.GetAddressOf()));
         if (SUCCEEDED(storeResult) && propertyStore)
         {
+            metadata->imageWidth = PropertyToInt32(propertyStore.Get(), L"System.Image.HorizontalSize");
+            metadata->imageHeight = PropertyToInt32(propertyStore.Get(), L"System.Image.VerticalSize");
             metadata->cameraMake = PropertyToString(propertyStore.Get(), L"System.Photo.CameraManufacturer");
             metadata->cameraModel = PropertyToString(propertyStore.Get(), L"System.Photo.CameraModel");
             metadata->dateTaken = PropertyToString(propertyStore.Get(), L"System.Photo.DateTaken");
@@ -309,6 +339,7 @@ namespace hyperbrowse::services
 #endif
 
         metadata->hasExif = metadata->hasExif
+            || (metadata->imageWidth > 0 && metadata->imageHeight > 0)
             || !metadata->cameraMake.empty()
             || !metadata->cameraModel.empty()
             || !metadata->dateTaken.empty()

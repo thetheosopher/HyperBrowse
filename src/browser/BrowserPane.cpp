@@ -3089,7 +3089,25 @@ namespace hyperbrowse::browser
         case 3:
             return item->modifiedDate;
         case 4:
-            return FormatDimensionsForItem(*item);
+        {
+            if (item->imageWidth > 0 && item->imageHeight > 0)
+            {
+                return FormatDimensionsForItem(*item);
+            }
+
+            const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+            const auto metadata = modelIndex >= 0 ? FindCachedMetadataForModelIndex(modelIndex) : nullptr;
+            if (metadata && metadata->imageWidth > 0 && metadata->imageHeight > 0)
+            {
+                return FormatDimensions(metadata->imageWidth, metadata->imageHeight);
+            }
+
+            if (modelIndex >= 0)
+            {
+                ScheduleMetadataForItem(modelIndex, *item);
+            }
+            return L"...";
+        }
         case 5:
         case 6:
         case 7:
@@ -3564,9 +3582,26 @@ namespace hyperbrowse::browser
             if (model_ && metadataService_)
             {
                 auto metadata = metadataService_->FindCachedMetadata(update->item);
+                bool dimensionsChanged = false;
+                if (metadata && metadata->imageWidth > 0 && metadata->imageHeight > 0)
+                {
+                    dimensionsChanged = model_->UpdateDecodedDimensions(update->modelIndex,
+                                                                        metadata->imageWidth,
+                                                                        metadata->imageHeight);
+                }
                 if (metadata && metadata->dateTakenTimestampUtc != 0)
                 {
                     model_->UpdateDateTakenTimestamp(update->modelIndex, metadata->dateTakenTimestampUtc);
+                }
+
+                if (dimensionsChanged && sortMode_ == BrowserSortMode::Dimensions)
+                {
+                    RebuildOrder();
+                    UpdateDetailsListView();
+                    UpdateVerticalScrollBar();
+                    ScheduleVisibleThumbnailWork();
+                    InvalidateRect(hwnd_, nullptr, FALSE);
+                    return 0;
                 }
             }
 
