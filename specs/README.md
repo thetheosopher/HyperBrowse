@@ -19,6 +19,7 @@ This folder contains a repo-ready planning pack for building a high-performance 
 - `13-branding-and-ui-assessment.md`
 - `14-todo.md`
 - `15-d2d-rendering-migration.md`
+- `16-toolbar-ux-redesign.md`
 
 ## Rendering stack
 

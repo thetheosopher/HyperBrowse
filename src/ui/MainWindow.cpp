@@ -29,6 +29,7 @@
 #include "services/ImageMetadataService.h"
 #include "services/JpegTransformService.h"
 #include "ui/DiagnosticsWindow.h"
+#include "ui/ToolbarIconLibrary.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
 #include "util/Timing.h"
@@ -83,6 +84,7 @@ namespace
     constexpr UINT ID_FILE_COPY_PATH = 1020;
     constexpr UINT ID_FILE_PROPERTIES = 1021;
     constexpr UINT ID_FILE_VIEW_ON_SECONDARY_MONITOR = 1022;
+    constexpr UINT ID_FILE_RENAME_SELECTED = 1023;
     constexpr UINT ID_VIEW_THUMBNAILS = 2001;
     constexpr UINT ID_VIEW_DETAILS = 2002;
     constexpr UINT ID_VIEW_RECURSIVE = 2003;
@@ -117,6 +119,8 @@ namespace
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350 = 2312;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500 = 2313;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800 = 2314;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200 = 2315;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000 = 2316;
     constexpr UINT ID_ACTION_SORT_MENU = 2401;
     constexpr UINT ID_ACTION_THUMBNAIL_SIZE_MENU = 2402;
     constexpr UINT ID_ACTION_THEME_MENU = 2403;
@@ -125,24 +129,41 @@ namespace
     constexpr UINT ID_HELP_DIAGNOSTICS_SNAPSHOT = 9002;
     constexpr UINT ID_HELP_DIAGNOSTICS_RESET = 9003;
 
-    constexpr int kActionStripPaddingX = 12;
-    constexpr int kActionStripPaddingY = 8;
-    constexpr int kActionButtonHeight = 28;
-    constexpr int kActionButtonGap = 8;
-    constexpr int kActionButtonTextInsetX = 12;
-    constexpr int kOpenFolderButtonWidth = 88;
-    constexpr int kRecursiveButtonWidth = 76;
-    constexpr int kThumbnailButtonWidth = 78;
-    constexpr int kDetailsButtonWidth = 64;
-    constexpr int kSortButtonWidth = 92;
-    constexpr int kSizeButtonWidth = 72;
-    constexpr int kThemeButtonWidth = 78;
-    constexpr int kSelectionActionButtonWidth = 52;
-    constexpr int kDeleteButtonWidth = 58;
+    constexpr int kActionStripPaddingX = 8;
+    constexpr int kActionStripPaddingY = 6;
+    constexpr int kToolbarItemSize = 32;
+    constexpr int kToolbarIconSize = 18;
+    constexpr int kToolbarDropdownChevronSize = 10;
+    constexpr int kToolbarSeparatorWidth = 9;
+    constexpr int kToolbarSeparatorGap = 4;
     constexpr int kFilterEditMinWidth = 160;
     constexpr int kDetailsStripHeight = 22;
     constexpr std::size_t kIncrementalFolderWatchEventLimit = 64;
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
+    constexpr wchar_t kTextInputDialogClassName[] = L"HyperBrowseTextInputDialog";
+    constexpr int kTextInputDialogWidth = 440;
+    constexpr int kTextInputDialogHeight = 160;
+    constexpr int kTextInputDialogMargin = 14;
+    constexpr int kTextInputEditHeight = 24;
+    constexpr int kTextInputButtonWidth = 88;
+    constexpr int kTextInputButtonHeight = 28;
+    constexpr int kTextInputEditControlId = 100;
+
+    struct TextInputDialogState
+    {
+        HWND ownerWindow{};
+        HWND editWindow{};
+        HWND okButton{};
+        std::wstring title;
+        std::wstring instruction;
+        std::wstring confirmLabel;
+        std::wstring initialText;
+        std::wstring resultText;
+        int selectionStart{};
+        int selectionEnd{};
+        bool accepted{};
+        bool done{};
+    };
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
     {
@@ -217,49 +238,7 @@ namespace
             return;
         }
 
-        RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
-    }
-
-    int MeasureSingleLineTextWidth(HWND hwnd, HFONT font, const std::wstring& text)
-    {
-        if (text.empty())
-        {
-            return 0;
-        }
-
-        HDC hdc = GetDC(hwnd);
-        if (!hdc)
-        {
-            return 0;
-        }
-
-        const HGDIOBJ oldFont = font ? SelectObject(hdc, font) : nullptr;
-        RECT rect{0, 0, 0, 0};
-        DrawTextW(hdc,
-                  text.c_str(),
-                  static_cast<int>(text.size()),
-                  &rect,
-                  DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
-
-        if (oldFont)
-        {
-            SelectObject(hdc, oldFont);
-        }
-        ReleaseDC(hwnd, hdc);
-        return rect.right - rect.left;
-    }
-
-    int MeasureActionButtonWidth(HWND button, int minimumWidth)
-    {
-        if (!button)
-        {
-            return minimumWidth;
-        }
-
-        const std::wstring text = ReadWindowText(button);
-        const HFONT font = reinterpret_cast<HFONT>(SendMessageW(button, WM_GETFONT, 0, 0));
-        const int textWidth = MeasureSingleLineTextWidth(button, font, text);
-        return std::max(minimumWidth, textWidth + (kActionButtonTextInsetX * 2) + 4);
+        RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE);
     }
 
     bool TryReadStringValue(HKEY key, const wchar_t* valueName, std::wstring* value)
@@ -325,6 +304,22 @@ namespace
             (GetBValue(baseColor) * baseAmount + GetBValue(mixColor) * mixAmount) / 255);
     }
 
+    void AlphaBlendBitmap(HDC targetDC, HDC scratchDC, HBITMAP bitmap, int x, int y, int width, int height)
+    {
+        if (!targetDC || !scratchDC || !bitmap || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        const HGDIOBJ oldBitmap = SelectObject(scratchDC, bitmap);
+        BLENDFUNCTION blend{};
+        blend.BlendOp = AC_SRC_OVER;
+        blend.SourceConstantAlpha = 255;
+        blend.AlphaFormat = AC_SRC_ALPHA;
+        AlphaBlend(targetDC, x, y, width, height, scratchDC, 0, 0, width, height, blend);
+        SelectObject(scratchDC, oldBitmap);
+    }
+
     std::wstring GetFolderDisplayName(std::wstring_view folderPath)
     {
         if (folderPath.empty())
@@ -373,6 +368,380 @@ namespace
         }
 
         return path;
+    }
+
+    std::wstring RewritePathPrefix(std::wstring_view path, std::wstring_view oldPrefix, std::wstring_view newPrefix)
+    {
+        if (!hyperbrowse::browser::PathHasPrefix(path, oldPrefix))
+        {
+            return std::wstring(path);
+        }
+
+        std::wstring rewrittenPath(newPrefix);
+        std::wstring suffix(std::wstring(path).substr(oldPrefix.size()));
+        if (!rewrittenPath.empty() && !suffix.empty() && rewrittenPath.back() == L'\\' && suffix.front() == L'\\')
+        {
+            suffix.erase(suffix.begin());
+        }
+
+        rewrittenPath.append(suffix);
+        return NormalizeFolderPath(std::move(rewrittenPath));
+    }
+
+    int DefaultRenameSelectionEnd(std::wstring_view leafName, bool isFile)
+    {
+        if (!isFile)
+        {
+            return static_cast<int>(leafName.size());
+        }
+
+        const fs::path leafPath(leafName);
+        const std::wstring stem = leafPath.stem().wstring();
+        const std::wstring extension = leafPath.extension().wstring();
+        if (!stem.empty() && !extension.empty())
+        {
+            return static_cast<int>(stem.size());
+        }
+
+        return static_cast<int>(leafName.size());
+    }
+
+    void CenterWindowOnOwner(HWND window, HWND ownerWindow)
+    {
+        RECT ownerRect{};
+        RECT dialogRect{};
+        const HWND referenceWindow = ownerWindow ? ownerWindow : GetDesktopWindow();
+        GetWindowRect(referenceWindow, &ownerRect);
+        GetWindowRect(window, &dialogRect);
+
+        const int width = dialogRect.right - dialogRect.left;
+        const int height = dialogRect.bottom - dialogRect.top;
+        const int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - width) / 2;
+        const int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - height) / 2;
+        SetWindowPos(window, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    LRESULT CALLBACK TextInputDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<TextInputDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<TextInputDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+
+            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const int clientWidth = kTextInputDialogWidth;
+            const int clientHeight = kTextInputDialogHeight;
+            const int contentWidth = clientWidth - (kTextInputDialogMargin * 2);
+            const int instructionHeight = 34;
+            const int buttonTop = clientHeight - kTextInputDialogMargin - kTextInputButtonHeight;
+            const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
+            const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
+
+            HWND instructionWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->instruction.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                kTextInputDialogMargin,
+                kTextInputDialogMargin,
+                contentWidth,
+                instructionHeight,
+                hwnd,
+                nullptr,
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+            state->editWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                state->initialText.c_str(),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                kTextInputDialogMargin,
+                kTextInputDialogMargin + instructionHeight + 6,
+                contentWidth,
+                kTextInputEditHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kTextInputEditControlId)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+            state->okButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                state->confirmLabel.c_str(),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                okLeft,
+                buttonTop,
+                kTextInputButtonWidth,
+                kTextInputButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+            HWND cancelButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Cancel",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                cancelLeft,
+                buttonTop,
+                kTextInputButtonWidth,
+                kTextInputButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+
+            if (instructionWindow) SendMessageW(instructionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (state->editWindow) SendMessageW(state->editWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (state->okButton) SendMessageW(state->okButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (cancelButton) SendMessageW(cancelButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+
+            if (state->editWindow)
+            {
+                SendMessageW(state->editWindow,
+                             EM_SETSEL,
+                             static_cast<WPARAM>(state->selectionStart),
+                             static_cast<LPARAM>(state->selectionEnd));
+            }
+
+            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            return 0;
+        }
+        case WM_SHOWWINDOW:
+            if (wParam != FALSE && state && state->editWindow)
+            {
+                SetFocus(state->editWindow);
+                return FALSE;
+            }
+            break;
+        case WM_COMMAND:
+            if (!state)
+            {
+                break;
+            }
+
+            if (LOWORD(wParam) == IDOK)
+            {
+                const int length = state->editWindow ? GetWindowTextLengthW(state->editWindow) : 0;
+                std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+                if (state->editWindow)
+                {
+                    GetWindowTextW(state->editWindow, text.data(), static_cast<int>(text.size()));
+                }
+                text.resize(wcslen(text.c_str()));
+                state->resultText = std::move(text);
+                state->accepted = true;
+                DestroyWindow(hwnd);
+                return 0;
+            }
+
+            if (LOWORD(wParam) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    bool PromptForSingleLineText(HWND ownerWindow,
+                                 HINSTANCE instance,
+                                 const std::wstring& title,
+                                 const std::wstring& instruction,
+                                 const std::wstring& confirmLabel,
+                                 const std::wstring& initialText,
+                                 int selectionStart,
+                                 int selectionEnd,
+                                 std::wstring* resultText)
+    {
+        if (!resultText)
+        {
+            return false;
+        }
+
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance, kTextInputDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &TextInputDialogProc;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = kTextInputDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return false;
+            }
+        }
+
+        TextInputDialogState state;
+        state.ownerWindow = ownerWindow;
+        state.title = title;
+        state.instruction = instruction;
+        state.confirmLabel = confirmLabel;
+        state.initialText = initialText;
+        state.selectionStart = selectionStart;
+        state.selectionEnd = selectionEnd;
+
+        RECT windowRect{0, 0, kTextInputDialogWidth, kTextInputDialogHeight};
+        AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, FALSE);
+        }
+
+        HWND dialogWindow = CreateWindowExW(
+            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+            kTextInputDialogClassName,
+            state.title.c_str(),
+            WS_CAPTION | WS_SYSMENU | WS_POPUP,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            ownerWindow,
+            nullptr,
+            instance,
+            &state);
+
+        if (!dialogWindow)
+        {
+            if (ownerWindow)
+            {
+                EnableWindow(ownerWindow, TRUE);
+            }
+            return false;
+        }
+
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+
+        MSG message{};
+        while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            if (!IsDialogMessageW(dialogWindow, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, TRUE);
+            SetForegroundWindow(ownerWindow);
+            SetActiveWindow(ownerWindow);
+        }
+
+        if (!state.accepted)
+        {
+            return false;
+        }
+
+        *resultText = state.resultText;
+        return true;
+    }
+
+    bool IsValidRenameLeafName(std::wstring_view leafName, std::wstring* errorMessage)
+    {
+        if (leafName.empty())
+        {
+            if (errorMessage) *errorMessage = L"The name cannot be empty.";
+            return false;
+        }
+
+        if (leafName == L"." || leafName == L"..")
+        {
+            if (errorMessage) *errorMessage = L"The name is not valid.";
+            return false;
+        }
+
+        if (std::any_of(leafName.begin(), leafName.end(), [](wchar_t character)
+        {
+            return character < 32 || wcschr(L"<>:\"/\\|?*", character) != nullptr;
+        }))
+        {
+            if (errorMessage) *errorMessage = L"The name contains characters that Windows does not allow.";
+            return false;
+        }
+
+        if (!leafName.empty() && (leafName.back() == L' ' || leafName.back() == L'.'))
+        {
+            if (errorMessage) *errorMessage = L"Names cannot end with a space or a period.";
+            return false;
+        }
+
+        return true;
+    }
+
+    bool PromptForRenameLeafName(HWND ownerWindow,
+                                 HINSTANCE instance,
+                                 std::wstring title,
+                                 std::wstring instruction,
+                                 std::wstring currentLeafName,
+                                 bool isFile,
+                                 std::wstring* renamedLeafName)
+    {
+        if (!renamedLeafName)
+        {
+            return false;
+        }
+
+        std::wstring candidate = currentLeafName;
+        const int selectionEnd = DefaultRenameSelectionEnd(currentLeafName, isFile);
+        while (PromptForSingleLineText(ownerWindow,
+                                       instance,
+                                       title,
+                                       instruction,
+                                       L"Rename",
+                                       candidate,
+                                       0,
+                                       selectionEnd,
+                                       &candidate))
+        {
+            std::wstring errorMessage;
+            if (!IsValidRenameLeafName(candidate, &errorMessage))
+            {
+                MessageBoxW(ownerWindow, errorMessage.c_str(), title.c_str(), MB_OK | MB_ICONWARNING);
+                continue;
+            }
+
+            if (candidate == currentLeafName)
+            {
+                return false;
+            }
+
+            *renamedLeafName = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     bool FolderPathsEqual(std::wstring_view lhs, std::wstring_view rhs)
@@ -892,6 +1261,10 @@ namespace
             return 500;
         case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800:
             return 800;
+        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200:
+            return 1200;
+        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000:
+            return 2000;
         case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350:
         default:
             return 350;
@@ -912,13 +1285,21 @@ namespace
         {
             return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500;
         }
-        return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800;
+        if (durationMs <= 1000)
+        {
+            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800;
+        }
+        if (durationMs <= 1600)
+        {
+            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200;
+        }
+        return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000;
     }
 
     bool IsTransitionDurationCommand(UINT commandId)
     {
         return commandId >= ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200
-            && commandId <= ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800;
+            && commandId <= ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000;
     }
 
     bool IsJpegBrowserItem(const hyperbrowse::browser::BrowserItem& item)
@@ -1132,6 +1513,7 @@ namespace hyperbrowse::ui
             {FVIRTKEY | FCONTROL, static_cast<WORD>('2'), ID_VIEW_DETAILS},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('R'), ID_VIEW_RECURSIVE},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('S'), ID_VIEW_SLIDESHOW_SELECTION},
+            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('F'), ID_VIEW_SLIDESHOW_FOLDER},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('D'), ID_HELP_DIAGNOSTICS_SNAPSHOT},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('X'), ID_HELP_DIAGNOSTICS_RESET},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('L'), ID_VIEW_THEME_LIGHT},
@@ -1218,7 +1600,7 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Info Strip");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection\tCtrl+Shift+S");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder\tCtrl+Shift+F");
         AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CUT, L"&Cut");
         AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE, L"&Crossfade");
         AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_SLIDE, L"S&lide");
@@ -1228,6 +1610,8 @@ namespace hyperbrowse::ui
         AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350, L"&350 ms");
         AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500, L"&500 ms");
         AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800, L"&800 ms");
+        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200, L"1&200 ms");
+        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000, L"2&000 ms");
         AppendMenuW(slideshowTransitionMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionDurationMenu), L"&Duration");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionMenu), L"Slideshow &Transition");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
@@ -1252,51 +1636,60 @@ namespace hyperbrowse::ui
     bool MainWindow::CreateChildWindows()
     {
         const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        auto createActionButton = [this, defaultGuiFont](UINT commandId, const wchar_t* text) -> HWND
-        {
-            HWND button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                text,
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0, 0, 100, kActionButtonHeight,
-                hwnd_,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(commandId)),
-                instance_,
-                nullptr);
-            if (button)
-            {
-                SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
-            }
-            return button;
-        };
 
-        openFolderButton_ = createActionButton(ID_FILE_OPEN_FOLDER, L"Open Folder");
-        recursiveButton_ = createActionButton(ID_VIEW_RECURSIVE, L"Recursive");
-        thumbnailModeButton_ = createActionButton(ID_VIEW_THUMBNAILS, L"Thumbnails");
-        detailsModeButton_ = createActionButton(ID_VIEW_DETAILS, L"Details");
-        sortMenuButton_ = createActionButton(ID_ACTION_SORT_MENU, L"Sort");
-        sizeMenuButton_ = createActionButton(ID_ACTION_THUMBNAIL_SIZE_MENU, L"Tiles");
-        themeMenuButton_ = createActionButton(ID_ACTION_THEME_MENU, L"Theme");
+        toolbarIconLibrary_ = std::make_unique<ToolbarIconLibrary>();
+        if (toolbarIconLibrary_ && !toolbarIconLibrary_->Initialize())
+        {
+            util::LogError(L"Toolbar SVG icon library failed to initialize.");
+        }
+
+        InitToolbarItems();
+
         filterEdit_ = CreateWindowExW(
             0,
             L"EDIT",
             L"",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-            0, 0, 120, kActionButtonHeight - 8,
+            0, 0, 120, kToolbarItemSize - 8,
             hwnd_,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_ACTION_FILTER_EDIT)),
             instance_,
             nullptr);
-        copyButton_ = createActionButton(ID_FILE_COPY_SELECTION, L"Copy");
-        moveButton_ = createActionButton(ID_FILE_MOVE_SELECTION, L"Move");
-        deleteButton_ = createActionButton(ID_FILE_DELETE_SELECTION, L"Delete");
 
         if (filterEdit_)
         {
             SendMessageW(filterEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
             SendMessageW(filterEdit_, EM_LIMITTEXT, 260, 0);
             SendMessageW(filterEdit_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"Filter filenames"));
+        }
+
+        tooltipControl_ = CreateWindowExW(
+            WS_EX_TOPMOST,
+            TOOLTIPS_CLASSW,
+            nullptr,
+            WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            hwnd_,
+            nullptr,
+            instance_,
+            nullptr);
+        if (tooltipControl_)
+        {
+            SendMessageW(tooltipControl_, TTM_SETDELAYTIME, TTDT_INITIAL, MAKELPARAM(400, 0));
+            SendMessageW(tooltipControl_, TTM_SETDELAYTIME, TTDT_RESHOW, MAKELPARAM(100, 0));
+            SendMessageW(tooltipControl_, TTM_SETMAXTIPWIDTH, 0, 300);
+
+            for (int index = 0; index < static_cast<int>(toolbarItems_.size()); ++index)
+            {
+                TTTOOLINFOW toolInfo{};
+                toolInfo.cbSize = sizeof(toolInfo);
+                toolInfo.uFlags = TTF_SUBCLASS;
+                toolInfo.hwnd = hwnd_;
+                toolInfo.uId = static_cast<UINT_PTR>(index);
+                toolInfo.rect = toolbarItems_[static_cast<std::size_t>(index)].rect;
+                toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+                SendMessageW(tooltipControl_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+            }
         }
 
         treePane_ = CreateWindowExW(
@@ -1332,10 +1725,7 @@ namespace hyperbrowse::ui
             instance_,
             nullptr);
 
-        if (!openFolderButton_ || !recursiveButton_ || !thumbnailModeButton_ || !detailsModeButton_
-            || !sortMenuButton_ || !sizeMenuButton_ || !themeMenuButton_ || !filterEdit_
-            || !copyButton_ || !moveButton_ || !deleteButton_
-            || !treePane_ || !statusBar_ || !detailsStrip_)
+        if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsStrip_)
         {
             util::LogLastError(L"CreateChildWindows");
             return false;
@@ -1386,7 +1776,7 @@ namespace hyperbrowse::ui
         }
         RefreshBrowserPane();
         UpdateStatusText();
-        UpdateActionStripState();
+        UpdateToolbarItemStates();
         LayoutChildren();
         return true;
     }
@@ -1918,52 +2308,7 @@ namespace hyperbrowse::ui
             MoveWindow(detailsStrip_, 0, stripTop, clientWidth, detailsStripHeight, TRUE);
         }
 
-        const int buttonTop = kActionStripPaddingY;
-        int buttonLeft = kActionStripPaddingX;
-        auto placeLeftButton = [&buttonLeft, buttonTop](HWND button, int width)
-        {
-            if (!button)
-            {
-                return;
-            }
-
-            MoveWindow(button, buttonLeft, buttonTop, width, kActionButtonHeight, TRUE);
-            buttonLeft += width + kActionButtonGap;
-        };
-
-        int buttonRight = clientWidth - kActionStripPaddingX;
-        auto placeRightButton = [&buttonRight, buttonTop](HWND button, int width)
-        {
-            if (!button)
-            {
-                return;
-            }
-
-            buttonRight -= width;
-            MoveWindow(button, buttonRight, buttonTop, width, kActionButtonHeight, TRUE);
-            buttonRight -= kActionButtonGap;
-        };
-
-        placeLeftButton(openFolderButton_, MeasureActionButtonWidth(openFolderButton_, kOpenFolderButtonWidth));
-        placeLeftButton(recursiveButton_, MeasureActionButtonWidth(recursiveButton_, kRecursiveButtonWidth));
-        placeLeftButton(thumbnailModeButton_, MeasureActionButtonWidth(thumbnailModeButton_, kThumbnailButtonWidth));
-        placeLeftButton(detailsModeButton_, MeasureActionButtonWidth(detailsModeButton_, kDetailsButtonWidth));
-        placeLeftButton(sortMenuButton_, MeasureActionButtonWidth(sortMenuButton_, kSortButtonWidth));
-        placeLeftButton(sizeMenuButton_, MeasureActionButtonWidth(sizeMenuButton_, kSizeButtonWidth));
-        placeLeftButton(themeMenuButton_, MeasureActionButtonWidth(themeMenuButton_, kThemeButtonWidth));
-
-        placeRightButton(deleteButton_, MeasureActionButtonWidth(deleteButton_, kDeleteButtonWidth));
-        placeRightButton(moveButton_, MeasureActionButtonWidth(moveButton_, kSelectionActionButtonWidth));
-        placeRightButton(copyButton_, MeasureActionButtonWidth(copyButton_, kSelectionActionButtonWidth));
-
-        const int filterLeft = buttonLeft;
-        const int availableFilterWidth = std::max(0, buttonRight - filterLeft);
-        const int filterWidth = availableFilterWidth >= kFilterEditMinWidth ? availableFilterWidth : availableFilterWidth;
-        const int filterRight = std::min(clientWidth - kActionStripPaddingX, filterLeft + filterWidth);
-        MoveWindow(filterEdit_, filterLeft + 10, buttonTop + 4, std::max(0, filterRight - filterLeft - 20), kActionButtonHeight - 8, TRUE);
-
-        RECT actionStripRect{0, 0, clientWidth, kActionStripHeight};
-        InvalidateRect(hwnd_, &actionStripRect, FALSE);
+        LayoutToolbar();
 
         RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
         InvalidateRect(hwnd_, &splitterRect, FALSE);
@@ -2270,8 +2615,10 @@ namespace hyperbrowse::ui
 
         const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
+        const bool hasSingleSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 1;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool allowMutatingFileCommands = hasSelection && !fileOperationActive_;
+        const bool allowRenameSelected = hasSingleSelection && !fileOperationActive_;
         const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
 
         HMENU menu = CreatePopupMenu();
@@ -2300,6 +2647,7 @@ namespace hyperbrowse::ui
         AppendMenuW(menu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer");
         AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
         AppendMenuW(menu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h");
+        AppendMenuW(menu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...");
         AppendMenuW(menu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
@@ -2338,6 +2686,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_RENAME_SELECTED, MF_BYCOMMAND | (allowRenameSelected ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_COPY_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_MOVE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
@@ -2419,28 +2768,21 @@ namespace hyperbrowse::ui
             return;
         }
 
-        constexpr UINT kDeleteFolderCommandId = 1;
-        constexpr UINT kDeleteFolderPermanentCommandId = 2;
+        constexpr UINT kRenameFolderCommandId = 1;
+        constexpr UINT kDeleteFolderCommandId = 2;
+        constexpr UINT kDeleteFolderPermanentCommandId = 3;
 
-                if (fileOperationActive_)
-                {
-                    pendingFolderWatchReloadPath_ = update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath;
-                    pendingFolderWatchTreeRefresh_ = true;
-                    return;
-                }
-
-                RefreshFolderTree();
+        AppendMenuW(menu, MF_STRING, kRenameFolderCommandId, L"Re&name Folder...");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kDeleteFolderCommandId, L"&Delete Folder");
         AppendMenuW(menu, MF_STRING, kDeleteFolderPermanentCommandId, L"Delete Folder &Permanently");
 
         const UINT enableState = fileOperationActive_ ? MF_GRAYED : MF_ENABLED;
+        EnableMenuItem(menu, kRenameFolderCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(menu, kDeleteFolderCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(menu, kDeleteFolderPermanentCommandId, MF_BYCOMMAND | enableState);
 
-            std::vector<std::wstring> foldersToInsertIntoTree;
         SetForegroundWindow(hwnd_);
-            bool refreshFolderTree = false;
-            bool preferAsyncReload = update.events.size() >= kIncrementalFolderWatchEventLimit;
         const UINT commandId = TrackPopupMenuEx(
             menu,
             TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
@@ -2453,6 +2795,9 @@ namespace hyperbrowse::ui
 
         switch (commandId)
         {
+        case kRenameFolderCommandId:
+            StartFolderTreeRename(folderPath);
+            break;
         case kDeleteFolderCommandId:
             StartFolderTreeDelete(folderPath, false);
             break;
@@ -2602,6 +2947,46 @@ namespace hyperbrowse::ui
                            std::move(targetLeafNames));
     }
 
+    void MainWindow::StartRenameSelectedImage()
+    {
+        if (!browserModel_ || !browserPaneController_ || fileOperationActive_)
+        {
+            return;
+        }
+
+        if (browserPaneController_->SelectedCount() != 1)
+        {
+            MessageBoxW(hwnd_, L"Select a single image to rename.", L"Rename Image", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const int modelIndex = browserPaneController_->PrimarySelectedModelIndex();
+        const auto& items = browserModel_->Items();
+        if (modelIndex < 0 || modelIndex >= static_cast<int>(items.size()))
+        {
+            return;
+        }
+
+        const browser::BrowserItem& item = items[static_cast<std::size_t>(modelIndex)];
+        std::wstring renamedLeafName;
+        if (!PromptForRenameLeafName(hwnd_,
+                                     instance_,
+                                     L"Rename Image",
+                                     L"Enter a new file name.",
+                                     item.fileName,
+                                     true,
+                                     &renamedLeafName))
+        {
+            return;
+        }
+
+        StartFileOperation(services::FileOperationType::Rename,
+                           {item.filePath},
+                           {},
+                           services::FileConflictPolicy::PromptShell,
+                           {renamedLeafName});
+    }
+
     void MainWindow::StartMoveSelection()
     {
         if (!browserPaneController_ || fileOperationActive_)
@@ -2674,6 +3059,43 @@ namespace hyperbrowse::ui
                            {},
                            services::FileConflictPolicy::PromptShell,
                            {});
+    }
+
+    void MainWindow::StartFolderTreeRename(std::wstring folderPath)
+    {
+        if (folderPath.empty() || fileOperationActive_)
+        {
+            return;
+        }
+
+        folderPath = NormalizeFolderPath(std::move(folderPath));
+        std::error_code error;
+        if (!fs::is_directory(fs::path(folderPath), error) || error)
+        {
+            MessageBoxW(hwnd_, L"The selected folder is no longer available.", L"Rename Folder", MB_OK | MB_ICONINFORMATION);
+            RefreshFolderTree();
+            return;
+        }
+
+        const std::wstring currentLeafName = fs::path(folderPath).filename().wstring();
+        std::wstring renamedLeafName;
+        if (!PromptForRenameLeafName(hwnd_,
+                                     instance_,
+                                     L"Rename Folder",
+                                     L"Enter a new folder name.",
+                                     currentLeafName,
+                                     false,
+                                     &renamedLeafName))
+        {
+            return;
+        }
+
+        activeTreeFolderRenamePath_ = folderPath;
+        StartFileOperation(services::FileOperationType::Rename,
+                           {folderPath},
+                           {},
+                           services::FileConflictPolicy::PromptShell,
+                           {renamedLeafName});
     }
 
     void MainWindow::StartFolderTreeDelete(std::wstring folderPath, bool permanent)
@@ -3008,8 +3430,15 @@ namespace hyperbrowse::ui
         fileOperationActive_ = false;
         activeFileOperationLabel_.clear();
 
+        const std::wstring deferredFolderWatchReloadPath = pendingFolderWatchReloadPath_;
+        const bool deferredFolderWatchTreeRefresh = pendingFolderWatchTreeRefresh_;
+        pendingFolderWatchReloadPath_.clear();
+        pendingFolderWatchTreeRefresh_ = false;
+
         const std::wstring treeFolderOperationPath = activeTreeFolderOperationPath_;
         activeTreeFolderOperationPath_.clear();
+        const std::wstring treeFolderRenamePath = activeTreeFolderRenamePath_;
+        activeTreeFolderRenamePath_.clear();
         const bool treeFolderDeleteOperation = !treeFolderOperationPath.empty()
             && (update.type == services::FileOperationType::DeleteRecycleBin
                 || update.type == services::FileOperationType::DeletePermanent);
@@ -3029,11 +3458,96 @@ namespace hyperbrowse::ui
             fallbackFolderPath = FindExistingFolderAncestor(fs::path(treeFolderOperationPath).parent_path());
         }
 
-        bool modelChanged = false;
-        if (browserModel_ && browserPaneController_)
+        std::wstring treeFolderReloadPath;
+        if (!treeFolderRenamePath.empty() && update.type == services::FileOperationType::Rename)
         {
-            const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
-            const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
+            const std::size_t renamePairCount = std::min(update.succeededSourcePaths.size(), update.createdPaths.size());
+            for (std::size_t index = 0; index < renamePairCount; ++index)
+            {
+                if (!FolderPathsEqual(update.succeededSourcePaths[index], treeFolderRenamePath))
+                {
+                    continue;
+                }
+
+                refreshFolderTree = true;
+                if (browserModel_ && !browserModel_->FolderPath().empty())
+                {
+                    if (browser::PathHasPrefix(browserModel_->FolderPath(), treeFolderRenamePath))
+                    {
+                        treeFolderReloadPath = RewritePathPrefix(
+                            browserModel_->FolderPath(),
+                            treeFolderRenamePath,
+                            update.createdPaths[index]);
+                    }
+                    else if (browserModel_->IsRecursive()
+                        && browser::PathHasPrefix(treeFolderRenamePath, browserModel_->FolderPath()))
+                    {
+                        treeFolderReloadPath = browserModel_->FolderPath();
+                    }
+                }
+                break;
+            }
+        }
+
+        bool reloadCurrentFolder = browserModel_
+            && !browserModel_->FolderPath().empty()
+            && !deferredFolderWatchReloadPath.empty()
+            && FolderPathsEqual(browserModel_->FolderPath(), deferredFolderWatchReloadPath);
+
+        if (!treeFolderReloadPath.empty())
+        {
+            reloadCurrentFolder = true;
+        }
+
+        if (!reloadCurrentFolder && browserModel_ && !browserModel_->FolderPath().empty())
+        {
+            const std::size_t affectedCount = update.succeededSourcePaths.size() + update.createdPaths.size();
+            if (affectedCount >= kIncrementalFileOperationPathLimit)
+            {
+                const auto pathAffectsCurrentScope = [&](const std::wstring& path)
+                {
+                    return IsPathInCurrentScope(path)
+                        || browser::PathHasPrefix(browserModel_->FolderPath(), path);
+                };
+
+                reloadCurrentFolder = std::any_of(
+                    update.createdPaths.begin(),
+                    update.createdPaths.end(),
+                    pathAffectsCurrentScope)
+                    || std::any_of(
+                        update.succeededSourcePaths.begin(),
+                        update.succeededSourcePaths.end(),
+                        pathAffectsCurrentScope);
+            }
+        }
+
+        bool modelChanged = false;
+        if (!reloadCurrentFolder && browserModel_ && browserPaneController_)
+        {
+            std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+            std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
+
+            if (update.type == services::FileOperationType::Rename)
+            {
+                const std::size_t renamePairCount = std::min(update.succeededSourcePaths.size(), update.createdPaths.size());
+                for (std::size_t index = 0; index < renamePairCount; ++index)
+                {
+                    const std::wstring& sourcePath = update.succeededSourcePaths[index];
+                    const std::wstring& createdPath = update.createdPaths[index];
+                    for (std::wstring& selectedPath : selectedPaths)
+                    {
+                        if (browser::FilePathsEqual(selectedPath, sourcePath))
+                        {
+                            selectedPath = createdPath;
+                        }
+                    }
+
+                    if (browser::FilePathsEqual(focusedPath, sourcePath))
+                    {
+                        focusedPath = createdPath;
+                    }
+                }
+            }
 
             auto upsertVisiblePath = [&](const std::wstring& path)
             {
@@ -3084,6 +3598,23 @@ namespace hyperbrowse::ui
                         : browserModel_->RemoveItemByPath(sourcePath)) || modelChanged;
                 }
                 break;
+            case services::FileOperationType::Rename:
+            {
+                const std::size_t renamePairCount = std::min(update.succeededSourcePaths.size(), update.createdPaths.size());
+                for (std::size_t index = 0; index < renamePairCount; ++index)
+                {
+                    const std::wstring& sourcePath = update.succeededSourcePaths[index];
+                    const std::wstring& createdPath = update.createdPaths[index];
+                    if (!treeFolderRenamePath.empty() && FolderPathsEqual(sourcePath, treeFolderRenamePath))
+                    {
+                        continue;
+                    }
+
+                    modelChanged = browserModel_->RemoveItemByPath(sourcePath) || modelChanged;
+                    upsertVisiblePath(createdPath);
+                }
+                break;
+            }
             default:
                 break;
             }
@@ -3103,7 +3634,17 @@ namespace hyperbrowse::ui
             }
         }
 
-        if (refreshFolderTree)
+        if ((update.type == services::FileOperationType::Copy || update.type == services::FileOperationType::Move)
+            && !update.destinationFolder.empty())
+        {
+            std::error_code destinationError;
+            if (fs::is_directory(fs::path(update.destinationFolder), destinationError) && !destinationError)
+            {
+                InsertFolderTreeFolderIfParentLoaded(update.destinationFolder);
+            }
+        }
+
+        if (refreshFolderTree || deferredFolderWatchTreeRefresh)
         {
             RefreshFolderTree();
         }
@@ -3111,6 +3652,14 @@ namespace hyperbrowse::ui
         if (!fallbackFolderPath.empty())
         {
             LoadFolderAsync(fallbackFolderPath);
+        }
+        else if (!treeFolderReloadPath.empty())
+        {
+            LoadFolderAsync(treeFolderReloadPath);
+        }
+        else if (reloadCurrentFolder && browserModel_ && !browserModel_->FolderPath().empty())
+        {
+            LoadFolderAsync(browserModel_->FolderPath());
         }
 
         UpdateStatusText();
@@ -3146,6 +3695,14 @@ namespace hyperbrowse::ui
 
         if (update.requiresFullReload)
         {
+            if (fileOperationActive_)
+            {
+                pendingFolderWatchReloadPath_ = update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath;
+                pendingFolderWatchTreeRefresh_ = true;
+                return;
+            }
+
+            RefreshFolderTree();
             LoadFolderAsync(update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath);
             return;
         }
@@ -3153,7 +3710,21 @@ namespace hyperbrowse::ui
         const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
         const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
         std::vector<std::wstring> invalidatedPaths;
+        std::vector<std::wstring> foldersToInsertIntoTree;
         bool changed = false;
+        bool refreshFolderTree = false;
+        bool preferAsyncReload = update.events.size() >= kIncrementalFolderWatchEventLimit;
+
+        auto isExistingDirectory = [](const std::wstring& path)
+        {
+            if (path.empty())
+            {
+                return false;
+            }
+
+            std::error_code error;
+            return fs::is_directory(fs::path(path), error) && !error;
+        };
 
         auto upsertFromPath = [&](const std::wstring& path)
         {
@@ -3173,7 +3744,6 @@ namespace hyperbrowse::ui
             {
                 return;
             }
-
 
             preferAsyncReload = true;
         };
@@ -3241,14 +3811,14 @@ namespace hyperbrowse::ui
                 break;
             }
         }
+
         if (preferAsyncReload)
         {
             if (fileOperationActive_)
             {
                 pendingFolderWatchReloadPath_ = browserModel_->FolderPath();
                 pendingFolderWatchTreeRefresh_ = pendingFolderWatchTreeRefresh_
-                    || refreshFolderTree
-                    || !foldersToInsertIntoTree.empty();
+                    || refreshFolderTree;
                 return;
             }
 
@@ -3302,7 +3872,7 @@ namespace hyperbrowse::ui
         UpdateWindowTitle();
     }
 
-    void MainWindow::UpdateMenuState() const
+    void MainWindow::UpdateMenuState()
     {
         if (!menu_)
         {
@@ -3411,7 +3981,7 @@ namespace hyperbrowse::ui
         CheckMenuRadioItem(
             menu_,
             ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200,
-            ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800,
+            ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000,
             CommandIdFromTransitionDuration(slideshowTransitionDurationMs_),
             MF_BYCOMMAND);
         EnableMenuItem(
@@ -3441,128 +4011,55 @@ namespace hyperbrowse::ui
             DrawMenuBar(hwnd_);
         }
 
-        UpdateActionStripState();
+        UpdateToolbarItemStates();
     }
 
-    void MainWindow::UpdateActionStripState() const
+    void MainWindow::UpdateToolbarItemStates()
     {
-        if (!openFolderButton_)
+        const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
+        const bool selectionActionsEnabled = hasSelection && !fileOperationActive_;
+        const bool sizeEnabled = browserMode_ == BrowserMode::Thumbnails;
+
+        for (auto& item : toolbarItems_)
+        {
+            switch (item.commandId)
+            {
+            case ID_VIEW_RECURSIVE:
+                item.checked = recursiveBrowsingEnabled_;
+                break;
+            case ID_VIEW_THUMBNAILS:
+                item.checked = browserMode_ == BrowserMode::Thumbnails;
+                break;
+            case ID_VIEW_DETAILS:
+                item.checked = browserMode_ == BrowserMode::Details;
+                break;
+            case ID_ACTION_THUMBNAIL_SIZE_MENU:
+                item.enabled = sizeEnabled;
+                break;
+            case ID_FILE_COPY_SELECTION:
+            case ID_FILE_MOVE_SELECTION:
+            case ID_FILE_DELETE_SELECTION:
+                item.enabled = selectionActionsEnabled;
+                break;
+            default:
+                break;
+            }
+        }
+
+        InvalidateToolbarStrip();
+    }
+
+    void MainWindow::InvalidateToolbarStrip()
+    {
+        if (!hwnd_)
         {
             return;
         }
 
-        const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
-        const browser::BrowserSortMode sortMode = browserPaneController_
-            ? browserPaneController_->GetSortMode()
-            : browser::BrowserSortMode::FileName;
-        const bool sortAscending = browserPaneController_
-            ? browserPaneController_->IsSortAscending()
-            : true;
-        const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
-            ? browserPaneController_->GetThumbnailSizePreset()
-            : thumbnailSizePreset_;
-
-        std::wstring sortLabel = CompactSortLabel(sortMode);
-        if (sortMode != browser::BrowserSortMode::Random)
-        {
-            sortLabel += sortAscending ? L" \u2191" : L" \u2193";
-        }
-        const std::wstring sizeText = std::to_wstring(static_cast<int>(thumbnailSizePreset)) + L" px";
-        const std::wstring themeText = themeMode_ == ThemeMode::Dark ? L"Dark" : L"Light";
-
-        const bool sizeButtonEnabled = browserMode_ == BrowserMode::Thumbnails;
-        const bool selectionActionsEnabled = hasSelection && !fileOperationActive_;
-
-        const ActionStripVisualState currentState{
-            sortLabel,
-            sizeText,
-            themeText,
-            recursiveBrowsingEnabled_,
-            browserMode_ == BrowserMode::Thumbnails,
-            browserMode_ == BrowserMode::Details,
-            sizeButtonEnabled,
-            selectionActionsEnabled,
-            themeMode_,
-        };
-
-        const bool themeChanged = !actionStripVisualStateInitialized_
-
-            const std::wstring deferredFolderWatchReloadPath = pendingFolderWatchReloadPath_;
-            const bool deferredFolderWatchTreeRefresh = pendingFolderWatchTreeRefresh_;
-            pendingFolderWatchReloadPath_.clear();
-            pendingFolderWatchTreeRefresh_ = false;
-            || actionStripVisualState_.themeMode != currentState.themeMode;
-
-        if (themeChanged)
-        {
-            RedrawWindowNoErase(openFolderButton_);
-        }
-
-        if (themeChanged
-            || !actionStripVisualStateInitialized_
-            || actionStripVisualState_.recursiveChecked != currentState.recursiveChecked)
-        {
-            RedrawWindowNoErase(recursiveButton_);
-        }
-
-        if (themeChanged
-            || !actionStripVisualStateInitialized_
-            || actionStripVisualState_.thumbnailsChecked != currentState.thumbnailsChecked)
-        {
-            RedrawWindowNoErase(thumbnailModeButton_);
-        }
-
-        if (themeChanged
-            || !actionStripVisualStateInitialized_
-            || actionStripVisualState_.detailsChecked != currentState.detailsChecked)
-        {
-            RedrawWindowNoErase(detailsModeButton_);
-        }
-
-        const bool sortTextChanged = SetWindowTextIfDifferent(sortMenuButton_, currentState.sortLabel);
-        if (sortTextChanged || themeChanged)
-        {
-            RedrawWindowNoErase(sortMenuButton_);
-        }
-
-        const bool sizeTextChanged = SetWindowTextIfDifferent(sizeMenuButton_, currentState.sizeText);
-        const bool sizeEnabledChanged = SetWindowEnabledIfDifferent(sizeMenuButton_, currentState.sizeButtonEnabled);
-        if (sizeTextChanged || sizeEnabledChanged || themeChanged)
-        {
-            RedrawWindowNoErase(sizeMenuButton_);
-        }
-
-        const bool themeTextChanged = SetWindowTextIfDifferent(themeMenuButton_, currentState.themeText);
-        if (themeTextChanged || themeChanged)
-        {
-            RedrawWindowNoErase(themeMenuButton_);
-        }
-
-        const bool copyEnabledChanged = SetWindowEnabledIfDifferent(copyButton_, currentState.selectionActionsEnabled);
-        if (copyEnabledChanged || themeChanged)
-        {
-            RedrawWindowNoErase(copyButton_);
-        }
-
-        const bool moveEnabledChanged = SetWindowEnabledIfDifferent(moveButton_, currentState.selectionActionsEnabled);
-        if (moveEnabledChanged || themeChanged)
-        {
-            RedrawWindowNoErase(moveButton_);
-        }
-
-        const bool deleteEnabledChanged = SetWindowEnabledIfDifferent(deleteButton_, currentState.selectionActionsEnabled);
-        if (deleteEnabledChanged || themeChanged)
-        {
-            RedrawWindowNoErase(deleteButton_);
-        }
-
-        actionStripVisualState_ = currentState;
-        actionStripVisualStateInitialized_ = true;
-
-        if (sortTextChanged || sizeTextChanged || themeTextChanged)
-        {
-            PostMessageW(hwnd_, WM_APP + 1, 0, 0);
-        }
+        RECT client{};
+        GetClientRect(hwnd_, &client);
+        RECT stripRect{0, 0, client.right, kActionStripHeight};
+        InvalidateRect(hwnd_, &stripRect, FALSE);
     }
 
     void MainWindow::UpdateWindowTitle() const
@@ -3637,32 +4134,12 @@ namespace hyperbrowse::ui
             SetWindowPos(
                 hwnd_,
                 nullptr,
-                        bool reloadCurrentFolder = browserModel_
-                            && !browserModel_->FolderPath().empty()
-                            && !deferredFolderWatchReloadPath.empty()
-                            && FolderPathsEqual(browserModel_->FolderPath(), deferredFolderWatchReloadPath);
-
-                        if (!reloadCurrentFolder && browserModel_ && !browserModel_->FolderPath().empty())
-                        {
-                            const std::size_t affectedCount = update.succeededSourcePaths.size() + update.createdPaths.size();
-                            if (affectedCount >= kIncrementalFileOperationPathLimit)
-                            {
-                                const auto pathAffectsCurrentScope = [&](const std::wstring& path)
-                                {
-                                    return IsPathInCurrentScope(path)
-                                        || browser::PathHasPrefix(browserModel_->FolderPath(), path);
-                                };
-
-                                reloadCurrentFolder = std::any_of(update.createdPaths.begin(), update.createdPaths.end(), pathAffectsCurrentScope)
-                                    || std::any_of(update.succeededSourcePaths.begin(), update.succeededSourcePaths.end(), pathAffectsCurrentScope);
-                            }
-                        }
                 0,
                 0,
-                        if (!reloadCurrentFolder && browserModel_ && browserPaneController_)
+                0,
                 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-            RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+            RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME);
         }
     }
 
@@ -4069,6 +4546,9 @@ namespace hyperbrowse::ui
         case ID_FILE_COPY_SELECTION:
             StartCopySelection();
             return true;
+        case ID_FILE_RENAME_SELECTED:
+            StartRenameSelectedImage();
+            return true;
         case ID_FILE_MOVE_SELECTION:
             StartMoveSelection();
             return true;
@@ -4130,13 +4610,31 @@ namespace hyperbrowse::ui
             SetBrowserMode(BrowserMode::Details);
             return true;
         case ID_ACTION_SORT_MENU:
-            ShowSortActionMenu();
+        {
+            for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
+            {
+                if (toolbarItems_[static_cast<std::size_t>(i)].commandId == ID_ACTION_SORT_MENU)
+                {
+                    ShowDropdownForItem(i);
+                    break;
+                }
+            }
             return true;
+        }
         case ID_ACTION_THUMBNAIL_SIZE_MENU:
-            ShowThumbnailSizeActionMenu();
+        {
+            for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
+            {
+                if (toolbarItems_[static_cast<std::size_t>(i)].commandId == ID_ACTION_THUMBNAIL_SIZE_MENU)
+                {
+                    ShowDropdownForItem(i);
+                    break;
+                }
+            }
             return true;
+        }
         case ID_ACTION_THEME_MENU:
-            ShowThemeActionMenu();
+            // Theme is now toggled via menu; no dropdown button
             return true;
         case ID_VIEW_RECURSIVE:
             ToggleRecursiveBrowsing();
@@ -4304,147 +4802,6 @@ namespace hyperbrowse::ui
         UpdateWindowTitle();
     }
 
-    void MainWindow::ShowSortActionMenu()
-    {
-        if (!sortMenuButton_)
-        {
-            return;
-        }
-
-        HMENU menu = CreatePopupMenu();
-        if (!menu)
-        {
-            return;
-        }
-
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By Filename");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_MODIFIED, L"By Modified Date");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_SIZE, L"By File Size");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DIMENSIONS, L"By Dimensions");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_TYPE, L"By Type");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DATETAKEN, L"By Date Taken");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By Random");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"Descending");
-
-        const bool sortAscending = browserPaneController_
-            ? browserPaneController_->IsSortAscending()
-            : true;
-        const UINT checkedCommand = browserPaneController_
-            ? CommandIdFromSortMode(browserPaneController_->GetSortMode())
-            : ID_VIEW_SORT_FILENAME;
-        CheckMenuRadioItem(menu, ID_VIEW_SORT_FILENAME, ID_VIEW_SORT_RANDOM, checkedCommand, MF_BYCOMMAND);
-        CheckMenuItem(menu, ID_VIEW_SORT_DIRECTION, MF_BYCOMMAND | (sortAscending ? MF_UNCHECKED : MF_CHECKED));
-
-        RECT buttonRect{};
-        GetWindowRect(sortMenuButton_, &buttonRect);
-        SetForegroundWindow(hwnd_);
-        const UINT commandId = TrackPopupMenuEx(
-            menu,
-            TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-            buttonRect.left,
-            buttonRect.bottom,
-            hwnd_,
-            nullptr);
-        DestroyMenu(menu);
-        PostMessageW(hwnd_, WM_NULL, 0, 0);
-
-        if (commandId != 0)
-        {
-            HandleCommand(commandId);
-        }
-    }
-
-    void MainWindow::ShowThumbnailSizeActionMenu()
-    {
-        if (!sizeMenuButton_ || browserMode_ != BrowserMode::Thumbnails)
-        {
-            return;
-        }
-
-        HMENU menu = CreatePopupMenu();
-        if (!menu)
-        {
-            return;
-        }
-
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_96, L"96 px");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_128, L"128 px");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_160, L"160 px");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_192, L"192 px");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_256, L"256 px");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_320, L"320 px");
-
-        const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
-            ? browserPaneController_->GetThumbnailSizePreset()
-            : thumbnailSizePreset_;
-        CheckMenuRadioItem(
-            menu,
-            ID_VIEW_THUMBNAIL_SIZE_96,
-            ID_VIEW_THUMBNAIL_SIZE_320,
-            CommandIdFromThumbnailSizePreset(thumbnailSizePreset),
-            MF_BYCOMMAND);
-
-        RECT buttonRect{};
-        GetWindowRect(sizeMenuButton_, &buttonRect);
-        SetForegroundWindow(hwnd_);
-        const UINT commandId = TrackPopupMenuEx(
-            menu,
-            TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-            buttonRect.left,
-            buttonRect.bottom,
-            hwnd_,
-            nullptr);
-        DestroyMenu(menu);
-        PostMessageW(hwnd_, WM_NULL, 0, 0);
-
-        if (commandId != 0)
-        {
-            HandleCommand(commandId);
-        }
-    }
-
-    void MainWindow::ShowThemeActionMenu()
-    {
-        if (!themeMenuButton_)
-        {
-            return;
-        }
-
-        HMENU menu = CreatePopupMenu();
-        if (!menu)
-        {
-            return;
-        }
-
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THEME_LIGHT, L"Light");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THEME_DARK, L"Dark");
-        CheckMenuRadioItem(
-            menu,
-            ID_VIEW_THEME_LIGHT,
-            ID_VIEW_THEME_DARK,
-            themeMode_ == ThemeMode::Light ? ID_VIEW_THEME_LIGHT : ID_VIEW_THEME_DARK,
-            MF_BYCOMMAND);
-
-        RECT buttonRect{};
-        GetWindowRect(themeMenuButton_, &buttonRect);
-        SetForegroundWindow(hwnd_);
-        const UINT commandId = TrackPopupMenuEx(
-            menu,
-            TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-            buttonRect.left,
-            buttonRect.bottom,
-            hwnd_,
-            nullptr);
-        DestroyMenu(menu);
-        PostMessageW(hwnd_, WM_NULL, 0, 0);
-
-        if (commandId != 0)
-        {
-            HandleCommand(commandId);
-        }
-    }
-
     MainWindow::ThemePalette MainWindow::GetThemePalette() const
     {
         switch (themeMode_)
@@ -4454,6 +4811,7 @@ namespace hyperbrowse::ui
                 RGB(24, 28, 32),
                 RGB(34, 38, 43),
                 RGB(234, 238, 242),
+                RGB(140, 148, 158),
                 RGB(96, 102, 110),
                 RGB(78, 84, 92),
                 RGB(29, 33, 38),
@@ -4469,6 +4827,7 @@ namespace hyperbrowse::ui
                 RGB(243, 245, 248),
                 RGB(255, 255, 255),
                 RGB(32, 36, 40),
+                RGB(128, 136, 148),
                 RGB(198, 204, 212),
                 RGB(210, 215, 223),
                 RGB(249, 250, 252),
@@ -4481,111 +4840,422 @@ namespace hyperbrowse::ui
         }
     }
 
-    bool MainWindow::DrawActionButton(const DRAWITEMSTRUCT& drawItem) const
+    void MainWindow::InitToolbarItems()
     {
-        if (drawItem.CtlType != ODT_BUTTON)
+        toolbarItems_.clear();
+
+        auto addIcon = [this](UINT cmdId, std::string iconName, std::wstring tip,
+                              ToolbarItemKind kind = ToolbarItemKind::IconButton,
+                              ToolbarAlignment align = ToolbarAlignment::Left)
         {
-            return false;
+            ToolbarItem item;
+            item.commandId = cmdId;
+            item.iconName = std::move(iconName);
+            item.tooltip = std::move(tip);
+            item.kind = kind;
+            item.alignment = align;
+            toolbarItems_.push_back(std::move(item));
+        };
+
+        auto addSeparator = [this](ToolbarAlignment align = ToolbarAlignment::Left)
+        {
+            ToolbarItem sep;
+            sep.kind = ToolbarItemKind::Separator;
+            sep.alignment = align;
+            toolbarItems_.push_back(std::move(sep));
+        };
+
+        // Left group 1: Navigation
+    addIcon(ID_FILE_OPEN_FOLDER, "open-folder", L"Open Folder (Ctrl+O)");
+    addIcon(ID_VIEW_RECURSIVE, "recursive", L"Recursive Browsing (Ctrl+R)", ToolbarItemKind::IconToggle);
+
+        addSeparator();
+
+        // Left group 2: View mode
+        addIcon(ID_VIEW_THUMBNAILS, "view-grid", L"Thumbnail Mode (Ctrl+1)", ToolbarItemKind::IconToggle);
+        addIcon(ID_VIEW_DETAILS, "view-list", L"Details Mode (Ctrl+2)", ToolbarItemKind::IconToggle);
+
+        addSeparator();
+
+        // Left group 3: Display controls (dropdowns)
+        addIcon(ID_ACTION_SORT_MENU, "sort", L"Sort By", ToolbarItemKind::IconDropdown);
+        addIcon(ID_ACTION_THUMBNAIL_SIZE_MENU, "thumbnail-size", L"Thumbnail Size", ToolbarItemKind::IconDropdown);
+
+        addSeparator();
+
+        // Filter placeholder (will be positioned in LayoutToolbar)
+        {
+            ToolbarItem filterItem;
+            filterItem.kind = ToolbarItemKind::FilterEdit;
+            filterItem.alignment = ToolbarAlignment::Left;
+            toolbarItems_.push_back(std::move(filterItem));
         }
 
-        const UINT controlId = drawItem.CtlID;
-        switch (controlId)
+        addSeparator(ToolbarAlignment::Right);
+
+        // Right group: Selection actions
+        addIcon(ID_FILE_COPY_SELECTION, "copy", L"Copy Selection", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
+        addIcon(ID_FILE_MOVE_SELECTION, "move", L"Move Selection", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
+        addIcon(ID_FILE_DELETE_SELECTION, "delete", L"Delete (Del)", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
+    }
+
+    void MainWindow::LayoutToolbar()
+    {
+        RECT client{};
+        GetClientRect(hwnd_, &client);
+        const int clientWidth = client.right - client.left;
+        const int itemTop = kActionStripPaddingY;
+
+        // Lay out left-aligned items first, then right-aligned items, then fill filter gap.
+        int leftCursor = kActionStripPaddingX;
+        int rightCursor = clientWidth - kActionStripPaddingX;
+        int filterItemIndex = -1;
+
+        // Left pass
+        for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
         {
-        case ID_FILE_OPEN_FOLDER:
-        case ID_VIEW_RECURSIVE:
-        case ID_VIEW_THUMBNAILS:
-        case ID_VIEW_DETAILS:
-        case ID_ACTION_SORT_MENU:
-        case ID_ACTION_THUMBNAIL_SIZE_MENU:
-        case ID_ACTION_THEME_MENU:
-        case ID_FILE_COPY_SELECTION:
-        case ID_FILE_MOVE_SELECTION:
-        case ID_FILE_DELETE_SELECTION:
-            break;
-        default:
-            return false;
+            auto& item = toolbarItems_[static_cast<std::size_t>(i)];
+            if (item.alignment != ToolbarAlignment::Left)
+            {
+                continue;
+            }
+
+            if (item.kind == ToolbarItemKind::Separator)
+            {
+                item.rect = RECT{leftCursor + kToolbarSeparatorGap, itemTop,
+                                 leftCursor + kToolbarSeparatorGap + 1, itemTop + kToolbarItemSize};
+                leftCursor += kToolbarSeparatorWidth;
+                continue;
+            }
+
+            if (item.kind == ToolbarItemKind::FilterEdit)
+            {
+                filterItemIndex = i;
+                continue;
+            }
+
+            item.rect = RECT{leftCursor, itemTop, leftCursor + kToolbarItemSize, itemTop + kToolbarItemSize};
+            leftCursor += kToolbarItemSize + 2;
         }
 
+        // Right pass (iterate in reverse so rightmost items stay rightmost)
+        for (int i = static_cast<int>(toolbarItems_.size()) - 1; i >= 0; --i)
+        {
+            auto& item = toolbarItems_[static_cast<std::size_t>(i)];
+            if (item.alignment != ToolbarAlignment::Right)
+            {
+                continue;
+            }
+
+            if (item.kind == ToolbarItemKind::Separator)
+            {
+                rightCursor -= kToolbarSeparatorWidth;
+                item.rect = RECT{rightCursor + kToolbarSeparatorGap, itemTop,
+                                 rightCursor + kToolbarSeparatorGap + 1, itemTop + kToolbarItemSize};
+                continue;
+            }
+
+            rightCursor -= kToolbarItemSize;
+            item.rect = RECT{rightCursor, itemTop, rightCursor + kToolbarItemSize, itemTop + kToolbarItemSize};
+            rightCursor -= 2;
+        }
+
+        // Place filter edit control in the gap
+        if (filterItemIndex >= 0 && filterEdit_)
+        {
+            const int filterLeft = leftCursor + 6;
+            const int filterRight = rightCursor - 6;
+            const int filterWidth = std::max(0, filterRight - filterLeft);
+            toolbarItems_[static_cast<std::size_t>(filterItemIndex)].rect =
+                RECT{filterLeft, itemTop, filterLeft + filterWidth, itemTop + kToolbarItemSize};
+            MoveWindow(filterEdit_, filterLeft + 10, itemTop + 7, std::max(0, filterWidth - 20), kToolbarItemSize - 14, TRUE);
+        }
+
+        // Update tooltip rects
+        if (tooltipControl_)
+        {
+            for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
+            {
+                TTTOOLINFOW toolInfo{};
+                toolInfo.cbSize = sizeof(toolInfo);
+                toolInfo.hwnd = hwnd_;
+                toolInfo.uId = static_cast<UINT_PTR>(i);
+                toolInfo.rect = toolbarItems_[static_cast<std::size_t>(i)].rect;
+                SendMessageW(tooltipControl_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+            }
+        }
+
+        // Invalidate the strip area
+        RECT stripRect{0, 0, clientWidth, kActionStripHeight};
+        InvalidateRect(hwnd_, &stripRect, FALSE);
+    }
+
+    void MainWindow::PaintToolbar(HDC hdc, const RECT& stripRect)
+    {
         const ThemePalette palette = GetThemePalette();
-        const bool enabled = (drawItem.itemState & ODS_DISABLED) == 0;
-        const bool pressed = (drawItem.itemState & ODS_SELECTED) != 0;
-        const bool checked = (controlId == ID_VIEW_RECURSIVE && recursiveBrowsingEnabled_)
-            || (controlId == ID_VIEW_THUMBNAILS && browserMode_ == BrowserMode::Thumbnails)
-            || (controlId == ID_VIEW_DETAILS && browserMode_ == BrowserMode::Details);
+        HDC iconDC = toolbarIconLibrary_ ? CreateCompatibleDC(hdc) : nullptr;
 
-        COLORREF fillColor = BlendColor(palette.paneBackground, palette.windowBackground, themeMode_ == ThemeMode::Dark ? 84 : 92);
-        COLORREF borderColor = palette.actionStripBorder;
-        COLORREF textColor = palette.text;
-
-        if (checked)
-        {
-            fillColor = palette.accentFill;
-            borderColor = palette.accent;
-            textColor = palette.accentText;
-        }
-
-        if (pressed)
-        {
-            fillColor = BlendColor(fillColor, palette.accent, checked ? 48 : 28);
-            borderColor = palette.accent;
-        }
-
-        if (!enabled)
-        {
-            fillColor = BlendColor(fillColor, palette.windowBackground, 108);
-            borderColor = BlendColor(borderColor, palette.windowBackground, 128);
-            textColor = BlendColor(palette.text, fillColor, 148);
-        }
-
-        RECT bounds = drawItem.rcItem;
+        // Fill strip background
         const HBRUSH stripBrush = CreateSolidBrush(palette.actionStripBackground);
-        FillRect(drawItem.hDC, &bounds, stripBrush);
+        FillRect(hdc, &stripRect, stripBrush);
         DeleteObject(stripBrush);
 
-        RECT buttonRect = bounds;
-        InflateRect(&buttonRect, -1, -1);
-
-        const HBRUSH fillBrush = CreateSolidBrush(fillColor);
-        const HPEN borderPen = CreatePen(PS_SOLID, 1, borderColor);
-        const HGDIOBJ oldBrush = SelectObject(drawItem.hDC, fillBrush);
-        const HGDIOBJ oldPen = SelectObject(drawItem.hDC, borderPen);
-        RoundRect(drawItem.hDC, buttonRect.left, buttonRect.top, buttonRect.right, buttonRect.bottom, 14, 14);
-        SelectObject(drawItem.hDC, oldPen);
-        SelectObject(drawItem.hDC, oldBrush);
+        // Bottom border
+        const HPEN borderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
+        const HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+        MoveToEx(hdc, stripRect.left, stripRect.bottom - 1, nullptr);
+        LineTo(hdc, stripRect.right, stripRect.bottom - 1);
+        SelectObject(hdc, oldPen);
         DeleteObject(borderPen);
-        DeleteObject(fillBrush);
 
-        HFONT font = reinterpret_cast<HFONT>(SendMessageW(drawItem.hwndItem, WM_GETFONT, 0, 0));
-        const HGDIOBJ oldFont = font ? SelectObject(drawItem.hDC, font) : nullptr;
-        SetBkMode(drawItem.hDC, TRANSPARENT);
-        SetTextColor(drawItem.hDC, textColor);
+        SetBkMode(hdc, TRANSPARENT);
 
-        const int textLength = GetWindowTextLengthW(drawItem.hwndItem);
-        std::wstring text(static_cast<std::size_t>(textLength) + 1, L'\0');
-        GetWindowTextW(drawItem.hwndItem, text.data(), static_cast<int>(text.size()));
-        text.resize(wcslen(text.c_str()));
-
-        RECT textRect = buttonRect;
-        InflateRect(&textRect, -kActionButtonTextInsetX, 0);
-        DrawTextW(drawItem.hDC,
-              text.c_str(),
-              -1,
-              &textRect,
-              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-
-        if (oldFont)
+        for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
         {
-            SelectObject(drawItem.hDC, oldFont);
+            const auto& item = toolbarItems_[static_cast<std::size_t>(i)];
+
+            if (item.kind == ToolbarItemKind::Separator)
+            {
+                const HPEN sepPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
+                const HGDIOBJ savedPen = SelectObject(hdc, sepPen);
+                MoveToEx(hdc, item.rect.left, item.rect.top + 4, nullptr);
+                LineTo(hdc, item.rect.left, item.rect.bottom - 4);
+                SelectObject(hdc, savedPen);
+                DeleteObject(sepPen);
+                continue;
+            }
+
+            if (item.kind == ToolbarItemKind::FilterEdit)
+            {
+                // Draw filter field background
+                if (filterEdit_)
+                {
+                    RECT filterBg = item.rect;
+                    InflateRect(&filterBg, 0, -2);
+                    const bool filterFocused = GetFocus() == filterEdit_;
+                    const HBRUSH fieldBrush = CreateSolidBrush(palette.actionFieldBackground);
+                    const HPEN fieldPen = CreatePen(PS_SOLID, 1, filterFocused ? palette.accent : palette.actionStripBorder);
+                    const HGDIOBJ oldb = SelectObject(hdc, fieldBrush);
+                    const HGDIOBJ oldp = SelectObject(hdc, fieldPen);
+                    RoundRect(hdc, filterBg.left, filterBg.top, filterBg.right, filterBg.bottom, 14, 14);
+                    SelectObject(hdc, oldp);
+                    SelectObject(hdc, oldb);
+                    DeleteObject(fieldPen);
+                    DeleteObject(fieldBrush);
+
+                    if (toolbarIconLibrary_ && iconDC)
+                    {
+                        const HBITMAP searchBitmap = toolbarIconLibrary_->GetBitmap("search", 14, palette.mutedText);
+                        AlphaBlendBitmap(hdc, iconDC, searchBitmap, filterBg.left + 7, filterBg.top + 7, 14, 14);
+                    }
+                }
+                continue;
+            }
+
+            // Determine visual state
+            const bool isHot = (i == toolbarHotIndex_);
+            const bool isPressed = (i == toolbarPressedIndex_);
+            const bool isChecked = item.checked;
+            const bool isEnabled = item.enabled;
+
+            // Choose icon color
+            COLORREF iconColor = palette.mutedText;
+            if (isChecked)
+            {
+                iconColor = palette.accentText;
+            }
+            else if (!isEnabled)
+            {
+                iconColor = BlendColor(palette.mutedText, palette.actionStripBackground, 140);
+            }
+
+            // Draw background for hot/pressed/checked states
+            if (isEnabled && (isHot || isPressed || isChecked))
+            {
+                RECT bgRect = item.rect;
+                InflateRect(&bgRect, -1, -1);
+
+                COLORREF bgColor;
+                if (isChecked)
+                {
+                    bgColor = palette.accentFill;
+                    if (isPressed)
+                    {
+                        bgColor = BlendColor(bgColor, palette.accent, 48);
+                    }
+                    else if (isHot)
+                    {
+                        bgColor = BlendColor(bgColor, palette.accent, 24);
+                    }
+                }
+                else if (isPressed)
+                {
+                    bgColor = BlendColor(palette.actionStripBackground, palette.accent, 48);
+                }
+                else
+                {
+                    bgColor = BlendColor(palette.actionStripBackground, palette.text, 20);
+                }
+
+                const HBRUSH bgBrush = CreateSolidBrush(bgColor);
+                const HPEN bgPen = CreatePen(PS_SOLID, 1, bgColor);
+                const HGDIOBJ oldb = SelectObject(hdc, bgBrush);
+                const HGDIOBJ oldp = SelectObject(hdc, bgPen);
+                RoundRect(hdc, bgRect.left, bgRect.top, bgRect.right, bgRect.bottom, 10, 10);
+                SelectObject(hdc, oldp);
+                SelectObject(hdc, oldb);
+                DeleteObject(bgPen);
+                DeleteObject(bgBrush);
+            }
+
+            if (!item.iconName.empty() && toolbarIconLibrary_ && iconDC)
+            {
+                RECT iconRect = item.rect;
+                if (item.kind == ToolbarItemKind::IconDropdown)
+                {
+                    iconRect.right -= kToolbarDropdownChevronSize + 2;
+                }
+
+                const int iconWidth = kToolbarIconSize;
+                const int iconHeight = kToolbarIconSize;
+                const int iconX = iconRect.left + ((iconRect.right - iconRect.left) - iconWidth) / 2;
+                const int iconY = iconRect.top + ((iconRect.bottom - iconRect.top) - iconHeight) / 2;
+                const HBITMAP iconBitmap = toolbarIconLibrary_->GetBitmap(item.iconName, kToolbarIconSize, iconColor);
+                AlphaBlendBitmap(hdc, iconDC, iconBitmap, iconX, iconY, iconWidth, iconHeight);
+            }
+
+            // Draw dropdown indicator
+            if (item.kind == ToolbarItemKind::IconDropdown && isEnabled && toolbarIconLibrary_ && iconDC)
+            {
+                RECT chevronRect = item.rect;
+                const int chevronX = chevronRect.right - kToolbarDropdownChevronSize - 6;
+                const int chevronY = chevronRect.top + ((chevronRect.bottom - chevronRect.top) - kToolbarDropdownChevronSize) / 2;
+                const HBITMAP chevronBitmap = toolbarIconLibrary_->GetBitmap("chevron-down", kToolbarDropdownChevronSize, palette.mutedText);
+                AlphaBlendBitmap(hdc, iconDC, chevronBitmap, chevronX, chevronY, kToolbarDropdownChevronSize, kToolbarDropdownChevronSize);
+            }
         }
 
-        if ((drawItem.itemState & ODS_FOCUS) != 0)
+        if (iconDC)
         {
-            RECT focusRect = buttonRect;
-            InflateRect(&focusRect, -4, -4);
-            DrawFocusRect(drawItem.hDC, &focusRect);
+            DeleteDC(iconDC);
+        }
+    }
+
+    int MainWindow::ToolbarHitTest(int x, int y) const
+    {
+        POINT pt{x, y};
+        for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
+        {
+            const auto& item = toolbarItems_[static_cast<std::size_t>(i)];
+            if (item.kind == ToolbarItemKind::Separator || item.kind == ToolbarItemKind::FilterEdit)
+            {
+                continue;
+            }
+
+            if (PtInRect(&item.rect, pt))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    void MainWindow::ToolbarHandleClick(int itemIndex)
+    {
+        if (itemIndex < 0 || itemIndex >= static_cast<int>(toolbarItems_.size()))
+        {
+            return;
         }
 
-        return true;
+        const auto& item = toolbarItems_[static_cast<std::size_t>(itemIndex)];
+        if (!item.enabled)
+        {
+            return;
+        }
+
+        if (item.kind == ToolbarItemKind::IconDropdown)
+        {
+            ShowDropdownForItem(itemIndex);
+            return;
+        }
+
+        if (item.commandId != 0)
+        {
+            HandleCommand(item.commandId);
+        }
+    }
+
+    void MainWindow::ShowDropdownForItem(int itemIndex)
+    {
+        if (itemIndex < 0 || itemIndex >= static_cast<int>(toolbarItems_.size()))
+        {
+            return;
+        }
+
+        const auto& item = toolbarItems_[static_cast<std::size_t>(itemIndex)];
+        RECT itemScreenRect = item.rect;
+        MapWindowPoints(hwnd_, HWND_DESKTOP, reinterpret_cast<LPPOINT>(&itemScreenRect), 2);
+
+        switch (item.commandId)
+        {
+        case ID_ACTION_SORT_MENU:
+        {
+            HMENU menu = CreatePopupMenu();
+            if (!menu) return;
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By Filename");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_MODIFIED, L"By Modified Date");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_SIZE, L"By File Size");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DIMENSIONS, L"By Dimensions");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_TYPE, L"By Type");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DATETAKEN, L"By Date Taken");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By Random");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"Descending");
+
+            const bool sortAscending = browserPaneController_
+                ? browserPaneController_->IsSortAscending() : true;
+            const UINT checkedCommand = browserPaneController_
+                ? CommandIdFromSortMode(browserPaneController_->GetSortMode())
+                : ID_VIEW_SORT_FILENAME;
+            CheckMenuRadioItem(menu, ID_VIEW_SORT_FILENAME, ID_VIEW_SORT_RANDOM, checkedCommand, MF_BYCOMMAND);
+            CheckMenuItem(menu, ID_VIEW_SORT_DIRECTION, MF_BYCOMMAND | (sortAscending ? MF_UNCHECKED : MF_CHECKED));
+
+            SetForegroundWindow(hwnd_);
+            const UINT cmdId = TrackPopupMenuEx(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+                itemScreenRect.left, itemScreenRect.bottom, hwnd_, nullptr);
+            DestroyMenu(menu);
+            PostMessageW(hwnd_, WM_NULL, 0, 0);
+            if (cmdId != 0) HandleCommand(cmdId);
+            break;
+        }
+        case ID_ACTION_THUMBNAIL_SIZE_MENU:
+        {
+            if (browserMode_ != BrowserMode::Thumbnails) return;
+            HMENU menu = CreatePopupMenu();
+            if (!menu) return;
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_96, L"96 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_128, L"128 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_160, L"160 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_192, L"192 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_256, L"256 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_320, L"320 px");
+
+            const browser::ThumbnailSizePreset preset = browserPaneController_
+                ? browserPaneController_->GetThumbnailSizePreset() : thumbnailSizePreset_;
+            CheckMenuRadioItem(menu, ID_VIEW_THUMBNAIL_SIZE_96, ID_VIEW_THUMBNAIL_SIZE_320,
+                CommandIdFromThumbnailSizePreset(preset), MF_BYCOMMAND);
+
+            SetForegroundWindow(hwnd_);
+            const UINT cmdId = TrackPopupMenuEx(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+                itemScreenRect.left, itemScreenRect.bottom, hwnd_, nullptr);
+            DestroyMenu(menu);
+            PostMessageW(hwnd_, WM_NULL, 0, 0);
+            if (cmdId != 0) HandleCommand(cmdId);
+            break;
+        }
+        default:
+            break;
+        }
     }
 
     void MainWindow::OnSize()
@@ -4606,7 +5276,19 @@ namespace hyperbrowse::ui
 
     void MainWindow::OnLButtonDown(int x, int y)
     {
-        (void)y;
+        // Toolbar hit test
+        if (y < kActionStripHeight)
+        {
+            const int hit = ToolbarHitTest(x, y);
+            if (hit >= 0)
+            {
+                toolbarPressedIndex_ = hit;
+                InvalidateToolbarStrip();
+                SetCapture(hwnd_);
+                return;
+            }
+        }
+
         if (IsOverSplitter(x))
         {
             dragMode_ = DragMode::Splitter;
@@ -4627,6 +5309,24 @@ namespace hyperbrowse::ui
 
     void MainWindow::OnLButtonUp()
     {
+        if (toolbarPressedIndex_ >= 0)
+        {
+            const int pressedIdx = toolbarPressedIndex_;
+            toolbarPressedIndex_ = -1;
+            ReleaseCapture();
+            InvalidateToolbarStrip();
+
+            // Confirm click: mouse must still be over the same item
+            POINT pt{};
+            GetCursorPos(&pt);
+            ScreenToClient(hwnd_, &pt);
+            if (ToolbarHitTest(pt.x, pt.y) == pressedIdx)
+            {
+                ToolbarHandleClick(pressedIdx);
+            }
+            return;
+        }
+
         if (dragMode_ != DragMode::None)
         {
             dragMode_ = DragMode::None;
@@ -4636,7 +5336,46 @@ namespace hyperbrowse::ui
 
     void MainWindow::OnMouseMove(int x, int y)
     {
-        (void)y;
+        // Track mouse leave for toolbar hover reset
+        if (!toolbarMouseTracking_)
+        {
+            TRACKMOUSEEVENT tme{};
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = hwnd_;
+            TrackMouseEvent(&tme);
+            toolbarMouseTracking_ = true;
+        }
+
+        // Toolbar hover
+        if (y < kActionStripHeight && dragMode_ == DragMode::None)
+        {
+            const int hit = ToolbarHitTest(x, y);
+            if (hit != toolbarHotIndex_)
+            {
+                toolbarHotIndex_ = hit;
+                InvalidateToolbarStrip();
+            }
+
+            // Relay to tooltip
+            if (tooltipControl_)
+            {
+                MSG msg{};
+                msg.hwnd = hwnd_;
+                msg.message = WM_MOUSEMOVE;
+                msg.lParam = MAKELPARAM(x, y);
+                SendMessageW(tooltipControl_, TTM_RELAYEVENT, 0, reinterpret_cast<LPARAM>(&msg));
+            }
+            return;
+        }
+
+        // Clear toolbar hover when mouse leaves strip
+        if (toolbarHotIndex_ >= 0)
+        {
+            toolbarHotIndex_ = -1;
+            InvalidateToolbarStrip();
+        }
+
         if (dragMode_ == DragMode::Splitter)
         {
             RECT client{};
@@ -4645,17 +5384,8 @@ namespace hyperbrowse::ui
             leftPaneWidth_ = std::clamp(x, kMinLeftPaneWidth, maxLeft);
             LayoutChildren();
         }
-                if ((update.type == services::FileOperationType::Copy || update.type == services::FileOperationType::Move)
-                    && !update.destinationFolder.empty())
-                {
-                    std::error_code destinationError;
-                    if (fs::is_directory(fs::path(update.destinationFolder), destinationError) && !destinationError)
-                    {
-                        InsertFolderTreeFolderIfParentLoaded(update.destinationFolder);
-                    }
-                }
         else
-                if (refreshFolderTree || deferredFolderWatchTreeRefresh)
+        {
             SetCursor(LoadCursorW(nullptr, IsOverSplitter(x) ? IDC_SIZEWE : IDC_ARROW));
         }
     }
@@ -4664,10 +5394,6 @@ namespace hyperbrowse::ui
     {
         switch (message)
         {
-                else if (reloadCurrentFolder && browserModel_ && !browserModel_->FolderPath().empty())
-                {
-                    LoadFolderAsync(browserModel_->FolderPath());
-                }
         case WM_GETMINMAXINFO:
             OnGetMinMaxInfo(reinterpret_cast<MINMAXINFO*>(lParam));
             return 0;
@@ -4735,13 +5461,30 @@ namespace hyperbrowse::ui
         case viewer::ViewerWindow::kClosedMessage:
             return OnViewerClosedMessage();
         case WM_DRAWITEM:
-            if (DrawActionButton(*reinterpret_cast<const DRAWITEMSTRUCT*>(lParam)))
+            break;
+        case WM_MOUSELEAVE:
+            toolbarMouseTracking_ = false;
+            if (toolbarHotIndex_ >= 0)
             {
-                return TRUE;
+                toolbarHotIndex_ = -1;
+                InvalidateToolbarStrip();
             }
             break;
         case WM_NOTIFY:
+        {
+            const auto* nmh = reinterpret_cast<NMHDR*>(lParam);
+            if (nmh->hwndFrom == tooltipControl_ && nmh->code == TTN_GETDISPINFOW)
+            {
+                auto* di = reinterpret_cast<NMTTDISPINFOW*>(lParam);
+                const auto idx = static_cast<std::size_t>(di->hdr.idFrom);
+                if (idx < toolbarItems_.size() && !toolbarItems_[idx].tooltip.empty())
+                {
+                    di->lpszText = const_cast<wchar_t*>(toolbarItems_[idx].tooltip.c_str());
+                }
+                return 0;
+            }
             return OnFolderTreeNotify(lParam);
+        }
         case WM_CTLCOLOREDIT:
             if (reinterpret_cast<HWND>(lParam) == filterEdit_)
             {
@@ -4779,9 +5522,12 @@ namespace hyperbrowse::ui
         {
             RECT client{};
             GetClientRect(hwnd_, &client);
+            HDC eraseDC = reinterpret_cast<HDC>(wParam);
+            // Exclude the action strip — PaintToolbar handles it
+            RECT below{0, kActionStripHeight, client.right, client.bottom};
             FillRect(
-                reinterpret_cast<HDC>(wParam),
-                &client,
+                eraseDC,
+                &below,
                 backgroundBrush_ ? backgroundBrush_ : reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
             return 1;
         }
@@ -4791,43 +5537,24 @@ namespace hyperbrowse::ui
             HDC hdc = BeginPaint(hwnd_, &ps);
             RECT client{};
             GetClientRect(hwnd_, &client);
-            const ThemePalette palette = GetThemePalette();
 
+            // Double-buffered toolbar paint
             RECT stripRect{0, 0, client.right, kActionStripHeight};
-            const HBRUSH stripBrush = CreateSolidBrush(palette.actionStripBackground);
-            FillRect(hdc, &stripRect, stripBrush);
-            DeleteObject(stripBrush);
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP memBmp = CreateCompatibleBitmap(hdc, client.right, kActionStripHeight);
+            HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+            PaintToolbar(memDC, stripRect);
+            BitBlt(hdc, 0, 0, client.right, kActionStripHeight, memDC, 0, 0, SRCCOPY);
+            SelectObject(memDC, oldBmp);
+            DeleteObject(memBmp);
+            DeleteDC(memDC);
 
-            if (filterEdit_)
-            {
-                RECT filterRect{};
-                GetWindowRect(filterEdit_, &filterRect);
-                MapWindowPoints(HWND_DESKTOP, hwnd_, reinterpret_cast<LPPOINT>(&filterRect), 2);
-                InflateRect(&filterRect, 10, 4);
-
-                const bool filterFocused = GetFocus() == filterEdit_;
-                const HBRUSH fieldBrush = CreateSolidBrush(palette.actionFieldBackground);
-                const HPEN fieldPen = CreatePen(PS_SOLID, 1, filterFocused ? palette.accent : palette.actionStripBorder);
-                const HGDIOBJ oldFieldBrush = SelectObject(hdc, fieldBrush);
-                const HGDIOBJ oldFieldPen = SelectObject(hdc, fieldPen);
-                RoundRect(hdc, filterRect.left, filterRect.top, filterRect.right, filterRect.bottom, 14, 14);
-                SelectObject(hdc, oldFieldPen);
-                SelectObject(hdc, oldFieldBrush);
-                DeleteObject(fieldPen);
-                DeleteObject(fieldBrush);
-            }
-
-            const HPEN borderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
-            const HGDIOBJ oldPen = SelectObject(hdc, borderPen);
-            MoveToEx(hdc, stripRect.left, stripRect.bottom - 1, nullptr);
-            LineTo(hdc, stripRect.right, stripRect.bottom - 1);
-            SelectObject(hdc, oldPen);
-            DeleteObject(borderPen);
-
+            // Splitter
             RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
             const HBRUSH splitterBrush = CreateSolidBrush(GetThemePalette().splitter);
             FillRect(hdc, &splitterRect, splitterBrush);
             DeleteObject(splitterBrush);
+
             EndPaint(hwnd_, &ps);
             return 0;
         }

@@ -12,8 +12,10 @@ The goal is to let users complete common browse-and-cull workflows without leavi
 
 - copy selected files to another folder
 - move selected files to another folder
+- rename the primary selected image from the browser context menu
 - delete selected files to Recycle Bin
 - permanently delete selected files
+- rename non-root folders from the explorer tree context menu
 - delete non-root folders from the explorer tree to Recycle Bin or permanently
 - reveal the primary selected file in Explorer
 - open the containing folder for the primary selected file
@@ -68,19 +70,21 @@ Recommended order:
 2. Reveal in Explorer
 3. Open Containing Folder
 4. Copy Path
-5. Properties
-6. separator
-7. Copy Selection...
-8. Move Selection...
-9. Delete
-10. Delete Permanently
-11. separator
-12. existing slideshow / batch-convert / JPEG orientation items
+5. Rename...
+6. Properties
+7. separator
+8. Copy Selection...
+9. Move Selection...
+10. Delete
+11. Delete Permanently
+12. separator
+13. existing slideshow / batch-convert / JPEG orientation items
 
 ## 4.3 Explorer tree context menu
 
 For non-root folder nodes in the explorer tree, add a folder-only context menu with:
 
+- `Rename Folder...`
 - `Delete Folder`
 - `Delete Folder Permanently`
 
@@ -103,6 +107,7 @@ Copy and move do not require default accelerators in the first pass.
 - All file actions operate on the ordered current selection from the browser pane.
 - If there is no selection, the commands are disabled.
 - Explorer reveal and Properties act on the primary selected item.
+- Browser rename acts on the primary selected image and should be enabled only when exactly one image is selected.
 - Copy Path copies all selected file paths separated by CRLF.
 
 ## 6. API Choices

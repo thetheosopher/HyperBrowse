@@ -52,6 +52,11 @@ namespace hyperbrowse::services
     class ImageMetadataService;
 }
 
+namespace hyperbrowse::decode
+{
+    enum class ThumbnailDecodeFailureKind : int;
+}
+
 namespace hyperbrowse::cache
 {
     class CachedThumbnail;
@@ -202,10 +207,18 @@ namespace hyperbrowse::browser
         void RebuildD2DTextFormats();
         void D2DDrawPlaceholderState(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
         void D2DDrawThumbnailCells(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
+        void D2DDrawUnavailableThumbnailState(ID2D1RenderTarget* rt,
+                              const D2D1_RECT_F& previewRect,
+                              decode::ThumbnailDecodeFailureKind failureKind,
+                              bool selected) const;
         void D2DDrawPreviewThumbnail(ID2D1RenderTarget* rt, const D2D1_RECT_F& previewRect, const BrowserItem& item, bool selected) const;
         ID2D1Bitmap* GetOrCreateD2DBitmap(ID2D1RenderTarget* rt, const cache::CachedThumbnail& thumbnail) const;
         void DrawPlaceholderState(HDC hdc, const RECT& clientRect) const;
         void DrawThumbnailCells(HDC hdc, const RECT& clientRect) const;
+        void DrawUnavailableThumbnailState(HDC hdc,
+                           const RECT& previewRect,
+                           decode::ThumbnailDecodeFailureKind failureKind,
+                           bool selected) const;
         void DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item, bool selected) const;
         std::wstring BuildListText(int viewIndex, int subItem) const;
         std::wstring BuildThumbnailTooltipText(int viewIndex) const;
@@ -235,6 +248,7 @@ namespace hyperbrowse::browser
         HPEN selectedBorderPen_{};
         HPEN rubberBandPen_{};
         std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> placeholderArt_;
+        std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> unavailableThumbnailArt_;
         ThemeColors colors_{};
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;

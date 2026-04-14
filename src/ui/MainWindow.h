@@ -43,6 +43,7 @@ namespace hyperbrowse::viewer
 namespace hyperbrowse::ui
 {
     class DiagnosticsWindow;
+    class ToolbarIconLibrary;
 
     class MainWindow
     {
@@ -95,6 +96,7 @@ namespace hyperbrowse::ui
             COLORREF windowBackground;
             COLORREF paneBackground;
             COLORREF text;
+            COLORREF mutedText;
             COLORREF treeLine;
             COLORREF splitter;
             COLORREF actionStripBackground;
@@ -105,17 +107,31 @@ namespace hyperbrowse::ui
             COLORREF accentText;
         };
 
-        struct ActionStripVisualState
+        enum class ToolbarItemKind
         {
-            std::wstring sortLabel;
-            std::wstring sizeText;
-            std::wstring themeText;
-            bool recursiveChecked{};
-            bool thumbnailsChecked{};
-            bool detailsChecked{};
-            bool sizeButtonEnabled{};
-            bool selectionActionsEnabled{};
-            ThemeMode themeMode{ThemeMode::Light};
+            IconButton,
+            IconToggle,
+            IconDropdown,
+            Separator,
+            FilterEdit,
+        };
+
+        enum class ToolbarAlignment
+        {
+            Left,
+            Right,
+        };
+
+        struct ToolbarItem
+        {
+            UINT commandId{};
+            std::string iconName;
+            std::wstring tooltip;
+            ToolbarItemKind kind{ToolbarItemKind::IconButton};
+            ToolbarAlignment alignment{ToolbarAlignment::Left};
+            bool enabled{true};
+            bool checked{};
+            RECT rect{};
         };
 
         bool RegisterWindowClass() const;
@@ -140,8 +156,7 @@ namespace hyperbrowse::ui
         std::wstring GetSelectedFolderTreePath() const;
         void LayoutChildren();
         void UpdateStatusText() const;
-        void UpdateMenuState() const;
-        void UpdateActionStripState() const;
+        void UpdateMenuState();
         void UpdateWindowTitle() const;
         void ApplyViewerTransitionSettings();
         void ApplyTheme();
@@ -164,9 +179,11 @@ namespace hyperbrowse::ui
         void ShowDiagnosticsSnapshot();
         void ResetDiagnosticsState();
         void ShowImageInformation();
+        void StartRenameSelectedImage();
         void StartCopySelection();
         void StartMoveSelection();
         void StartDeleteSelection(bool permanent);
+        void StartFolderTreeRename(std::wstring folderPath);
         void StartFolderTreeDelete(std::wstring folderPath, bool permanent);
         void StartFileOperation(services::FileOperationType type,
                     std::vector<std::wstring> sourcePaths,
@@ -203,12 +220,16 @@ namespace hyperbrowse::ui
         void ToggleRecursiveBrowsing();
         void ApplyThumbnailDisplaySettings();
         void SetThemeMode(ThemeMode themeMode);
-        void ShowSortActionMenu();
-        void ShowThumbnailSizeActionMenu();
-        void ShowThemeActionMenu();
         void UpdateDetailsStripText();
         ThemePalette GetThemePalette() const;
-        bool DrawActionButton(const DRAWITEMSTRUCT& drawItem) const;
+        void InitToolbarItems();
+        void LayoutToolbar();
+        void PaintToolbar(HDC hdc, const RECT& stripRect);
+        int ToolbarHitTest(int x, int y) const;
+        void ToolbarHandleClick(int itemIndex);
+        void ShowDropdownForItem(int itemIndex);
+        void UpdateToolbarItemStates();
+        void InvalidateToolbarStrip();
 
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -223,25 +244,21 @@ namespace hyperbrowse::ui
 
         HINSTANCE instance_{};
         HWND hwnd_{};
-        HWND openFolderButton_{};
-        HWND recursiveButton_{};
-        HWND thumbnailModeButton_{};
-        HWND detailsModeButton_{};
-        HWND sortMenuButton_{};
-        HWND sizeMenuButton_{};
-        HWND themeMenuButton_{};
         HWND filterEdit_{};
-        HWND copyButton_{};
-        HWND moveButton_{};
-        HWND deleteButton_{};
         HWND treePane_{};
         HWND browserPane_{};
         HWND statusBar_{};
         HWND detailsStrip_{};
+        HWND tooltipControl_{};
         HIMAGELIST treeImageList_{};
         HMENU menu_{};
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
+        int toolbarHotIndex_{-1};
+        int toolbarPressedIndex_{-1};
+        bool toolbarMouseTracking_{};
+        std::vector<ToolbarItem> toolbarItems_;
+        std::unique_ptr<ToolbarIconLibrary> toolbarIconLibrary_;
         BrowserMode browserMode_{BrowserMode::Thumbnails};
         ThemeMode themeMode_{ThemeMode::Light};
         bool recursiveBrowsingEnabled_{false};
@@ -274,6 +291,7 @@ namespace hyperbrowse::ui
         std::wstring batchConvertOutputFolder_;
         std::wstring batchConvertCurrentFile_;
         std::wstring activeTreeFolderOperationPath_;
+        std::wstring activeTreeFolderRenamePath_;
         std::wstring pendingFolderWatchReloadPath_;
         bool pendingFolderWatchTreeRefresh_{};
         std::wstring activeFileOperationLabel_;
@@ -290,7 +308,5 @@ namespace hyperbrowse::ui
         viewer::TransitionStyle slideshowTransitionStyle_{};
         UINT slideshowTransitionDurationMs_{350};
         bool detailsStripVisible_{true};
-        mutable bool actionStripVisualStateInitialized_{};
-        mutable ActionStripVisualState actionStripVisualState_{};
     };
 }

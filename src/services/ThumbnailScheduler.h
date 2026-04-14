@@ -14,6 +14,11 @@
 
 #include "cache/ThumbnailCache.h"
 
+namespace hyperbrowse::decode
+{
+    enum class ThumbnailDecodeFailureKind : int;
+}
+
 namespace hyperbrowse::services
 {
     struct ThumbnailWorkItem
@@ -50,6 +55,8 @@ namespace hyperbrowse::services
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
 
         std::shared_ptr<const cache::CachedThumbnail> FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const;
+        bool HasKnownFailure(const cache::ThumbnailCacheKey& key) const;
+        decode::ThumbnailDecodeFailureKind KnownFailureKind(const cache::ThumbnailCacheKey& key) const;
         std::size_t CacheBytes() const;
         std::size_t CacheCapacityBytes() const;
         std::size_t WorkerCount() const;
@@ -99,6 +106,7 @@ namespace hyperbrowse::services
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> queuedKeys_;
         std::unordered_map<cache::ThumbnailCacheKey, std::vector<InflightDecode>, cache::ThumbnailCacheKeyHasher> inflightJobs_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> requestedKeys_;
+        std::unordered_map<cache::ThumbnailCacheKey, decode::ThumbnailDecodeFailureKind, cache::ThumbnailCacheKeyHasher> failedKeys_;
         std::vector<std::thread> generalWorkers_;
         std::vector<std::thread> rawWorkers_;
         cache::ThumbnailCache cache_;

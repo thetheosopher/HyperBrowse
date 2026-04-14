@@ -16,6 +16,7 @@ set(HYPERBROWSE_INSTALLER_DOC_DIR "docs")
 set(HYPERBROWSE_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseVersion.rc")
 set(HYPERBROWSE_PORTABLE_README "${CMAKE_CURRENT_BINARY_DIR}/PortableREADME.txt")
 set(HYPERBROWSE_RUNTIME_DEPENDENCIES "${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.txt")
+set(HYPERBROWSE_TOOLBAR_ICONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/toolbar-icons")
 
 option(HYPERBROWSE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(HYPERBROWSE_BUILD_TESTS "Build placeholder tests" ON)
@@ -80,6 +81,7 @@ add_executable(HyperBrowse WIN32
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
     src/ui/MainWindow.cpp
+    src/ui/ToolbarIconLibrary.cpp
     src/util/Diagnostics.cpp
     src/util/Log.cpp
     src/viewer/ViewerWindow.cpp
@@ -88,6 +90,7 @@ add_executable(HyperBrowse WIN32
 
 target_include_directories(HyperBrowse PRIVATE
     src
+    external/nanosvg
 )
 
 target_link_libraries(HyperBrowse PRIVATE
@@ -167,6 +170,12 @@ set_target_properties(HyperBrowse PROPERTIES
     VERSION ${PROJECT_VERSION}
 )
 
+add_custom_command(TARGET HyperBrowse POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HyperBrowse>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${HYPERBROWSE_TOOLBAR_ICONS_DIR}"
+        "$<TARGET_FILE_DIR:HyperBrowse>/assets/toolbar-icons")
+
 if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
     foreach(_hyperbrowse_cuda_runtime_dll IN LISTS HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
         add_custom_command(TARGET HyperBrowse POST_BUILD
@@ -213,6 +222,14 @@ install(FILES "${HYPERBROWSE_RUNTIME_DEPENDENCIES}"
     DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
     COMPONENT Runtime
     RENAME "runtime-dependencies.txt")
+
+install(DIRECTORY "${HYPERBROWSE_TOOLBAR_ICONS_DIR}/"
+    DESTINATION "assets/toolbar-icons"
+    COMPONENT Portable)
+
+install(DIRECTORY "${HYPERBROWSE_TOOLBAR_ICONS_DIR}/"
+    DESTINATION "${HYPERBROWSE_INSTALLER_BIN_DIR}/assets/toolbar-icons"
+    COMPONENT Runtime)
 
 if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
     install(PROGRAMS ${HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS}

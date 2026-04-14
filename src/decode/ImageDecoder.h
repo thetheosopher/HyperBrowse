@@ -10,6 +10,13 @@
 
 namespace hyperbrowse::decode
 {
+    enum class ThumbnailDecodeFailureKind : int
+    {
+        None = 0,
+        DecodeFailed = 1,
+        TimedOut = 2,
+    };
+
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
     enum class LibRawHelperMode
     {
@@ -45,14 +52,18 @@ namespace hyperbrowse::decode
     bool IsRawFileType(std::wstring_view fileType);
     bool CanDecodeThumbnail(const browser::BrowserItem& item);
     bool CanDecodeFullImage(const browser::BrowserItem& item);
+    ThumbnailDecodeFailureKind ClassifyThumbnailDecodeFailure(std::wstring_view errorMessage);
 
     std::shared_ptr<const cache::CachedThumbnail> DecodeThumbnailCpuOnly(const cache::ThumbnailCacheKey& key,
-                                                                         std::wstring* errorMessage = nullptr);
+                                                                         std::wstring* errorMessage = nullptr,
+                                                                         ThumbnailDecodeFailureKind* failureKind = nullptr);
     std::shared_ptr<const cache::CachedThumbnail> DecodeThumbnail(const cache::ThumbnailCacheKey& key,
-                                                                  std::wstring* errorMessage = nullptr);
+                                                                  std::wstring* errorMessage = nullptr,
+                                                                  ThumbnailDecodeFailureKind* failureKind = nullptr);
     std::vector<std::shared_ptr<const cache::CachedThumbnail>> DecodeThumbnailBatch(
         const std::vector<cache::ThumbnailCacheKey>& keys,
-        std::vector<std::wstring>* errorMessages = nullptr);
+        std::vector<std::wstring>* errorMessages = nullptr,
+        std::vector<ThumbnailDecodeFailureKind>* failureKinds = nullptr);
     std::shared_ptr<const cache::CachedThumbnail> DecodeFullImage(const browser::BrowserItem& item,
                                                                   std::wstring* errorMessage);
 }

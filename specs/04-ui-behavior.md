@@ -60,6 +60,7 @@ Keep menus compact and practical.
 - Sort By (submenu: Filename, Modified Date, File Size, Dimensions, Type, Random)
 - Slideshow from Selection
 - Slideshow from Folder
+- Slideshow Transition (Cut / Crossfade / Slide / Ken Burns, duration presets: 200 / 350 / 500 / 800 / 1200 / 2000 ms)
 - Theme (Light / Dark)
 - Enable NVIDIA JPEG Acceleration
 - Use Out-of-Process LibRaw Fallback
@@ -258,6 +259,7 @@ Note: Configurable slideshow interval is not yet exposed in the UI. The API acce
 - `Ctrl+2`: details mode
 - `Ctrl+R`: recursive browsing toggle
 - `Ctrl+Shift+S`: slideshow from selection
+- `Ctrl+Shift+F`: slideshow from folder
 - `Ctrl+L`: light theme
 - `Ctrl+D`: dark theme
 - `Ctrl+Shift+D`: diagnostics snapshot

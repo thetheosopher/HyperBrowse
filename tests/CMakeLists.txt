@@ -16,6 +16,7 @@ add_executable(HyperBrowseTests
     ../src/render/D2DRenderer.cpp
     ../src/ui/DiagnosticsWindow.cpp
     ../src/ui/MainWindow.cpp
+    ../src/ui/ToolbarIconLibrary.cpp
     ../src/services/ThumbnailScheduler.cpp
     ../src/util/Diagnostics.cpp
     ../src/util/Log.cpp
@@ -27,6 +28,7 @@ target_compile_features(HyperBrowseTests PRIVATE cxx_std_20)
 
 target_include_directories(HyperBrowseTests PRIVATE
     ../src
+    ../external/nanosvg
 )
 
 target_link_libraries(HyperBrowseTests PRIVATE
@@ -71,5 +73,11 @@ endif()
 target_compile_definitions(HyperBrowseTests PRIVATE
     HYPERBROWSE_TESTS_SOURCE_DIR=L"${CMAKE_CURRENT_SOURCE_DIR}"
 )
+
+add_custom_command(TARGET HyperBrowseTests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HyperBrowseTests>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/../assets/toolbar-icons"
+        "$<TARGET_FILE_DIR:HyperBrowseTests>/assets/toolbar-icons")
 
 add_test(NAME HyperBrowseSmoke COMMAND HyperBrowseTests)

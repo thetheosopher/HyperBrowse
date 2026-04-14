@@ -62,7 +62,9 @@ namespace
     {
         std::uint64_t expectedSessionId{};
         int readyCount{};
+        int failedCount{};
         std::vector<std::wstring> readyPaths;
+        std::vector<std::wstring> failedPaths;
     };
 
     struct FolderTreeEnumerationResult
@@ -74,12 +76,20 @@ namespace
         bool failed{};
     };
 
+    struct FileOperationResult
+    {
+        std::uint64_t expectedRequestId{};
+        hyperbrowse::services::FileOperationUpdate update;
+        bool completed{};
+    };
+
     struct TestWindowState
     {
         std::uint64_t expectedRequestId{};
         EnumerationResult enumerationResult;
         ThumbnailResult thumbnailResult;
         FolderTreeEnumerationResult folderTreeEnumerationResult;
+        FileOperationResult fileOperationResult;
     };
 
     class ComScope
@@ -443,6 +453,11 @@ namespace
                 ++state->thumbnailResult.readyCount;
                 state->thumbnailResult.readyPaths.push_back(update->cacheKey.filePath);
             }
+            else
+            {
+                ++state->thumbnailResult.failedCount;
+                state->thumbnailResult.failedPaths.push_back(update->cacheKey.filePath);
+            }
             return 0;
         }
 
@@ -468,6 +483,20 @@ namespace
             default:
                 return 0;
             }
+        }
+
+        if (message == hyperbrowse::services::FileOperationService::kMessageId)
+        {
+            std::unique_ptr<hyperbrowse::services::FileOperationUpdate> update(
+                reinterpret_cast<hyperbrowse::services::FileOperationUpdate*>(lParam));
+            if (!state || !update || update->requestId != state->fileOperationResult.expectedRequestId)
+            {
+                return 0;
+            }
+
+            state->fileOperationResult.update = std::move(*update);
+            state->fileOperationResult.completed = true;
+            return 0;
         }
 
         return DefWindowProcW(hwnd, message, wParam, lParam);
@@ -905,6 +934,35 @@ namespace
         Expect(elapsed < 250, "Batch convert cancellation blocked instead of returning promptly");
     }
 
+    void RunFileRenameOperationScenario(HWND hwnd, TestWindowState* state)
+    {
+        TempFolder root(L"HyperBrowseFileRenameOperation");
+        const fs::path sourcePath = root.Root() / L"before.jpg";
+        const fs::path renamedPath = root.Root() / L"after.jpg";
+        root.WriteFile(L"before.jpg", 16);
+
+        hyperbrowse::services::FileOperationService service;
+        state->fileOperationResult = {};
+        state->fileOperationResult.expectedRequestId = service.Start(
+            hwnd,
+            nullptr,
+            hyperbrowse::services::FileOperationType::Rename,
+            {sourcePath.wstring()},
+            {},
+            hyperbrowse::services::FileConflictPolicy::PromptShell,
+            {L"after.jpg"});
+
+        Expect(PumpMessagesUntil([&]() { return state->fileOperationResult.completed; }, 5000),
+               "File rename operation timed out");
+        Expect(state->fileOperationResult.update.failedCount == 0,
+               "File rename operation reported a failure");
+        Expect(!fs::exists(sourcePath), "The original file still exists after rename");
+        Expect(fs::exists(renamedPath), "The renamed file was not created");
+        Expect(state->fileOperationResult.update.createdPaths.size() == 1
+                   && state->fileOperationResult.update.createdPaths.front() == renamedPath.wstring(),
+               "File rename operation did not report the created path");
+    }
+
         void RunFileConflictPlanningScenario()
         {
          TempFolder root(L"HyperBrowseFileConflictPlanning");
@@ -999,6 +1057,50 @@ namespace
         scheduler.Schedule(7, 2, requests);
         PumpMessagesFor(300);
         Expect(state->thumbnailResult.readyCount == 0, "Cached thumbnails should not be re-decoded on the next schedule pass");
+    }
+
+        void RunThumbnailSchedulerFailureScenario(HWND hwnd, TestWindowState* state)
+        {
+         TempFolder root(L"HyperBrowsePrompt5SchedulerFailure");
+         const fs::path missingRawPath = root.Root() / L"missing.nef";
+         const auto missingRawKey = MakeCacheKey(missingRawPath, 1);
+
+         hyperbrowse::services::ThumbnailScheduler scheduler(8ULL * 1024ULL * 1024ULL, 1);
+         scheduler.BindTargetWindow(hwnd);
+
+         ResetThumbnailResult(state, 8);
+         scheduler.Schedule(8, 1, {{0, missingRawKey, 0, true}});
+         Expect(PumpMessagesUntil([&]() { return state->thumbnailResult.failedCount >= 1; }, 5000),
+             "Thumbnail scheduler did not surface a failed decode update");
+         Expect(state->thumbnailResult.failedPaths.size() == 1
+                 && state->thumbnailResult.failedPaths.front() == missingRawPath.wstring(),
+             "Thumbnail scheduler reported the wrong failed path");
+         Expect(scheduler.FindCachedThumbnail(missingRawKey) == nullptr,
+             "Failed thumbnail decodes should not populate the thumbnail cache");
+         Expect(scheduler.HasKnownFailure(missingRawKey),
+             "Thumbnail scheduler did not retain the failed-thumbnail state");
+         Expect(scheduler.KnownFailureKind(missingRawKey) == hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed,
+             "Thumbnail scheduler misclassified a generic decode failure");
+
+         ResetThumbnailResult(state, 8);
+         scheduler.Schedule(8, 2, {{0, missingRawKey, 0, true}});
+         PumpMessagesFor(300);
+         Expect(state->thumbnailResult.readyCount == 0 && state->thumbnailResult.failedCount == 0,
+             "Known failed thumbnails should not be requeued until the file path is invalidated");
+
+         scheduler.InvalidateFilePaths({missingRawPath.wstring()});
+         Expect(!scheduler.HasKnownFailure(missingRawKey),
+             "Invalidating a file path should clear the scheduler's known-failure state");
+        }
+
+    void RunThumbnailFailureClassificationScenario()
+    {
+        Expect(hyperbrowse::decode::ClassifyThumbnailDecodeFailure(L"The RAW helper timed out and was terminated.")
+                   == hyperbrowse::decode::ThumbnailDecodeFailureKind::TimedOut,
+               "Timeout classification did not detect a helper timeout");
+        Expect(hyperbrowse::decode::ClassifyThumbnailDecodeFailure(L"Failed to process the RAW thumbnail fallback.")
+                   == hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed,
+               "Decode-failure classification misidentified a generic decode failure");
     }
 
         void RunThumbnailSchedulerWorkerAllocationScenario()
@@ -1548,9 +1650,12 @@ int main()
         RunWicDecoderScenario();
         RunJpegOrientationAdjustmentScenario();
         RunBatchConvertCancellationScenario(hwnd);
+        RunFileRenameOperationScenario(hwnd, &state);
         RunFileConflictPlanningScenario();
         RunThumbnailSchedulerWorkerAllocationScenario();
         RunThumbnailSchedulerScenario(hwnd, &state);
+        RunThumbnailSchedulerFailureScenario(hwnd, &state);
+        RunThumbnailFailureClassificationScenario();
         RunImageMetadataServiceScenario();
         RunRawFormatAllowlistScenario();
         RunRawDecoderScenario();

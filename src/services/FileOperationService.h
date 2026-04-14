@@ -17,6 +17,7 @@ namespace hyperbrowse::services
         Move = 1,
         DeleteRecycleBin = 2,
         DeletePermanent = 3,
+        Rename = 4,
     };
 
     enum class FileConflictPolicy : int

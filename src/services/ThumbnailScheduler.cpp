@@ -7,6 +7,7 @@
 
 #include "decode/ImageDecoder.h"
 #include "util/Diagnostics.h"
+#include "util/PathUtils.h"
 #include "util/ResourceSizing.h"
 
 namespace
@@ -166,7 +167,7 @@ namespace hyperbrowse::services
             for (ThumbnailWorkItem& workItem : workItems)
             {
                 requestedKeys_.insert(workItem.cacheKey);
-                if (cache_.Find(workItem.cacheKey))
+                if (cache_.Find(workItem.cacheKey) || failedKeys_.contains(workItem.cacheKey))
                 {
                     continue;
                 }
@@ -221,11 +222,51 @@ namespace hyperbrowse::services
     void ThumbnailScheduler::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
     {
         cache_.InvalidateFilePaths(filePaths);
+
+        if (filePaths.empty())
+        {
+            return;
+        }
+
+        std::vector<std::wstring> normalizedPaths;
+        normalizedPaths.reserve(filePaths.size());
+        for (const std::wstring& filePath : filePaths)
+        {
+            normalizedPaths.push_back(util::NormalizePathForComparison(filePath));
+        }
+
+        std::scoped_lock lock(mutex_);
+        for (auto iterator = failedKeys_.begin(); iterator != failedKeys_.end();)
+        {
+            if (std::find(normalizedPaths.begin(), normalizedPaths.end(), util::NormalizePathForComparison(iterator->first.filePath))
+                == normalizedPaths.end())
+            {
+                ++iterator;
+                continue;
+            }
+
+            iterator = failedKeys_.erase(iterator);
+        }
     }
 
     std::shared_ptr<const cache::CachedThumbnail> ThumbnailScheduler::FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const
     {
         return cache_.Find(key);
+    }
+
+    bool ThumbnailScheduler::HasKnownFailure(const cache::ThumbnailCacheKey& key) const
+    {
+        std::scoped_lock lock(mutex_);
+        return failedKeys_.contains(key);
+    }
+
+    decode::ThumbnailDecodeFailureKind ThumbnailScheduler::KnownFailureKind(const cache::ThumbnailCacheKey& key) const
+    {
+        std::scoped_lock lock(mutex_);
+        const auto iterator = failedKeys_.find(key);
+        return iterator == failedKeys_.end()
+            ? decode::ThumbnailDecodeFailureKind::None
+            : iterator->second;
     }
 
     std::size_t ThumbnailScheduler::CacheBytes() const
@@ -403,6 +444,7 @@ namespace hyperbrowse::services
             std::vector<std::shared_ptr<const cache::CachedThumbnail>> thumbnails(jobs.size());
             std::vector<std::size_t> missingIndices;
             std::vector<cache::ThumbnailCacheKey> missingKeys;
+            std::vector<decode::ThumbnailDecodeFailureKind> failureKinds(jobs.size(), decode::ThumbnailDecodeFailureKind::None);
             missingIndices.reserve(jobs.size());
             missingKeys.reserve(jobs.size());
             for (std::size_t index = 0; index < jobs.size(); ++index)
@@ -417,22 +459,26 @@ namespace hyperbrowse::services
 
             if (missingKeys.size() > 1)
             {
-                std::vector<std::shared_ptr<const cache::CachedThumbnail>> decodedBatch = decode::DecodeThumbnailBatch(missingKeys);
+                std::vector<decode::ThumbnailDecodeFailureKind> decodedFailureKinds;
+                std::vector<std::shared_ptr<const cache::CachedThumbnail>> decodedBatch = decode::DecodeThumbnailBatch(missingKeys, nullptr, &decodedFailureKinds);
                 for (std::size_t index = 0; index < missingIndices.size(); ++index)
                 {
                     thumbnails[missingIndices[index]] = std::move(decodedBatch[index]);
+                    failureKinds[missingIndices[index]] = decodedFailureKinds[index];
                 }
             }
             else if (missingKeys.size() == 1)
             {
+                decode::ThumbnailDecodeFailureKind failureKind = decode::ThumbnailDecodeFailureKind::None;
                 if (jobs.front().workItem.preferCpu)
                 {
-                    thumbnails[missingIndices.front()] = decode::DecodeThumbnailCpuOnly(missingKeys.front());
+                    thumbnails[missingIndices.front()] = decode::DecodeThumbnailCpuOnly(missingKeys.front(), nullptr, &failureKind);
                 }
                 else
                 {
-                    thumbnails[missingIndices.front()] = decode::DecodeThumbnail(missingKeys.front());
+                    thumbnails[missingIndices.front()] = decode::DecodeThumbnail(missingKeys.front(), nullptr, &failureKind);
                 }
+                failureKinds[missingIndices.front()] = failureKind;
             }
 
             for (std::size_t index = 0; index < jobs.size(); ++index)
@@ -446,6 +492,17 @@ namespace hyperbrowse::services
                 bool shouldNotify = false;
                 {
                     std::scoped_lock lock(mutex_);
+                    if (thumbnail)
+                    {
+                        failedKeys_.erase(jobs[index].workItem.cacheKey);
+                    }
+                    else
+                    {
+                        failedKeys_[jobs[index].workItem.cacheKey] = failureKinds[index] == decode::ThumbnailDecodeFailureKind::None
+                            ? decode::ThumbnailDecodeFailureKind::DecodeFailed
+                            : failureKinds[index];
+                    }
+
                     const auto inflight = inflightJobs_.find(jobs[index].workItem.cacheKey);
                     if (inflight != inflightJobs_.end())
                     {
@@ -466,7 +523,6 @@ namespace hyperbrowse::services
                     }
 
                     shouldNotify = targetWindow_ != nullptr
-                        && thumbnail != nullptr
                         && jobs[index].sessionId == activeSessionId_
                         && (jobs[index].requestEpoch == activeRequestEpoch_ || requestedKeys_.contains(jobs[index].workItem.cacheKey));
                 }
@@ -477,9 +533,9 @@ namespace hyperbrowse::services
                               jobs[index].requestEpoch,
                               jobs[index].workItem.modelIndex,
                               jobs[index].workItem.cacheKey,
-                              thumbnail->SourceWidth(),
-                              thumbnail->SourceHeight(),
-                              true);
+                              thumbnail ? thumbnail->SourceWidth() : 0,
+                              thumbnail ? thumbnail->SourceHeight() : 0,
+                              thumbnail != nullptr);
                 }
             }
         }

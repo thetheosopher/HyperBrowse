@@ -35,6 +35,24 @@ namespace
     std::atomic_bool g_libRawOutOfProcessEnabled{true};
     constexpr DWORD kRawHelperThumbnailTimeoutMs = 8000;
     constexpr DWORD kRawHelperFullImageTimeoutMs = 30000;
+
+    hyperbrowse::decode::ThumbnailDecodeFailureKind ClassifyThumbnailFailureKindFromMessage(std::wstring_view errorMessage)
+    {
+        if (errorMessage.empty())
+        {
+            return hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed;
+        }
+
+        std::wstring normalized(errorMessage);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](wchar_t value)
+        {
+            return static_cast<wchar_t>(towlower(value));
+        });
+
+        return normalized.find(L"timed out") != std::wstring::npos
+            ? hyperbrowse::decode::ThumbnailDecodeFailureKind::TimedOut
+            : hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed;
+    }
     constexpr const wchar_t* kRawHelperExecutableName = L"HyperBrowseRawHelper.exe";
 
     std::wstring NormalizeFileType(std::wstring_view fileType)
@@ -756,9 +774,15 @@ namespace
     }
 
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeRawThumbnail(const hyperbrowse::cache::ThumbnailCacheKey& key,
-                                                                                   std::wstring* errorMessage)
+                                                                                   std::wstring* errorMessage,
+                                                                                   hyperbrowse::decode::ThumbnailDecodeFailureKind* failureKind)
     {
         hyperbrowse::util::Stopwatch decodeStopwatch;
+        if (failureKind)
+        {
+            *failureKind = hyperbrowse::decode::ThumbnailDecodeFailureKind::None;
+        }
+
         LibRaw processor;
         int result = OpenRawFile(processor, key.filePath);
         if (result != LIBRAW_SUCCESS)
@@ -766,6 +790,10 @@ namespace
             if (errorMessage)
             {
                 *errorMessage = L"Failed to open the RAW image: " + WideErrorString(libraw_strerror(result));
+            }
+            if (failureKind)
+            {
+                *failureKind = hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed;
             }
             return {};
         }
@@ -776,6 +804,10 @@ namespace
             if (errorMessage)
             {
                 *errorMessage = L"Failed to inspect the RAW metadata: " + WideErrorString(libraw_strerror(result));
+            }
+            if (failureKind)
+            {
+                *failureKind = hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed;
             }
             return {};
         }
@@ -827,6 +859,10 @@ namespace
             {
                 *errorMessage = L"Failed to reopen the RAW image for thumbnail fallback: " + WideErrorString(libraw_strerror(result));
             }
+            if (failureKind)
+            {
+                *failureKind = hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed;
+            }
             return {};
         }
 
@@ -838,6 +874,10 @@ namespace
             {
                 *errorMessage = L"Failed to unpack the RAW thumbnail fallback: " + WideErrorString(libraw_strerror(result));
             }
+            if (failureKind)
+            {
+                *failureKind = hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed;
+            }
             return {};
         }
 
@@ -847,6 +887,10 @@ namespace
             if (errorMessage)
             {
                 *errorMessage = L"Failed to process the RAW thumbnail fallback: " + WideErrorString(libraw_strerror(result));
+            }
+            if (failureKind)
+            {
+                *failureKind = hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed;
             }
             return {};
         }
@@ -862,6 +906,10 @@ namespace
         if (image)
         {
             LibRaw::dcraw_clear_mem(image);
+        }
+        if (!decodedImage && failureKind)
+        {
+            *failureKind = hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed;
         }
         hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw.fallback_full", decodeStopwatch.ElapsedMilliseconds());
         return decodedImage;
@@ -943,11 +991,21 @@ namespace
     }
 
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeRawThumbnailWithHelper(const hyperbrowse::cache::ThumbnailCacheKey& key,
-                                                                                             std::wstring* errorMessage)
+                                                                                             std::wstring* errorMessage,
+                                                                                             hyperbrowse::decode::ThumbnailDecodeFailureKind* failureKind)
     {
+        if (failureKind)
+        {
+            *failureKind = hyperbrowse::decode::ThumbnailDecodeFailureKind::None;
+        }
+
         std::wstring outputPath = CreateTemporaryOutputPath(errorMessage);
         if (outputPath.empty())
         {
+            if (failureKind)
+            {
+                *failureKind = hyperbrowse::decode::ClassifyThumbnailDecodeFailure(errorMessage ? *errorMessage : std::wstring_view{});
+            }
             return {};
         }
 
@@ -964,6 +1022,10 @@ namespace
         DeleteFileW(outputPath.c_str());
         if (!success)
         {
+            if (failureKind)
+            {
+                *failureKind = hyperbrowse::decode::ClassifyThumbnailDecodeFailure(errorMessage ? *errorMessage : std::wstring_view{});
+            }
             hyperbrowse::util::IncrementCounter(L"thumbnail.decode.raw.helper.failures");
             return {};
         }
@@ -1103,7 +1165,7 @@ namespace hyperbrowse::decode
             cacheKey.filePath = invocation.filePath;
             cacheKey.targetWidth = invocation.targetWidth;
             cacheKey.targetHeight = invocation.targetHeight;
-            decodedImage = DecodeRawThumbnail(cacheKey, errorMessage);
+            decodedImage = DecodeRawThumbnail(cacheKey, errorMessage, nullptr);
         }
         else
         {
@@ -1190,10 +1252,21 @@ namespace hyperbrowse::decode
         return IsWicFileType(item.fileType) || IsRawFileType(item.fileType);
     }
 
+    ThumbnailDecodeFailureKind ClassifyThumbnailDecodeFailure(std::wstring_view errorMessage)
+    {
+        return ClassifyThumbnailFailureKindFromMessage(errorMessage);
+    }
+
     std::shared_ptr<const cache::CachedThumbnail> DecodeThumbnailCpuOnly(const cache::ThumbnailCacheKey& key,
-                                                                         std::wstring* errorMessage)
+                                                                         std::wstring* errorMessage,
+                                                                         ThumbnailDecodeFailureKind* failureKind)
     {
         hyperbrowse::util::Stopwatch stopwatch;
+        if (failureKind)
+        {
+            *failureKind = ThumbnailDecodeFailureKind::None;
+        }
+
         const std::wstring fileType = FileTypeFromPath(key.filePath);
         if (IsWicFileType(fileType))
         {
@@ -1203,6 +1276,10 @@ namespace hyperbrowse::decode
             if (fileType == L"jpg" || fileType == L"jpeg")
             {
                 hyperbrowse::util::RecordTiming(L"thumbnail.decode.jpeg.cpu", elapsedMs);
+            }
+            if (!thumbnail && failureKind)
+            {
+                *failureKind = ThumbnailDecodeFailureKind::DecodeFailed;
             }
             return thumbnail;
         }
@@ -1216,15 +1293,26 @@ namespace hyperbrowse::decode
             }
 
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
+            ThumbnailDecodeFailureKind rawFailureKind = ThumbnailDecodeFailureKind::None;
             auto thumbnail = IsLibRawOutOfProcessEnabled() && IsLibRawHelperExecutableAvailable()
-                ? DecodeRawThumbnailWithHelper(key, errorMessage)
-                : DecodeRawThumbnail(key, errorMessage);
+                ? DecodeRawThumbnailWithHelper(key, errorMessage, &rawFailureKind)
+                : DecodeRawThumbnail(key, errorMessage, &rawFailureKind);
             hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw", stopwatch.ElapsedMilliseconds());
+            if (!thumbnail && failureKind)
+            {
+                *failureKind = rawFailureKind == ThumbnailDecodeFailureKind::None
+                    ? ThumbnailDecodeFailureKind::DecodeFailed
+                    : rawFailureKind;
+            }
             return thumbnail;
 #else
             if (errorMessage)
             {
                 *errorMessage = L"This build does not include LibRaw support for the configured RAW thumbnail formats.";
+            }
+            if (failureKind)
+            {
+                *failureKind = ThumbnailDecodeFailureKind::DecodeFailed;
             }
             return {};
 #endif
@@ -1234,13 +1322,23 @@ namespace hyperbrowse::decode
         {
             *errorMessage = L"The selected file type is not supported for thumbnail decode.";
         }
+        if (failureKind)
+        {
+            *failureKind = ThumbnailDecodeFailureKind::DecodeFailed;
+        }
         return {};
     }
 
     std::shared_ptr<const cache::CachedThumbnail> DecodeThumbnail(const cache::ThumbnailCacheKey& key,
-                                                                  std::wstring* errorMessage)
+                                                                  std::wstring* errorMessage,
+                                                                  ThumbnailDecodeFailureKind* failureKind)
     {
         hyperbrowse::util::Stopwatch stopwatch;
+        if (failureKind)
+        {
+            *failureKind = ThumbnailDecodeFailureKind::None;
+        }
+
         const std::wstring fileType = FileTypeFromPath(key.filePath);
         const bool isJpeg = fileType == L"jpg" || fileType == L"jpeg";
         if (isJpeg && IsNvJpegAccelerationEnabled() && IsNvJpegRuntimeAvailable())
@@ -1259,17 +1357,22 @@ namespace hyperbrowse::decode
             }
         }
 
-        return DecodeThumbnailCpuOnly(key, errorMessage);
+        return DecodeThumbnailCpuOnly(key, errorMessage, failureKind);
     }
 
     std::vector<std::shared_ptr<const cache::CachedThumbnail>> DecodeThumbnailBatch(
         const std::vector<cache::ThumbnailCacheKey>& keys,
-        std::vector<std::wstring>* errorMessages)
+        std::vector<std::wstring>* errorMessages,
+        std::vector<ThumbnailDecodeFailureKind>* failureKinds)
     {
         std::vector<std::shared_ptr<const cache::CachedThumbnail>> thumbnails(keys.size());
         if (errorMessages)
         {
             errorMessages->assign(keys.size(), std::wstring{});
+        }
+        if (failureKinds)
+        {
+            failureKinds->assign(keys.size(), ThumbnailDecodeFailureKind::None);
         }
 
         if (keys.empty())
@@ -1335,10 +1438,15 @@ namespace hyperbrowse::decode
                 }
 
                 std::wstring fallbackError;
-                thumbnails[index] = DecodeThumbnail(keys[index], &fallbackError);
+                ThumbnailDecodeFailureKind fallbackFailureKind = ThumbnailDecodeFailureKind::None;
+                thumbnails[index] = DecodeThumbnail(keys[index], &fallbackError, &fallbackFailureKind);
                 if (errorMessages)
                 {
                     (*errorMessages)[index] = fallbackError.empty() ? nvJpegErrors[index] : std::move(fallbackError);
+                }
+                if (failureKinds)
+                {
+                    (*failureKinds)[index] = fallbackFailureKind;
                 }
             }
 
@@ -1348,10 +1456,15 @@ namespace hyperbrowse::decode
         for (std::size_t index = 0; index < keys.size(); ++index)
         {
             std::wstring error;
-            thumbnails[index] = DecodeThumbnail(keys[index], &error);
+            ThumbnailDecodeFailureKind batchFailureKind = ThumbnailDecodeFailureKind::None;
+            thumbnails[index] = DecodeThumbnail(keys[index], &error, &batchFailureKind);
             if (errorMessages)
             {
                 (*errorMessages)[index] = std::move(error);
+            }
+            if (failureKinds)
+            {
+                (*failureKinds)[index] = batchFailureKind;
             }
         }
 

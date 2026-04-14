@@ -47,8 +47,33 @@ namespace
     constexpr int kMaximumDetailsMetadataLookAheadItems = 96;
     constexpr int kPlaceholderBrandArtSize = 256;
     constexpr int kPlaceholderIconDisplaySize = 128;
+    constexpr int kUnavailableThumbnailIconSize = 48;
     constexpr int kPlaceholderTitlePointSize = 18;
     constexpr int kPlaceholderBodyPointSize = 13;
+
+    const wchar_t* UnavailableThumbnailMessage(hyperbrowse::decode::ThumbnailDecodeFailureKind failureKind)
+    {
+        switch (failureKind)
+        {
+        case hyperbrowse::decode::ThumbnailDecodeFailureKind::TimedOut:
+            return L"Thumbnail\r\nTimed Out";
+        case hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed:
+        default:
+            return L"Thumbnail\r\nDecode Failed";
+        }
+    }
+
+    const wchar_t* UnavailableThumbnailTooltipText(hyperbrowse::decode::ThumbnailDecodeFailureKind failureKind)
+    {
+        switch (failureKind)
+        {
+        case hyperbrowse::decode::ThumbnailDecodeFailureKind::TimedOut:
+            return L"Thumbnail: generation timed out.";
+        case hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed:
+        default:
+            return L"Thumbnail: generation failed.";
+        }
+    }
 
     hyperbrowse::browser::BrowserPane::ThemeColors MakeThemeColors(bool darkTheme)
     {
@@ -166,6 +191,64 @@ namespace
         return key;
     }
 
+    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> CreateIconThumbnail(HICON iconHandle, int iconSize)
+    {
+        if (!iconHandle || iconSize <= 0)
+        {
+            return {};
+        }
+
+        BITMAPINFO bitmapInfo{};
+        bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bitmapInfo.bmiHeader.biWidth = iconSize;
+        bitmapInfo.bmiHeader.biHeight = -iconSize;
+        bitmapInfo.bmiHeader.biPlanes = 1;
+        bitmapInfo.bmiHeader.biBitCount = 32;
+        bitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+        HDC screenDc = GetDC(nullptr);
+        if (!screenDc)
+        {
+            return {};
+        }
+
+        void* pixels = nullptr;
+        HBITMAP bitmap = CreateDIBSection(screenDc, &bitmapInfo, DIB_RGB_COLORS, &pixels, nullptr, 0);
+        if (!bitmap)
+        {
+            ReleaseDC(nullptr, screenDc);
+            return {};
+        }
+
+        const std::size_t bufferSize = static_cast<std::size_t>(iconSize) * static_cast<std::size_t>(iconSize) * 4U;
+        if (pixels)
+        {
+            ZeroMemory(pixels, bufferSize);
+        }
+
+        HDC memoryDc = CreateCompatibleDC(screenDc);
+        if (!memoryDc)
+        {
+            DeleteObject(bitmap);
+            ReleaseDC(nullptr, screenDc);
+            return {};
+        }
+
+        HGDIOBJ oldBitmap = SelectObject(memoryDc, bitmap);
+        DrawIconEx(memoryDc, 0, 0, iconHandle, iconSize, iconSize, 0, nullptr, DI_NORMAL);
+        SelectObject(memoryDc, oldBitmap);
+        DeleteDC(memoryDc);
+        ReleaseDC(nullptr, screenDc);
+
+        return std::make_shared<const hyperbrowse::cache::CachedThumbnail>(
+            bitmap,
+            iconSize,
+            iconSize,
+            bufferSize,
+            iconSize,
+            iconSize);
+    }
+
     HFONT CreateSystemUiFont()
     {
         NONCLIENTMETRICSW metrics{};
@@ -264,6 +347,7 @@ namespace hyperbrowse::browser
                                                       IDB_HYPERBROWSE_BRAND_PNG,
                                                       kPlaceholderBrandArtSize,
                                                       kPlaceholderBrandArtSize);
+        unavailableThumbnailArt_ = CreateIconThumbnail(LoadIconW(nullptr, IDI_WARNING), 64);
         RebuildThemeResources();
         RebuildThumbnailFonts();
     }
@@ -2412,6 +2496,7 @@ namespace hyperbrowse::browser
         const int targetWidth = layout.previewWidth;
         const int targetHeight = layout.previewHeight;
         const auto cacheKey = MakeThumbnailCacheKey(item, targetWidth, targetHeight);
+        const auto thumbnail = thumbnailScheduler_ ? thumbnailScheduler_->FindCachedThumbnail(cacheKey) : nullptr;
 
         ID2D1SolidColorBrush* statusBrush = selected ? d2dSelectionTextBrush_.Get() : d2dMutedTextBrush_.Get();
 
@@ -2432,9 +2517,15 @@ namespace hyperbrowse::browser
             return;
         }
 
-        const auto thumbnail = thumbnailScheduler_->FindCachedThumbnail(cacheKey);
         if (!thumbnail)
         {
+            const decode::ThumbnailDecodeFailureKind knownFailureKind = thumbnailScheduler_->KnownFailureKind(cacheKey);
+            if (knownFailureKind != decode::ThumbnailDecodeFailureKind::None)
+            {
+                D2DDrawUnavailableThumbnailState(rt, previewRect, knownFailureKind, selected);
+                return;
+            }
+
             const float previewHeight = previewRect.bottom - previewRect.top;
             const float iconSize = static_cast<float>(layout.loadingIconSize);
             const float iconY = previewRect.top + std::max(static_cast<float>(layout.previewInset),
@@ -2471,6 +2562,67 @@ namespace hyperbrowse::browser
                    1.0f,
                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         rt->PopAxisAlignedClip();
+    }
+
+    void BrowserPane::D2DDrawUnavailableThumbnailState(ID2D1RenderTarget* rt,
+                                                       const D2D1_RECT_F& previewRect,
+                                                       decode::ThumbnailDecodeFailureKind failureKind,
+                                                       bool selected) const
+    {
+        if (!rt)
+        {
+            return;
+        }
+
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        ID2D1SolidColorBrush* statusBrush = selected ? d2dSelectionTextBrush_.Get() : d2dMutedTextBrush_.Get();
+        const float previewWidth = previewRect.right - previewRect.left;
+        const float previewHeight = previewRect.bottom - previewRect.top;
+
+        float iconSize = 0.0f;
+        if (unavailableThumbnailArt_)
+        {
+            iconSize = std::min({
+                static_cast<float>(kUnavailableThumbnailIconSize),
+                std::max(0.0f, previewWidth - (layout.textInset * 2.0f)),
+                previewHeight * 0.34f,
+            });
+        }
+
+        float textTop = previewRect.top + (previewHeight * 0.34f);
+        if (iconSize > 0.0f && unavailableThumbnailArt_)
+        {
+            if (ID2D1Bitmap* iconBitmap = GetOrCreateD2DBitmap(rt, *unavailableThumbnailArt_))
+            {
+                const float iconX = previewRect.left + ((previewWidth - iconSize) / 2.0f);
+                const float iconY = previewRect.top + std::max(10.0f, previewHeight * 0.14f);
+                rt->DrawBitmap(iconBitmap,
+                               D2D1::RectF(iconX, iconY, iconX + iconSize, iconY + iconSize),
+                               1.0f,
+                               D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                textTop = iconY + iconSize + std::max(6.0f, static_cast<float>(layout.metaTopGap));
+            }
+        }
+
+        const wchar_t* message = UnavailableThumbnailMessage(failureKind);
+        if (d2dStatusFormat_ && statusBrush)
+        {
+            D2D1_RECT_F statusRect = D2D1::RectF(
+                previewRect.left + layout.textInset,
+                textTop,
+                previewRect.right - layout.textInset,
+                previewRect.bottom - layout.previewInset);
+            d2dStatusFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            d2dStatusFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            d2dStatusFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+            rt->DrawText(message,
+                         static_cast<UINT32>(wcslen(message)),
+                         d2dStatusFormat_.Get(),
+                         statusRect,
+                         statusBrush,
+                         D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            d2dStatusFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        }
     }
 
     void BrowserPane::DrawPlaceholderState(HDC hdc, const RECT& clientRect) const
@@ -2783,6 +2935,7 @@ namespace hyperbrowse::browser
         const int targetWidth = layout.previewWidth;
         const int targetHeight = layout.previewHeight;
         const auto cacheKey = MakeThumbnailCacheKey(item, targetWidth, targetHeight);
+        const auto thumbnail = thumbnailScheduler_ ? thumbnailScheduler_->FindCachedThumbnail(cacheKey) : nullptr;
 
         if (!thumbnailScheduler_ || !decode::CanDecodeThumbnail(item))
         {
@@ -2804,9 +2957,15 @@ namespace hyperbrowse::browser
             return;
         }
 
-        const auto thumbnail = thumbnailScheduler_->FindCachedThumbnail(cacheKey);
         if (!thumbnail)
         {
+            const decode::ThumbnailDecodeFailureKind knownFailureKind = thumbnailScheduler_->KnownFailureKind(cacheKey);
+            if (knownFailureKind != decode::ThumbnailDecodeFailureKind::None)
+            {
+                DrawUnavailableThumbnailState(hdc, previewRect, knownFailureKind, selected);
+                return;
+            }
+
             const int previewWidth = previewRect.right - previewRect.left;
             const int previewHeight = previewRect.bottom - previewRect.top;
             const int iconSize = layout.loadingIconSize;
@@ -2858,6 +3017,57 @@ namespace hyperbrowse::browser
 
         SelectObject(bitmapDc, oldBitmap);
         DeleteDC(bitmapDc);
+    }
+
+    void BrowserPane::DrawUnavailableThumbnailState(HDC hdc,
+                                                    const RECT& previewRect,
+                                                    decode::ThumbnailDecodeFailureKind failureKind,
+                                                    bool selected) const
+    {
+        if (!hdc)
+        {
+            return;
+        }
+
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        const int previewWidth = previewRect.right - previewRect.left;
+        const int previewHeight = previewRect.bottom - previewRect.top;
+        int textTop = previewRect.top + (previewHeight / 3);
+
+        if (unavailableThumbnailArt_)
+        {
+            const int iconSize = std::min({
+                kUnavailableThumbnailIconSize,
+                std::max(0, previewWidth - (layout.textInset * 2)),
+                static_cast<int>(previewHeight * 0.34f),
+            });
+            if (iconSize > 0)
+            {
+                const int iconX = previewRect.left + ((previewWidth - iconSize) / 2);
+                const int iconY = previewRect.top + std::max(10, static_cast<int>(previewHeight * 0.14f));
+                util::DrawBitmapWithAlpha(hdc, *unavailableThumbnailArt_, iconX, iconY, iconSize, iconSize);
+                textTop = iconY + iconSize + std::max(6, layout.metaTopGap);
+            }
+        }
+
+        const wchar_t* message = UnavailableThumbnailMessage(failureKind);
+        SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
+        HGDIOBJ oldFont = thumbnailStatusFont_
+            ? SelectObject(hdc, thumbnailStatusFont_)
+            : static_cast<HGDIOBJ>(nullptr);
+        RECT statusRect{previewRect.left + layout.textInset,
+                        textTop,
+                        previewRect.right - layout.textInset,
+                        previewRect.bottom - layout.previewInset};
+        DrawTextW(hdc,
+              message,
+              -1,
+                  &statusRect,
+                  DT_CENTER | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
+        if (oldFont)
+        {
+            SelectObject(hdc, oldFont);
+        }
     }
 
     std::wstring BrowserPane::BuildListText(int viewIndex, int subItem) const
@@ -2927,6 +3137,18 @@ namespace hyperbrowse::browser
         tooltip.append(FormatByteSize(item->fileSizeBytes));
         tooltip.append(L"\r\nModified: ");
         tooltip.append(item->modifiedDate);
+
+        if (thumbnailScheduler_ && decode::CanDecodeThumbnail(*item))
+        {
+            const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+            const auto cacheKey = MakeThumbnailCacheKey(*item, layout.previewWidth, layout.previewHeight);
+            const decode::ThumbnailDecodeFailureKind failureKind = thumbnailScheduler_->KnownFailureKind(cacheKey);
+            if (failureKind != decode::ThumbnailDecodeFailureKind::None)
+            {
+                tooltip.append(L"\r\n");
+                tooltip.append(UnavailableThumbnailTooltipText(failureKind));
+            }
+        }
 
         const int modelIndex = ModelIndexFromViewIndex(viewIndex);
         const auto metadata = modelIndex >= 0 ? FindCachedMetadataForModelIndex(modelIndex) : nullptr;
@@ -3294,8 +3516,14 @@ namespace hyperbrowse::browser
         {
             std::unique_ptr<services::ThumbnailReadyUpdate> update(
                 reinterpret_cast<services::ThumbnailReadyUpdate*>(lParam));
-            if (!update || !update->success || update->sessionId != thumbnailSessionId_)
+            if (!update || update->sessionId != thumbnailSessionId_)
             {
+                return 0;
+            }
+
+            if (!update->success)
+            {
+                InvalidateThumbnailCellForModelIndex(update->modelIndex);
                 return 0;
             }
 

@@ -205,8 +205,13 @@ namespace
             return S_OK;
         }
 
-        HRESULT STDMETHODCALLTYPE PostRenameItem(DWORD, IShellItem*, LPCWSTR, HRESULT, IShellItem*) override
+        HRESULT STDMETHODCALLTYPE PostRenameItem(DWORD,
+                                                 IShellItem* item,
+                                                 LPCWSTR,
+                                                 HRESULT result,
+                                                 IShellItem* newlyCreated) override
         {
+            RecordResult(item, result, newlyCreated);
             return S_OK;
         }
 
@@ -424,6 +429,8 @@ namespace hyperbrowse::services
     {
         switch (type)
         {
+        case FileOperationType::Rename:
+            return L"Rename";
         case FileOperationType::Move:
             return L"Move";
         case FileOperationType::DeleteRecycleBin:
@@ -440,6 +447,8 @@ namespace hyperbrowse::services
     {
         switch (type)
         {
+        case FileOperationType::Rename:
+            return L"Renaming";
         case FileOperationType::Move:
             return L"Moving";
         case FileOperationType::DeleteRecycleBin:
@@ -554,7 +563,7 @@ namespace hyperbrowse::services
                 }
 
                 const wchar_t* targetLeafName = nullptr;
-                if ((type == FileOperationType::Copy || type == FileOperationType::Move)
+                if ((type == FileOperationType::Copy || type == FileOperationType::Move || type == FileOperationType::Rename)
                     && index < targetLeafNames.size()
                     && !targetLeafNames[index].empty())
                 {
@@ -568,6 +577,11 @@ namespace hyperbrowse::services
                     break;
                 case FileOperationType::Move:
                     result = operation->MoveItem(sourceItem.Get(), destinationItem.Get(), targetLeafName, nullptr);
+                    break;
+                case FileOperationType::Rename:
+                    result = targetLeafName
+                        ? operation->RenameItem(sourceItem.Get(), targetLeafName, nullptr)
+                        : E_INVALIDARG;
                     break;
                 case FileOperationType::DeleteRecycleBin:
                 case FileOperationType::DeletePermanent:
@@ -610,7 +624,7 @@ namespace hyperbrowse::services
 
             if (FAILED(result) && update->succeededSourcePaths.empty())
             {
-                update->failedCount = std::max(update->failedCount, sourcePaths.size());
+                update->failedCount = (std::max)(update->failedCount, sourcePaths.size());
                 update->message = L"The Windows file operation did not complete successfully.";
                 PostUpdate(targetWindow, std::move(update));
                 return;
