@@ -10,9 +10,12 @@
 
 #include <algorithm>
 #include <cwchar>
+#include <cwctype>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <system_error>
+#include <unordered_set>
 #include <vector>
 
 #include "browser/BrowserModel.h"
@@ -50,6 +53,8 @@ namespace
     constexpr wchar_t kRegistryValueSortMode[] = L"SortMode";
     constexpr wchar_t kRegistryValueSortAscending[] = L"SortAscending";
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
+    constexpr wchar_t kRegistryValueSlideshowTransitionStyle[] = L"SlideshowTransitionStyle";
+    constexpr wchar_t kRegistryValueSlideshowTransitionDuration[] = L"SlideshowTransitionDurationMs";
     constexpr wchar_t kRegistryValueDetailsStripVisible[] = L"DetailsStripVisible";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
@@ -104,6 +109,14 @@ namespace
     constexpr UINT ID_VIEW_DETAILS_STRIP = 2209;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CUT = 2303;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE = 2304;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_SLIDE = 2305;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS = 2306;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200 = 2311;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350 = 2312;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500 = 2313;
+    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800 = 2314;
     constexpr UINT ID_ACTION_SORT_MENU = 2401;
     constexpr UINT ID_ACTION_THUMBNAIL_SIZE_MENU = 2402;
     constexpr UINT ID_ACTION_THEME_MENU = 2403;
@@ -116,6 +129,7 @@ namespace
     constexpr int kActionStripPaddingY = 8;
     constexpr int kActionButtonHeight = 28;
     constexpr int kActionButtonGap = 8;
+    constexpr int kActionButtonTextInsetX = 12;
     constexpr int kOpenFolderButtonWidth = 88;
     constexpr int kRecursiveButtonWidth = 76;
     constexpr int kThumbnailButtonWidth = 78;
@@ -127,6 +141,8 @@ namespace
     constexpr int kDeleteButtonWidth = 58;
     constexpr int kFilterEditMinWidth = 160;
     constexpr int kDetailsStripHeight = 22;
+    constexpr std::size_t kIncrementalFolderWatchEventLimit = 64;
+    constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
     {
@@ -202,6 +218,48 @@ namespace
         }
 
         RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+    }
+
+    int MeasureSingleLineTextWidth(HWND hwnd, HFONT font, const std::wstring& text)
+    {
+        if (text.empty())
+        {
+            return 0;
+        }
+
+        HDC hdc = GetDC(hwnd);
+        if (!hdc)
+        {
+            return 0;
+        }
+
+        const HGDIOBJ oldFont = font ? SelectObject(hdc, font) : nullptr;
+        RECT rect{0, 0, 0, 0};
+        DrawTextW(hdc,
+                  text.c_str(),
+                  static_cast<int>(text.size()),
+                  &rect,
+                  DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+
+        if (oldFont)
+        {
+            SelectObject(hdc, oldFont);
+        }
+        ReleaseDC(hwnd, hdc);
+        return rect.right - rect.left;
+    }
+
+    int MeasureActionButtonWidth(HWND button, int minimumWidth)
+    {
+        if (!button)
+        {
+            return minimumWidth;
+        }
+
+        const std::wstring text = ReadWindowText(button);
+        const HFONT font = reinterpret_cast<HFONT>(SendMessageW(button, WM_GETFONT, 0, 0));
+        const int textWidth = MeasureSingleLineTextWidth(button, font, text);
+        return std::max(minimumWidth, textWidth + (kActionButtonTextInsetX * 2) + 4);
     }
 
     bool TryReadStringValue(HKEY key, const wchar_t* valueName, std::wstring* value)
@@ -392,6 +450,47 @@ namespace
         return result == IDOK;
     }
 
+    std::wstring BuildFolderDeleteConfirmationMessage(std::wstring_view folderPath, bool permanent)
+    {
+        const std::wstring folderLabel = GetFolderDisplayName(folderPath);
+        return permanent
+            ? L"Permanently delete the folder \"" + folderLabel + L"\"?\n\nThis cannot be undone."
+            : L"Move the folder \"" + folderLabel + L"\" to the Recycle Bin?";
+    }
+
+    bool ConfirmFolderDeletion(HWND ownerWindow, std::wstring_view folderPath, bool permanent)
+    {
+        const std::wstring prompt = BuildFolderDeleteConfirmationMessage(folderPath, permanent);
+        const int result = MessageBoxW(ownerWindow,
+                                       prompt.c_str(),
+                                       permanent ? L"Permanent Delete Folder" : L"Delete Folder",
+                                       MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2);
+        return result == IDOK;
+    }
+
+    std::wstring FindExistingFolderAncestor(fs::path candidate)
+    {
+        std::error_code error;
+        while (!candidate.empty())
+        {
+            if (fs::is_directory(candidate, error) && !error)
+            {
+                return NormalizeFolderPath(candidate.wstring());
+            }
+
+            error.clear();
+            const fs::path parent = candidate.parent_path();
+            if (parent == candidate)
+            {
+                break;
+            }
+
+            candidate = parent;
+        }
+
+        return {};
+    }
+
     std::wstring JoinLines(const std::vector<std::wstring>& lines)
     {
         std::wstring combined;
@@ -404,6 +503,68 @@ namespace
             combined.append(lines[index]);
         }
         return combined;
+    }
+
+    std::wstring BuildFileConflictContent(std::size_t conflictCount)
+    {
+        if (conflictCount == 1)
+        {
+            return L"1 selected file would use a name that already exists in the destination or is already queued for this operation.";
+        }
+
+        return std::to_wstring(conflictCount)
+            + L" selected files would use names that already exist in the destination or are already queued for this operation.";
+    }
+
+    bool PromptForFileConflictPolicy(HWND ownerWindow,
+                                     hyperbrowse::services::FileOperationType type,
+                                     std::size_t conflictCount,
+                                     hyperbrowse::services::FileConflictPolicy* conflictPolicy)
+    {
+        if (!conflictPolicy)
+        {
+            return false;
+        }
+
+        if (conflictCount == 0)
+        {
+            *conflictPolicy = hyperbrowse::services::FileConflictPolicy::PromptShell;
+            return true;
+        }
+
+        TASKDIALOG_BUTTON buttons[] = {
+            {1001, L"Overwrite target files\nReplace the existing destination files when names collide."},
+            {1002, L"Auto-rename incoming files\nKeep both versions using numeric suffixes like photo.1.jpg and photo.2.jpg."},
+        };
+
+        const std::wstring content = BuildFileConflictContent(conflictCount);
+
+        TASKDIALOGCONFIG config{};
+        config.cbSize = sizeof(config);
+        config.hwndParent = ownerWindow;
+        config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+        config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+        config.pszWindowTitle = type == hyperbrowse::services::FileOperationType::Move
+            ? L"Move Conflicts"
+            : L"Copy Conflicts";
+        config.pszMainIcon = TD_WARNING_ICON;
+        config.pszMainInstruction = L"Conflicting file names were found in the destination.";
+        config.pszContent = content.c_str();
+        config.cButtons = static_cast<UINT>(std::size(buttons));
+        config.pButtons = buttons;
+        config.nDefaultButton = 1002;
+
+        int clickedButton = 0;
+        const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
+        if (FAILED(dialogResult) || clickedButton == IDCANCEL)
+        {
+            return false;
+        }
+
+        *conflictPolicy = clickedButton == 1001
+            ? hyperbrowse::services::FileConflictPolicy::OverwriteExisting
+            : hyperbrowse::services::FileConflictPolicy::AutoRenameNumericSuffix;
+        return true;
     }
 
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target)
@@ -683,6 +844,83 @@ namespace
         }
     }
 
+    hyperbrowse::viewer::TransitionStyle TransitionStyleFromCommandId(UINT commandId)
+    {
+        switch (commandId)
+        {
+        case ID_VIEW_SLIDESHOW_TRANSITION_CUT:
+            return hyperbrowse::viewer::TransitionStyle::Cut;
+        case ID_VIEW_SLIDESHOW_TRANSITION_SLIDE:
+            return hyperbrowse::viewer::TransitionStyle::Slide;
+        case ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS:
+            return hyperbrowse::viewer::TransitionStyle::KenBurns;
+        case ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE:
+        default:
+            return hyperbrowse::viewer::TransitionStyle::Crossfade;
+        }
+    }
+
+    UINT CommandIdFromTransitionStyle(hyperbrowse::viewer::TransitionStyle style)
+    {
+        switch (style)
+        {
+        case hyperbrowse::viewer::TransitionStyle::Cut:
+            return ID_VIEW_SLIDESHOW_TRANSITION_CUT;
+        case hyperbrowse::viewer::TransitionStyle::Slide:
+            return ID_VIEW_SLIDESHOW_TRANSITION_SLIDE;
+        case hyperbrowse::viewer::TransitionStyle::KenBurns:
+            return ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS;
+        case hyperbrowse::viewer::TransitionStyle::Crossfade:
+        default:
+            return ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE;
+        }
+    }
+
+    bool IsTransitionStyleCommand(UINT commandId)
+    {
+        return commandId >= ID_VIEW_SLIDESHOW_TRANSITION_CUT
+            && commandId <= ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS;
+    }
+
+    UINT TransitionDurationFromCommandId(UINT commandId)
+    {
+        switch (commandId)
+        {
+        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200:
+            return 200;
+        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500:
+            return 500;
+        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800:
+            return 800;
+        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350:
+        default:
+            return 350;
+        }
+    }
+
+    UINT CommandIdFromTransitionDuration(UINT durationMs)
+    {
+        if (durationMs <= 275)
+        {
+            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200;
+        }
+        if (durationMs <= 425)
+        {
+            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350;
+        }
+        if (durationMs <= 650)
+        {
+            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500;
+        }
+        return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800;
+    }
+
+    bool IsTransitionDurationCommand(UINT commandId)
+    {
+        return commandId >= ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200
+            && commandId <= ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800;
+    }
+
     bool IsJpegBrowserItem(const hyperbrowse::browser::BrowserItem& item)
     {
         return hyperbrowse::decode::IsWicFileType(item.fileType)
@@ -756,6 +994,7 @@ namespace hyperbrowse::ui
         , folderWatchService_(std::make_unique<services::FolderWatchService>())
         , diagnosticsWindow_(std::make_unique<DiagnosticsWindow>(instance))
         , viewerWindow_(std::make_unique<viewer::ViewerWindow>(instance))
+        , slideshowTransitionStyle_(viewer::TransitionStyle::Crossfade)
     {
     }
 
@@ -807,6 +1046,7 @@ namespace hyperbrowse::ui
         }
 
         LoadWindowState();
+        ApplyViewerTransitionSettings();
 
         hwnd_ = CreateWindowExW(
             0,
@@ -911,10 +1151,12 @@ namespace hyperbrowse::ui
         HMENU viewMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
+        HMENU slideshowTransitionMenu = CreatePopupMenu();
+        HMENU slideshowTransitionDurationMenu = CreatePopupMenu();
         HMENU themeMenu = CreatePopupMenu();
         HMENU helpMenu = CreatePopupMenu();
 
-        if (!menu_ || !fileMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !themeMenu || !helpMenu)
+        if (!menu_ || !fileMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !themeMenu || !helpMenu)
         {
             return false;
         }
@@ -977,6 +1219,17 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection\tCtrl+Shift+S");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder");
+        AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CUT, L"&Cut");
+        AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE, L"&Crossfade");
+        AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_SLIDE, L"S&lide");
+        AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS, L"&Ken Burns");
+        AppendMenuW(slideshowTransitionMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200, L"&200 ms");
+        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350, L"&350 ms");
+        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500, L"&500 ms");
+        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800, L"&800 ms");
+        AppendMenuW(slideshowTransitionMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionDurationMenu), L"&Duration");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionMenu), L"Slideshow &Transition");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
@@ -1447,6 +1700,75 @@ namespace hyperbrowse::ui
         return nullptr;
     }
 
+    HTREEITEM MainWindow::FindFolderTreeItemByPath(const std::wstring& folderPath) const
+    {
+        if (!treePane_ || folderPath.empty())
+        {
+            return nullptr;
+        }
+
+        const std::wstring normalizedPath = NormalizeFolderPath(folderPath);
+        std::function<HTREEITEM(HTREEITEM)> findItem = [&](HTREEITEM parentItem) -> HTREEITEM
+        {
+            HTREEITEM currentItem = parentItem
+                ? TreeView_GetChild(treePane_, parentItem)
+                : TreeView_GetRoot(treePane_);
+            while (currentItem)
+            {
+                FolderTreeNodeData* nodeData = GetFolderTreeNodeData(currentItem);
+                if (nodeData && FolderPathsEqual(nodeData->path, normalizedPath))
+                {
+                    return currentItem;
+                }
+
+                if (HTREEITEM descendant = findItem(currentItem))
+                {
+                    return descendant;
+                }
+
+                currentItem = TreeView_GetNextSibling(treePane_, currentItem);
+            }
+
+            return nullptr;
+        };
+
+        return findItem(nullptr);
+    }
+
+    void MainWindow::InsertFolderTreeFolderIfParentLoaded(const std::wstring& folderPath)
+    {
+        if (!treePane_ || folderPath.empty())
+        {
+            return;
+        }
+
+        const std::wstring normalizedPath = NormalizeFolderPath(folderPath);
+        if (FindFolderTreeItemByPath(normalizedPath))
+        {
+            return;
+        }
+
+        const std::wstring parentPath = NormalizeFolderPath(fs::path(normalizedPath).parent_path().wstring());
+        if (parentPath.empty())
+        {
+            return;
+        }
+
+        const HTREEITEM parentItem = FindFolderTreeItemByPath(parentPath);
+        if (!parentItem)
+        {
+            return;
+        }
+
+        FolderTreeNodeData* parentNodeData = GetFolderTreeNodeData(parentItem);
+        if (!parentNodeData || !parentNodeData->childrenLoaded)
+        {
+            return;
+        }
+
+        InsertFolderTreeItem(parentItem, normalizedPath);
+    }
+
     MainWindow::FolderTreeNodeData* MainWindow::GetFolderTreeNodeData(HTREEITEM item) const
     {
         if (!treePane_ || !item)
@@ -1487,6 +1809,8 @@ namespace hyperbrowse::ui
 
         switch (header->code)
         {
+        case NM_RCLICK:
+            return OnFolderTreeRightClick();
         case TVN_ITEMEXPANDINGW:
             return OnFolderTreeItemExpanding(*reinterpret_cast<const NMTREEVIEWW*>(lParam));
         case TVN_SELCHANGEDW:
@@ -1524,6 +1848,39 @@ namespace hyperbrowse::ui
             RequestFolderTreeChildren(treeView.itemNew.hItem);
         }
 
+        return 0;
+    }
+
+    LRESULT MainWindow::OnFolderTreeRightClick()
+    {
+        if (!treePane_)
+        {
+            return 0;
+        }
+
+        POINT screenPoint{};
+        if (!GetCursorPos(&screenPoint))
+        {
+            return 0;
+        }
+
+        POINT clientPoint = screenPoint;
+        ScreenToClient(treePane_, &clientPoint);
+
+        TVHITTESTINFO hitTest{};
+        hitTest.pt = clientPoint;
+        const HTREEITEM item = TreeView_HitTest(treePane_, &hitTest);
+        if (!item || (hitTest.flags & TVHT_ONITEM) == 0)
+        {
+            return 0;
+        }
+
+        if (!GetFolderTreeNodeData(item) || !TreeView_GetParent(treePane_, item))
+        {
+            return 0;
+        }
+
+        ShowFolderTreeContextMenu(screenPoint, item);
         return 0;
     }
 
@@ -1587,17 +1944,17 @@ namespace hyperbrowse::ui
             buttonRight -= kActionButtonGap;
         };
 
-        placeLeftButton(openFolderButton_, kOpenFolderButtonWidth);
-        placeLeftButton(recursiveButton_, kRecursiveButtonWidth);
-        placeLeftButton(thumbnailModeButton_, kThumbnailButtonWidth);
-        placeLeftButton(detailsModeButton_, kDetailsButtonWidth);
-        placeLeftButton(sortMenuButton_, kSortButtonWidth);
-        placeLeftButton(sizeMenuButton_, kSizeButtonWidth);
-        placeLeftButton(themeMenuButton_, kThemeButtonWidth);
+        placeLeftButton(openFolderButton_, MeasureActionButtonWidth(openFolderButton_, kOpenFolderButtonWidth));
+        placeLeftButton(recursiveButton_, MeasureActionButtonWidth(recursiveButton_, kRecursiveButtonWidth));
+        placeLeftButton(thumbnailModeButton_, MeasureActionButtonWidth(thumbnailModeButton_, kThumbnailButtonWidth));
+        placeLeftButton(detailsModeButton_, MeasureActionButtonWidth(detailsModeButton_, kDetailsButtonWidth));
+        placeLeftButton(sortMenuButton_, MeasureActionButtonWidth(sortMenuButton_, kSortButtonWidth));
+        placeLeftButton(sizeMenuButton_, MeasureActionButtonWidth(sizeMenuButton_, kSizeButtonWidth));
+        placeLeftButton(themeMenuButton_, MeasureActionButtonWidth(themeMenuButton_, kThemeButtonWidth));
 
-        placeRightButton(deleteButton_, kDeleteButtonWidth);
-        placeRightButton(moveButton_, kSelectionActionButtonWidth);
-        placeRightButton(copyButton_, kSelectionActionButtonWidth);
+        placeRightButton(deleteButton_, MeasureActionButtonWidth(deleteButton_, kDeleteButtonWidth));
+        placeRightButton(moveButton_, MeasureActionButtonWidth(moveButton_, kSelectionActionButtonWidth));
+        placeRightButton(copyButton_, MeasureActionButtonWidth(copyButton_, kSelectionActionButtonWidth));
 
         const int filterLeft = buttonLeft;
         const int availableFilterWidth = std::max(0, buttonRight - filterLeft);
@@ -1779,6 +2136,7 @@ namespace hyperbrowse::ui
             return;
         }
 
+        ApplyViewerTransitionSettings();
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
             if (startSlideshow)
@@ -2041,6 +2399,71 @@ namespace hyperbrowse::ui
         DestroyMenu(menu);
     }
 
+    void MainWindow::ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item)
+    {
+        if (!hwnd_ || !treePane_ || !item)
+        {
+            return;
+        }
+
+        const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+        if (!nodeData || nodeData->path.empty() || !TreeView_GetParent(treePane_, item))
+        {
+            return;
+        }
+
+        const std::wstring folderPath = nodeData->path;
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        constexpr UINT kDeleteFolderCommandId = 1;
+        constexpr UINT kDeleteFolderPermanentCommandId = 2;
+
+                if (fileOperationActive_)
+                {
+                    pendingFolderWatchReloadPath_ = update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath;
+                    pendingFolderWatchTreeRefresh_ = true;
+                    return;
+                }
+
+                RefreshFolderTree();
+        AppendMenuW(menu, MF_STRING, kDeleteFolderCommandId, L"&Delete Folder");
+        AppendMenuW(menu, MF_STRING, kDeleteFolderPermanentCommandId, L"Delete Folder &Permanently");
+
+        const UINT enableState = fileOperationActive_ ? MF_GRAYED : MF_ENABLED;
+        EnableMenuItem(menu, kDeleteFolderCommandId, MF_BYCOMMAND | enableState);
+        EnableMenuItem(menu, kDeleteFolderPermanentCommandId, MF_BYCOMMAND | enableState);
+
+            std::vector<std::wstring> foldersToInsertIntoTree;
+        SetForegroundWindow(hwnd_);
+            bool refreshFolderTree = false;
+            bool preferAsyncReload = update.events.size() >= kIncrementalFolderWatchEventLimit;
+        const UINT commandId = TrackPopupMenuEx(
+            menu,
+            TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+            screenPoint.x,
+            screenPoint.y,
+            hwnd_,
+            nullptr);
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+        DestroyMenu(menu);
+
+        switch (commandId)
+        {
+        case kDeleteFolderCommandId:
+            StartFolderTreeDelete(folderPath, false);
+            break;
+        case kDeleteFolderPermanentCommandId:
+            StartFolderTreeDelete(folderPath, true);
+            break;
+        default:
+            break;
+        }
+    }
+
     void MainWindow::ShowDiagnosticsSnapshot()
     {
         if (!diagnosticsWindow_)
@@ -2152,7 +2575,31 @@ namespace hyperbrowse::ui
             return;
         }
 
-        StartFileOperation(services::FileOperationType::Copy, std::vector<std::wstring>(sourcePaths), std::move(destinationFolder));
+        const services::FileConflictPlan conflictPlan = services::PlanDestinationConflicts(
+            sourcePaths,
+            destinationFolder,
+            services::FileConflictPolicy::OverwriteExisting);
+
+        services::FileConflictPolicy conflictPolicy = services::FileConflictPolicy::PromptShell;
+        std::vector<std::wstring> targetLeafNames;
+        if (!PromptForFileConflictPolicy(hwnd_, services::FileOperationType::Copy, conflictPlan.conflictCount, &conflictPolicy))
+        {
+            return;
+        }
+
+        if (conflictPolicy == services::FileConflictPolicy::AutoRenameNumericSuffix)
+        {
+            targetLeafNames = services::PlanDestinationConflicts(
+                sourcePaths,
+                destinationFolder,
+                conflictPolicy).targetLeafNames;
+        }
+
+        StartFileOperation(services::FileOperationType::Copy,
+                           std::vector<std::wstring>(sourcePaths),
+                           std::move(destinationFolder),
+                           conflictPolicy,
+                           std::move(targetLeafNames));
     }
 
     void MainWindow::StartMoveSelection()
@@ -2175,7 +2622,31 @@ namespace hyperbrowse::ui
             return;
         }
 
-        StartFileOperation(services::FileOperationType::Move, std::vector<std::wstring>(sourcePaths), std::move(destinationFolder));
+        const services::FileConflictPlan conflictPlan = services::PlanDestinationConflicts(
+            sourcePaths,
+            destinationFolder,
+            services::FileConflictPolicy::OverwriteExisting);
+
+        services::FileConflictPolicy conflictPolicy = services::FileConflictPolicy::PromptShell;
+        std::vector<std::wstring> targetLeafNames;
+        if (!PromptForFileConflictPolicy(hwnd_, services::FileOperationType::Move, conflictPlan.conflictCount, &conflictPolicy))
+        {
+            return;
+        }
+
+        if (conflictPolicy == services::FileConflictPolicy::AutoRenameNumericSuffix)
+        {
+            targetLeafNames = services::PlanDestinationConflicts(
+                sourcePaths,
+                destinationFolder,
+                conflictPolicy).targetLeafNames;
+        }
+
+        StartFileOperation(services::FileOperationType::Move,
+                           std::vector<std::wstring>(sourcePaths),
+                           std::move(destinationFolder),
+                           conflictPolicy,
+                           std::move(targetLeafNames));
     }
 
     void MainWindow::StartDeleteSelection(bool permanent)
@@ -2192,19 +2663,58 @@ namespace hyperbrowse::ui
             return;
         }
 
-        if (!ConfirmFileDeletion(hwnd_, sourcePaths.size(), permanent))
+        const bool bypassConfirmation = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (!bypassConfirmation && !ConfirmFileDeletion(hwnd_, sourcePaths.size(), permanent))
         {
             return;
         }
 
         StartFileOperation(permanent ? services::FileOperationType::DeletePermanent : services::FileOperationType::DeleteRecycleBin,
                            std::vector<std::wstring>(sourcePaths),
+                           {},
+                           services::FileConflictPolicy::PromptShell,
+                           {});
+    }
+
+    void MainWindow::StartFolderTreeDelete(std::wstring folderPath, bool permanent)
+    {
+        if (folderPath.empty() || fileOperationActive_)
+        {
+            return;
+        }
+
+        folderPath = NormalizeFolderPath(std::move(folderPath));
+
+        std::error_code error;
+        if (!fs::is_directory(fs::path(folderPath), error) || error)
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected folder is no longer available.",
+                        permanent ? L"Permanent Delete Folder" : L"Delete Folder",
+                        MB_OK | MB_ICONINFORMATION);
+            RefreshFolderTree();
+            return;
+        }
+
+        const bool bypassConfirmation = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (!bypassConfirmation && !ConfirmFolderDeletion(hwnd_, folderPath, permanent))
+        {
+            return;
+        }
+
+        activeTreeFolderOperationPath_ = folderPath;
+        StartFileOperation(permanent ? services::FileOperationType::DeletePermanent : services::FileOperationType::DeleteRecycleBin,
+                           {folderPath},
+                           {},
+                           services::FileConflictPolicy::PromptShell,
                            {});
     }
 
     void MainWindow::StartFileOperation(services::FileOperationType type,
                                         std::vector<std::wstring> sourcePaths,
-                                        std::wstring destinationFolder)
+                                        std::wstring destinationFolder,
+                                        services::FileConflictPolicy conflictPolicy,
+                                        std::vector<std::wstring> targetLeafNames)
     {
         if (!fileOperationService_ || sourcePaths.empty() || fileOperationActive_)
         {
@@ -2216,7 +2726,14 @@ namespace hyperbrowse::ui
         activeFileOperationLabel_.append(std::to_wstring(sourcePaths.size()));
         activeFileOperationLabel_.append(L" item(s)");
         fileOperationActive_ = true;
-        activeFileOperationRequestId_ = fileOperationService_->Start(hwnd_, hwnd_, type, std::move(sourcePaths), std::move(destinationFolder));
+        activeFileOperationRequestId_ = fileOperationService_->Start(
+            hwnd_,
+            hwnd_,
+            type,
+            std::move(sourcePaths),
+            std::move(destinationFolder),
+            conflictPolicy,
+            std::move(targetLeafNames));
         UpdateStatusText();
         UpdateMenuState();
     }
@@ -2491,6 +3008,27 @@ namespace hyperbrowse::ui
         fileOperationActive_ = false;
         activeFileOperationLabel_.clear();
 
+        const std::wstring treeFolderOperationPath = activeTreeFolderOperationPath_;
+        activeTreeFolderOperationPath_.clear();
+        const bool treeFolderDeleteOperation = !treeFolderOperationPath.empty()
+            && (update.type == services::FileOperationType::DeleteRecycleBin
+                || update.type == services::FileOperationType::DeletePermanent);
+        const bool treeFolderDeleteSucceeded = treeFolderDeleteOperation
+            && std::any_of(update.succeededSourcePaths.begin(), update.succeededSourcePaths.end(), [&](const std::wstring& sourcePath)
+            {
+                return FolderPathsEqual(sourcePath, treeFolderOperationPath);
+            });
+
+        bool refreshFolderTree = treeFolderDeleteSucceeded;
+        std::wstring fallbackFolderPath;
+        if (treeFolderDeleteSucceeded
+            && browserModel_
+            && !browserModel_->FolderPath().empty()
+            && browser::PathHasPrefix(browserModel_->FolderPath(), treeFolderOperationPath))
+        {
+            fallbackFolderPath = FindExistingFolderAncestor(fs::path(treeFolderOperationPath).parent_path());
+        }
+
         bool modelChanged = false;
         if (browserModel_ && browserPaneController_)
         {
@@ -2541,7 +3079,9 @@ namespace hyperbrowse::ui
             case services::FileOperationType::DeletePermanent:
                 for (const std::wstring& sourcePath : update.succeededSourcePaths)
                 {
-                    modelChanged = browserModel_->RemoveItemByPath(sourcePath) || modelChanged;
+                    modelChanged = ((treeFolderDeleteOperation && FolderPathsEqual(sourcePath, treeFolderOperationPath))
+                        ? browserModel_->RemoveItemsByPathPrefix(sourcePath)
+                        : browserModel_->RemoveItemByPath(sourcePath)) || modelChanged;
                 }
                 break;
             default:
@@ -2555,12 +3095,22 @@ namespace hyperbrowse::ui
                 browserPaneController_->InvalidateMediaCacheForPaths(affectedPaths);
             }
 
-            if (modelChanged)
+            if (modelChanged && fallbackFolderPath.empty())
             {
                 RefreshBrowserPane();
                 browserPaneController_->RestoreSelectionByFilePaths(selectedPaths, focusedPath);
                 UpdateWindowTitle();
             }
+        }
+
+        if (refreshFolderTree)
+        {
+            RefreshFolderTree();
+        }
+
+        if (!fallbackFolderPath.empty())
+        {
+            LoadFolderAsync(fallbackFolderPath);
         }
 
         UpdateStatusText();
@@ -2624,33 +3174,44 @@ namespace hyperbrowse::ui
                 return;
             }
 
-            const fs::directory_options options = fs::directory_options::skip_permission_denied;
-            for (fs::recursive_directory_iterator iterator(watchedPath, options, error), end; iterator != end; iterator.increment(error))
-            {
-                if (error)
-                {
-                    error.clear();
-                    continue;
-                }
 
-                std::error_code statusError;
-                if (!iterator->is_regular_file(statusError) || statusError)
-                {
-                    continue;
-                }
-
-                if (!browser::IsSupportedImageExtension(iterator->path().extension().wstring()))
-                {
-                    continue;
-                }
-
-                changed = browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(iterator->path())) || changed;
-                invalidatedPaths.push_back(iterator->path().wstring());
-            }
+            preferAsyncReload = true;
         };
 
         for (const services::FolderWatchEvent& event : update.events)
         {
+            if (event.kind == services::FolderWatchEventKind::Added && isExistingDirectory(event.path))
+            {
+                foldersToInsertIntoTree.push_back(event.path);
+                if (recursiveBrowsingEnabled_)
+                {
+                    preferAsyncReload = true;
+                }
+            }
+
+            if (event.kind == services::FolderWatchEventKind::Removed
+                && FindFolderTreeItemByPath(event.path))
+            {
+                refreshFolderTree = true;
+            }
+
+            if (event.kind == services::FolderWatchEventKind::Renamed)
+            {
+                if (!event.oldPath.empty() && FindFolderTreeItemByPath(event.oldPath))
+                {
+                    refreshFolderTree = true;
+                }
+
+                if (isExistingDirectory(event.path))
+                {
+                    foldersToInsertIntoTree.push_back(event.path);
+                    if (recursiveBrowsingEnabled_)
+                    {
+                        preferAsyncReload = true;
+                    }
+                }
+            }
+
             switch (event.kind)
             {
             case services::FolderWatchEventKind::Added:
@@ -2680,15 +3241,63 @@ namespace hyperbrowse::ui
                 break;
             }
         }
+        if (preferAsyncReload)
+        {
+            if (fileOperationActive_)
+            {
+                pendingFolderWatchReloadPath_ = browserModel_->FolderPath();
+                pendingFolderWatchTreeRefresh_ = pendingFolderWatchTreeRefresh_
+                    || refreshFolderTree
+                    || !foldersToInsertIntoTree.empty();
+                return;
+            }
+
+            if (refreshFolderTree)
+            {
+                RefreshFolderTree();
+            }
+            else
+            {
+                for (const std::wstring& folderPath : foldersToInsertIntoTree)
+                {
+                    InsertFolderTreeFolderIfParentLoaded(folderPath);
+                }
+            }
+
+            LoadFolderAsync(browserModel_->FolderPath());
+            return;
+        }
 
         if (!changed && invalidatedPaths.empty())
         {
+            if (refreshFolderTree)
+            {
+                RefreshFolderTree();
+            }
+            else
+            {
+                for (const std::wstring& folderPath : foldersToInsertIntoTree)
+                {
+                    InsertFolderTreeFolderIfParentLoaded(folderPath);
+                }
+            }
             return;
         }
 
         browserPaneController_->InvalidateMediaCacheForPaths(invalidatedPaths);
         RefreshBrowserPane();
         browserPaneController_->RestoreSelectionByFilePaths(selectedPaths, focusedPath);
+        if (refreshFolderTree)
+        {
+            RefreshFolderTree();
+        }
+        else
+        {
+            for (const std::wstring& folderPath : foldersToInsertIntoTree)
+            {
+                InsertFolderTreeFolderIfParentLoaded(folderPath);
+            }
+        }
         UpdateStatusText();
         UpdateWindowTitle();
     }
@@ -2793,6 +3402,18 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_DETAILS_STRIP,
             MF_BYCOMMAND | (detailsStripVisible_ ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuRadioItem(
+            menu_,
+            ID_VIEW_SLIDESHOW_TRANSITION_CUT,
+            ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS,
+            CommandIdFromTransitionStyle(slideshowTransitionStyle_),
+            MF_BYCOMMAND);
+        CheckMenuRadioItem(
+            menu_,
+            ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200,
+            ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800,
+            CommandIdFromTransitionDuration(slideshowTransitionDurationMs_),
+            MF_BYCOMMAND);
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
@@ -2865,6 +3486,11 @@ namespace hyperbrowse::ui
         };
 
         const bool themeChanged = !actionStripVisualStateInitialized_
+
+            const std::wstring deferredFolderWatchReloadPath = pendingFolderWatchReloadPath_;
+            const bool deferredFolderWatchTreeRefresh = pendingFolderWatchTreeRefresh_;
+            pendingFolderWatchReloadPath_.clear();
+            pendingFolderWatchTreeRefresh_ = false;
             || actionStripVisualState_.themeMode != currentState.themeMode;
 
         if (themeChanged)
@@ -2893,7 +3519,8 @@ namespace hyperbrowse::ui
             RedrawWindowNoErase(detailsModeButton_);
         }
 
-        if (SetWindowTextIfDifferent(sortMenuButton_, currentState.sortLabel) || themeChanged)
+        const bool sortTextChanged = SetWindowTextIfDifferent(sortMenuButton_, currentState.sortLabel);
+        if (sortTextChanged || themeChanged)
         {
             RedrawWindowNoErase(sortMenuButton_);
         }
@@ -2905,7 +3532,8 @@ namespace hyperbrowse::ui
             RedrawWindowNoErase(sizeMenuButton_);
         }
 
-        if (SetWindowTextIfDifferent(themeMenuButton_, currentState.themeText) || themeChanged)
+        const bool themeTextChanged = SetWindowTextIfDifferent(themeMenuButton_, currentState.themeText);
+        if (themeTextChanged || themeChanged)
         {
             RedrawWindowNoErase(themeMenuButton_);
         }
@@ -2930,6 +3558,11 @@ namespace hyperbrowse::ui
 
         actionStripVisualState_ = currentState;
         actionStripVisualStateInitialized_ = true;
+
+        if (sortTextChanged || sizeTextChanged || themeTextChanged)
+        {
+            PostMessageW(hwnd_, WM_APP + 1, 0, 0);
+        }
     }
 
     void MainWindow::UpdateWindowTitle() const
@@ -3004,12 +3637,40 @@ namespace hyperbrowse::ui
             SetWindowPos(
                 hwnd_,
                 nullptr,
+                        bool reloadCurrentFolder = browserModel_
+                            && !browserModel_->FolderPath().empty()
+                            && !deferredFolderWatchReloadPath.empty()
+                            && FolderPathsEqual(browserModel_->FolderPath(), deferredFolderWatchReloadPath);
+
+                        if (!reloadCurrentFolder && browserModel_ && !browserModel_->FolderPath().empty())
+                        {
+                            const std::size_t affectedCount = update.succeededSourcePaths.size() + update.createdPaths.size();
+                            if (affectedCount >= kIncrementalFileOperationPathLimit)
+                            {
+                                const auto pathAffectsCurrentScope = [&](const std::wstring& path)
+                                {
+                                    return IsPathInCurrentScope(path)
+                                        || browser::PathHasPrefix(browserModel_->FolderPath(), path);
+                                };
+
+                                reloadCurrentFolder = std::any_of(update.createdPaths.begin(), update.createdPaths.end(), pathAffectsCurrentScope)
+                                    || std::any_of(update.succeededSourcePaths.begin(), update.succeededSourcePaths.end(), pathAffectsCurrentScope);
+                            }
+                        }
                 0,
                 0,
-                0,
+                        if (!reloadCurrentFolder && browserModel_ && browserPaneController_)
                 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
             RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+        }
+    }
+
+    void MainWindow::ApplyViewerTransitionSettings()
+    {
+        if (viewerWindow_)
+        {
+            viewerWindow_->SetTransitionSettings(slideshowTransitionStyle_, slideshowTransitionDurationMs_);
         }
     }
 
@@ -3075,6 +3736,19 @@ namespace hyperbrowse::ui
                 slideshowIntervalMs_ = static_cast<UINT>(value);
             }
 
+            if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionStyle, &value)
+                && value <= static_cast<DWORD>(viewer::TransitionStyle::KenBurns))
+            {
+                slideshowTransitionStyle_ = static_cast<viewer::TransitionStyle>(value);
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionDuration, &value)
+                && value >= 120
+                && value <= 5000)
+            {
+                slideshowTransitionDurationMs_ = static_cast<UINT>(value);
+            }
+
             if (TryReadDwordValue(key, kRegistryValueDetailsStripVisible, &value))
             {
                 detailsStripVisible_ = value != 0;
@@ -3113,6 +3787,8 @@ namespace hyperbrowse::ui
                 WriteDwordValue(key, kRegistryValueSortAscending, browserPaneController_->IsSortAscending() ? 1UL : 0UL);
             }
             WriteDwordValue(key, kRegistryValueSlideshowInterval, static_cast<DWORD>(slideshowIntervalMs_));
+            WriteDwordValue(key, kRegistryValueSlideshowTransitionStyle, static_cast<DWORD>(slideshowTransitionStyle_));
+            WriteDwordValue(key, kRegistryValueSlideshowTransitionDuration, static_cast<DWORD>(slideshowTransitionDurationMs_));
             WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
             RegCloseKey(key);
         }
@@ -3354,6 +4030,22 @@ namespace hyperbrowse::ui
 
     bool MainWindow::HandleCommand(UINT commandId)
     {
+        if (IsTransitionStyleCommand(commandId))
+        {
+            slideshowTransitionStyle_ = TransitionStyleFromCommandId(commandId);
+            ApplyViewerTransitionSettings();
+            UpdateMenuState();
+            return true;
+        }
+
+        if (IsTransitionDurationCommand(commandId))
+        {
+            slideshowTransitionDurationMs_ = TransitionDurationFromCommandId(commandId);
+            ApplyViewerTransitionSettings();
+            UpdateMenuState();
+            return true;
+        }
+
         switch (commandId)
         {
         case ID_FILE_OPEN_FOLDER:
@@ -3874,8 +4566,12 @@ namespace hyperbrowse::ui
         text.resize(wcslen(text.c_str()));
 
         RECT textRect = buttonRect;
-        InflateRect(&textRect, -8, 0);
-        DrawTextW(drawItem.hDC, text.c_str(), -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        InflateRect(&textRect, -kActionButtonTextInsetX, 0);
+        DrawTextW(drawItem.hDC,
+              text.c_str(),
+              -1,
+              &textRect,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
         if (oldFont)
         {
@@ -3949,8 +4645,17 @@ namespace hyperbrowse::ui
             leftPaneWidth_ = std::clamp(x, kMinLeftPaneWidth, maxLeft);
             LayoutChildren();
         }
+                if ((update.type == services::FileOperationType::Copy || update.type == services::FileOperationType::Move)
+                    && !update.destinationFolder.empty())
+                {
+                    std::error_code destinationError;
+                    if (fs::is_directory(fs::path(update.destinationFolder), destinationError) && !destinationError)
+                    {
+                        InsertFolderTreeFolderIfParentLoaded(update.destinationFolder);
+                    }
+                }
         else
-        {
+                if (refreshFolderTree || deferredFolderWatchTreeRefresh)
             SetCursor(LoadCursorW(nullptr, IsOverSplitter(x) ? IDC_SIZEWE : IDC_ARROW));
         }
     }
@@ -3959,12 +4664,30 @@ namespace hyperbrowse::ui
     {
         switch (message)
         {
+                else if (reloadCurrentFolder && browserModel_ && !browserModel_->FolderPath().empty())
+                {
+                    LoadFolderAsync(browserModel_->FolderPath());
+                }
         case WM_GETMINMAXINFO:
             OnGetMinMaxInfo(reinterpret_cast<MINMAXINFO*>(lParam));
             return 0;
         case WM_SIZE:
             OnSize();
             return 0;
+        case WM_APP + 1:
+            LayoutChildren();
+            return 0;
+        case WM_DPICHANGED:
+        {
+            const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+            SetWindowPos(hwnd_, nullptr,
+                         suggested->left, suggested->top,
+                         suggested->right - suggested->left,
+                         suggested->bottom - suggested->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            ApplyTheme();
+            return 0;
+        }
         case WM_LBUTTONDOWN:
             OnLButtonDown(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             return 0;

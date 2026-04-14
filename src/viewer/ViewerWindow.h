@@ -1,6 +1,9 @@
 #pragma once
 
 #include <windows.h>
+#include <d2d1.h>
+#include <dwrite.h>
+#include <wrl/client.h>
 
 #include <atomic>
 #include <chrono>
@@ -14,6 +17,14 @@
 
 namespace hyperbrowse::viewer
 {
+    enum class TransitionStyle : int
+    {
+        Cut = 0,
+        Crossfade = 1,
+        Slide = 2,
+        KenBurns = 3,
+    };
+
     class ViewerWindow
     {
     public:
@@ -40,6 +51,7 @@ namespace hyperbrowse::viewer
         void StartSlideshow(UINT intervalMs = 3000);
         void StopSlideshow();
         bool IsSlideshowActive() const noexcept;
+        void SetTransitionSettings(TransitionStyle style, UINT durationMs);
         void SetDarkTheme(bool enabled);
 
     private:
@@ -78,7 +90,7 @@ namespace hyperbrowse::viewer
         void UpdateWindowTitle() const;
         void LoadCurrentImageAsync(LoadReason reason);
         void Navigate(int delta);
-        void PrepareForImageChange();
+        void PrepareForImageChange(bool keepDisplayedImage = false);
         void ResetCachedImageSlots();
         void ResetPrefetchStatistics();
         void ScheduleAdjacentPrefetch(std::uint64_t navigationGeneration);
@@ -99,15 +111,31 @@ namespace hyperbrowse::viewer
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
         void ToggleFullScreen();
         void AdvanceSlideshow();
+        int DisplayedImageIndex() const noexcept;
+        void QueueTransitionFromCurrent(bool forward);
+        void BeginTransitionFromPending();
+        void StopTransition(bool clearPending = true);
         void ResetViewState();
+        double FitScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const;
         double FitScaleForClient(const RECT& clientRect) const;
         double EffectiveScaleForClient(const RECT& clientRect) const;
+        void DrawImageBitmap(ID2D1RenderTarget* renderTarget,
+                     ID2D1Bitmap* bitmap,
+                     const cache::CachedThumbnail& image,
+                     const RECT& clientRect,
+                     float opacity,
+                     float scaleMultiplier,
+                     float offsetX,
+                     float offsetY) const;
         void RequestRepaint() const;
         void NotifyZoomChanged(int zoomPercent);
         void NotifyActivityChanged(bool isActive) const;
+        void EnsureD2DRenderTarget();
+        void ReleaseD2DResources();
+        void RebuildD2DBrushes();
         LRESULT HandleDecodedImageMessage(LPARAM lParam);
         LRESULT HandlePrefetchImageMessage(LPARAM lParam);
-        LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
+        LRESULT HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
         HINSTANCE instance_{};
@@ -138,6 +166,19 @@ namespace hyperbrowse::viewer
         bool slideshowActive_{};
         UINT slideshowIntervalMs_{3000};
         UINT_PTR slideshowTimerId_{};
+        TransitionStyle transitionStyle_{TransitionStyle::Crossfade};
+        UINT transitionDurationMs_{350};
+        bool transitionActive_{};
+        bool transitionForward_{true};
+        std::chrono::steady_clock::time_point transitionStartedAt_{};
+        std::shared_ptr<const cache::CachedThumbnail> transitionFromImage_;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> transitionFromBitmap_;
+        int transitionFromIndex_{-1};
+        std::shared_ptr<const cache::CachedThumbnail> pendingTransitionFromImage_;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> pendingTransitionFromBitmap_;
+        int pendingTransitionFromIndex_{-1};
+        bool pendingTransitionForward_{true};
+        UINT_PTR transitionTimerId_{};
         DWORD windowedStyle_{};
         DWORD windowedExStyle_{};
         WINDOWPLACEMENT windowedPlacement_{sizeof(WINDOWPLACEMENT)};
@@ -146,9 +187,33 @@ namespace hyperbrowse::viewer
         std::atomic_uint64_t prefetchCancelledCount_{0};
         std::atomic_uint64_t prefetchHitCount_{0};
         std::atomic_uint64_t prefetchMissCount_{0};
+        int slideshowNextPrefetchIndex_{-1};
+        std::uint64_t slideshowNextPrefetchGeneration_{};
+        bool slideshowAdvancePending_{};
         LoadReason pendingLoadReason_{LoadReason::Navigation};
         std::chrono::steady_clock::time_point pendingLoadStartedAt_{};
         bool pendingLoadActive_{};
+        bool preserveDisplayedImageWhileLoading_{};
         std::vector<std::future<void>> backgroundTasks_;
+
+        Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dBackgroundBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dTextBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dMutedTextBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dPanelFillBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dPanelBorderBrush_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dNameFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dInfoFormat_;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dCurrentImageBitmap_;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dStatusArtBitmap_;
+        int d2dCurrentImageIndex_{-1};
+
+        double smoothZoomTarget_{1.0};
+        double smoothZoomCurrent_{1.0};
+        UINT_PTR smoothZoomTimerId_{};
+        static constexpr UINT_PTR kSmoothZoomTimerId = 9002;
+        static constexpr UINT kSmoothZoomIntervalMs = 16;
+        static constexpr UINT_PTR kTransitionTimerId = 9003;
+        static constexpr UINT kTransitionIntervalMs = 16;
     };
 }

@@ -1,10 +1,14 @@
 #pragma once
 
 #include <windows.h>
+#include <d2d1.h>
+#include <dwrite.h>
+#include <wrl/client.h>
 
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -192,6 +196,14 @@ namespace hyperbrowse::browser
         void InvalidateThumbnailCellForModelIndex(int modelIndex) const;
         void UpdateThumbnailTooltip(POINT point, WPARAM wParam, LPARAM lParam);
         void HideThumbnailTooltip();
+        void EnsureD2DRenderTarget();
+        void ReleaseD2DResources();
+        void RebuildD2DBrushes();
+        void RebuildD2DTextFormats();
+        void D2DDrawPlaceholderState(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
+        void D2DDrawThumbnailCells(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
+        void D2DDrawPreviewThumbnail(ID2D1RenderTarget* rt, const D2D1_RECT_F& previewRect, const BrowserItem& item, bool selected) const;
+        ID2D1Bitmap* GetOrCreateD2DBitmap(ID2D1RenderTarget* rt, const cache::CachedThumbnail& thumbnail) const;
         void DrawPlaceholderState(HDC hdc, const RECT& clientRect) const;
         void DrawThumbnailCells(HDC hdc, const RECT& clientRect) const;
         void DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item, bool selected) const;
@@ -210,13 +222,14 @@ namespace hyperbrowse::browser
         HFONT thumbnailTitleFont_{};
         HFONT thumbnailMetaFont_{};
         HFONT thumbnailStatusFont_{};
+        HFONT placeholderTitleFont_{};
+        HFONT placeholderBodyFont_{};
         bool ownsDetailsListFont_{};
         HBRUSH backgroundBrush_{};
         HBRUSH surfaceBrush_{};
         HBRUSH previewBrush_{};
         HBRUSH selectedCellBrush_{};
         HBRUSH selectedPreviewBrush_{};
-        HBRUSH accentBrush_{};
         HBRUSH placeholderBrush_{};
         HPEN borderPen_{};
         HPEN selectedBorderPen_{};
@@ -233,7 +246,7 @@ namespace hyperbrowse::browser
         std::wstring filterQuery_;
         std::wstring filterQueryLower_;
         ThumbnailSizePreset thumbnailSizePreset_{ThumbnailSizePreset::Pixels192};
-        bool compactThumbnailLayout_{};
+        bool compactThumbnailLayout_{true};
         bool thumbnailDetailsVisible_{true};
         BrowserModel* model_{};
         std::vector<int> orderedModelIndices_;
@@ -253,6 +266,36 @@ namespace hyperbrowse::browser
         std::uint64_t thumbnailRequestEpoch_{};
         mutable std::wstring listViewTextBuffer_;
         mutable std::wstring tooltipTextBuffer_;
+
+        Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dBackgroundBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSurfaceBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dPreviewBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSelectedCellBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSelectedPreviewBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dPlaceholderBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dBorderBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSelectedBorderBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dRubberBandBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dTextBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dMutedTextBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSelectionTextBrush_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dTitleFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dMetaFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dStatusFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dPlaceholderTitleFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dPlaceholderBodyFormat_;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dPlaceholderArtBitmap_;
+        mutable std::unordered_map<HBITMAP, Microsoft::WRL::ComPtr<ID2D1Bitmap>> d2dBitmapCache_;
+
+        double smoothScrollTarget_{};
+        double smoothScrollCurrent_{};
+        double smoothScrollVelocity_{};
+        UINT_PTR smoothScrollTimerId_{};
+        static constexpr UINT_PTR kSmoothScrollTimerId = 9001;
+        static constexpr UINT kSmoothScrollIntervalMs = 16;
+        static constexpr double kSmoothScrollDeceleration = 0.82;
+        static constexpr double kSmoothScrollSnapThreshold = 2.0;
     };
 
     std::wstring BrowserSortModeToLabel(BrowserSortMode sortMode);

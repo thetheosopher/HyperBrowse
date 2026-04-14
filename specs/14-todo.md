@@ -38,9 +38,9 @@ Last reviewed: 2026-04-13
 ## P1 — Architecture and Rendering Gaps
 
 ### TODO: Direct2D / Direct3D 11 Rendering Backend
-- **Source:** spec 02 §1 (Recommended Approach), spec 02 §6 (Rendering Architecture)
-- **Status:** All rendering uses GDI (`StretchBlt`, `PlgBlt`, `DrawText`, etc.). D2D/D3D11 libraries are linked but unused.
-- **Scope:** Deferred. Only pursue if profiling shows GDI is a bottleneck for scroll smoothness or viewer responsiveness. Current GDI rendering is adequate.
+- **Source:** spec 02 §1 (Recommended Approach), spec 02 §6 (Rendering Architecture), spec 15
+- **Status:** ~~All rendering uses GDI.~~ Done. D2D rendering implemented for BrowserPane (thumbnail grid) and ViewerWindow (full-image viewer). DirectWrite text throughout. Per-monitor DPI awareness v2. Smooth inertial scroll and smooth zoom animations. GDI fallback retained for details view and edge cases. See spec 15 for full details.
+- **Scope:** ~~Deferred.~~ Done.
 
 ### TODO: Formal Decoder Abstraction Interface
 - **Source:** spec 02 §5 (Decoder Abstraction)

@@ -13,6 +13,7 @@ add_executable(HyperBrowseTests
     ../src/services/FolderWatchService.cpp
     ../src/services/ImageMetadataService.cpp
     ../src/services/JpegTransformService.cpp
+    ../src/render/D2DRenderer.cpp
     ../src/ui/DiagnosticsWindow.cpp
     ../src/ui/MainWindow.cpp
     ../src/services/ThumbnailScheduler.cpp
@@ -31,9 +32,13 @@ target_include_directories(HyperBrowseTests PRIVATE
 target_link_libraries(HyperBrowseTests PRIVATE
     comctl32
     dwmapi
+    d2d1
+    d3d11
+    dwrite
     msimg32
     propsys
     shell32
+    shlwapi
     windowscodecs
 )
 

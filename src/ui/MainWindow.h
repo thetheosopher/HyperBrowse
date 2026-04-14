@@ -23,7 +23,9 @@ namespace hyperbrowse::services
 {
     struct FolderWatchUpdate;
     enum class BatchConvertFormat : int;
+    enum class FileConflictPolicy : int;
     enum class FileOperationType : int;
+    struct FileConflictPlan;
     struct FileOperationUpdate;
     class BatchConvertService;
     class FileOperationService;
@@ -34,6 +36,7 @@ namespace hyperbrowse::services
 
 namespace hyperbrowse::viewer
 {
+    enum class TransitionStyle : int;
     class ViewerWindow;
 }
 
@@ -131,6 +134,8 @@ namespace hyperbrowse::ui
         void SelectFolderInTree(const std::wstring& folderPath);
         void ContinueSelectingFolderInTree();
         HTREEITEM FindChildFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath) const;
+        HTREEITEM FindFolderTreeItemByPath(const std::wstring& folderPath) const;
+        void InsertFolderTreeFolderIfParentLoaded(const std::wstring& folderPath);
         FolderTreeNodeData* GetFolderTreeNodeData(HTREEITEM item) const;
         std::wstring GetSelectedFolderTreePath() const;
         void LayoutChildren();
@@ -138,6 +143,7 @@ namespace hyperbrowse::ui
         void UpdateMenuState() const;
         void UpdateActionStripState() const;
         void UpdateWindowTitle() const;
+        void ApplyViewerTransitionSettings();
         void ApplyTheme();
         void LoadWindowState();
         void SaveWindowState() const;
@@ -154,15 +160,19 @@ namespace hyperbrowse::ui
         bool ChooseFolder(std::wstring* folderPath) const;
         bool HasSelectedJpegItems() const;
         void ShowBrowserContextMenu(POINT screenPoint);
+        void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
         void ShowDiagnosticsSnapshot();
         void ResetDiagnosticsState();
         void ShowImageInformation();
         void StartCopySelection();
         void StartMoveSelection();
         void StartDeleteSelection(bool permanent);
+        void StartFolderTreeDelete(std::wstring folderPath, bool permanent);
         void StartFileOperation(services::FileOperationType type,
                     std::vector<std::wstring> sourcePaths,
-                    std::wstring destinationFolder);
+                    std::wstring destinationFolder,
+                    services::FileConflictPolicy conflictPolicy,
+                    std::vector<std::wstring> targetLeafNames = {});
         void RevealSelectedInExplorer() const;
         void OpenSelectedContainingFolder() const;
         void CopySelectedPathsToClipboard() const;
@@ -179,6 +189,7 @@ namespace hyperbrowse::ui
         LRESULT OnFolderTreeNotify(LPARAM lParam);
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
+        LRESULT OnFolderTreeRightClick();
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
@@ -262,6 +273,9 @@ namespace hyperbrowse::ui
         std::size_t batchConvertFailed_{};
         std::wstring batchConvertOutputFolder_;
         std::wstring batchConvertCurrentFile_;
+        std::wstring activeTreeFolderOperationPath_;
+        std::wstring pendingFolderWatchReloadPath_;
+        bool pendingFolderWatchTreeRefresh_{};
         std::wstring activeFileOperationLabel_;
         int viewerZoomPercent_{};
         bool viewerWindowActive_{};
@@ -273,6 +287,8 @@ namespace hyperbrowse::ui
         bool compactThumbnailLayout_{};
         bool thumbnailDetailsVisible_{true};
         UINT slideshowIntervalMs_{3000};
+        viewer::TransitionStyle slideshowTransitionStyle_{};
+        UINT slideshowTransitionDurationMs_{350};
         bool detailsStripVisible_{true};
         mutable bool actionStripVisualStateInitialized_{};
         mutable ActionStripVisualState actionStripVisualState_{};

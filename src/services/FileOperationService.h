@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <future>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hyperbrowse::services
@@ -16,6 +17,20 @@ namespace hyperbrowse::services
         Move = 1,
         DeleteRecycleBin = 2,
         DeletePermanent = 3,
+    };
+
+    enum class FileConflictPolicy : int
+    {
+        PromptShell = 0,
+        OverwriteExisting = 1,
+        AutoRenameNumericSuffix = 2,
+    };
+
+    struct FileConflictPlan
+    {
+        std::size_t conflictCount{};
+        std::size_t renamedCount{};
+        std::vector<std::wstring> targetLeafNames;
     };
 
     struct FileOperationUpdate
@@ -32,6 +47,10 @@ namespace hyperbrowse::services
         std::wstring message;
     };
 
+    FileConflictPlan PlanDestinationConflicts(const std::vector<std::wstring>& sourcePaths,
+                                              std::wstring_view destinationFolder,
+                                              FileConflictPolicy conflictPolicy);
+
     std::wstring FileOperationTypeToLabel(FileOperationType type);
     std::wstring FileOperationTypeToActivityLabel(FileOperationType type);
 
@@ -47,7 +66,9 @@ namespace hyperbrowse::services
                             HWND ownerWindow,
                             FileOperationType type,
                             std::vector<std::wstring> sourcePaths,
-                            std::wstring destinationFolder = {});
+                            std::wstring destinationFolder = {},
+                            FileConflictPolicy conflictPolicy = FileConflictPolicy::PromptShell,
+                            std::vector<std::wstring> targetLeafNames = {});
 
     private:
         void ReapCompletedWorkers();

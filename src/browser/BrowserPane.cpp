@@ -2,6 +2,8 @@
 
 #include <commctrl.h>
 #include <windowsx.h>
+#include <d2d1.h>
+#include <dwrite.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -14,6 +16,7 @@
 #include "browser/BrowserModel.h"
 #include "cache/ThumbnailCache.h"
 #include "decode/ImageDecoder.h"
+#include "render/D2DRenderer.h"
 #include "services/ImageMetadataService.h"
 #include "services/ThumbnailScheduler.h"
 #include "util/ResourcePng.h"
@@ -43,6 +46,9 @@ namespace
     constexpr int kMinimumDetailsMetadataLookAheadItems = 12;
     constexpr int kMaximumDetailsMetadataLookAheadItems = 96;
     constexpr int kPlaceholderBrandArtSize = 256;
+    constexpr int kPlaceholderIconDisplaySize = 128;
+    constexpr int kPlaceholderTitlePointSize = 18;
+    constexpr int kPlaceholderBodyPointSize = 13;
 
     hyperbrowse::browser::BrowserPane::ThemeColors MakeThemeColors(bool darkTheme)
     {
@@ -203,6 +209,14 @@ namespace
         return CreateFontIndirectW(&logFont);
     }
 
+    D2D1_RECT_F InsetD2DRect(const D2D1_RECT_F& rect, float insetX, float insetY)
+    {
+        return D2D1::RectF(rect.left + insetX,
+                           rect.top + insetY,
+                           rect.right - insetX,
+                           rect.bottom - insetY);
+    }
+
 }
 
 namespace hyperbrowse::browser
@@ -256,6 +270,8 @@ namespace hyperbrowse::browser
 
     BrowserPane::~BrowserPane()
     {
+        ReleaseD2DResources();
+
         if (detailsListFont_ && ownsDetailsListFont_)
         {
             DeleteObject(detailsListFont_);
@@ -326,6 +342,7 @@ namespace hyperbrowse::browser
     void BrowserPane::RefreshFromModel()
     {
         HideThumbnailTooltip();
+        d2dBitmapCache_.clear();
         RebuildOrder();
         UpdateSelectionBytes();
         UpdateDetailsListView();
@@ -449,6 +466,7 @@ namespace hyperbrowse::browser
 
         thumbnailSizePreset_ = preset;
         RebuildThumbnailFonts();
+        RebuildD2DTextFormats();
         UpdateVerticalScrollBar();
         ScheduleVisibleThumbnailWork();
         NotifyStateChanged();
@@ -470,6 +488,7 @@ namespace hyperbrowse::browser
 
         compactThumbnailLayout_ = enabled;
         RebuildThumbnailFonts();
+        RebuildD2DTextFormats();
         UpdateVerticalScrollBar();
         ScheduleVisibleThumbnailWork();
         NotifyStateChanged();
@@ -490,6 +509,7 @@ namespace hyperbrowse::browser
 
         thumbnailDetailsVisible_ = visible;
         RebuildThumbnailFonts();
+        RebuildD2DTextFormats();
         UpdateVerticalScrollBar();
         ScheduleVisibleThumbnailWork();
         NotifyStateChanged();
@@ -507,6 +527,10 @@ namespace hyperbrowse::browser
         colors_ = MakeThemeColors(enabled);
 
         RebuildThemeResources();
+        if (d2dRenderTarget_)
+        {
+            RebuildD2DBrushes();
+        }
         ApplyThemeToDetailsList();
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
@@ -645,6 +669,8 @@ namespace hyperbrowse::browser
         {
             return;
         }
+
+        d2dBitmapCache_.clear();
 
         if (thumbnailScheduler_)
         {
@@ -842,7 +868,7 @@ namespace hyperbrowse::browser
     {
         const int previewWidth = ThumbnailSizePresetToPixels(thumbnailSizePreset_);
         const int previewHeight = std::max(72, static_cast<int>(std::lround(static_cast<double>(previewWidth) * kThumbnailPreviewAspectRatio)));
-        const bool compact = true;
+        const bool compact = compactThumbnailLayout_;
         const bool showDetails = thumbnailDetailsVisible_;
 
         ThumbnailLayoutMetrics layout;
@@ -851,22 +877,23 @@ namespace hyperbrowse::browser
         layout.previewWidth = previewWidth;
         layout.previewHeight = previewHeight;
         layout.textInset = compact ? std::max(8, previewWidth / 22) : std::max(12, previewWidth / 16);
-        layout.titleTopGap = showDetails ? std::max(2, previewWidth / 56) : 0;
-        layout.titleHeight = showDetails ? std::clamp(previewWidth / 8, 16, 22) : 0;
+        layout.titleTopGap = showDetails ? std::max(4, previewWidth / 56) : 0;
+        layout.titleHeight = showDetails ? std::clamp(previewWidth / (compact ? 7 : 6), compact ? 20 : 22, compact ? 25 : 28) : 0;
         layout.metaTopGap = 0;
         layout.metaHeight = 0;
-        layout.infoBottomInset = showDetails ? 4 : 0;
-        layout.infoHeight = showDetails ? std::clamp(previewWidth / 13, 12, 14) : 0;
+        layout.infoBottomInset = showDetails ? (compact ? 6 : 8) : 0;
+        layout.infoHeight = showDetails ? std::clamp(previewWidth / (compact ? 10 : 9), compact ? 16 : 18, compact ? 20 : 22) : 0;
         layout.badgeHorizontalPadding = compact ? 6 : 8;
         layout.badgeGap = compact ? 6 : 10;
         layout.badgeCornerRadius = compact ? 6 : 8;
         layout.cellCornerRadius = compact ? 12 : 16;
         layout.previewCornerRadius = compact ? 10 : 12;
         layout.loadingIconSize = std::clamp(previewWidth / 5, 18, 40);
-        layout.titlePointSize = std::clamp(previewWidth / (compact ? 18 : 16), compact ? 9 : 10, compact ? 11 : 12);
-        layout.metaPointSize = std::clamp(previewWidth / 24, 8, compact ? 9 : 10);
-        layout.statusPointSize = std::clamp(previewWidth / 24, 8, 10);
-        layout.itemWidth = layout.previewWidth + (layout.previewInset * 2);
+        layout.titlePointSize = std::clamp(previewWidth / (compact ? 15 : 14), compact ? 12 : 13, compact ? 14 : 15);
+        layout.metaPointSize = std::clamp(previewWidth / (compact ? 18 : 17), compact ? 11 : 12, compact ? 12 : 13);
+        layout.statusPointSize = std::clamp(previewWidth / (compact ? 18 : 17), compact ? 11 : 12, compact ? 12 : 13);
+        const int horizontalInset = std::max(layout.previewInset, layout.textInset);
+        layout.itemWidth = layout.previewWidth + (horizontalInset * 2);
         layout.itemHeight = layout.previewHeight + (layout.previewInset * 2);
         if (showDetails)
         {
@@ -1149,7 +1176,7 @@ namespace hyperbrowse::browser
         scrollInfo.fMask = SIF_POS;
         scrollInfo.nPos = scrollOffsetY_;
         SetScrollInfo(hwnd_, SB_VERT, &scrollInfo, TRUE);
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        InvalidateRect(hwnd_, nullptr, FALSE);
         ScheduleVisibleThumbnailWork();
     }
 
@@ -1180,8 +1207,9 @@ namespace hyperbrowse::browser
     RECT BrowserPane::GetThumbnailPreviewRect(const RECT& cellRect) const
     {
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        const int cellWidth = cellRect.right - cellRect.left;
         RECT previewRect{};
-        previewRect.left = cellRect.left + layout.previewInset;
+        previewRect.left = cellRect.left + std::max(layout.previewInset, (cellWidth - layout.previewWidth) / 2);
         previewRect.top = cellRect.top + layout.previewInset;
         previewRect.right = previewRect.left + layout.previewWidth;
         previewRect.bottom = previewRect.top + layout.previewHeight;
@@ -1264,7 +1292,6 @@ namespace hyperbrowse::browser
         previewBrush_ = CreateSolidBrush(colors_.previewBackground);
         selectedCellBrush_ = CreateSolidBrush(colors_.accentFill);
         selectedPreviewBrush_ = CreateSolidBrush(colors_.selectedPreviewBackground);
-        accentBrush_ = CreateSolidBrush(colors_.accent);
         placeholderBrush_ = CreateSolidBrush(colors_.placeholderBackground);
         borderPen_ = CreatePen(PS_SOLID, 1, colors_.border);
         selectedBorderPen_ = CreatePen(PS_SOLID, 1, colors_.accent);
@@ -1280,6 +1307,8 @@ namespace hyperbrowse::browser
         thumbnailTitleFont_ = CreateSizedUiFont(layout.titlePointSize, FW_SEMIBOLD);
         thumbnailMetaFont_ = CreateSizedUiFont(layout.metaPointSize, FW_NORMAL);
         thumbnailStatusFont_ = CreateSizedUiFont(layout.statusPointSize, FW_SEMIBOLD);
+        placeholderTitleFont_ = CreateSizedUiFont(kPlaceholderTitlePointSize, FW_SEMIBOLD);
+        placeholderBodyFont_ = CreateSizedUiFont(kPlaceholderBodyPointSize, FW_NORMAL);
 
         if (!thumbnailTitleFont_)
         {
@@ -1292,6 +1321,14 @@ namespace hyperbrowse::browser
         if (!thumbnailStatusFont_)
         {
             thumbnailStatusFont_ = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
+        if (!placeholderTitleFont_)
+        {
+            placeholderTitleFont_ = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
+        if (!placeholderBodyFont_)
+        {
+            placeholderBodyFont_ = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
     }
 
@@ -1325,12 +1362,6 @@ namespace hyperbrowse::browser
         {
             DeleteObject(selectedPreviewBrush_);
             selectedPreviewBrush_ = nullptr;
-        }
-
-        if (accentBrush_)
-        {
-            DeleteObject(accentBrush_);
-            accentBrush_ = nullptr;
         }
 
         if (placeholderBrush_)
@@ -1372,10 +1403,20 @@ namespace hyperbrowse::browser
         {
             DeleteObject(thumbnailStatusFont_);
         }
+        if (placeholderTitleFont_ && placeholderTitleFont_ != GetStockObject(DEFAULT_GUI_FONT))
+        {
+            DeleteObject(placeholderTitleFont_);
+        }
+        if (placeholderBodyFont_ && placeholderBodyFont_ != GetStockObject(DEFAULT_GUI_FONT))
+        {
+            DeleteObject(placeholderBodyFont_);
+        }
 
         thumbnailTitleFont_ = nullptr;
         thumbnailMetaFont_ = nullptr;
         thumbnailStatusFont_ = nullptr;
+        placeholderTitleFont_ = nullptr;
+        placeholderBodyFont_ = nullptr;
     }
 
     void BrowserPane::NotifyStateChanged() const
@@ -1984,6 +2025,454 @@ namespace hyperbrowse::browser
         InvalidateRect(hwnd_, &invalidRect, FALSE);
     }
 
+    void BrowserPane::EnsureD2DRenderTarget()
+    {
+        if (d2dRenderTarget_)
+        {
+            return;
+        }
+
+        auto& renderer = render::D2DRenderer::Instance();
+        if (!renderer.IsAvailable())
+        {
+            return;
+        }
+
+        d2dRenderTarget_ = renderer.CreateHwndRenderTarget(hwnd_);
+        if (d2dRenderTarget_)
+        {
+            RebuildD2DBrushes();
+            RebuildD2DTextFormats();
+
+            if (placeholderArt_)
+            {
+                d2dPlaceholderArtBitmap_ = renderer.CreateBitmapFromCachedThumbnail(
+                    d2dRenderTarget_.Get(), *placeholderArt_);
+            }
+        }
+    }
+
+    void BrowserPane::ReleaseD2DResources()
+    {
+        d2dBitmapCache_.clear();
+        d2dPlaceholderArtBitmap_.Reset();
+        d2dTitleFormat_.Reset();
+        d2dMetaFormat_.Reset();
+        d2dStatusFormat_.Reset();
+        d2dPlaceholderTitleFormat_.Reset();
+        d2dPlaceholderBodyFormat_.Reset();
+        d2dBackgroundBrush_.Reset();
+        d2dSurfaceBrush_.Reset();
+        d2dPreviewBrush_.Reset();
+        d2dSelectedCellBrush_.Reset();
+        d2dSelectedPreviewBrush_.Reset();
+        d2dPlaceholderBrush_.Reset();
+        d2dBorderBrush_.Reset();
+        d2dSelectedBorderBrush_.Reset();
+        d2dRubberBandBrush_.Reset();
+        d2dTextBrush_.Reset();
+        d2dMutedTextBrush_.Reset();
+        d2dSelectionTextBrush_.Reset();
+        d2dRenderTarget_.Reset();
+    }
+
+    void BrowserPane::RebuildD2DBrushes()
+    {
+        if (!d2dRenderTarget_)
+        {
+            return;
+        }
+
+        d2dBackgroundBrush_.Reset();
+        d2dSurfaceBrush_.Reset();
+        d2dPreviewBrush_.Reset();
+        d2dSelectedCellBrush_.Reset();
+        d2dSelectedPreviewBrush_.Reset();
+        d2dPlaceholderBrush_.Reset();
+        d2dBorderBrush_.Reset();
+        d2dSelectedBorderBrush_.Reset();
+        d2dRubberBandBrush_.Reset();
+        d2dTextBrush_.Reset();
+        d2dMutedTextBrush_.Reset();
+        d2dSelectionTextBrush_.Reset();
+
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.windowBackground), d2dBackgroundBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.surfaceBackground), d2dSurfaceBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.previewBackground), d2dPreviewBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.accentFill), d2dSelectedCellBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.selectedPreviewBackground), d2dSelectedPreviewBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.placeholderBackground), d2dPlaceholderBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.border), d2dBorderBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.accent), d2dSelectedBorderBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.rubberBand), d2dRubberBandBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.text), d2dTextBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.mutedText), d2dMutedTextBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(colors_.selectionText), d2dSelectionTextBrush_.GetAddressOf());
+    }
+
+    void BrowserPane::RebuildD2DTextFormats()
+    {
+        auto& renderer = render::D2DRenderer::Instance();
+        if (!renderer.IsAvailable())
+        {
+            return;
+        }
+
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        d2dTitleFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.titlePointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        d2dMetaFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.metaPointSize), DWRITE_FONT_WEIGHT_NORMAL);
+        d2dStatusFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.statusPointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        d2dPlaceholderTitleFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(kPlaceholderTitlePointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        d2dPlaceholderBodyFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(kPlaceholderBodyPointSize), DWRITE_FONT_WEIGHT_NORMAL);
+
+        const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+
+        if (d2dTitleFormat_)
+        {
+            d2dTitleFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            d2dTitleFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            d2dTitleFormat_->SetTrimming(&trimming, nullptr);
+        }
+
+        if (d2dMetaFormat_)
+        {
+            d2dMetaFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            d2dMetaFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            d2dMetaFormat_->SetTrimming(&trimming, nullptr);
+        }
+
+        if (d2dStatusFormat_)
+        {
+            d2dStatusFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            d2dStatusFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            d2dStatusFormat_->SetTrimming(&trimming, nullptr);
+        }
+
+        if (d2dPlaceholderTitleFormat_)
+        {
+            d2dPlaceholderTitleFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            d2dPlaceholderTitleFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            d2dPlaceholderTitleFormat_->SetTrimming(&trimming, nullptr);
+        }
+
+        if (d2dPlaceholderBodyFormat_)
+        {
+            d2dPlaceholderBodyFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            d2dPlaceholderBodyFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            d2dPlaceholderBodyFormat_->SetTrimming(&trimming, nullptr);
+        }
+    }
+
+    ID2D1Bitmap* BrowserPane::GetOrCreateD2DBitmap(ID2D1RenderTarget* rt, const cache::CachedThumbnail& thumbnail) const
+    {
+        const HBITMAP key = thumbnail.Bitmap();
+        auto it = d2dBitmapCache_.find(key);
+        if (it != d2dBitmapCache_.end())
+        {
+            return it->second.Get();
+        }
+
+        auto bitmap = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(rt, thumbnail);
+        if (!bitmap)
+        {
+            return nullptr;
+        }
+
+        auto [insertIt, _] = d2dBitmapCache_.emplace(key, std::move(bitmap));
+        return insertIt->second.Get();
+    }
+
+    void BrowserPane::D2DDrawPlaceholderState(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const
+    {
+        const bool hasFolder = model_ && !model_->FolderPath().empty();
+        const bool hasError = hasFolder && model_->HasError();
+        const bool loadingFolder = hasFolder && model_->IsEnumerating() && orderedModelIndices_.empty();
+        const bool noMatches = hasFolder && !filterQuery_.empty() && orderedModelIndices_.empty();
+        const bool emptyFolder = hasFolder && !hasError && !loadingFolder && !noMatches && orderedModelIndices_.empty();
+        const bool showIcon = !hasError && (!hasFolder || loadingFolder || emptyFolder);
+
+        std::wstring title = L"HyperBrowse";
+        if (hasFolder)
+        {
+            if (hasError) title = L"Folder Load Failed";
+            else if (loadingFolder) title = L"Loading Images";
+            else if (noMatches) title = L"No Matches";
+            else if (emptyFolder) title = L"Empty Folder";
+        }
+
+        const float clientWidth = size.width;
+        const float clientHeight = size.height;
+        constexpr float kPanelPaddingLeft = 24.0f;
+        constexpr float kPanelPaddingRight = 28.0f;
+        constexpr float kPanelPaddingVertical = 16.0f;
+        constexpr float kIconTextGap = 28.0f;
+        constexpr float kDesiredTextBlockWidth = 300.0f;
+        constexpr float kMinimumTextBlockWidth = 220.0f;
+        constexpr float kTitleHeight = 42.0f;
+        constexpr float kBodyHeight = 52.0f;
+        constexpr float kTitleBodyGap = 10.0f;
+
+        const float maxPanelWidth = std::max(280.0f, clientWidth - 40.0f);
+        const float maxPanelHeight = std::max(120.0f, clientHeight - 32.0f);
+
+        float renderedIconSize = 0.0f;
+        float panelWidth = std::max(280.0f, std::min(520.0f, clientWidth - 56.0f));
+        float panelHeight = showIcon
+            ? std::min(196.0f, std::max(152.0f, clientHeight - 56.0f))
+            : std::min(160.0f, std::max(120.0f, clientHeight - 56.0f));
+
+        if (showIcon && d2dPlaceholderArtBitmap_)
+        {
+            const float artWidth = static_cast<float>(d2dPlaceholderArtBitmap_->GetSize().width);
+            const float maxIconWidth = std::max(96.0f, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
+            const float maxIconHeight = std::max(96.0f, maxPanelHeight - (kPanelPaddingVertical * 2.0f));
+            renderedIconSize = std::min({static_cast<float>(kPlaceholderIconDisplaySize), artWidth, maxIconWidth, maxIconHeight});
+
+            const float textBlockWidth = std::max(kMinimumTextBlockWidth,
+                std::min(kDesiredTextBlockWidth,
+                         maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - renderedIconSize));
+            panelWidth = std::min(maxPanelWidth,
+                kPanelPaddingLeft + renderedIconSize + kIconTextGap + textBlockWidth + kPanelPaddingRight);
+            panelHeight = std::min(maxPanelHeight, (kPanelPaddingVertical * 2.0f) + renderedIconSize);
+        }
+
+        const float panelLeft = (clientWidth - panelWidth) / 2.0f;
+        const float panelTop = (clientHeight - panelHeight) / 2.0f;
+        const D2D1_RECT_F panelRect = D2D1::RectF(panelLeft, panelTop, panelLeft + panelWidth, panelTop + panelHeight);
+        const D2D1_ROUNDED_RECT roundedPanel = D2D1::RoundedRect(panelRect, 11.0f, 11.0f);
+
+        if (d2dPlaceholderBrush_) rt->FillRoundedRectangle(roundedPanel, d2dPlaceholderBrush_.Get());
+        if (d2dBorderBrush_) rt->DrawRoundedRectangle(roundedPanel, d2dBorderBrush_.Get(), 1.0f);
+
+        D2D1_RECT_F titleRect{};
+        D2D1_RECT_F bodyRect{};
+        if (showIcon && d2dPlaceholderArtBitmap_)
+        {
+            const float iconX = panelLeft + kPanelPaddingLeft;
+            const float iconY = panelTop + (panelHeight - renderedIconSize) / 2.0f;
+            rt->DrawBitmap(d2dPlaceholderArtBitmap_.Get(),
+                           D2D1::RectF(iconX, iconY, iconX + renderedIconSize, iconY + renderedIconSize),
+                           1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+
+            const float contentLeft = iconX + renderedIconSize + kIconTextGap;
+            const float contentRight = panelLeft + panelWidth - kPanelPaddingRight;
+            const float textBlockHeight = kTitleHeight + kTitleBodyGap + kBodyHeight;
+            const float contentTop = panelTop + std::max(kPanelPaddingVertical, (panelHeight - textBlockHeight) / 2.0f);
+            titleRect = D2D1::RectF(contentLeft, contentTop, contentRight, contentTop + kTitleHeight);
+            bodyRect = D2D1::RectF(contentLeft, titleRect.bottom + kTitleBodyGap, contentRight, titleRect.bottom + kTitleBodyGap + kBodyHeight);
+        }
+        else
+        {
+            titleRect = D2D1::RectF(panelLeft + 20, panelTop + 20, panelLeft + panelWidth - 20, panelTop + 54);
+            bodyRect = D2D1::RectF(panelLeft + 24, titleRect.bottom + 8, panelLeft + panelWidth - 24, panelTop + panelHeight - 22);
+        }
+
+        auto* titleFormat = d2dPlaceholderTitleFormat_.Get();
+        if (titleFormat && d2dTextBrush_)
+        {
+            titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            titleFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            rt->DrawText(title.c_str(), static_cast<UINT32>(title.size()), titleFormat, titleRect, d2dTextBrush_.Get());
+        }
+
+        const std::wstring text = BuildPlaceholderText();
+        if (!text.empty() && d2dPlaceholderBodyFormat_ && d2dMutedTextBrush_)
+        {
+            auto* fmt = d2dPlaceholderBodyFormat_.Get();
+            fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+            rt->DrawText(text.c_str(), static_cast<UINT32>(text.size()), fmt, bodyRect, d2dMutedTextBrush_.Get());
+            fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        }
+    }
+
+    void BrowserPane::D2DDrawThumbnailCells(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const
+    {
+        if (d2dBackgroundBrush_)
+        {
+            rt->Clear(render::ToD2DColor(colors_.windowBackground));
+        }
+
+        if (orderedModelIndices_.empty())
+        {
+            D2DDrawPlaceholderState(rt, size);
+            return;
+        }
+
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        const int clientWidth = static_cast<int>(size.width);
+        const int clientHeight = static_cast<int>(size.height);
+        const int columns = ColumnsForClientWidth(clientWidth);
+        const int verticalStride = layout.itemHeight + layout.cellPadding;
+        const int firstRow = std::max(0, scrollOffsetY_ / verticalStride);
+        const int lastRow = std::max(firstRow, (scrollOffsetY_ + clientHeight) / verticalStride + 1);
+        const int firstIndex = firstRow * columns;
+        const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (lastRow + 1) * columns);
+
+        for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
+        {
+            const BrowserItem* item = ItemFromViewIndex(viewIndex);
+            if (!item) continue;
+
+            const RECT cellRectGdi = GetThumbnailCellRect(viewIndex);
+            if (cellRectGdi.bottom < 0 || cellRectGdi.top > clientHeight) continue;
+
+            const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+            const bool selected = selectedModelIndices_.contains(modelIndex);
+
+            const D2D1_RECT_F cellRect = render::ToD2DRect(cellRectGdi);
+            const D2D1_RECT_F cellStrokeRect = InsetD2DRect(cellRect, 0.5f, 0.5f);
+            const float cornerRadius = static_cast<float>(layout.cellCornerRadius);
+            const D2D1_ROUNDED_RECT roundedCell = D2D1::RoundedRect(cellRect, cornerRadius, cornerRadius);
+            const D2D1_ROUNDED_RECT roundedCellStroke = D2D1::RoundedRect(
+                cellStrokeRect,
+                std::max(0.0f, cornerRadius - 0.5f),
+                std::max(0.0f, cornerRadius - 0.5f));
+
+            ID2D1SolidColorBrush* cellBrush = selected
+                ? (d2dSelectedCellBrush_ ? d2dSelectedCellBrush_.Get() : d2dSurfaceBrush_.Get())
+                : d2dSurfaceBrush_.Get();
+            ID2D1SolidColorBrush* borderBrush = selected
+                ? d2dSelectedBorderBrush_.Get()
+                : d2dBorderBrush_.Get();
+
+            if (cellBrush) rt->FillRoundedRectangle(roundedCell, cellBrush);
+            if (borderBrush) rt->DrawRoundedRectangle(roundedCellStroke, borderBrush, 1.0f);
+
+            const RECT previewRectGdi = GetThumbnailPreviewRect(cellRectGdi);
+            const D2D1_RECT_F previewRect = render::ToD2DRect(previewRectGdi);
+            const float previewCorner = static_cast<float>(layout.previewCornerRadius);
+            const D2D1_ROUNDED_RECT roundedPreview = D2D1::RoundedRect(previewRect, previewCorner, previewCorner);
+
+            ID2D1SolidColorBrush* previewBrush = selected
+                ? (d2dSelectedPreviewBrush_ ? d2dSelectedPreviewBrush_.Get() : d2dPreviewBrush_.Get())
+                : (d2dPreviewBrush_ ? d2dPreviewBrush_.Get() : d2dBackgroundBrush_.Get());
+            if (previewBrush) rt->FillRoundedRectangle(roundedPreview, previewBrush);
+
+            D2DDrawPreviewThumbnail(rt, previewRect, *item, selected);
+
+            if (thumbnailDetailsVisible_)
+            {
+                ID2D1SolidColorBrush* textBrush = selected ? d2dSelectionTextBrush_.Get() : d2dTextBrush_.Get();
+                ID2D1SolidColorBrush* mutedBrush = selected ? d2dSelectionTextBrush_.Get() : d2dMutedTextBrush_.Get();
+
+                const float titleTop = previewRect.bottom + static_cast<float>(layout.titleTopGap);
+                D2D1_RECT_F nameRect = D2D1::RectF(
+                    cellRect.left + layout.textInset, titleTop,
+                    cellRect.right - layout.textInset, titleTop + layout.titleHeight);
+
+                if (d2dTitleFormat_ && textBrush)
+                {
+                    d2dTitleFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                    d2dTitleFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                    const std::wstring displayTitle = BuildThumbnailDisplayTitle(*item);
+                    rt->DrawText(displayTitle.c_str(), static_cast<UINT32>(displayTitle.size()),
+                                 d2dTitleFormat_.Get(), nameRect, textBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                }
+
+                const float infoTop = cellRect.bottom - layout.infoBottomInset - layout.infoHeight;
+                D2D1_RECT_F infoRect = D2D1::RectF(
+                    cellRect.left + layout.textInset, infoTop,
+                    cellRect.right - layout.textInset, cellRect.bottom - layout.infoBottomInset);
+
+                const std::wstring typeLabel = ToUppercase(item->fileType);
+                const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
+
+                if (d2dMetaFormat_)
+                {
+                    d2dMetaFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                    if (mutedBrush && !dimensionLabel.empty())
+                    {
+                        rt->DrawText(dimensionLabel.c_str(), static_cast<UINT32>(dimensionLabel.size()),
+                                     d2dMetaFormat_.Get(), infoRect, mutedBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    }
+
+                    if (textBrush && !typeLabel.empty())
+                    {
+                        d2dMetaFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+                        rt->DrawText(typeLabel.c_str(), static_cast<UINT32>(typeLabel.size()),
+                                     d2dMetaFormat_.Get(), infoRect, textBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                        d2dMetaFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                    }
+                }
+            }
+        }
+
+        if (rubberBandActive_ && d2dRubberBandBrush_)
+        {
+            D2D1_RECT_F bandRect = render::ToD2DRect(rubberBandRect_);
+            rt->DrawRectangle(bandRect, d2dRubberBandBrush_.Get(), 1.0f);
+        }
+    }
+
+    void BrowserPane::D2DDrawPreviewThumbnail(ID2D1RenderTarget* rt, const D2D1_RECT_F& previewRect, const BrowserItem& item, bool selected) const
+    {
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        const int targetWidth = layout.previewWidth;
+        const int targetHeight = layout.previewHeight;
+        const auto cacheKey = MakeThumbnailCacheKey(item, targetWidth, targetHeight);
+
+        ID2D1SolidColorBrush* statusBrush = selected ? d2dSelectionTextBrush_.Get() : d2dMutedTextBrush_.Get();
+
+        if (!thumbnailScheduler_ || !decode::CanDecodeThumbnail(item))
+        {
+            D2D1_RECT_F iconTextRect = D2D1::RectF(
+                previewRect.left + layout.textInset,
+                previewRect.top + std::max(10.0f, static_cast<float>(layout.previewInset) - 2),
+                previewRect.right - layout.textInset,
+                previewRect.top + std::max(34.0f, static_cast<float>(layout.previewInset + layout.metaHeight)));
+            const std::wstring placeholder = decode::IsRawFileType(item.fileType) ? item.fileType : std::wstring(L"IMAGE");
+            if (d2dStatusFormat_ && statusBrush)
+            {
+                d2dStatusFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                rt->DrawText(placeholder.c_str(), static_cast<UINT32>(placeholder.size()),
+                             d2dStatusFormat_.Get(), iconTextRect, statusBrush);
+            }
+            return;
+        }
+
+        const auto thumbnail = thumbnailScheduler_->FindCachedThumbnail(cacheKey);
+        if (!thumbnail)
+        {
+            const float previewHeight = previewRect.bottom - previewRect.top;
+            const float iconSize = static_cast<float>(layout.loadingIconSize);
+            const float iconY = previewRect.top + std::max(static_cast<float>(layout.previewInset),
+                ((previewHeight - iconSize) / 2.0f) - (static_cast<float>(layout.metaHeight) / 2.0f));
+
+            D2D1_RECT_F statusRect = D2D1::RectF(
+                previewRect.left + layout.textInset,
+                iconY + iconSize + std::max(6.0f, static_cast<float>(layout.metaTopGap)),
+                previewRect.right - layout.textInset,
+                previewRect.bottom - layout.previewInset);
+            if (d2dStatusFormat_ && statusBrush)
+            {
+                d2dStatusFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                rt->DrawText(L"Loading thumbnail", 17, d2dStatusFormat_.Get(), statusRect, statusBrush);
+            }
+            return;
+        }
+
+        ID2D1Bitmap* d2dBitmap = GetOrCreateD2DBitmap(rt, *thumbnail);
+        if (!d2dBitmap)
+        {
+            return;
+        }
+
+        const D2D1_RECT_F imageBounds = InsetD2DRect(previewRect, 1.0f, 1.0f);
+        const float thumbWidth = static_cast<float>(thumbnail->Width());
+        const float thumbHeight = static_cast<float>(thumbnail->Height());
+        const float drawX = imageBounds.left + ((imageBounds.right - imageBounds.left - thumbWidth) / 2.0f);
+        const float drawY = imageBounds.top + ((imageBounds.bottom - imageBounds.top - thumbHeight) / 2.0f);
+
+        rt->PushAxisAlignedClip(imageBounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        rt->DrawBitmap(d2dBitmap,
+                   D2D1::RectF(drawX, drawY, drawX + thumbWidth, drawY + thumbHeight),
+                   1.0f,
+                   D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        rt->PopAxisAlignedClip();
+    }
+
     void BrowserPane::DrawPlaceholderState(HDC hdc, const RECT& clientRect) const
     {
         FillRect(hdc, &clientRect, backgroundBrush_ ? backgroundBrush_ : surfaceBrush_);
@@ -2027,9 +2516,9 @@ namespace hyperbrowse::browser
         constexpr int kIconTextGap = 28;
         constexpr int kDesiredTextBlockWidth = 300;
         constexpr int kMinimumTextBlockWidth = 220;
-        constexpr int kTitleHeight = 34;
-        constexpr int kBodyHeight = 34;
-        constexpr int kTitleBodyGap = 8;
+        constexpr int kTitleHeight = 42;
+        constexpr int kBodyHeight = 52;
+        constexpr int kTitleBodyGap = 10;
 
         const int maxPanelWidth = std::max(280, clientWidth - (kPanelMarginX * 2));
         const int maxPanelHeight = std::max(120, clientHeight - (kPanelMarginY * 2));
@@ -2043,7 +2532,7 @@ namespace hyperbrowse::browser
         {
             const int maxIconWidth = std::max(96, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
             const int maxIconHeight = std::max(96, maxPanelHeight - (kPanelPaddingVertical * 2));
-            renderedIconSize = std::min({placeholderArt_->Width(), maxIconWidth, maxIconHeight});
+            renderedIconSize = std::min({kPlaceholderIconDisplaySize, placeholderArt_->Width(), maxIconWidth, maxIconHeight});
 
             const int textBlockWidth = std::max(kMinimumTextBlockWidth,
                                                 std::min(kDesiredTextBlockWidth,
@@ -2093,12 +2582,26 @@ namespace hyperbrowse::browser
 
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, colors_.text);
+        HGDIOBJ oldTitleFont = placeholderTitleFont_
+            ? SelectObject(hdc, placeholderTitleFont_)
+            : static_cast<HGDIOBJ>(nullptr);
         DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        if (oldTitleFont)
+        {
+            SelectObject(hdc, oldTitleFont);
+        }
 
         if (!text.empty())
         {
             SetTextColor(hdc, colors_.mutedText);
+            HGDIOBJ oldBodyFont = placeholderBodyFont_
+                ? SelectObject(hdc, placeholderBodyFont_)
+                : static_cast<HGDIOBJ>(nullptr);
             DrawTextW(hdc, text.c_str(), -1, &bodyRect, DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+            if (oldBodyFont)
+            {
+                SelectObject(hdc, oldBodyFont);
+            }
         }
     }
 
@@ -2152,15 +2655,6 @@ namespace hyperbrowse::browser
                       cellRect.bottom,
                       layout.cellCornerRadius,
                       layout.cellCornerRadius);
-
-            if (selected && accentBrush_)
-            {
-                RECT accentRect{cellRect.left + 1,
-                                cellRect.top + 1,
-                                cellRect.right - 1,
-                                cellRect.top + std::max(4, layout.previewInset / 2)};
-                FillRect(hdc, &accentRect, accentBrush_);
-            }
 
             RECT previewRect = GetThumbnailPreviewRect(cellRect);
             const HBRUSH previewBrush = selected
@@ -2651,7 +3145,51 @@ namespace hyperbrowse::browser
             {
                 HideThumbnailTooltip();
                 const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-                SetScrollOffset(scrollOffsetY_ - ((delta / WHEEL_DELTA) * kWheelScrollAmount));
+                const double scrollAmount = static_cast<double>((delta / WHEEL_DELTA) * kWheelScrollAmount);
+
+                if (!smoothScrollTimerId_)
+                {
+                    smoothScrollCurrent_ = static_cast<double>(scrollOffsetY_);
+                }
+
+                smoothScrollTarget_ = smoothScrollCurrent_ - scrollAmount * 2.5;
+                smoothScrollVelocity_ = (smoothScrollTarget_ - smoothScrollCurrent_) * 0.3;
+
+                if (!smoothScrollTimerId_)
+                {
+                    smoothScrollTimerId_ = SetTimer(hwnd_, kSmoothScrollTimerId, kSmoothScrollIntervalMs, nullptr);
+                }
+                return 0;
+            }
+            break;
+        case WM_TIMER:
+            if (wParam == kSmoothScrollTimerId && smoothScrollTimerId_)
+            {
+                const double diff = smoothScrollTarget_ - smoothScrollCurrent_;
+                if (std::abs(diff) < kSmoothScrollSnapThreshold)
+                {
+                    smoothScrollCurrent_ = smoothScrollTarget_;
+                    KillTimer(hwnd_, kSmoothScrollTimerId);
+                    smoothScrollTimerId_ = 0;
+                    smoothScrollVelocity_ = 0.0;
+                }
+                else
+                {
+                    smoothScrollCurrent_ += diff * 0.18;
+                }
+
+                const int targetOffset = static_cast<int>(std::lround(smoothScrollCurrent_));
+                SetScrollOffset(targetOffset);
+
+                // If the scroll position was clamped at a boundary, stop animation
+                if (scrollOffsetY_ != targetOffset)
+                {
+                    smoothScrollCurrent_ = static_cast<double>(scrollOffsetY_);
+                    smoothScrollTarget_ = smoothScrollCurrent_;
+                    KillTimer(hwnd_, kSmoothScrollTimerId);
+                    smoothScrollTimerId_ = 0;
+                    smoothScrollVelocity_ = 0.0;
+                }
                 return 0;
             }
             break;
@@ -2943,6 +3481,38 @@ namespace hyperbrowse::browser
             break;
         case WM_PAINT:
         {
+            EnsureD2DRenderTarget();
+
+            if (d2dRenderTarget_ && viewMode_ != BrowserViewMode::Details)
+            {
+                PAINTSTRUCT paintStruct{};
+                BeginPaint(hwnd_, &paintStruct);
+
+                render::D2DRenderer::Instance().ResizeRenderTarget(d2dRenderTarget_.Get(), hwnd_);
+
+                d2dRenderTarget_->BeginDraw();
+                const D2D1_SIZE_F size = d2dRenderTarget_->GetSize();
+
+                if (orderedModelIndices_.empty() || viewMode_ != BrowserViewMode::Thumbnails)
+                {
+                    d2dRenderTarget_->Clear(render::ToD2DColor(colors_.windowBackground));
+                    D2DDrawPlaceholderState(d2dRenderTarget_.Get(), size);
+                }
+                else
+                {
+                    D2DDrawThumbnailCells(d2dRenderTarget_.Get(), size);
+                }
+
+                const HRESULT hr = d2dRenderTarget_->EndDraw();
+                if (hr == D2DERR_RECREATE_TARGET)
+                {
+                    ReleaseD2DResources();
+                }
+
+                EndPaint(hwnd_, &paintStruct);
+                return 0;
+            }
+
             PAINTSTRUCT paintStruct{};
             HDC hdc = BeginPaint(hwnd_, &paintStruct);
 

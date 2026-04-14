@@ -77,6 +77,7 @@ add_executable(HyperBrowse WIN32
     src/services/ImageMetadataService.cpp
     src/services/JpegTransformService.cpp
     src/services/ThumbnailScheduler.cpp
+    src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
     src/ui/MainWindow.cpp
     src/util/Diagnostics.cpp
@@ -94,6 +95,7 @@ target_link_libraries(HyperBrowse PRIVATE
     dwmapi
     d2d1
     d3d11
+    dwrite
     msimg32
     propsys
     windowscodecs

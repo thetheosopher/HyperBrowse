@@ -28,6 +28,7 @@
 #include "decode/ImageDecoder.h"
 #include "decode/WicThumbnailDecoder.h"
 #include "services/BatchConvertService.h"
+#include "services/FileOperationService.h"
 #include "services/FolderEnumerationService.h"
 #include "services/FolderTreeEnumerationService.h"
 #include "services/FolderWatchService.h"
@@ -904,6 +905,48 @@ namespace
         Expect(elapsed < 250, "Batch convert cancellation blocked instead of returning promptly");
     }
 
+        void RunFileConflictPlanningScenario()
+        {
+         TempFolder root(L"HyperBrowseFileConflictPlanning");
+         root.WriteFile(L"source-a\\alpha.jpg", 16);
+         root.WriteFile(L"source-b\\alpha.jpg", 16);
+         root.WriteFile(L"source-c\\beta.png", 16);
+         root.WriteFile(L"dest\\alpha.jpg", 16);
+         root.WriteFile(L"dest\\beta.png", 16);
+         root.WriteFile(L"dest\\beta.1.png", 16);
+
+         const fs::path destinationFolder = root.Root() / L"dest";
+         const std::vector<std::wstring> sourcePaths{
+             (root.Root() / L"source-a" / L"alpha.jpg").wstring(),
+             (root.Root() / L"source-b" / L"alpha.jpg").wstring(),
+             (root.Root() / L"source-c" / L"beta.png").wstring(),
+         };
+
+         const hyperbrowse::services::FileConflictPlan overwritePlan = hyperbrowse::services::PlanDestinationConflicts(
+             sourcePaths,
+             destinationFolder.wstring(),
+             hyperbrowse::services::FileConflictPolicy::OverwriteExisting);
+         Expect(overwritePlan.conflictCount == 3,
+             "Overwrite planning did not detect all copy/move destination conflicts");
+
+         const hyperbrowse::services::FileConflictPlan renamePlan = hyperbrowse::services::PlanDestinationConflicts(
+             sourcePaths,
+             destinationFolder.wstring(),
+             hyperbrowse::services::FileConflictPolicy::AutoRenameNumericSuffix);
+         Expect(renamePlan.conflictCount == 3,
+             "Auto-rename planning did not detect all destination conflicts");
+         Expect(renamePlan.renamedCount == 3,
+             "Auto-rename planning did not record the expected rename count");
+         Expect(renamePlan.targetLeafNames.size() == sourcePaths.size(),
+             "Auto-rename planning did not preserve target-name alignment");
+         Expect(renamePlan.targetLeafNames[0] == L"alpha.1.jpg",
+             "Auto-rename planning chose the wrong suffix for the first alpha conflict");
+         Expect(renamePlan.targetLeafNames[1] == L"alpha.2.jpg",
+             "Auto-rename planning chose the wrong suffix for the second alpha conflict");
+         Expect(renamePlan.targetLeafNames[2] == L"beta.2.png",
+             "Auto-rename planning did not skip the pre-existing beta.1 target");
+        }
+
     void RunThumbnailSchedulerScenario(HWND hwnd, TestWindowState* state)
     {
         TempFolder root(L"HyperBrowsePrompt5Scheduler");
@@ -1330,6 +1373,15 @@ namespace
     {
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
 
+        {
+            HKEY key{};
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_WRITE, &key) == ERROR_SUCCESS)
+            {
+                RegDeleteValueW(key, kRegistryValueViewerInfoOverlaysVisible);
+                RegCloseKey(key);
+            }
+        }
+
         TempFolder root(L"HyperBrowsePrompt6Viewer");
         const fs::path firstPath = root.Root() / L"first.jpg";
         const fs::path secondPath = root.Root() / L"second.png";
@@ -1360,7 +1412,7 @@ namespace
                "Viewer actual-size mode did not set zoom to 100%");
 
          SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_MINUS, 0);
-         PumpMessagesFor(100);
+         PumpMessagesFor(300);
          Expect(viewer.CurrentZoomPercent() == 100,
              "Viewer zoom-out should not shrink the image below the current window-fit bound");
 
@@ -1496,6 +1548,7 @@ int main()
         RunWicDecoderScenario();
         RunJpegOrientationAdjustmentScenario();
         RunBatchConvertCancellationScenario(hwnd);
+        RunFileConflictPlanningScenario();
         RunThumbnailSchedulerWorkerAllocationScenario();
         RunThumbnailSchedulerScenario(hwnd, &state);
         RunImageMetadataServiceScenario();

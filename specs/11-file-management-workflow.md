@@ -14,6 +14,7 @@ The goal is to let users complete common browse-and-cull workflows without leavi
 - move selected files to another folder
 - delete selected files to Recycle Bin
 - permanently delete selected files
+- delete non-root folders from the explorer tree to Recycle Bin or permanently
 - reveal the primary selected file in Explorer
 - open the containing folder for the primary selected file
 - copy selected file paths to the clipboard
@@ -35,6 +36,10 @@ The goal is to let users complete common browse-and-cull workflows without leavi
 3. Never block thumbnail paint, scrolling, or viewer interaction on file I/O.
 4. Preserve selection and scroll position where practical after file actions complete.
 5. Avoid full-folder reloads for simple deletes or moves out of the current folder.
+
+### Copy and move conflict rule
+
+- if destination-name collisions are detected before dispatch, HyperBrowse should ask whether to overwrite target files or keep both by auto-renaming the incoming files with `.1`, `.2`, and later numeric suffixes inserted before the file extension
 
 ## 4. Command Surface
 
@@ -72,7 +77,16 @@ Recommended order:
 11. separator
 12. existing slideshow / batch-convert / JPEG orientation items
 
-## 4.3 Shortcuts
+## 4.3 Explorer tree context menu
+
+For non-root folder nodes in the explorer tree, add a folder-only context menu with:
+
+- `Delete Folder`
+- `Delete Folder Permanently`
+
+Top-level roots such as Desktop, Documents, Pictures, and drive roots should not expose these delete commands.
+
+## 4.4 Shortcuts
 
 Required first-pass shortcuts:
 
@@ -101,9 +115,13 @@ Reasons:
 
 - native Windows copy/move/delete semantics
 - Recycle Bin support without legacy APIs
-- shell conflict handling
+- shell execution, progress, elevation, and undo behavior
 - elevation and permission prompts consistent with Explorer
 - low dependency cost because it is an inbox COM API
+
+Conflict policy note:
+
+- HyperBrowse may preflight copy/move name collisions and convert an explicit user choice into either overwrite behavior or precomputed target names before dispatching the `IFileOperation`
 
 Implementation notes:
 
@@ -220,6 +238,7 @@ Prompt in HyperBrowse before dispatch:
 
 - single item: `Move selected image to the Recycle Bin?`
 - multi-item: `Move N selected images to the Recycle Bin?`
+- holding `Shift` while invoking Delete bypasses this app-level confirmation dialog
 
 ### Permanent delete
 
@@ -227,8 +246,15 @@ Prompt in HyperBrowse before dispatch with stronger wording:
 
 - single item: `Permanently delete the selected image? This cannot be undone.`
 - multi-item: `Permanently delete N selected images? This cannot be undone.`
+- holding `Shift` while invoking Delete Permanently bypasses this app-level confirmation dialog
 
 Using an app-level confirm prevents duplicate-shell prompts from becoming noisy.
+
+### Explorer tree folder delete
+
+- recycle-bin delete: `Move the folder "Name" to the Recycle Bin?`
+- permanent delete: `Permanently delete the folder "Name"? This cannot be undone.`
+- holding `Shift` while invoking either folder-delete command bypasses this app-level confirmation dialog
 
 ## 12. Status and Feedback
 

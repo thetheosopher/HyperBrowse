@@ -8,7 +8,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cwctype>
+#include <filesystem>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace hyperbrowse::services
@@ -19,6 +23,7 @@ namespace hyperbrowse::services
 namespace
 {
     using Microsoft::WRL::ComPtr;
+    namespace fs = std::filesystem;
 
     class ComScope
     {
@@ -78,9 +83,50 @@ namespace
         return path;
     }
 
-    DWORD BuildOperationFlags(hyperbrowse::services::FileOperationType type)
+    std::wstring BuildCaseInsensitiveKey(std::wstring_view value)
+    {
+        std::wstring key(value);
+        std::transform(key.begin(), key.end(), key.begin(), [](wchar_t character)
+        {
+            return static_cast<wchar_t>(std::towlower(static_cast<wint_t>(character)));
+        });
+        return key;
+    }
+
+    bool PathExists(const fs::path& path)
+    {
+        std::error_code error;
+        const bool exists = fs::exists(path, error);
+        return exists && !error;
+    }
+
+    std::wstring BuildNumericSuffixFileName(std::wstring_view fileName, std::size_t suffix)
+    {
+        const fs::path namePath(fileName);
+        std::wstring stem = namePath.stem().wstring();
+        const std::wstring extension = namePath.extension().wstring();
+        if (stem.empty())
+        {
+            stem = std::wstring(fileName);
+        }
+
+        stem.append(L".");
+        stem.append(std::to_wstring(suffix));
+        stem.append(extension);
+        return stem;
+    }
+
+    DWORD BuildOperationFlags(hyperbrowse::services::FileOperationType type,
+                              hyperbrowse::services::FileConflictPolicy conflictPolicy)
     {
         DWORD flags = FOFX_SHOWELEVATIONPROMPT | FOF_NOCONFIRMMKDIR | FOFX_NOCOPYHOOKS;
+        if (conflictPolicy == hyperbrowse::services::FileConflictPolicy::OverwriteExisting
+            && (type == hyperbrowse::services::FileOperationType::Copy
+                || type == hyperbrowse::services::FileOperationType::Move))
+        {
+            flags |= FOF_NOCONFIRMATION;
+        }
+
         if (type == hyperbrowse::services::FileOperationType::DeleteRecycleBin)
         {
             flags |= FOF_ALLOWUNDO | FOFX_RECYCLEONDELETE | FOF_NOCONFIRMATION;
@@ -289,7 +335,7 @@ namespace
             message.append(std::to_wstring(succeededCount));
             message.append(L" of ");
             message.append(std::to_wstring(requestedCount));
-            message.append(L" file(s).");
+            message.append(L" item(s).");
         }
 
         if (failedCount > 0)
@@ -310,6 +356,70 @@ namespace
 
 namespace hyperbrowse::services
 {
+    FileConflictPlan PlanDestinationConflicts(const std::vector<std::wstring>& sourcePaths,
+                                              std::wstring_view destinationFolder,
+                                              FileConflictPolicy conflictPolicy)
+    {
+        FileConflictPlan plan;
+        if (destinationFolder.empty()
+            || (conflictPolicy != FileConflictPolicy::OverwriteExisting
+                && conflictPolicy != FileConflictPolicy::AutoRenameNumericSuffix))
+        {
+            return plan;
+        }
+
+        const fs::path destinationRoot(destinationFolder);
+        std::unordered_set<std::wstring> queuedNames;
+        if (conflictPolicy == FileConflictPolicy::AutoRenameNumericSuffix)
+        {
+            plan.targetLeafNames.resize(sourcePaths.size());
+        }
+
+        for (std::size_t index = 0; index < sourcePaths.size(); ++index)
+        {
+            const std::wstring fileName = fs::path(sourcePaths[index]).filename().wstring();
+            if (fileName.empty())
+            {
+                continue;
+            }
+
+            const std::wstring fileKey = BuildCaseInsensitiveKey(fileName);
+            const bool conflictsWithDestination = PathExists(destinationRoot / fileName);
+            const bool conflictsWithQueuedName = queuedNames.contains(fileKey);
+            const bool hasConflict = conflictsWithDestination || conflictsWithQueuedName;
+
+            if (!hasConflict)
+            {
+                queuedNames.insert(fileKey);
+                continue;
+            }
+
+            ++plan.conflictCount;
+            if (conflictPolicy == FileConflictPolicy::OverwriteExisting)
+            {
+                queuedNames.insert(fileKey);
+                continue;
+            }
+
+            for (std::size_t suffix = 1;; ++suffix)
+            {
+                const std::wstring renamedFileName = BuildNumericSuffixFileName(fileName, suffix);
+                const std::wstring renamedKey = BuildCaseInsensitiveKey(renamedFileName);
+                if (queuedNames.contains(renamedKey) || PathExists(destinationRoot / renamedFileName))
+                {
+                    continue;
+                }
+
+                plan.targetLeafNames[index] = renamedFileName;
+                queuedNames.insert(renamedKey);
+                ++plan.renamedCount;
+                break;
+            }
+        }
+
+        return plan;
+    }
+
     std::wstring FileOperationTypeToLabel(FileOperationType type)
     {
         switch (type)
@@ -351,17 +461,26 @@ namespace hyperbrowse::services
                                               HWND ownerWindow,
                                               FileOperationType type,
                                               std::vector<std::wstring> sourcePaths,
-                                              std::wstring destinationFolder)
+                                              std::wstring destinationFolder,
+                                              FileConflictPolicy conflictPolicy,
+                                              std::vector<std::wstring> targetLeafNames)
     {
         ReapCompletedWorkers();
 
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        if (targetLeafNames.size() != sourcePaths.size())
+        {
+            targetLeafNames.clear();
+        }
+
         workers_.push_back(std::async(std::launch::async,
             [targetWindow,
              ownerWindow,
              type,
              sourcePaths = std::move(sourcePaths),
              destinationFolder = std::move(destinationFolder),
+             conflictPolicy,
+             targetLeafNames = std::move(targetLeafNames),
              requestId]() mutable
         {
             auto update = std::make_unique<FileOperationUpdate>();
@@ -394,7 +513,7 @@ namespace hyperbrowse::services
             }
 
             operation->SetOwnerWindow(ownerWindow);
-            operation->SetOperationFlags(BuildOperationFlags(type));
+            operation->SetOperationFlags(BuildOperationFlags(type, conflictPolicy));
 
             ComPtr<IShellItem> destinationItem;
             if (type == FileOperationType::Copy || type == FileOperationType::Move)
@@ -423,8 +542,9 @@ namespace hyperbrowse::services
 
             std::size_t queueFailures = 0;
             std::size_t queuedCount = 0;
-            for (const std::wstring& sourcePath : sourcePaths)
+            for (std::size_t index = 0; index < sourcePaths.size(); ++index)
             {
+                const std::wstring& sourcePath = sourcePaths[index];
                 ComPtr<IShellItem> sourceItem;
                 result = SHCreateItemFromParsingName(sourcePath.c_str(), nullptr, IID_PPV_ARGS(sourceItem.GetAddressOf()));
                 if (FAILED(result) || !sourceItem)
@@ -433,13 +553,21 @@ namespace hyperbrowse::services
                     continue;
                 }
 
+                const wchar_t* targetLeafName = nullptr;
+                if ((type == FileOperationType::Copy || type == FileOperationType::Move)
+                    && index < targetLeafNames.size()
+                    && !targetLeafNames[index].empty())
+                {
+                    targetLeafName = targetLeafNames[index].c_str();
+                }
+
                 switch (type)
                 {
                 case FileOperationType::Copy:
-                    result = operation->CopyItem(sourceItem.Get(), destinationItem.Get(), nullptr, nullptr);
+                    result = operation->CopyItem(sourceItem.Get(), destinationItem.Get(), targetLeafName, nullptr);
                     break;
                 case FileOperationType::Move:
-                    result = operation->MoveItem(sourceItem.Get(), destinationItem.Get(), nullptr, nullptr);
+                    result = operation->MoveItem(sourceItem.Get(), destinationItem.Get(), targetLeafName, nullptr);
                     break;
                 case FileOperationType::DeleteRecycleBin:
                 case FileOperationType::DeletePermanent:

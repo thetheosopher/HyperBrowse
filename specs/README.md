@@ -18,6 +18,7 @@ This folder contains a repo-ready planning pack for building a high-performance 
 - `12-visual-polish-pass.md`
 - `13-branding-and-ui-assessment.md`
 - `14-todo.md`
+- `15-d2d-rendering-migration.md`
 
 ## Rendering stack
 
