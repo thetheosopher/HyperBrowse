@@ -32,6 +32,7 @@
 #include "ui/ToolbarIconLibrary.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
+#include "util/ResourcePng.h"
 #include "util/Timing.h"
 #include "viewer/ViewerWindow.h"
 
@@ -148,6 +149,15 @@ namespace
     constexpr int kTextInputButtonWidth = 88;
     constexpr int kTextInputButtonHeight = 28;
     constexpr int kTextInputEditControlId = 100;
+    constexpr wchar_t kAboutDialogClassName[] = L"HyperBrowseAboutDialog";
+    constexpr int kAboutDialogWidth = 1180;
+    constexpr int kAboutDialogHeight = 720;
+    constexpr int kAboutDialogMargin = 36;
+    constexpr int kAboutDialogHeaderHeight = 224;
+    constexpr int kAboutDialogFooterHeight = 96;
+    constexpr int kAboutDialogButtonWidth = 104;
+    constexpr int kAboutDialogButtonHeight = 32;
+    constexpr int kAboutDialogBrandArtSize = 152;
 
     struct TextInputDialogState
     {
@@ -163,6 +173,36 @@ namespace
         int selectionEnd{};
         bool accepted{};
         bool done{};
+    };
+
+    struct AboutDialogState
+    {
+        HWND ownerWindow{};
+        HWND okButton{};
+        HINSTANCE instance{};
+        HFONT titleFont{};
+        HFONT subtitleFont{};
+        HFONT bodyFont{};
+        HFONT footerFont{};
+        HICON heroIcon{};
+        HICON windowIcon{};
+        bool darkMode{};
+        bool done{};
+        COLORREF background{};
+        COLORREF headerBackground{};
+        COLORREF footerBackground{};
+        COLORREF panelBackground{};
+        COLORREF border{};
+        COLORREF text{};
+        COLORREF mutedText{};
+        COLORREF accent{};
+        std::wstring title;
+        std::wstring subtitle;
+        std::wstring intro;
+        std::wstring bodyHeading;
+        std::wstring bodyContent;
+        std::wstring footer;
+        std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> brandArt;
     };
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
@@ -330,6 +370,128 @@ namespace
         const fs::path path(folderPath);
         const std::wstring leaf = path.filename().wstring();
         return leaf.empty() ? std::wstring(folderPath) : leaf;
+    }
+
+    int CurrentCalendarYear()
+    {
+        SYSTEMTIME localTime{};
+        GetLocalTime(&localTime);
+        return static_cast<int>(localTime.wYear);
+    }
+
+    HFONT CreateDialogUiFont(int pointSize, int weight)
+    {
+        NONCLIENTMETRICSW metrics{};
+        metrics.cbSize = sizeof(metrics);
+
+        LOGFONTW logFont{};
+        if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0) != FALSE)
+        {
+            logFont = metrics.lfMessageFont;
+        }
+        else
+        {
+            wcscpy_s(logFont.lfFaceName, L"Segoe UI");
+        }
+
+        HDC screenDc = GetDC(nullptr);
+        const int dpiY = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
+        if (screenDc)
+        {
+            ReleaseDC(nullptr, screenDc);
+        }
+
+        logFont.lfHeight = -MulDiv(pointSize, dpiY, 72);
+        logFont.lfWeight = weight;
+        logFont.lfCharSet = DEFAULT_CHARSET;
+        logFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
+        return CreateFontIndirectW(&logFont);
+    }
+
+    void DeleteFontIfOwned(HFONT font)
+    {
+        if (font && font != GetStockObject(DEFAULT_GUI_FONT))
+        {
+            DeleteObject(font);
+        }
+    }
+
+    int MeasureTextBlockHeight(HFONT font,
+                               std::wstring_view text,
+                               int width,
+                               UINT format,
+                               int minimumHeight = 0)
+    {
+        if (width <= 0)
+        {
+            return minimumHeight;
+        }
+
+        std::wstring localText = text.empty() ? std::wstring(L" ") : std::wstring(text);
+        HDC screenDc = GetDC(nullptr);
+        if (!screenDc)
+        {
+            return minimumHeight;
+        }
+
+        const HGDIOBJ oldFont = font ? SelectObject(screenDc, font) : nullptr;
+        RECT bounds{0, 0, width, 0};
+        DrawTextW(screenDc, localText.c_str(), -1, &bounds, format | DT_CALCRECT);
+        if (oldFont)
+        {
+            SelectObject(screenDc, oldFont);
+        }
+        ReleaseDC(nullptr, screenDc);
+        const int measuredHeight = static_cast<int>(bounds.bottom - bounds.top);
+        return std::max(minimumHeight, measuredHeight);
+    }
+
+    int MeasureAboutDialogClientHeight(const AboutDialogState& state)
+    {
+        const int contentRight = kAboutDialogWidth - kAboutDialogMargin;
+        const int artLeft = contentRight - kAboutDialogBrandArtSize;
+        const int iconLeft = kAboutDialogMargin;
+        const int iconSize = 48;
+        const int textLeft = iconLeft + iconSize + 20;
+        const int textRight = artLeft - 28;
+        const int textWidth = std::max(320, textRight - textLeft);
+
+        const int titleTop = kAboutDialogMargin - 2;
+        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 44);
+        const int subtitleTop = titleTop + titleHeight + 10;
+        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int introTop = subtitleTop + subtitleHeight + 10;
+        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 40);
+        const int artFrameBottom = (kAboutDialogMargin - 4) + kAboutDialogBrandArtSize + 10;
+        const int headerHeight = std::max(kAboutDialogHeaderHeight,
+                                          std::max(artFrameBottom + kAboutDialogMargin - 8,
+                                                   introTop + introHeight + kAboutDialogMargin - 8));
+
+        const int bodyWidth = kAboutDialogWidth - (kAboutDialogMargin * 2);
+        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int bodyTextHeight = MeasureTextBlockHeight(state.bodyFont, state.bodyContent, bodyWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
+        const int bodyHeight = 24 + headingHeight + 12 + bodyTextHeight + 26;
+
+        const int footerTextWidth = kAboutDialogWidth - (kAboutDialogMargin * 2) - kAboutDialogButtonWidth - 20;
+        const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
+        const int footerHeight = std::max(kAboutDialogFooterHeight, std::max(footerTextHeight + 34, kAboutDialogButtonHeight + 36));
+
+        return headerHeight + bodyHeight + footerHeight;
+    }
+
+    void LayoutAboutDialogControls(HWND hwnd, const AboutDialogState& state)
+    {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        if (state.okButton)
+        {
+            MoveWindow(state.okButton,
+                       client.right - kAboutDialogMargin - kAboutDialogButtonWidth,
+                       client.bottom - kAboutDialogMargin - kAboutDialogButtonHeight,
+                       kAboutDialogButtonWidth,
+                       kAboutDialogButtonHeight,
+                       TRUE);
+        }
     }
 
     std::wstring CompactSortLabel(hyperbrowse::browser::BrowserSortMode sortMode)
@@ -548,6 +710,236 @@ namespace
             }
 
             if (LOWORD(wParam) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    void PaintAboutDialog(HDC hdc, const RECT& clientRect, const AboutDialogState& state)
+    {
+        const int contentRight = clientRect.right - kAboutDialogMargin;
+        const int artLeft = contentRight - kAboutDialogBrandArtSize;
+        const int artTop = kAboutDialogMargin - 4;
+        const int iconLeft = kAboutDialogMargin;
+        const int iconTop = kAboutDialogMargin + 2;
+        const int iconSize = 48;
+        const int textLeft = iconLeft + iconSize + 20;
+        const int textRight = artLeft - 28;
+        const int textWidth = std::max(320, textRight - textLeft);
+
+        const int titleTop = kAboutDialogMargin - 2;
+        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 44);
+        const int subtitleTop = titleTop + titleHeight + 10;
+        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int introTop = subtitleTop + subtitleHeight + 10;
+        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 40);
+        const int artFrameBottom = artTop + kAboutDialogBrandArtSize + 10;
+        const int headerHeight = std::max(kAboutDialogHeaderHeight,
+                                          std::max(artFrameBottom + kAboutDialogMargin - 8,
+                                                   introTop + introHeight + kAboutDialogMargin - 8));
+
+        const int bodyWidth = clientRect.right - (kAboutDialogMargin * 2);
+        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int footerTextWidth = clientRect.right - (kAboutDialogMargin * 2) - kAboutDialogButtonWidth - 20;
+        const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
+        const int footerHeight = std::max(kAboutDialogFooterHeight, std::max(footerTextHeight + 34, kAboutDialogButtonHeight + 36));
+
+        const RECT headerRect{clientRect.left, clientRect.top, clientRect.right, clientRect.top + headerHeight};
+        const RECT footerRect{clientRect.left, clientRect.bottom - footerHeight, clientRect.right, clientRect.bottom};
+        const RECT bodyRect{clientRect.left, headerRect.bottom, clientRect.right, footerRect.top};
+
+        HBRUSH backgroundBrush = CreateSolidBrush(state.background);
+        FillRect(hdc, &clientRect, backgroundBrush);
+        DeleteObject(backgroundBrush);
+
+        HBRUSH headerBrush = CreateSolidBrush(state.headerBackground);
+        FillRect(hdc, &headerRect, headerBrush);
+        DeleteObject(headerBrush);
+
+        HBRUSH footerBrush = CreateSolidBrush(state.footerBackground);
+        FillRect(hdc, &footerRect, footerBrush);
+        DeleteObject(footerBrush);
+
+        HBRUSH bodyBrush = CreateSolidBrush(state.panelBackground);
+        FillRect(hdc, &bodyRect, bodyBrush);
+        DeleteObject(bodyBrush);
+
+        HPEN borderPen = CreatePen(PS_SOLID, 1, state.border);
+        HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+        MoveToEx(hdc, clientRect.left, headerRect.bottom - 1, nullptr);
+        LineTo(hdc, clientRect.right, headerRect.bottom - 1);
+        MoveToEx(hdc, clientRect.left, footerRect.top, nullptr);
+        LineTo(hdc, clientRect.right, footerRect.top);
+        SelectObject(hdc, oldPen);
+        DeleteObject(borderPen);
+
+        SetBkMode(hdc, TRANSPARENT);
+
+        if (state.heroIcon)
+        {
+            DrawIconEx(hdc, iconLeft, iconTop, state.heroIcon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
+        }
+
+        if (state.brandArt)
+        {
+            RECT artFrame{artLeft - 10, artTop - 10, artLeft + kAboutDialogBrandArtSize + 10, artTop + kAboutDialogBrandArtSize + 10};
+            HBRUSH artPanelBrush = CreateSolidBrush(BlendColor(state.headerBackground, state.background, state.darkMode ? 42 : 18));
+            HPEN artBorderPen = CreatePen(PS_SOLID, 1, state.border);
+            HGDIOBJ oldBrush = SelectObject(hdc, artPanelBrush);
+            HGDIOBJ oldArtPen = SelectObject(hdc, artBorderPen);
+            RoundRect(hdc, artFrame.left, artFrame.top, artFrame.right, artFrame.bottom, 18, 18);
+            SelectObject(hdc, oldArtPen);
+            SelectObject(hdc, oldBrush);
+            DeleteObject(artBorderPen);
+            DeleteObject(artPanelBrush);
+
+            hyperbrowse::util::DrawBitmapWithAlpha(hdc, *state.brandArt, artLeft, artTop, kAboutDialogBrandArtSize, kAboutDialogBrandArtSize);
+        }
+
+        RECT titleRect{textLeft, titleTop, textRight, titleTop + titleHeight};
+        RECT subtitleRect{textLeft, subtitleTop, textRight, subtitleTop + subtitleHeight};
+        RECT introRect{textLeft, introTop, textRight, introTop + introHeight};
+
+        HGDIOBJ oldFont = SelectObject(hdc, state.titleFont ? state.titleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        SetTextColor(hdc, state.text);
+        DrawTextW(hdc, state.title.c_str(), -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+        SelectObject(hdc, state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        SetTextColor(hdc, state.accent);
+        DrawTextW(hdc, state.subtitle.c_str(), -1, &subtitleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+        SelectObject(hdc, state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        SetTextColor(hdc, state.mutedText);
+        DrawTextW(hdc,
+                  state.intro.c_str(),
+                  -1,
+                  &introRect,
+                  DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+
+        RECT headingRect{kAboutDialogMargin, bodyRect.top + 24, clientRect.right - kAboutDialogMargin, bodyRect.top + 24 + headingHeight};
+        SetTextColor(hdc, state.accent);
+        DrawTextW(hdc, state.bodyHeading.c_str(), -1, &headingRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+
+        RECT bodyTextRect{kAboutDialogMargin, headingRect.bottom + 12, clientRect.right - kAboutDialogMargin, footerRect.top - 18};
+        SetTextColor(hdc, state.text);
+        DrawTextW(hdc,
+                  state.bodyContent.c_str(),
+                  -1,
+                  &bodyTextRect,
+                  DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+
+        RECT footerTextRect{kAboutDialogMargin, footerRect.top + 18, clientRect.right - kAboutDialogMargin - kAboutDialogButtonWidth - 20, footerRect.bottom - 16};
+        SelectObject(hdc, state.footerFont ? state.footerFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        SetTextColor(hdc, state.mutedText);
+        DrawTextW(hdc,
+                  state.footer.c_str(),
+                  -1,
+                  &footerTextRect,
+                  DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+
+        SelectObject(hdc, oldFont);
+    }
+
+    LRESULT CALLBACK AboutDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<AboutDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<AboutDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+
+            state->okButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"OK",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                kAboutDialogWidth - kAboutDialogMargin - kAboutDialogButtonWidth,
+                kAboutDialogHeight - kAboutDialogFooterHeight + 20,
+                kAboutDialogButtonWidth,
+                kAboutDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+            if (state->okButton)
+            {
+                SendMessageW(state->okButton,
+                             WM_SETFONT,
+                             reinterpret_cast<WPARAM>(state->bodyFont ? state->bodyFont : GetStockObject(DEFAULT_GUI_FONT)),
+                             TRUE);
+            }
+
+            if (state->windowIcon)
+            {
+                SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(state->windowIcon));
+                SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(state->windowIcon));
+            }
+
+            ApplyWindowFrameTheme(hwnd, state->darkMode);
+            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            LayoutAboutDialogControls(hwnd, *state);
+            return 0;
+        }
+        case WM_SIZE:
+            if (state)
+            {
+                LayoutAboutDialogControls(hwnd, *state);
+            }
+            return 0;
+        case WM_SHOWWINDOW:
+            if (wParam != FALSE && state && state->okButton)
+            {
+                SetFocus(state->okButton);
+                return FALSE;
+            }
+            break;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+        {
+            if (!state)
+            {
+                break;
+            }
+
+            PAINTSTRUCT ps{};
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT clientRect{};
+            GetClientRect(hwnd, &clientRect);
+            PaintAboutDialog(hdc, clientRect, *state);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
             {
                 DestroyWindow(hwnd);
                 return 0;
@@ -2826,6 +3218,135 @@ namespace hyperbrowse::ui
         util::LogInfo(L"Opened diagnostics snapshot window.");
     }
 
+    void MainWindow::ShowAboutDialog() const
+    {
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance_, kAboutDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &AboutDialogProc;
+            windowClass.hInstance = instance_;
+            windowClass.lpszClassName = kAboutDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return;
+            }
+        }
+
+        const ThemePalette palette = GetThemePalette();
+
+        AboutDialogState state;
+        state.ownerWindow = hwnd_;
+        state.instance = instance_;
+        state.darkMode = themeMode_ == ThemeMode::Dark;
+        state.background = palette.windowBackground;
+        state.headerBackground = BlendColor(palette.actionStripBackground, palette.accent, state.darkMode ? 28 : 18);
+        state.footerBackground = BlendColor(palette.paneBackground, palette.windowBackground, state.darkMode ? 38 : 58);
+        state.panelBackground = palette.paneBackground;
+        state.border = palette.actionStripBorder;
+        state.text = palette.text;
+        state.mutedText = palette.mutedText;
+        state.accent = palette.accent;
+        state.title = L"HyperBrowse 0.1.0";
+        state.subtitle = L"High-performance native image browser for Windows";
+        state.intro = L"High-performance browsing and viewing for large Windows image folders.";
+        state.bodyHeading = L"What sets it apart";
+        state.bodyContent =
+            L"- Native Win32 shell tuned for fast startup, compact chrome, and direct file-system browsing.\r\n"
+            L"- Async folder enumeration, incremental folder watching, and responsive refresh in large image collections.\r\n"
+            L"- Virtualized thumbnail and details views with filtering, metadata-aware sorting, and efficient multi-selection workflows.\r\n"
+            L"- Broad format coverage across JPEG, PNG, GIF, TIFF, and major RAW camera formats with graceful fallback behavior.\r\n"
+            L"- Dedicated viewer window with slideshow playback, transition effects, overlays, full-screen viewing, and background prefetch.\r\n"
+            L"- Practical photographer workflows including batch convert, lossless JPEG orientation adjustment, and Explorer-friendly file operations.\r\n"
+            L"- Optional NVIDIA-accelerated JPEG decoding when available, while preserving correctness on systems without GPU acceleration.";
+        state.footer =
+            L"Copyright (c) "
+            + std::to_wstring(CurrentCalendarYear())
+            + L" Michael A. McCloskey\r\nLicensed under the MIT License.";
+        state.brandArt = util::LoadPngResourceBitmap(instance_, IDB_HYPERBROWSE_BRAND_PNG, kAboutDialogBrandArtSize, kAboutDialogBrandArtSize);
+        state.heroIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, 48, 48, LR_DEFAULTCOLOR));
+        state.windowIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
+        state.titleFont = CreateDialogUiFont(21, FW_BOLD);
+        state.subtitleFont = CreateDialogUiFont(11, FW_SEMIBOLD);
+        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL);
+        state.footerFont = CreateDialogUiFont(9, FW_NORMAL);
+
+        if (!state.titleFont) state.titleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        if (!state.subtitleFont) state.subtitleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        if (!state.bodyFont) state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        if (!state.footerFont) state.footerFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+        const int aboutClientHeight = std::max(kAboutDialogHeight, MeasureAboutDialogClientHeight(state));
+        RECT windowRect{0, 0, kAboutDialogWidth, aboutClientHeight};
+        AdjustWindowRectEx(&windowRect,
+                           WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+                           FALSE,
+                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+
+        if (hwnd_)
+        {
+            EnableWindow(hwnd_, FALSE);
+        }
+
+        HWND dialogWindow = CreateWindowExW(
+            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+            kAboutDialogClassName,
+            L"About HyperBrowse",
+            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            hwnd_,
+            nullptr,
+            instance_,
+            &state);
+
+        if (!dialogWindow)
+        {
+            if (hwnd_)
+            {
+                EnableWindow(hwnd_, TRUE);
+            }
+            DeleteFontIfOwned(state.titleFont);
+            DeleteFontIfOwned(state.subtitleFont);
+            DeleteFontIfOwned(state.bodyFont);
+            DeleteFontIfOwned(state.footerFont);
+            if (state.heroIcon) DestroyIcon(state.heroIcon);
+            if (state.windowIcon) DestroyIcon(state.windowIcon);
+            return;
+        }
+
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+
+        MSG message{};
+        while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            if (!IsDialogMessageW(dialogWindow, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+
+        if (hwnd_)
+        {
+            EnableWindow(hwnd_, TRUE);
+            SetForegroundWindow(hwnd_);
+            SetActiveWindow(hwnd_);
+        }
+
+        DeleteFontIfOwned(state.titleFont);
+        DeleteFontIfOwned(state.subtitleFont);
+        DeleteFontIfOwned(state.bodyFont);
+        DeleteFontIfOwned(state.footerFont);
+        if (state.heroIcon) DestroyIcon(state.heroIcon);
+        if (state.windowIcon) DestroyIcon(state.windowIcon);
+    }
+
     void MainWindow::ResetDiagnosticsState()
     {
         util::ResetDiagnostics();
@@ -4719,15 +5240,7 @@ namespace hyperbrowse::ui
             StartSlideshow(false);
             return true;
         case ID_HELP_ABOUT:
-            MessageBoxW(
-                hwnd_,
-                L"HyperBrowse\nVersion " L"0.1.0" L"\n\n"
-                L"A fast, native Win32 image browser.\n\n"
-                L"Features: async folder browsing, virtualized thumbnails, "
-                L"RAW support, metadata, slideshow, batch convert, "
-                L"and GPU-accelerated JPEG decoding.",
-                L"About HyperBrowse",
-                MB_OK | MB_ICONINFORMATION);
+            ShowAboutDialog();
             return true;
         case ID_HELP_DIAGNOSTICS_SNAPSHOT:
             ShowDiagnosticsSnapshot();

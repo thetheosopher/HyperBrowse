@@ -176,6 +176,7 @@ namespace hyperbrowse::ui
         bool HasSelectedJpegItems() const;
         void ShowBrowserContextMenu(POINT screenPoint);
         void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
+        void ShowAboutDialog() const;
         void ShowDiagnosticsSnapshot();
         void ResetDiagnosticsState();
         void ShowImageInformation();

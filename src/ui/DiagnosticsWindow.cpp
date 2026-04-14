@@ -14,10 +14,10 @@ namespace
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
 
-    constexpr int kMargin = 16;
-    constexpr int kSectionGap = 10;
-    constexpr int kTitleHeight = 28;
-    constexpr int kSummaryHeight = 78;
+    constexpr int kMargin = 18;
+    constexpr int kSectionGap = 12;
+    constexpr int kTitleHeight = 34;
+    constexpr int kSummaryHeight = 84;
     constexpr int kSectionLabelHeight = 24;
 
     void ApplyWindowFrameTheme(HWND hwnd, bool useDarkMode)
@@ -102,6 +102,53 @@ namespace
                << std::setw(2) << localTime.wMinute << L":"
                << std::setw(2) << localTime.wSecond;
         return stream.str();
+    }
+
+    std::wstring ReadWindowText(HWND hwnd)
+    {
+        const int length = GetWindowTextLengthW(hwnd);
+        std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+        if (length > 0)
+        {
+            GetWindowTextW(hwnd, text.data(), length + 1);
+            text.resize(static_cast<std::size_t>(length));
+        }
+        else
+        {
+            text.clear();
+        }
+        return text;
+    }
+
+    int MeasureWindowTextHeight(HWND hwnd, HFONT font, int width, UINT format, int minimumHeight)
+    {
+        if (!hwnd || width <= 0)
+        {
+            return minimumHeight;
+        }
+
+        std::wstring text = ReadWindowText(hwnd);
+        if (text.empty())
+        {
+            text = L" ";
+        }
+
+        HDC screenDc = GetDC(nullptr);
+        if (!screenDc)
+        {
+            return minimumHeight;
+        }
+
+        const HGDIOBJ oldFont = font ? SelectObject(screenDc, font) : nullptr;
+        RECT bounds{0, 0, width, 0};
+        DrawTextW(screenDc, text.c_str(), -1, &bounds, format | DT_CALCRECT);
+        if (oldFont)
+        {
+            SelectObject(screenDc, oldFont);
+        }
+        ReleaseDC(nullptr, screenDc);
+        const int measuredHeight = static_cast<int>(bounds.bottom - bounds.top);
+        return std::max(minimumHeight, measuredHeight);
     }
 }
 
@@ -206,8 +253,8 @@ namespace hyperbrowse::ui
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            980,
-            720,
+            1040,
+            760,
             owner,
             nullptr,
             instance_,
@@ -222,7 +269,7 @@ namespace hyperbrowse::ui
             0,
             L"STATIC",
             L"HyperBrowse Diagnostics",
-            WS_CHILD | WS_VISIBLE,
+            WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
             0, 0, 0, 0,
             hwnd_,
             nullptr,
@@ -233,16 +280,16 @@ namespace hyperbrowse::ui
             0,
             L"STATIC",
             L"",
-            WS_CHILD | WS_VISIBLE,
+            WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
             0, 0, 0, 0,
             hwnd_,
             nullptr,
             instance_,
             nullptr);
 
-        timingsLabel_ = CreateWindowExW(0, L"STATIC", L"Timings", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd_, nullptr, instance_, nullptr);
-        countersLabel_ = CreateWindowExW(0, L"STATIC", L"Counters", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd_, nullptr, instance_, nullptr);
-        derivedLabel_ = CreateWindowExW(0, L"STATIC", L"Derived", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd_, nullptr, instance_, nullptr);
+        timingsLabel_ = CreateWindowExW(0, L"STATIC", L"Timings", WS_CHILD | WS_VISIBLE | SS_NOPREFIX, 0, 0, 0, 0, hwnd_, nullptr, instance_, nullptr);
+        countersLabel_ = CreateWindowExW(0, L"STATIC", L"Counters", WS_CHILD | WS_VISIBLE | SS_NOPREFIX, 0, 0, 0, 0, hwnd_, nullptr, instance_, nullptr);
+        derivedLabel_ = CreateWindowExW(0, L"STATIC", L"Derived", WS_CHILD | WS_VISIBLE | SS_NOPREFIX, 0, 0, 0, 0, hwnd_, nullptr, instance_, nullptr);
 
         const DWORD listStyle = WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL;
         timingsList_ = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, nullptr, listStyle, 0, 0, 0, 0, hwnd_, nullptr, instance_, nullptr);
@@ -354,25 +401,31 @@ namespace hyperbrowse::ui
         const int topWidth = clientWidth - (kMargin * 2);
         int top = kMargin;
 
-        MoveWindow(titleLabel_, kMargin, top, topWidth, kTitleHeight, TRUE);
-        top += kTitleHeight + 4;
-        MoveWindow(summaryLabel_, kMargin, top, topWidth, kSummaryHeight, TRUE);
-        top += kSummaryHeight + kSectionGap;
+        const int titleHeight = MeasureWindowTextHeight(titleLabel_, titleFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, kTitleHeight);
+        const int summaryHeight = MeasureWindowTextHeight(summaryLabel_, bodyFont_, topWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, kSummaryHeight);
+        const int sectionLabelHeight = std::max({MeasureWindowTextHeight(timingsLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, kSectionLabelHeight),
+                             MeasureWindowTextHeight(countersLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, kSectionLabelHeight),
+                             MeasureWindowTextHeight(derivedLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, kSectionLabelHeight)});
 
-        MoveWindow(timingsLabel_, kMargin, top, topWidth, kSectionLabelHeight, TRUE);
-        top += kSectionLabelHeight + 4;
+        MoveWindow(titleLabel_, kMargin, top, topWidth, titleHeight, TRUE);
+        top += titleHeight + 6;
+        MoveWindow(summaryLabel_, kMargin, top, topWidth, summaryHeight, TRUE);
+        top += summaryHeight + kSectionGap;
+
+        MoveWindow(timingsLabel_, kMargin, top, topWidth, sectionLabelHeight, TRUE);
+        top += sectionLabelHeight + 4;
 
         const int remainingHeight = clientHeight - top - kMargin;
-        const int bottomSectionHeight = std::max(150, (remainingHeight - kSectionGap - kSectionLabelHeight) / 2);
-        const int timingsHeight = std::max(180, remainingHeight - bottomSectionHeight - kSectionGap - kSectionLabelHeight - 4);
+        const int bottomSectionHeight = std::max(150, (remainingHeight - kSectionGap - sectionLabelHeight) / 2);
+        const int timingsHeight = std::max(180, remainingHeight - bottomSectionHeight - kSectionGap - sectionLabelHeight - 4);
 
         MoveWindow(timingsList_, kMargin, top, topWidth, timingsHeight, TRUE);
         top += timingsHeight + kSectionGap;
 
         const int halfWidth = (topWidth - kSectionGap) / 2;
-        MoveWindow(countersLabel_, kMargin, top, halfWidth, kSectionLabelHeight, TRUE);
-        MoveWindow(derivedLabel_, kMargin + halfWidth + kSectionGap, top, halfWidth, kSectionLabelHeight, TRUE);
-        top += kSectionLabelHeight + 4;
+        MoveWindow(countersLabel_, kMargin, top, halfWidth, sectionLabelHeight, TRUE);
+        MoveWindow(derivedLabel_, kMargin + halfWidth + kSectionGap, top, halfWidth, sectionLabelHeight, TRUE);
+        top += sectionLabelHeight + 4;
 
         const int bottomHeight = clientHeight - top - kMargin;
         MoveWindow(countersList_, kMargin, top, halfWidth, bottomHeight, TRUE);
