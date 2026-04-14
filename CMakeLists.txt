@@ -6,9 +6,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(HYPERBROWSE_STATIC_MSVC_RUNTIME "Statically link the MSVC runtime to reduce deployed files" ON)
+
+if(MSVC)
+    if(HYPERBROWSE_STATIC_MSVC_RUNTIME)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    else()
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    endif()
+endif()
+
 set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
-set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
-include(InstallRequiredSystemLibraries)
+if(MSVC AND NOT HYPERBROWSE_STATIC_MSVC_RUNTIME)
+    set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
+    include(InstallRequiredSystemLibraries)
+endif()
 
 set(HYPERBROWSE_INSTALLER_BIN_DIR "bin")
 set(HYPERBROWSE_INSTALLER_DOC_DIR "docs")
@@ -28,9 +40,16 @@ include(CTest)
 
 set(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS "")
 set(HYPERBROWSE_BUNDLED_CUDA_LICENSE_FILES "")
+set(HYPERBROWSE_PORTABLE_MSVC_RUNTIME_LINE "- No separate Microsoft Visual C++ runtime DLLs; the runtime is linked statically into HyperBrowse.exe and HyperBrowseRawHelper.exe")
+set(HYPERBROWSE_RUNTIME_DEPENDENCY_MSVC_LINE "No separate Microsoft Visual C++ runtime DLLs, because this build uses the static MSVC runtime")
 set(HYPERBROWSE_PORTABLE_NVIDIA_RUNTIME_LINE "The app uses WIC by default and only uses nvJPEG when that optional runtime is available.")
 set(HYPERBROWSE_RUNTIME_DEPENDENCY_NVIDIA_LINE "nvJPEG, because acceleration is optional and the application stays correct without NVIDIA runtime support")
 set(HYPERBROWSE_PORTABLE_NVIDIA_CONTENT_LINE "")
+
+if(MSVC AND NOT HYPERBROWSE_STATIC_MSVC_RUNTIME)
+    set(HYPERBROWSE_PORTABLE_MSVC_RUNTIME_LINE "- Microsoft Visual C++ runtime DLLs staged by CMake for this toolchain")
+    set(HYPERBROWSE_RUNTIME_DEPENDENCY_MSVC_LINE "Microsoft Visual C++ runtime DLLs copied by CMake when the active toolchain requires them")
+endif()
 
 if(HYPERBROWSE_ENABLE_NVJPEG AND HYPERBROWSE_BUNDLE_CUDA_REDIST)
     include(cmake/BundleCudaRedistributables.cmake)
@@ -171,10 +190,7 @@ set_target_properties(HyperBrowse PROPERTIES
 )
 
 add_custom_command(TARGET HyperBrowse POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HyperBrowse>/assets"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${HYPERBROWSE_TOOLBAR_ICONS_DIR}"
-        "$<TARGET_FILE_DIR:HyperBrowse>/assets/toolbar-icons")
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:HyperBrowse>/assets")
 
 if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
     foreach(_hyperbrowse_cuda_runtime_dll IN LISTS HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
@@ -222,14 +238,6 @@ install(FILES "${HYPERBROWSE_RUNTIME_DEPENDENCIES}"
     DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
     COMPONENT Runtime
     RENAME "runtime-dependencies.txt")
-
-install(DIRECTORY "${HYPERBROWSE_TOOLBAR_ICONS_DIR}/"
-    DESTINATION "assets/toolbar-icons"
-    COMPONENT Portable)
-
-install(DIRECTORY "${HYPERBROWSE_TOOLBAR_ICONS_DIR}/"
-    DESTINATION "${HYPERBROWSE_INSTALLER_BIN_DIR}/assets/toolbar-icons"
-    COMPONENT Runtime)
 
 if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
     install(PROGRAMS ${HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS}

@@ -25,6 +25,7 @@
 #pragma warning(pop)
 #endif
 
+#include "app/resource.h"
 #include "util/Log.h"
 
 namespace fs = std::filesystem;
@@ -63,6 +64,41 @@ namespace
             nullptr,
             nullptr);
         return narrowText;
+    }
+
+    std::string LoadBinaryResourceUtf8(int resourceId)
+    {
+        HMODULE module = GetModuleHandleW(nullptr);
+        if (!module)
+        {
+            return {};
+        }
+
+        HRSRC resourceHandle = FindResourceW(module, MAKEINTRESOURCEW(resourceId), RT_RCDATA);
+        if (!resourceHandle)
+        {
+            return {};
+        }
+
+        const DWORD resourceSize = SizeofResource(module, resourceHandle);
+        if (resourceSize == 0)
+        {
+            return {};
+        }
+
+        HGLOBAL loadedResource = LoadResource(module, resourceHandle);
+        if (!loadedResource)
+        {
+            return {};
+        }
+
+        const void* resourceData = LockResource(loadedResource);
+        if (!resourceData)
+        {
+            return {};
+        }
+
+        return std::string(static_cast<const char*>(resourceData), static_cast<std::size_t>(resourceSize));
     }
 }
 
@@ -124,17 +160,17 @@ namespace hyperbrowse::ui
         }
 
         bool success = true;
-        success = LoadIconFile(L"open-folder", L"open-folder.svg") && success;
-        success = LoadIconFile(L"recursive", L"recursive.svg") && success;
-        success = LoadIconFile(L"view-grid", L"view-grid.svg") && success;
-        success = LoadIconFile(L"view-list", L"view-list.svg") && success;
-        success = LoadIconFile(L"sort", L"sort.svg") && success;
-        success = LoadIconFile(L"thumbnail-size", L"thumbnail-size.svg") && success;
-        success = LoadIconFile(L"copy", L"copy.svg") && success;
-        success = LoadIconFile(L"move", L"move.svg") && success;
-        success = LoadIconFile(L"delete", L"delete.svg") && success;
-        success = LoadIconFile(L"search", L"search.svg") && success;
-        success = LoadIconFile(L"chevron-down", L"chevron-down.svg") && success;
+        success = LoadIconAsset(L"open-folder", IDR_TOOLBAR_ICON_OPEN_FOLDER, L"open-folder.svg") && success;
+        success = LoadIconAsset(L"recursive", IDR_TOOLBAR_ICON_RECURSIVE, L"recursive.svg") && success;
+        success = LoadIconAsset(L"view-grid", IDR_TOOLBAR_ICON_VIEW_GRID, L"view-grid.svg") && success;
+        success = LoadIconAsset(L"view-list", IDR_TOOLBAR_ICON_VIEW_LIST, L"view-list.svg") && success;
+        success = LoadIconAsset(L"sort", IDR_TOOLBAR_ICON_SORT, L"sort.svg") && success;
+        success = LoadIconAsset(L"thumbnail-size", IDR_TOOLBAR_ICON_THUMBNAIL_SIZE, L"thumbnail-size.svg") && success;
+        success = LoadIconAsset(L"copy", IDR_TOOLBAR_ICON_COPY, L"copy.svg") && success;
+        success = LoadIconAsset(L"move", IDR_TOOLBAR_ICON_MOVE, L"move.svg") && success;
+        success = LoadIconAsset(L"delete", IDR_TOOLBAR_ICON_DELETE, L"delete.svg") && success;
+        success = LoadIconAsset(L"search", IDR_TOOLBAR_ICON_SEARCH, L"search.svg") && success;
+        success = LoadIconAsset(L"chevron-down", IDR_TOOLBAR_ICON_CHEVRON_DOWN, L"chevron-down.svg") && success;
         return success;
     }
 
@@ -211,20 +247,31 @@ namespace hyperbrowse::ui
         return dib;
     }
 
-    bool ToolbarIconLibrary::LoadIconFile(const wchar_t* iconName, const wchar_t* fileName)
+    bool ToolbarIconLibrary::LoadIconAsset(const wchar_t* iconName, int resourceId, const wchar_t* fileName)
     {
+        if (std::string svgMarkup = LoadBinaryResourceUtf8(resourceId); !svgMarkup.empty())
+        {
+            const std::wstring resourceLabel = L"embedded toolbar resource #" + std::to_wstring(resourceId);
+            return ParseAndStoreIcon(NarrowUtf8(iconName), std::move(svgMarkup), resourceLabel);
+        }
+
         const fs::path iconPath = fs::path(GetIconDirectory()) / fileName;
         std::ifstream fileStream(iconPath, std::ios::binary);
         if (!fileStream)
         {
-            util::LogError(L"Failed to open toolbar icon SVG: " + iconPath.wstring());
+            util::LogError(L"Failed to open toolbar icon SVG resource or fallback file: " + iconPath.wstring());
             return false;
         }
 
         std::string svgMarkup((std::istreambuf_iterator<char>(fileStream)), std::istreambuf_iterator<char>());
+        return ParseAndStoreIcon(NarrowUtf8(iconName), std::move(svgMarkup), iconPath.wstring());
+    }
+
+    bool ToolbarIconLibrary::ParseAndStoreIcon(std::string iconKey, std::string svgMarkup, std::wstring_view sourceLabel)
+    {
         if (svgMarkup.empty())
         {
-            util::LogError(L"Toolbar icon SVG was empty: " + iconPath.wstring());
+            util::LogError(L"Toolbar icon SVG was empty: " + std::wstring(sourceLabel));
             return false;
         }
 
@@ -232,11 +279,11 @@ namespace hyperbrowse::ui
         NSVGimage* image = nsvgParse(svgMarkup.data(), "px", 96.0f);
         if (!image)
         {
-            util::LogError(L"Failed to parse toolbar icon SVG: " + iconPath.wstring());
+            util::LogError(L"Failed to parse toolbar icon SVG: " + std::wstring(sourceLabel));
             return false;
         }
 
-        images_[NarrowUtf8(iconName)] = image;
+        images_[std::move(iconKey)] = image;
         return true;
     }
 

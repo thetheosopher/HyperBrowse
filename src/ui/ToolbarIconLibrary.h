@@ -38,7 +38,8 @@ namespace hyperbrowse::ui
             std::size_t operator()(const BitmapKey& key) const;
         };
 
-        bool LoadIconFile(const wchar_t* iconName, const wchar_t* fileName);
+        bool LoadIconAsset(const wchar_t* iconName, int resourceId, const wchar_t* fileName);
+        bool ParseAndStoreIcon(std::string iconKey, std::string svgMarkup, std::wstring_view sourceLabel);
         std::wstring GetIconDirectory() const;
 
         NSVGrasterizer* rasterizer_{};

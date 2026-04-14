@@ -4,6 +4,17 @@
 // Application icon – ID 1 so the shell uses it as the default .exe icon
 IDI_HYPERBROWSE  ICON  "@CMAKE_CURRENT_SOURCE_DIR@/assets/HyperBrowse.ico"
 IDB_HYPERBROWSE_BRAND_PNG  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/HyperBrowse_256.png"
+IDR_TOOLBAR_ICON_OPEN_FOLDER  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/open-folder.svg"
+IDR_TOOLBAR_ICON_RECURSIVE  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/recursive.svg"
+IDR_TOOLBAR_ICON_VIEW_GRID  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/view-grid.svg"
+IDR_TOOLBAR_ICON_VIEW_LIST  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/view-list.svg"
+IDR_TOOLBAR_ICON_SORT  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/sort.svg"
+IDR_TOOLBAR_ICON_THUMBNAIL_SIZE  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/thumbnail-size.svg"
+IDR_TOOLBAR_ICON_COPY  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/copy.svg"
+IDR_TOOLBAR_ICON_MOVE  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/move.svg"
+IDR_TOOLBAR_ICON_DELETE  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/delete.svg"
+IDR_TOOLBAR_ICON_SEARCH  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/search.svg"
+IDR_TOOLBAR_ICON_CHEVRON_DOWN  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/chevron-down.svg"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0

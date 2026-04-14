@@ -4,7 +4,8 @@ This folder contains the portable HyperBrowse layout for Windows 10/11 x64.
 
 Contents:
 - HyperBrowse.exe
-- Any Microsoft Visual C++ runtime DLLs staged by CMake for this toolchain
+- HyperBrowseRawHelper.exe
+@HYPERBROWSE_PORTABLE_MSVC_RUNTIME_LINE@
 @HYPERBROWSE_PORTABLE_NVIDIA_CONTENT_LINE@
 - RUNTIME-DEPENDENCIES.txt
 

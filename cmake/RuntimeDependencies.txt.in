@@ -2,12 +2,14 @@ HyperBrowse Runtime Dependencies
 
 Bundled by these packaging rules:
 - HyperBrowse.exe
-- Microsoft Visual C++ runtime DLLs copied by CMake when the active toolchain requires them
+- HyperBrowseRawHelper.exe
+- @HYPERBROWSE_RUNTIME_DEPENDENCY_MSVC_LINE@
 - @HYPERBROWSE_RUNTIME_DEPENDENCY_NVIDIA_LINE@
 - README.txt / README-portable.txt and this dependency manifest
 
 Not shipped as separate third-party runtime DLLs in this build:
 - LibRaw, because the vendored build is linked statically
+- Toolbar SVG assets, because the application embeds them as Win32 resources
 
 Expected from Windows 10/11 x64:
 - Windows Imaging Component (WIC)
