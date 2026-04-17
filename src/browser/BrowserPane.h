@@ -42,6 +42,11 @@ namespace hyperbrowse::browser
         Pixels192 = 192,
         Pixels256 = 256,
         Pixels320 = 320,
+        Pixels360 = 360,
+        Pixels420 = 420,
+        Pixels480 = 480,
+        Pixels560 = 560,
+        Pixels640 = 640,
     };
 }
 
@@ -125,6 +130,7 @@ namespace hyperbrowse::browser
         void RestoreSelectionByFilePaths(const std::vector<std::wstring>& filePaths, const std::wstring& focusedFilePath);
         void InvalidateMediaCacheForPaths(const std::vector<std::wstring>& filePaths);
         std::shared_ptr<const hyperbrowse::services::ImageMetadata> FindCachedMetadataForModelIndex(int modelIndex) const;
+        void RequestMetadataForModelIndices(const std::vector<int>& modelIndices) const;
         std::wstring BuildMetadataReportForModelIndex(int modelIndex) const;
 
     private:

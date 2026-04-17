@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <condition_variable>
+#include <cwctype>
 #include <cstring>
+#include <string_view>
 #include <thread>
 
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
@@ -189,6 +191,264 @@ namespace
         return SUCCEEDED(convertResult) ? static_cast<int>(convertedValue) : 0;
     }
 
+    std::wstring PropertyCanonicalName(REFPROPERTYKEY key)
+    {
+        PWSTR canonicalName = nullptr;
+        if (FAILED(PSGetNameFromPropertyKey(key, &canonicalName)) || !canonicalName)
+        {
+            return {};
+        }
+
+        std::wstring result = canonicalName;
+        CoTaskMemFree(canonicalName);
+        return result;
+    }
+
+    std::wstring PropertyDisplayName(REFPROPERTYKEY key)
+    {
+        ComPtr<IPropertyDescription> description;
+        if (FAILED(PSGetPropertyDescription(key, IID_PPV_ARGS(description.GetAddressOf()))) || !description)
+        {
+            return {};
+        }
+
+        PWSTR displayName = nullptr;
+        if (FAILED(description->GetDisplayName(&displayName)) || !displayName)
+        {
+            return {};
+        }
+
+        std::wstring result = displayName;
+        CoTaskMemFree(displayName);
+        return result;
+    }
+
+    bool PropertyNameHasPrefix(std::wstring_view canonicalName, std::wstring_view prefix)
+    {
+        return canonicalName.size() >= prefix.size()
+            && canonicalName.substr(0, prefix.size()) == prefix;
+    }
+
+    bool PropertyNameHasSuffix(std::wstring_view canonicalName, std::wstring_view suffix)
+    {
+        return canonicalName.size() >= suffix.size()
+            && canonicalName.substr(canonicalName.size() - suffix.size()) == suffix;
+    }
+
+    std::wstring TrimWhitespace(std::wstring_view text)
+    {
+        std::size_t start = 0;
+        while (start < text.size() && iswspace(text[start]) != 0)
+        {
+            ++start;
+        }
+
+        std::size_t end = text.size();
+        while (end > start && iswspace(text[end - 1]) != 0)
+        {
+            --end;
+        }
+
+        return std::wstring(text.substr(start, end - start));
+    }
+
+    std::wstring HumanizeMetadataToken(std::wstring_view token)
+    {
+        std::wstring result;
+        result.reserve(token.size() + 8);
+
+        for (std::size_t index = 0; index < token.size(); ++index)
+        {
+            const wchar_t current = token[index];
+            const wchar_t previous = index > 0 ? token[index - 1] : L'\0';
+            const wchar_t next = (index + 1) < token.size() ? token[index + 1] : L'\0';
+
+            if (current == L'.' || current == L'_' || current == L'-')
+            {
+                if (!result.empty() && result.back() != L' ')
+                {
+                    result.push_back(L' ');
+                }
+                continue;
+            }
+
+            const bool needSpace = !result.empty()
+                && result.back() != L' '
+                && ((iswupper(current) != 0 && (iswlower(previous) != 0 || (iswupper(previous) != 0 && iswlower(next) != 0)))
+                    || (iswdigit(current) != 0 && iswalpha(previous) != 0)
+                    || (iswalpha(current) != 0 && iswdigit(previous) != 0));
+            if (needSpace)
+            {
+                result.push_back(L' ');
+            }
+
+            result.push_back(current);
+        }
+
+        return TrimWhitespace(result);
+    }
+
+    std::wstring NormalizeMetadataDisplayName(std::wstring_view canonicalName, std::wstring_view displayName)
+    {
+        const std::wstring trimmedDisplayName = TrimWhitespace(displayName);
+        if (!trimmedDisplayName.empty() && !PropertyNameHasPrefix(trimmedDisplayName, L"System."))
+        {
+            return trimmedDisplayName;
+        }
+
+        std::wstring prefix;
+        std::wstring_view token = canonicalName;
+        if (PropertyNameHasPrefix(token, L"System.Photo."))
+        {
+            token.remove_prefix(std::size(L"System.Photo.") - 1);
+        }
+        else if (PropertyNameHasPrefix(token, L"System.Image."))
+        {
+            token.remove_prefix(std::size(L"System.Image.") - 1);
+        }
+        else if (PropertyNameHasPrefix(token, L"System.GPS."))
+        {
+            prefix = L"GPS ";
+            token.remove_prefix(std::size(L"System.GPS.") - 1);
+        }
+        else if (PropertyNameHasPrefix(token, L"System."))
+        {
+            token.remove_prefix(std::size(L"System.") - 1);
+        }
+
+        if (PropertyNameHasSuffix(token, L"Text"))
+        {
+            token = token.substr(0, token.size() - 4);
+        }
+
+        std::wstring normalized = HumanizeMetadataToken(token);
+        if (!prefix.empty())
+        {
+            normalized.insert(0, prefix);
+        }
+
+        return normalized.empty() ? trimmedDisplayName : normalized;
+    }
+
+    bool ShouldSuppressDetailedMetadataProperty(std::wstring_view canonicalName)
+    {
+        return canonicalName == L"System.Image.Dimensions"
+            || PropertyNameHasSuffix(canonicalName, L"Numerator")
+            || PropertyNameHasSuffix(canonicalName, L"Denominator");
+    }
+
+    bool EqualsInsensitive(std::wstring_view lhs, std::wstring_view rhs)
+    {
+        return _wcsicmp(std::wstring(lhs).c_str(), std::wstring(rhs).c_str()) == 0;
+    }
+
+    bool IsDetailedImageMetadataProperty(std::wstring_view canonicalName)
+    {
+        return PropertyNameHasPrefix(canonicalName, L"System.Photo.")
+            || PropertyNameHasPrefix(canonicalName, L"System.Image.")
+            || PropertyNameHasPrefix(canonicalName, L"System.GPS.")
+            || canonicalName == L"System.Title"
+            || canonicalName == L"System.Subject"
+            || canonicalName == L"System.Comment"
+            || canonicalName == L"System.Author"
+            || canonicalName == L"System.Keywords"
+            || canonicalName == L"System.Rating"
+            || canonicalName == L"System.SimpleRating"
+            || canonicalName == L"System.Copyright";
+    }
+
+    void UpsertMetadataProperty(hyperbrowse::services::ImageMetadata* metadata,
+                                std::wstring canonicalName,
+                                std::wstring displayName,
+                                std::wstring value)
+    {
+        if (!metadata || canonicalName.empty() || value.empty() || ShouldSuppressDetailedMetadataProperty(canonicalName))
+        {
+            return;
+        }
+
+        displayName = NormalizeMetadataDisplayName(canonicalName, displayName);
+        if (displayName.empty())
+        {
+            displayName = canonicalName;
+        }
+
+        auto existing = std::find_if(metadata->properties.begin(),
+                                     metadata->properties.end(),
+                                     [&](const hyperbrowse::services::MetadataPropertyEntry& entry)
+                                     {
+                                         return entry.canonicalName == canonicalName;
+                                     });
+        if (existing != metadata->properties.end())
+        {
+            existing->displayName = std::move(displayName);
+            existing->value = std::move(value);
+            return;
+        }
+
+        metadata->properties.push_back(hyperbrowse::services::MetadataPropertyEntry{
+            std::move(canonicalName),
+            std::move(displayName),
+            std::move(value),
+        });
+    }
+
+    void EnumerateDetailedMetadataProperties(IPropertyStore* propertyStore,
+                                             hyperbrowse::services::ImageMetadata* metadata)
+    {
+        if (!propertyStore || !metadata)
+        {
+            return;
+        }
+
+        DWORD propertyCount = 0;
+        if (FAILED(propertyStore->GetCount(&propertyCount)))
+        {
+            return;
+        }
+
+        for (DWORD index = 0; index < propertyCount; ++index)
+        {
+            PROPERTYKEY key{};
+            if (FAILED(propertyStore->GetAt(index, &key)))
+            {
+                continue;
+            }
+
+            const std::wstring canonicalName = PropertyCanonicalName(key);
+            if (canonicalName.empty() || !IsDetailedImageMetadataProperty(canonicalName))
+            {
+                continue;
+            }
+
+            const std::wstring value = PropertyToString(propertyStore, key);
+            if (value.empty())
+            {
+                continue;
+            }
+
+            UpsertMetadataProperty(metadata, canonicalName, PropertyDisplayName(key), value);
+        }
+    }
+
+    bool IsCuratedMetadataProperty(std::wstring_view canonicalName)
+    {
+        return canonicalName == L"System.Image.Dimensions"
+            || canonicalName == L"System.Image.HorizontalSize"
+            || canonicalName == L"System.Image.VerticalSize"
+            || canonicalName == L"System.Photo.CameraManufacturer"
+            || canonicalName == L"System.Photo.CameraModel"
+            || canonicalName == L"System.Photo.DateTaken"
+            || canonicalName == L"System.Photo.ExposureTime"
+            || canonicalName == L"System.Photo.FNumber"
+            || canonicalName == L"System.Photo.ISOSpeed"
+            || canonicalName == L"System.Photo.FocalLength"
+            || canonicalName == L"System.Title"
+            || canonicalName == L"System.Author"
+            || canonicalName == L"System.Keywords"
+            || canonicalName == L"System.Comment";
+    }
+
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
     std::wstring WideText(const char* value)
     {
@@ -279,6 +539,14 @@ namespace
             metadata->focalLength = std::to_wstring(processor.imgdata.other.focal_len) + L" mm";
         }
 
+        UpsertMetadataProperty(metadata, L"System.Photo.CameraManufacturer", L"Camera manufacturer", metadata->cameraMake);
+        UpsertMetadataProperty(metadata, L"System.Photo.CameraModel", L"Camera model", metadata->cameraModel);
+        UpsertMetadataProperty(metadata, L"System.Photo.DateTaken", L"Date taken", metadata->dateTaken);
+        UpsertMetadataProperty(metadata, L"System.Photo.ExposureTime", L"Exposure time", metadata->exposureTime);
+        UpsertMetadataProperty(metadata, L"System.Photo.FNumber", L"F-number", metadata->fNumber);
+        UpsertMetadataProperty(metadata, L"System.Photo.ISOSpeed", L"ISO speed", metadata->isoSpeed);
+        UpsertMetadataProperty(metadata, L"System.Photo.FocalLength", L"Focal length", metadata->focalLength);
+
         metadata->hasExif = metadata->hasExif
             || !metadata->cameraMake.empty()
             || !metadata->cameraModel.empty()
@@ -301,6 +569,49 @@ namespace
         label.append(L"\r\n");
         return label;
     }
+
+    void AppendAllAvailableMetadata(std::wstring* text, const hyperbrowse::services::ImageMetadata& metadata)
+    {
+        if (!text)
+        {
+            return;
+        }
+
+        bool wroteHeader = false;
+        std::vector<hyperbrowse::services::MetadataPropertyEntry> renderedProperties;
+        for (const hyperbrowse::services::MetadataPropertyEntry& property : metadata.properties)
+        {
+            if (property.value.empty() || IsCuratedMetadataProperty(property.canonicalName))
+            {
+                continue;
+            }
+
+            const bool duplicateProperty = std::any_of(renderedProperties.begin(),
+                                                       renderedProperties.end(),
+                                                       [&](const hyperbrowse::services::MetadataPropertyEntry& candidate)
+                                                       {
+                                                           return EqualsInsensitive(candidate.displayName, property.displayName)
+                                                               && EqualsInsensitive(candidate.value, property.value);
+                                                       });
+            if (duplicateProperty)
+            {
+                continue;
+            }
+
+            if (!wroteHeader)
+            {
+                if (!text->empty())
+                {
+                    text->append(L"\r\n");
+                }
+                text->append(L"All Available Metadata\r\n");
+                wroteHeader = true;
+            }
+
+            text->append(JoinLine(property.displayName + L": ", property.value));
+            renderedProperties.push_back(property);
+        }
+    }
 }
 
 namespace hyperbrowse::services
@@ -318,6 +629,7 @@ namespace hyperbrowse::services
                                                                       IID_PPV_ARGS(propertyStore.GetAddressOf()));
         if (SUCCEEDED(storeResult) && propertyStore)
         {
+            EnumerateDetailedMetadataProperties(propertyStore.Get(), metadata.get());
             metadata->imageWidth = PropertyToInt32(propertyStore.Get(), L"System.Image.HorizontalSize");
             metadata->imageHeight = PropertyToInt32(propertyStore.Get(), L"System.Image.VerticalSize");
             metadata->cameraMake = PropertyToString(propertyStore.Get(), L"System.Photo.CameraManufacturer");
@@ -350,6 +662,19 @@ namespace hyperbrowse::services
         metadata->hasIptc = !metadata->author.empty() || !metadata->keywords.empty() || !metadata->comment.empty();
         metadata->hasXmp = !metadata->title.empty() || !metadata->author.empty() || !metadata->keywords.empty() || !metadata->comment.empty();
 
+        std::sort(metadata->properties.begin(),
+                  metadata->properties.end(),
+                  [](const MetadataPropertyEntry& lhs, const MetadataPropertyEntry& rhs)
+                  {
+                      const int displayCompare = _wcsicmp(lhs.displayName.c_str(), rhs.displayName.c_str());
+                      if (displayCompare != 0)
+                      {
+                          return displayCompare < 0;
+                      }
+
+                      return _wcsicmp(lhs.canonicalName.c_str(), rhs.canonicalName.c_str()) < 0;
+                  });
+
         if (!metadata->hasExif && !metadata->hasIptc && !metadata->hasXmp)
         {
             if (errorMessage)
@@ -363,31 +688,41 @@ namespace hyperbrowse::services
 
     std::wstring FormatImageMetadataReport(const browser::BrowserItem& item, const ImageMetadata& metadata)
     {
+        (void)item;
+
         std::wstring report;
-        report.reserve(1024);
-        report.append(L"File: ");
-        report.append(item.fileName);
-        report.append(L"\r\nPath: ");
-        report.append(item.filePath);
-        report.append(L"\r\nType: ");
-        report.append(item.fileType);
-        report.append(L"\r\nSize: ");
-        report.append(browser::FormatByteSize(item.fileSizeBytes));
-        report.append(L"\r\nDimensions: ");
-        report.append(browser::FormatDimensionsForItem(item));
-        report.append(L"\r\n\r\nEXIF\r\n");
-        report.append(JoinLine(L"Camera Make: ", metadata.cameraMake));
-        report.append(JoinLine(L"Camera Model: ", metadata.cameraModel));
-        report.append(JoinLine(L"Date Taken: ", metadata.dateTaken));
-        report.append(JoinLine(L"Exposure: ", metadata.exposureTime));
-        report.append(JoinLine(L"Aperture: ", metadata.fNumber));
-        report.append(JoinLine(L"ISO: ", metadata.isoSpeed));
-        report.append(JoinLine(L"Focal Length: ", metadata.focalLength));
-        report.append(L"\r\nIPTC / XMP\r\n");
-        report.append(JoinLine(L"Title: ", metadata.title));
-        report.append(JoinLine(L"Author: ", metadata.author));
-        report.append(JoinLine(L"Keywords: ", metadata.keywords));
-        report.append(JoinLine(L"Comment: ", metadata.comment));
+        report.reserve(768);
+
+        std::wstring exifSection;
+        exifSection.append(JoinLine(L"Camera Make: ", metadata.cameraMake));
+        exifSection.append(JoinLine(L"Camera Model: ", metadata.cameraModel));
+        exifSection.append(JoinLine(L"Date Taken: ", metadata.dateTaken));
+        exifSection.append(JoinLine(L"Exposure: ", metadata.exposureTime));
+        exifSection.append(JoinLine(L"Aperture: ", metadata.fNumber));
+        exifSection.append(JoinLine(L"ISO: ", metadata.isoSpeed));
+        exifSection.append(JoinLine(L"Focal Length: ", metadata.focalLength));
+        if (!exifSection.empty())
+        {
+            report.append(L"EXIF\r\n");
+            report.append(exifSection);
+        }
+
+        std::wstring descriptiveSection;
+        descriptiveSection.append(JoinLine(L"Title: ", metadata.title));
+        descriptiveSection.append(JoinLine(L"Author: ", metadata.author));
+        descriptiveSection.append(JoinLine(L"Keywords: ", metadata.keywords));
+        descriptiveSection.append(JoinLine(L"Comment: ", metadata.comment));
+        if (!descriptiveSection.empty())
+        {
+            if (!report.empty())
+            {
+                report.append(L"\r\n");
+            }
+            report.append(L"IPTC / XMP\r\n");
+            report.append(descriptiveSection);
+        }
+
+        AppendAllAvailableMetadata(&report, metadata);
         return report;
     }
 
@@ -425,6 +760,7 @@ namespace hyperbrowse::services
         expanded.append(JoinLine(L"Author: ", metadata.author));
         expanded.append(JoinLine(L"Keywords: ", metadata.keywords));
         expanded.append(JoinLine(L"Comment: ", metadata.comment));
+        AppendAllAvailableMetadata(&expanded, metadata);
         // Trim any trailing whitespace
         while (!expanded.empty() && (expanded.back() == L'\r' || expanded.back() == L'\n'))
         {

@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commctrl.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -32,6 +33,12 @@ namespace hyperbrowse::services
     class FolderEnumerationService;
     class FolderTreeEnumerationService;
     class FolderWatchService;
+    class ThumbnailScheduler;
+}
+
+namespace hyperbrowse::cache
+{
+    class CachedThumbnail;
 }
 
 namespace hyperbrowse::viewer
@@ -213,6 +220,7 @@ namespace hyperbrowse::ui
         LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBatchConvertMessage(LPARAM lParam);
         LRESULT OnFileOperationMessage(LPARAM lParam);
+        LRESULT OnDetailsPanelThumbnailMessage(LPARAM lParam);
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
         LRESULT OnViewerClosedMessage();
@@ -221,7 +229,13 @@ namespace hyperbrowse::ui
         void ToggleRecursiveBrowsing();
         void ApplyThumbnailDisplaySettings();
         void SetThemeMode(ThemeMode themeMode);
-        void UpdateDetailsStripText();
+        void UpdateDetailsPanel();
+        void ApplyDetailsPanelText(std::wstring title, std::wstring summary, std::wstring body);
+        void RefreshDetailsPanelBodyPresentation();
+        void ResetDetailsPanelHistogram();
+        void RequestDetailsPanelHistogram(const browser::BrowserItem& item, int modelIndex);
+        void ApplyDetailsPanelHistogram(const cache::CachedThumbnail& thumbnail);
+        void PaintDetailsPanel(HDC hdc, const RECT& clientRect) const;
         ThemePalette GetThemePalette() const;
         void InitToolbarItems();
         void LayoutToolbar();
@@ -249,8 +263,9 @@ namespace hyperbrowse::ui
         HWND treePane_{};
         HWND browserPane_{};
         HWND statusBar_{};
-        HWND detailsStrip_{};
+        HWND detailsPanelText_{};
         HWND tooltipControl_{};
+        HMODULE detailsPanelRichEditModule_{};
         HIMAGELIST treeImageList_{};
         HMENU menu_{};
         HACCEL accelerators_{};
@@ -267,6 +282,10 @@ namespace hyperbrowse::ui
         DragMode dragMode_{DragMode::None};
         HBRUSH backgroundBrush_{};
         HBRUSH actionFieldBrush_{};
+        HBRUSH detailsPanelBrush_{};
+        HFONT detailsPanelTitleFont_{};
+        HFONT detailsPanelSummaryFont_{};
+        HFONT detailsPanelBodyFont_{};
         std::wstring startupFolderPath_;
         std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
         std::unique_ptr<browser::BrowserModel> browserModel_;
@@ -276,10 +295,27 @@ namespace hyperbrowse::ui
         std::unique_ptr<services::FolderEnumerationService> folderEnumerationService_;
         std::unique_ptr<services::FolderTreeEnumerationService> folderTreeEnumerationService_;
         std::unique_ptr<services::FolderWatchService> folderWatchService_;
+        std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::wstring pendingTreeSelectionPath_;
+        RECT detailsPanelRect_{};
+        RECT detailsPanelHistogramRect_{};
+        std::wstring detailsPanelTitleText_;
+        std::wstring detailsPanelSummaryText_;
+        std::wstring detailsPanelBodyText_;
+        std::wstring detailsPanelHistogramPath_;
+        std::uint64_t detailsPanelHistogramModifiedTimestampUtc_{};
+        std::uint64_t detailsPanelThumbnailSessionId_{1};
+        std::uint64_t detailsPanelThumbnailRequestEpoch_{};
+        int detailsPanelHistogramModelIndex_{-1};
+        bool detailsPanelHistogramVisible_{};
+        bool detailsPanelHistogramLoading_{};
+        std::array<std::uint32_t, 64> detailsPanelHistogramRed_{};
+        std::array<std::uint32_t, 64> detailsPanelHistogramGreen_{};
+        std::array<std::uint32_t, 64> detailsPanelHistogramBlue_{};
+        std::uint32_t detailsPanelHistogramPeak_{};
         std::uint64_t activeEnumerationRequestId_{};
         std::uint64_t activeFolderWatchRequestId_{};
         std::uint64_t activeBatchConvertRequestId_{};

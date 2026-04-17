@@ -779,6 +779,35 @@ namespace hyperbrowse::browser
         return metadataService_->FindCachedMetadata(model_->Items()[static_cast<std::size_t>(modelIndex)]);
     }
 
+    void BrowserPane::RequestMetadataForModelIndices(const std::vector<int>& modelIndices) const
+    {
+        if (!metadataService_ || !model_ || modelIndices.empty())
+        {
+            return;
+        }
+
+        std::vector<services::MetadataWorkItem> workItems;
+        workItems.reserve(modelIndices.size());
+        for (const int modelIndex : modelIndices)
+        {
+            if (modelIndex < 0 || modelIndex >= static_cast<int>(model_->Items().size()))
+            {
+                continue;
+            }
+
+            workItems.push_back(services::MetadataWorkItem{
+                modelIndex,
+                model_->Items()[static_cast<std::size_t>(modelIndex)],
+                kVisiblePriority,
+            });
+        }
+
+        if (!workItems.empty())
+        {
+            metadataService_->Schedule(metadataSessionId_, std::move(workItems));
+        }
+    }
+
     std::wstring BrowserPane::BuildMetadataReportForModelIndex(int modelIndex) const
     {
         if (!model_ || modelIndex < 0 || modelIndex >= static_cast<int>(model_->Items().size()))
@@ -3613,7 +3642,7 @@ namespace hyperbrowse::browser
             {
                 SendMessageW(thumbnailTooltip_, TTM_UPDATE, 0, 0);
             }
-            if (update->modelIndex == focusedModelIndex_)
+            if (update->modelIndex == focusedModelIndex_ || selectedModelIndices_.contains(update->modelIndex))
             {
                 NotifyStateChanged();
             }

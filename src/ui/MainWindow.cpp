@@ -6,6 +6,7 @@
 #include <shobjidl.h>
 #include <shellapi.h>
 #include <windowsx.h>
+#include <richedit.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -28,6 +29,7 @@
 #include "services/FolderWatchService.h"
 #include "services/ImageMetadataService.h"
 #include "services/JpegTransformService.h"
+#include "services/ThumbnailScheduler.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/ToolbarIconLibrary.h"
 #include "util/Diagnostics.h"
@@ -99,8 +101,13 @@ namespace
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_192 = 2113;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_256 = 2114;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_320 = 2115;
-    constexpr UINT ID_VIEW_THUMBNAIL_LAYOUT_COMPACT = 2116;
-    constexpr UINT ID_VIEW_THUMBNAIL_DETAILS = 2117;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_360 = 2116;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_420 = 2117;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_480 = 2118;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_560 = 2119;
+    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_640 = 2120;
+    constexpr UINT ID_VIEW_THUMBNAIL_LAYOUT_COMPACT = 2121;
+    constexpr UINT ID_VIEW_THUMBNAIL_DETAILS = 2122;
     constexpr UINT ID_VIEW_SORT_FILENAME = 2201;
     constexpr UINT ID_VIEW_SORT_MODIFIED = 2202;
     constexpr UINT ID_VIEW_SORT_SIZE = 2203;
@@ -139,6 +146,12 @@ namespace
     constexpr int kToolbarSeparatorGap = 4;
     constexpr int kFilterEditMinWidth = 160;
     constexpr int kDetailsStripHeight = 22;
+    constexpr int kDetailsPanelPreferredWidth = 340;
+    constexpr int kDetailsPanelMargin = 14;
+    constexpr int kDetailsPanelHistogramHeight = 88;
+    constexpr int kDetailsPanelSectionGap = 12;
+    constexpr int kDetailsPanelTextTopGap = 14;
+    constexpr int kDetailsPanelHistogramBins = 64;
     constexpr std::size_t kIncrementalFolderWatchEventLimit = 64;
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
     constexpr wchar_t kTextInputDialogClassName[] = L"HyperBrowseTextInputDialog";
@@ -158,6 +171,18 @@ namespace
     constexpr int kAboutDialogButtonWidth = 104;
     constexpr int kAboutDialogButtonHeight = 32;
     constexpr int kAboutDialogBrandArtSize = 152;
+
+    hyperbrowse::cache::ThumbnailCacheKey MakeThumbnailCacheKey(const hyperbrowse::browser::BrowserItem& item,
+                                                                int targetWidth,
+                                                                int targetHeight)
+    {
+        hyperbrowse::cache::ThumbnailCacheKey key;
+        key.filePath = item.filePath;
+        key.modifiedTimestampUtc = item.modifiedTimestampUtc;
+        key.targetWidth = targetWidth;
+        key.targetHeight = targetHeight;
+        return key;
+    }
 
     struct TextInputDialogState
     {
@@ -492,6 +517,228 @@ namespace
                        kAboutDialogButtonHeight,
                        TRUE);
         }
+    }
+
+    bool StringsEqualInsensitive(std::wstring_view lhs, std::wstring_view rhs)
+    {
+        return _wcsicmp(std::wstring(lhs).c_str(), std::wstring(rhs).c_str()) == 0;
+    }
+
+    std::wstring BuildCameraSummaryLabel(const hyperbrowse::services::ImageMetadata& metadata)
+    {
+        if (!metadata.cameraMake.empty() && !metadata.cameraModel.empty())
+        {
+            return metadata.cameraMake + L" " + metadata.cameraModel;
+        }
+
+        return !metadata.cameraModel.empty() ? metadata.cameraModel : metadata.cameraMake;
+    }
+
+    bool IsCuratedDetailsProperty(std::wstring_view canonicalName)
+    {
+        return canonicalName == L"System.Image.Dimensions"
+            || canonicalName == L"System.Image.HorizontalSize"
+            || canonicalName == L"System.Image.VerticalSize"
+            || canonicalName == L"System.Photo.CameraManufacturer"
+            || canonicalName == L"System.Photo.CameraModel"
+            || canonicalName == L"System.Photo.DateTaken"
+            || canonicalName == L"System.Photo.ExposureTime"
+            || canonicalName == L"System.Photo.FNumber"
+            || canonicalName == L"System.Photo.ISOSpeed"
+            || canonicalName == L"System.Photo.FocalLength"
+            || canonicalName == L"System.Title"
+            || canonicalName == L"System.Author"
+            || canonicalName == L"System.Keywords"
+            || canonicalName == L"System.Comment";
+    }
+
+    void AppendLabeledLine(std::wstring* text, std::wstring_view label, std::wstring_view value)
+    {
+        if (!text || value.empty())
+        {
+            return;
+        }
+
+        text->append(label);
+        text->append(value);
+        text->append(L"\r\n");
+    }
+
+    bool HasEquivalentDisplayedProperty(const std::vector<hyperbrowse::services::MetadataPropertyEntry>& properties,
+                                       const hyperbrowse::services::MetadataPropertyEntry& candidate)
+    {
+        return std::any_of(properties.begin(),
+                           properties.end(),
+                           [&](const hyperbrowse::services::MetadataPropertyEntry& property)
+                           {
+                               return StringsEqualInsensitive(property.displayName, candidate.displayName)
+                                   && StringsEqualInsensitive(property.value, candidate.value);
+                           });
+    }
+
+    std::wstring BuildSingleSelectionSummary(const hyperbrowse::browser::BrowserItem& item)
+    {
+        std::wstring summary = item.fileType;
+
+        const std::wstring dimensions = hyperbrowse::browser::FormatDimensionsForItem(item);
+        if (!dimensions.empty() && dimensions != L"...")
+        {
+            if (!summary.empty())
+            {
+                summary.append(L" | ");
+            }
+            summary.append(dimensions);
+        }
+
+        const std::wstring fileSize = hyperbrowse::browser::FormatByteSize(item.fileSizeBytes);
+        if (!fileSize.empty())
+        {
+            if (!summary.empty())
+            {
+                summary.append(L" | ");
+            }
+            summary.append(fileSize);
+        }
+
+        return summary;
+    }
+
+    template <typename Getter>
+    bool TryGetCommonItemString(const std::vector<hyperbrowse::browser::BrowserItem>& items,
+                                Getter getter,
+                                std::wstring* commonValue)
+    {
+        if (!commonValue || items.empty())
+        {
+            return false;
+        }
+
+        const std::wstring first = getter(items.front());
+        if (first.empty() || first == L"...")
+        {
+            return false;
+        }
+
+        for (std::size_t index = 1; index < items.size(); ++index)
+        {
+            const std::wstring candidate = getter(items[index]);
+            if (candidate.empty() || candidate == L"..." || !StringsEqualInsensitive(first, candidate))
+            {
+                return false;
+            }
+        }
+
+        *commonValue = first;
+        return true;
+    }
+
+    template <typename Getter>
+    bool TryGetCommonMetadataString(const std::vector<std::shared_ptr<const hyperbrowse::services::ImageMetadata>>& metadataList,
+                                    Getter getter,
+                                    std::wstring* commonValue)
+    {
+        if (!commonValue || metadataList.empty() || !metadataList.front())
+        {
+            return false;
+        }
+
+        const std::wstring first = getter(*metadataList.front());
+        if (first.empty())
+        {
+            return false;
+        }
+
+        for (std::size_t index = 1; index < metadataList.size(); ++index)
+        {
+            if (!metadataList[index])
+            {
+                return false;
+            }
+
+            const std::wstring candidate = getter(*metadataList[index]);
+            if (candidate.empty() || !StringsEqualInsensitive(first, candidate))
+            {
+                return false;
+            }
+        }
+
+        *commonValue = first;
+        return true;
+    }
+
+    bool TryGetCommonDimensions(const std::vector<hyperbrowse::browser::BrowserItem>& items,
+                                std::wstring* commonValue)
+    {
+        if (!commonValue || items.empty())
+        {
+            return false;
+        }
+
+        const int firstWidth = items.front().imageWidth;
+        const int firstHeight = items.front().imageHeight;
+        if (firstWidth <= 0 || firstHeight <= 0)
+        {
+            return false;
+        }
+
+        for (std::size_t index = 1; index < items.size(); ++index)
+        {
+            if (items[index].imageWidth != firstWidth || items[index].imageHeight != firstHeight)
+            {
+                return false;
+            }
+        }
+
+        *commonValue = hyperbrowse::browser::FormatDimensions(firstWidth, firstHeight);
+        return true;
+    }
+
+    std::vector<hyperbrowse::services::MetadataPropertyEntry> FindCommonMetadataProperties(
+        const std::vector<std::shared_ptr<const hyperbrowse::services::ImageMetadata>>& metadataList)
+    {
+        if (metadataList.empty() || !metadataList.front())
+        {
+            return {};
+        }
+
+        std::vector<hyperbrowse::services::MetadataPropertyEntry> commonProperties;
+        for (const hyperbrowse::services::MetadataPropertyEntry& property : metadataList.front()->properties)
+        {
+            if (property.value.empty())
+            {
+                continue;
+            }
+
+            bool isCommon = true;
+            for (std::size_t index = 1; index < metadataList.size(); ++index)
+            {
+                if (!metadataList[index])
+                {
+                    isCommon = false;
+                    break;
+                }
+
+                const auto propertyIt = std::find_if(metadataList[index]->properties.begin(),
+                                                     metadataList[index]->properties.end(),
+                                                     [&](const hyperbrowse::services::MetadataPropertyEntry& candidate)
+                                                     {
+                                                         return candidate.canonicalName == property.canonicalName
+                                                             && StringsEqualInsensitive(candidate.value, property.value);
+                                                     });
+                if (propertyIt == metadataList[index]->properties.end())
+                {
+                    isCommon = false;
+                    break;
+                }
+            }
+
+            if (isCommon)
+            {
+                commonProperties.push_back(property);
+            }
+        }
+
+        return commonProperties;
     }
 
     std::wstring CompactSortLabel(hyperbrowse::browser::BrowserSortMode sortMode)
@@ -1560,6 +1807,21 @@ namespace
         case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels320):
             *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels320;
             return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels360):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels360;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels420):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels420;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels480):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels480;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels560):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels560;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels640):
+            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels640;
+            return true;
         default:
             return false;
         }
@@ -1579,6 +1841,16 @@ namespace
             return hyperbrowse::browser::ThumbnailSizePreset::Pixels256;
         case ID_VIEW_THUMBNAIL_SIZE_320:
             return hyperbrowse::browser::ThumbnailSizePreset::Pixels320;
+        case ID_VIEW_THUMBNAIL_SIZE_360:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels360;
+        case ID_VIEW_THUMBNAIL_SIZE_420:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels420;
+        case ID_VIEW_THUMBNAIL_SIZE_480:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels480;
+        case ID_VIEW_THUMBNAIL_SIZE_560:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels560;
+        case ID_VIEW_THUMBNAIL_SIZE_640:
+            return hyperbrowse::browser::ThumbnailSizePreset::Pixels640;
         case ID_VIEW_THUMBNAIL_SIZE_192:
         default:
             return hyperbrowse::browser::ThumbnailSizePreset::Pixels192;
@@ -1599,6 +1871,16 @@ namespace
             return ID_VIEW_THUMBNAIL_SIZE_256;
         case hyperbrowse::browser::ThumbnailSizePreset::Pixels320:
             return ID_VIEW_THUMBNAIL_SIZE_320;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels360:
+            return ID_VIEW_THUMBNAIL_SIZE_360;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels420:
+            return ID_VIEW_THUMBNAIL_SIZE_420;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels480:
+            return ID_VIEW_THUMBNAIL_SIZE_480;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels560:
+            return ID_VIEW_THUMBNAIL_SIZE_560;
+        case hyperbrowse::browser::ThumbnailSizePreset::Pixels640:
+            return ID_VIEW_THUMBNAIL_SIZE_640;
         case hyperbrowse::browser::ThumbnailSizePreset::Pixels192:
         default:
             return ID_VIEW_THUMBNAIL_SIZE_192;
@@ -1803,6 +2085,21 @@ namespace hyperbrowse::ui
             DeleteObject(actionFieldBrush_);
         }
 
+        if (detailsPanelBrush_)
+        {
+            DeleteObject(detailsPanelBrush_);
+        }
+
+        DeleteFontIfOwned(detailsPanelTitleFont_);
+        DeleteFontIfOwned(detailsPanelSummaryFont_);
+        DeleteFontIfOwned(detailsPanelBodyFont_);
+
+        if (detailsPanelRichEditModule_)
+        {
+            FreeLibrary(detailsPanelRichEditModule_);
+            detailsPanelRichEditModule_ = nullptr;
+        }
+
         if (accelerators_)
         {
             DestroyAcceleratorTable(accelerators_);
@@ -1987,9 +2284,14 @@ namespace hyperbrowse::ui
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_192, L"1&92 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_256, L"2&56 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_320, L"3&20 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_360, L"3&60 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_420, L"4&20 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_480, L"4&80 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_560, L"5&60 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"6&40 px");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Info Strip");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show File &Details Panel");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection\tCtrl+Shift+S");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder\tCtrl+Shift+F");
@@ -2028,6 +2330,13 @@ namespace hyperbrowse::ui
     bool MainWindow::CreateChildWindows()
     {
         const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+        detailsPanelTitleFont_ = CreateDialogUiFont(11, FW_SEMIBOLD);
+        detailsPanelSummaryFont_ = CreateDialogUiFont(9, FW_NORMAL);
+        detailsPanelBodyFont_ = CreateDialogUiFont(9, FW_NORMAL);
+        if (!detailsPanelTitleFont_) detailsPanelTitleFont_ = defaultGuiFont;
+        if (!detailsPanelSummaryFont_) detailsPanelSummaryFont_ = defaultGuiFont;
+        if (!detailsPanelBodyFont_) detailsPanelBodyFont_ = defaultGuiFont;
 
         toolbarIconLibrary_ = std::make_unique<ToolbarIconLibrary>();
         if (toolbarIconLibrary_ && !toolbarIconLibrary_->Initialize())
@@ -2106,24 +2415,54 @@ namespace hyperbrowse::ui
             instance_,
             nullptr);
 
-        detailsStrip_ = CreateWindowExW(
-            0,
-            L"STATIC",
+        if (!detailsPanelRichEditModule_)
+        {
+            detailsPanelRichEditModule_ = LoadLibraryW(L"Msftedit.dll");
+        }
+
+        const DWORD detailsPanelTextStyle = WS_CHILD | (detailsStripVisible_ ? WS_VISIBLE : 0) | WS_VSCROLL
+            | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_NOHIDESEL;
+        detailsPanelText_ = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            detailsPanelRichEditModule_ ? MSFTEDIT_CLASS : L"EDIT",
             L"",
-            WS_CHILD | (detailsStripVisible_ ? WS_VISIBLE : 0) | SS_LEFT | SS_ENDELLIPSIS | SS_NOPREFIX,
-            0, 0, 100, kDetailsStripHeight,
+            detailsPanelTextStyle,
+            0, 0, 100, 100,
             hwnd_,
             nullptr,
             instance_,
             nullptr);
 
-        if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsStrip_)
+        if (!detailsPanelText_ && detailsPanelRichEditModule_)
+        {
+            FreeLibrary(detailsPanelRichEditModule_);
+            detailsPanelRichEditModule_ = nullptr;
+            detailsPanelText_ = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                L"",
+                detailsPanelTextStyle,
+                0, 0, 100, 100,
+                hwnd_,
+                nullptr,
+                instance_,
+                nullptr);
+        }
+
+        if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsPanelText_)
         {
             util::LogLastError(L"CreateChildWindows");
             return false;
         }
 
-        SendMessageW(detailsStrip_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
+        SendMessageW(detailsPanelText_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
+        RefreshDetailsPanelBodyPresentation();
+
+        detailsPanelThumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>();
+        if (detailsPanelThumbnailScheduler_)
+        {
+            detailsPanelThumbnailScheduler_->BindTargetWindow(hwnd_);
+        }
 
         if (!browserPaneController_ || !browserPaneController_->Create(hwnd_))
         {
@@ -2169,6 +2508,7 @@ namespace hyperbrowse::ui
         RefreshBrowserPane();
         UpdateStatusText();
         UpdateToolbarItemStates();
+        UpdateDetailsPanel();
         LayoutChildren();
         return true;
     }
@@ -2683,27 +3023,89 @@ namespace hyperbrowse::ui
         const int statusHeight = statusRect.bottom - statusRect.top;
 
         const int clientWidth = client.right - client.left;
-        const int detailsStripHeight = detailsStripVisible_ ? kDetailsStripHeight : 0;
-        const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top) - statusHeight - kActionStripHeight - detailsStripHeight);
+        const int desiredDetailsPanelWidth = detailsStripVisible_
+            ? std::min(kDetailsPanelPreferredWidth,
+                       std::max(0, clientWidth - kMinLeftPaneWidth - kMinRightPaneWidth - kSplitterWidth))
+            : 0;
+        const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top) - statusHeight - kActionStripHeight);
         const int contentTop = kActionStripHeight;
 
-        const int maxLeft = std::max(kMinLeftPaneWidth, clientWidth - kMinRightPaneWidth - kSplitterWidth);
+        const int maxLeft = std::max(kMinLeftPaneWidth,
+                                     clientWidth - desiredDetailsPanelWidth - kMinRightPaneWidth - kSplitterWidth);
         leftPaneWidth_ = std::clamp(leftPaneWidth_, kMinLeftPaneWidth, maxLeft);
+
+        const int browserWidth = std::max(kMinRightPaneWidth,
+                                          clientWidth - leftPaneWidth_ - kSplitterWidth - desiredDetailsPanelWidth);
+        const int detailsPanelWidth = std::max(0, clientWidth - leftPaneWidth_ - kSplitterWidth - browserWidth);
 
         MoveWindow(treePane_, 0, contentTop, leftPaneWidth_, clientHeight, TRUE);
         MoveWindow(browserPane_, leftPaneWidth_ + kSplitterWidth, contentTop,
-                   clientWidth - leftPaneWidth_ - kSplitterWidth, clientHeight, TRUE);
+                   browserWidth, clientHeight, TRUE);
 
-        if (detailsStrip_)
+        detailsPanelRect_ = RECT{leftPaneWidth_ + kSplitterWidth + browserWidth,
+                                 contentTop,
+                                 clientWidth,
+                                 contentTop + clientHeight};
+        detailsPanelHistogramRect_ = RECT{};
+
+        if (detailsPanelText_)
         {
-            const int stripTop = contentTop + clientHeight;
-            MoveWindow(detailsStrip_, 0, stripTop, clientWidth, detailsStripHeight, TRUE);
+            if (detailsStripVisible_ && detailsPanelWidth > 0)
+            {
+                const int innerLeft = detailsPanelRect_.left + kDetailsPanelMargin;
+                const int innerRight = detailsPanelRect_.right - kDetailsPanelMargin;
+                const int innerWidth = std::max(0, innerRight - innerLeft);
+                const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
+                const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
+                                                               title,
+                                                               innerWidth,
+                                                               DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                               22);
+                const int summaryHeight = detailsPanelSummaryText_.empty()
+                    ? 0
+                    : MeasureTextBlockHeight(detailsPanelSummaryFont_,
+                                             detailsPanelSummaryText_,
+                                             innerWidth,
+                                             DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                             18);
+
+                int top = detailsPanelRect_.top + kDetailsPanelMargin + titleHeight + 6;
+                if (summaryHeight > 0)
+                {
+                    top += summaryHeight + 8;
+                }
+
+                if (detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_)
+                {
+                    detailsPanelHistogramRect_ = RECT{
+                        innerLeft,
+                        top,
+                        innerRight,
+                        top + kDetailsPanelHistogramHeight,
+                    };
+                    top = detailsPanelHistogramRect_.bottom + kDetailsPanelTextTopGap;
+                }
+
+                const int availableTextHeight = static_cast<int>(detailsPanelRect_.bottom - kDetailsPanelMargin - top);
+                const int textHeight = std::max(0, availableTextHeight);
+                MoveWindow(detailsPanelText_, innerLeft, top, innerWidth, textHeight, TRUE);
+                ShowWindow(detailsPanelText_, SW_SHOW);
+            }
+            else
+            {
+                ShowWindow(detailsPanelText_, SW_HIDE);
+                detailsPanelRect_ = RECT{};
+            }
         }
 
         LayoutToolbar();
 
         RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
         InvalidateRect(hwnd_, &splitterRect, FALSE);
+        if (detailsStripVisible_)
+        {
+            InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+        }
 
         UpdateStatusText();
     }
@@ -2741,52 +3143,562 @@ namespace hyperbrowse::ui
         SendMessageW(statusBar_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(selectionText.c_str()));
     }
 
-    void MainWindow::UpdateDetailsStripText()
+    void MainWindow::ApplyDetailsPanelText(std::wstring title, std::wstring summary, std::wstring body)
     {
-        if (!detailsStrip_ || !detailsStripVisible_)
+        detailsPanelTitleText_ = std::move(title);
+        detailsPanelSummaryText_ = std::move(summary);
+        detailsPanelBodyText_ = std::move(body);
+
+        if (detailsPanelText_)
         {
+            const bool changed = SetWindowTextIfDifferent(detailsPanelText_, detailsPanelBodyText_);
+            RefreshDetailsPanelBodyPresentation();
+            if (changed)
+            {
+                SendMessageW(detailsPanelText_, EM_SETSEL, 0, 0);
+                SendMessageW(detailsPanelText_, WM_VSCROLL, MAKEWPARAM(SB_TOP, 0), 0);
+            }
+        }
+
+        if (hwnd_ && !IsRectEmpty(&detailsPanelRect_))
+        {
+            InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+        }
+    }
+
+    void MainWindow::RefreshDetailsPanelBodyPresentation()
+    {
+        if (!detailsPanelText_ || !detailsPanelRichEditModule_)
+        {
+            return;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        SendMessageW(detailsPanelText_, EM_SETBKGNDCOLOR, FALSE, palette.paneBackground);
+        SendMessageW(detailsPanelText_, WM_SETREDRAW, FALSE, 0);
+
+        CHARRANGE allText{};
+        allText.cpMin = 0;
+        allText.cpMax = -1;
+        SendMessageW(detailsPanelText_, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&allText));
+
+        CHARFORMAT2W baseFormat{};
+        baseFormat.cbSize = sizeof(baseFormat);
+        baseFormat.dwMask = CFM_BOLD | CFM_COLOR;
+        baseFormat.dwEffects = 0;
+        baseFormat.crTextColor = palette.mutedText;
+        SendMessageW(detailsPanelText_, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&baseFormat));
+
+        const LRESULT lineCount = SendMessageW(detailsPanelText_, EM_GETLINECOUNT, 0, 0);
+        for (LONG lineIndex = 0; lineIndex < lineCount; ++lineIndex)
+        {
+            const LONG lineStart = static_cast<LONG>(SendMessageW(detailsPanelText_, EM_LINEINDEX, lineIndex, 0));
+            if (lineStart < 0)
+            {
+                continue;
+            }
+
+            const LONG lineLength = static_cast<LONG>(SendMessageW(detailsPanelText_, EM_LINELENGTH, lineStart, 0));
+            if (lineLength <= 0)
+            {
+                continue;
+            }
+
+            std::vector<wchar_t> lineBuffer(static_cast<std::size_t>(lineLength) + 2, L'\0');
+            *reinterpret_cast<WORD*>(lineBuffer.data()) = static_cast<WORD>(lineBuffer.size() - 1);
+            const LRESULT copiedChars = SendMessageW(detailsPanelText_,
+                                                     EM_GETLINE,
+                                                     static_cast<WPARAM>(lineIndex),
+                                                     reinterpret_cast<LPARAM>(lineBuffer.data()));
+            if (copiedChars <= 0)
+            {
+                continue;
+            }
+
+            std::wstring_view line(lineBuffer.data(), static_cast<std::size_t>(copiedChars));
+            LONG emphasisStart = lineStart;
+            LONG emphasisEnd = lineStart + static_cast<LONG>(line.size());
+
+            const std::size_t colon = line.find(L':');
+            if (colon != std::wstring::npos)
+            {
+                std::size_t valueOffset = colon + 1;
+                while (valueOffset < line.size() && iswspace(line[valueOffset]) != 0)
+                {
+                    ++valueOffset;
+                }
+
+                if (valueOffset >= line.size())
+                {
+                    continue;
+                }
+
+                emphasisStart = lineStart + static_cast<LONG>(valueOffset);
+            }
+
+            CHARRANGE emphasisRange{};
+            emphasisRange.cpMin = emphasisStart;
+            emphasisRange.cpMax = emphasisEnd;
+            SendMessageW(detailsPanelText_, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&emphasisRange));
+
+            CHARFORMAT2W emphasisFormat{};
+            emphasisFormat.cbSize = sizeof(emphasisFormat);
+            emphasisFormat.dwMask = CFM_BOLD | CFM_COLOR;
+            emphasisFormat.dwEffects = CFE_BOLD;
+            emphasisFormat.crTextColor = palette.text;
+            SendMessageW(detailsPanelText_, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&emphasisFormat));
+        }
+
+        CHARRANGE resetSelection{};
+        resetSelection.cpMin = 0;
+        resetSelection.cpMax = 0;
+        SendMessageW(detailsPanelText_, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&resetSelection));
+        SendMessageW(detailsPanelText_, WM_SETREDRAW, TRUE, 0);
+        InvalidateRect(detailsPanelText_, nullptr, TRUE);
+    }
+
+    void MainWindow::ResetDetailsPanelHistogram()
+    {
+        detailsPanelHistogramPath_.clear();
+        detailsPanelHistogramModifiedTimestampUtc_ = 0;
+        detailsPanelHistogramModelIndex_ = -1;
+        detailsPanelHistogramVisible_ = false;
+        detailsPanelHistogramLoading_ = false;
+        detailsPanelHistogramPeak_ = 0;
+        detailsPanelHistogramRed_.fill(0);
+        detailsPanelHistogramGreen_.fill(0);
+        detailsPanelHistogramBlue_.fill(0);
+
+        if (detailsPanelThumbnailScheduler_)
+        {
+            detailsPanelThumbnailScheduler_->CancelOutstanding();
+        }
+    }
+
+    void MainWindow::RequestDetailsPanelHistogram(const browser::BrowserItem& item, int modelIndex)
+    {
+        if (!detailsPanelThumbnailScheduler_ || !decode::CanDecodeThumbnail(item) || modelIndex < 0)
+        {
+            ResetDetailsPanelHistogram();
+            return;
+        }
+
+        const int targetWidth = 192;
+        const int targetHeight = 128;
+        const auto cacheKey = MakeThumbnailCacheKey(item, targetWidth, targetHeight);
+
+        if (detailsPanelHistogramModelIndex_ == modelIndex
+            && detailsPanelHistogramModifiedTimestampUtc_ == item.modifiedTimestampUtc
+            && StringsEqualInsensitive(detailsPanelHistogramPath_, item.filePath)
+            && (detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_))
+        {
+            return;
+        }
+
+        detailsPanelHistogramPath_ = item.filePath;
+        detailsPanelHistogramModifiedTimestampUtc_ = item.modifiedTimestampUtc;
+        detailsPanelHistogramModelIndex_ = modelIndex;
+
+        if (const auto cachedThumbnail = detailsPanelThumbnailScheduler_->FindCachedThumbnail(cacheKey))
+        {
+            ApplyDetailsPanelHistogram(*cachedThumbnail);
+            LayoutChildren();
+            return;
+        }
+
+        detailsPanelHistogramVisible_ = false;
+        detailsPanelHistogramLoading_ = true;
+        detailsPanelHistogramPeak_ = 0;
+        detailsPanelHistogramRed_.fill(0);
+        detailsPanelHistogramGreen_.fill(0);
+        detailsPanelHistogramBlue_.fill(0);
+
+        ++detailsPanelThumbnailRequestEpoch_;
+        detailsPanelThumbnailScheduler_->Schedule(detailsPanelThumbnailSessionId_,
+                                                 detailsPanelThumbnailRequestEpoch_,
+                                                 {services::ThumbnailWorkItem{modelIndex, cacheKey, 0, true}});
+        LayoutChildren();
+    }
+
+    void MainWindow::ApplyDetailsPanelHistogram(const cache::CachedThumbnail& thumbnail)
+    {
+        detailsPanelHistogramVisible_ = false;
+        detailsPanelHistogramLoading_ = false;
+        detailsPanelHistogramPeak_ = 0;
+        detailsPanelHistogramRed_.fill(0);
+        detailsPanelHistogramGreen_.fill(0);
+        detailsPanelHistogramBlue_.fill(0);
+
+        BITMAP bitmap{};
+        if (!thumbnail.Bitmap() || GetObjectW(thumbnail.Bitmap(), sizeof(bitmap), &bitmap) == 0)
+        {
+            return;
+        }
+
+        const int bitmapWidth = bitmap.bmWidth;
+        const int bitmapHeight = std::abs(bitmap.bmHeight);
+        if (bitmapWidth <= 0 || bitmapHeight <= 0)
+        {
+            return;
+        }
+
+        BITMAPINFO bitmapInfo{};
+        bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
+        bitmapInfo.bmiHeader.biWidth = bitmapWidth;
+        bitmapInfo.bmiHeader.biHeight = -bitmapHeight;
+        bitmapInfo.bmiHeader.biPlanes = 1;
+        bitmapInfo.bmiHeader.biBitCount = 32;
+        bitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+        std::vector<RGBQUAD> pixels(static_cast<std::size_t>(bitmapWidth) * static_cast<std::size_t>(bitmapHeight));
+        HDC screenDc = GetDC(nullptr);
+        if (!screenDc)
+        {
+            return;
+        }
+
+        const int copiedScanLines = GetDIBits(screenDc,
+                                              thumbnail.Bitmap(),
+                                              0,
+                                              static_cast<UINT>(bitmapHeight),
+                                              pixels.data(),
+                                              &bitmapInfo,
+                                              DIB_RGB_COLORS);
+        ReleaseDC(nullptr, screenDc);
+        if (copiedScanLines == 0)
+        {
+            return;
+        }
+
+        for (const RGBQUAD& pixel : pixels)
+        {
+            const std::size_t redIndex = std::min<std::size_t>(kDetailsPanelHistogramBins - 1, (pixel.rgbRed * kDetailsPanelHistogramBins) / 256);
+            const std::size_t greenIndex = std::min<std::size_t>(kDetailsPanelHistogramBins - 1, (pixel.rgbGreen * kDetailsPanelHistogramBins) / 256);
+            const std::size_t blueIndex = std::min<std::size_t>(kDetailsPanelHistogramBins - 1, (pixel.rgbBlue * kDetailsPanelHistogramBins) / 256);
+
+            detailsPanelHistogramRed_[redIndex] += 1;
+            detailsPanelHistogramGreen_[greenIndex] += 1;
+            detailsPanelHistogramBlue_[blueIndex] += 1;
+        }
+
+        for (std::size_t index = 0; index < kDetailsPanelHistogramBins; ++index)
+        {
+            detailsPanelHistogramPeak_ = std::max(detailsPanelHistogramPeak_, detailsPanelHistogramRed_[index]);
+            detailsPanelHistogramPeak_ = std::max(detailsPanelHistogramPeak_, detailsPanelHistogramGreen_[index]);
+            detailsPanelHistogramPeak_ = std::max(detailsPanelHistogramPeak_, detailsPanelHistogramBlue_[index]);
+        }
+
+        detailsPanelHistogramVisible_ = detailsPanelHistogramPeak_ > 0;
+    }
+
+    void MainWindow::UpdateDetailsPanel()
+    {
+        if (!detailsStripVisible_)
+        {
+            ResetDetailsPanelHistogram();
             return;
         }
 
         if (!browserPaneController_ || !browserModel_)
         {
-            SetWindowTextW(detailsStrip_, L"");
+            ApplyDetailsPanelText(L"File Details", L"Select one or more images to inspect metadata.", L"");
+            ResetDetailsPanelHistogram();
+            LayoutChildren();
             return;
         }
 
-        const int modelIndex = browserPaneController_->PrimarySelectedModelIndex();
-        if (modelIndex < 0 || modelIndex >= static_cast<int>(browserModel_->Items().size()))
+        const std::vector<int> selectedModelIndices = browserPaneController_->OrderedSelectedModelIndicesSnapshot();
+        if (selectedModelIndices.empty())
         {
-            SetWindowTextW(detailsStrip_, L"");
+            ApplyDetailsPanelText(L"File Details",
+                                  L"Select one or more images to inspect camera, EXIF, and other image metadata.",
+                                  L"");
+            ResetDetailsPanelHistogram();
+            LayoutChildren();
             return;
         }
 
-        const browser::BrowserItem& item = browserModel_->Items()[static_cast<std::size_t>(modelIndex)];
-        std::wstring text = L"  ";
-        text.append(item.fileName);
-        text.append(L"  |  ");
-        text.append(item.fileType);
-        text.append(L"  |  ");
-        text.append(browser::FormatByteSize(item.fileSizeBytes));
-        text.append(L"  |  ");
-        text.append(browser::FormatDimensionsForItem(item));
+        const auto& items = browserModel_->Items();
+        std::vector<browser::BrowserItem> selectedItems;
+        selectedItems.reserve(selectedModelIndices.size());
+        std::vector<std::shared_ptr<const services::ImageMetadata>> metadataList;
+        metadataList.reserve(selectedModelIndices.size());
+        bool allMetadataLoaded = true;
+        std::uint64_t selectedBytes = 0;
 
-        const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex);
-        if (metadata)
+        for (const int modelIndex : selectedModelIndices)
         {
-            if (!metadata->cameraModel.empty())
+            if (modelIndex < 0 || modelIndex >= static_cast<int>(items.size()))
             {
-                text.append(L"  |  ");
-                text.append(metadata->cameraModel);
+                continue;
             }
-            if (!metadata->dateTaken.empty())
+
+            selectedItems.push_back(items[static_cast<std::size_t>(modelIndex)]);
+            selectedBytes += items[static_cast<std::size_t>(modelIndex)].fileSizeBytes;
+            const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex);
+            metadataList.push_back(metadata);
+            allMetadataLoaded = allMetadataLoaded && static_cast<bool>(metadata);
+        }
+
+        browserPaneController_->RequestMetadataForModelIndices(selectedModelIndices);
+
+        if (selectedItems.empty())
+        {
+            ApplyDetailsPanelText(L"File Details", L"Select one or more images to inspect metadata.", L"");
+            ResetDetailsPanelHistogram();
+            LayoutChildren();
+            return;
+        }
+
+        if (selectedItems.size() == 1)
+        {
+            const browser::BrowserItem& item = selectedItems.front();
+            const auto metadata = metadataList.front();
+
+            const std::wstring summary = BuildSingleSelectionSummary(item);
+
+            std::wstring body = metadata
+                ? services::FormatImageMetadataReport(item, *metadata)
+                : L"Loading detailed metadata...";
+
+            ApplyDetailsPanelText(item.fileName, std::move(summary), std::move(body));
+            RequestDetailsPanelHistogram(item, selectedModelIndices.front());
+            LayoutChildren();
+            return;
+        }
+
+        std::wstring body;
+        body.reserve(2048);
+        body.append(L"Common Attributes\r\n");
+        bool hasCommonAttributes = false;
+
+        std::wstring commonValue;
+        if (TryGetCommonItemString(selectedItems, [](const browser::BrowserItem& item) { return item.fileType; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Type: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonDimensions(selectedItems, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Dimensions: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return BuildCameraSummaryLabel(metadata); }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Camera: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.dateTaken; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Date Taken: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.exposureTime; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Exposure: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.fNumber; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Aperture: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.isoSpeed; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"ISO: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.focalLength; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Focal Length: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.title; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Title: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.author; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Author: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.keywords; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Keywords: ", commonValue);
+            hasCommonAttributes = true;
+        }
+        if (TryGetCommonMetadataString(metadataList, [](const services::ImageMetadata& metadata) { return metadata.comment; }, &commonValue))
+        {
+            AppendLabeledLine(&body, L"Comment: ", commonValue);
+            hasCommonAttributes = true;
+        }
+
+        if (allMetadataLoaded)
+        {
+            bool wroteAdditionalHeader = false;
+            std::vector<services::MetadataPropertyEntry> renderedCommonProperties;
+            for (const services::MetadataPropertyEntry& property : FindCommonMetadataProperties(metadataList))
             {
-                text.append(L"  |  ");
-                text.append(metadata->dateTaken);
+                if (property.value.empty() || IsCuratedDetailsProperty(property.canonicalName))
+                {
+                    continue;
+                }
+
+                if (HasEquivalentDisplayedProperty(renderedCommonProperties, property))
+                {
+                    continue;
+                }
+
+                if (!wroteAdditionalHeader)
+                {
+                    body.append(L"\r\nCommon Additional Metadata\r\n");
+                    wroteAdditionalHeader = true;
+                }
+                AppendLabeledLine(&body, property.displayName + L": ", property.value);
+                renderedCommonProperties.push_back(property);
+                hasCommonAttributes = true;
+            }
+        }
+        else
+        {
+            body.append(L"\r\nLoading detailed metadata for the current selection...\r\n");
+        }
+
+        if (!hasCommonAttributes)
+        {
+            body.append(L"No common file or metadata attributes are shared by the current selection.");
+        }
+
+        ApplyDetailsPanelText(std::to_wstring(selectedItems.size()) + L" Files Selected",
+                              std::to_wstring(selectedItems.size()) + L" items | " + browser::FormatByteSize(selectedBytes),
+                              std::move(body));
+        ResetDetailsPanelHistogram();
+        LayoutChildren();
+    }
+
+    void MainWindow::PaintDetailsPanel(HDC hdc, const RECT& clientRect) const
+    {
+        (void)clientRect;
+        if (!detailsStripVisible_ || IsRectEmpty(&detailsPanelRect_))
+        {
+            return;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        FillRect(hdc,
+                 &detailsPanelRect_,
+                 detailsPanelBrush_ ? detailsPanelBrush_ : (backgroundBrush_ ? backgroundBrush_ : reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1)));
+
+        HPEN borderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
+        HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+        MoveToEx(hdc, detailsPanelRect_.left, detailsPanelRect_.top, nullptr);
+        LineTo(hdc, detailsPanelRect_.left, detailsPanelRect_.bottom);
+        SelectObject(hdc, oldPen);
+        DeleteObject(borderPen);
+
+        const int innerLeft = detailsPanelRect_.left + kDetailsPanelMargin;
+        const int innerRight = detailsPanelRect_.right - kDetailsPanelMargin;
+        const int innerWidth = std::max(0, innerRight - innerLeft);
+
+        const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
+        const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
+                                                       title,
+                                                       innerWidth,
+                                                       DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                       22);
+        RECT titleRect{innerLeft, detailsPanelRect_.top + kDetailsPanelMargin, innerRight, detailsPanelRect_.top + kDetailsPanelMargin + titleHeight};
+
+        SetBkMode(hdc, TRANSPARENT);
+        HGDIOBJ oldFont = SelectObject(hdc, detailsPanelTitleFont_ ? detailsPanelTitleFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        SetTextColor(hdc, palette.text);
+        DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+
+        int summaryTop = titleRect.bottom + 6;
+        if (!detailsPanelSummaryText_.empty())
+        {
+            const int summaryHeight = MeasureTextBlockHeight(detailsPanelSummaryFont_,
+                                                             detailsPanelSummaryText_,
+                                                             innerWidth,
+                                                             DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                             18);
+            RECT summaryRect{innerLeft, summaryTop, innerRight, summaryTop + summaryHeight};
+            SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+            SetTextColor(hdc, palette.mutedText);
+            DrawTextW(hdc, detailsPanelSummaryText_.c_str(), -1, &summaryRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+        }
+
+        if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_) && !IsRectEmpty(&detailsPanelHistogramRect_))
+        {
+            const COLORREF histogramBackground = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 24 : 12);
+            HBRUSH histogramBrush = CreateSolidBrush(histogramBackground);
+            FillRect(hdc, &detailsPanelHistogramRect_, histogramBrush);
+            DeleteObject(histogramBrush);
+
+            HPEN histogramBorderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
+            oldPen = SelectObject(hdc, histogramBorderPen);
+            MoveToEx(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.top, nullptr);
+            LineTo(hdc, detailsPanelHistogramRect_.right, detailsPanelHistogramRect_.top);
+            LineTo(hdc, detailsPanelHistogramRect_.right, detailsPanelHistogramRect_.bottom);
+            LineTo(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.bottom);
+            LineTo(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.top);
+            SelectObject(hdc, oldPen);
+            DeleteObject(histogramBorderPen);
+
+            RECT histogramTextRect = detailsPanelHistogramRect_;
+            InflateRect(&histogramTextRect, -8, -8);
+            SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+
+            if (detailsPanelHistogramLoading_)
+            {
+                SetTextColor(hdc, palette.mutedText);
+                DrawTextW(hdc, L"Loading histogram...", -1, &histogramTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            }
+            else if (!detailsPanelHistogramVisible_ || detailsPanelHistogramPeak_ == 0)
+            {
+                SetTextColor(hdc, palette.mutedText);
+                DrawTextW(hdc, L"Histogram unavailable", -1, &histogramTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            }
+            else
+            {
+                const int chartLeft = detailsPanelHistogramRect_.left + 6;
+                const int chartTop = detailsPanelHistogramRect_.top + 6;
+                const int chartRight = detailsPanelHistogramRect_.right - 6;
+                const int chartBottom = detailsPanelHistogramRect_.bottom - 6;
+                const int chartWidth = std::max(1, chartRight - chartLeft);
+                const int chartHeight = std::max(1, chartBottom - chartTop);
+
+                auto drawChannel = [&](const std::array<std::uint32_t, 64>& values, COLORREF color)
+                {
+                    HPEN channelPen = CreatePen(PS_SOLID, 1, color);
+                    HGDIOBJ oldChannelPen = SelectObject(hdc, channelPen);
+                    for (int index = 0; index < kDetailsPanelHistogramBins; ++index)
+                    {
+                        const int x = chartLeft + MulDiv(index, chartWidth - 1, kDetailsPanelHistogramBins - 1);
+                        const int valueHeight = detailsPanelHistogramPeak_ > 0
+                            ? MulDiv(static_cast<int>(values[static_cast<std::size_t>(index)]), chartHeight - 1, static_cast<int>(detailsPanelHistogramPeak_))
+                            : 0;
+                        const int y = chartBottom - valueHeight;
+                        if (index == 0)
+                        {
+                            MoveToEx(hdc, x, y, nullptr);
+                        }
+                        else
+                        {
+                            LineTo(hdc, x, y);
+                        }
+                    }
+                    SelectObject(hdc, oldChannelPen);
+                    DeleteObject(channelPen);
+                };
+
+                drawChannel(detailsPanelHistogramRed_, RGB(224, 98, 92));
+                drawChannel(detailsPanelHistogramGreen_, RGB(112, 188, 102));
+                drawChannel(detailsPanelHistogramBlue_, RGB(92, 150, 232));
             }
         }
 
-        SetWindowTextW(detailsStrip_, text.c_str());
+        SelectObject(hdc, oldFont);
     }
 
     void MainWindow::RefreshBrowserPane()
@@ -2803,6 +3715,7 @@ namespace hyperbrowse::ui
         browserPaneController_->SetSortMode(sortMode_);
         browserPaneController_->SetSortAscending(sortAscending_);
         browserPaneController_->RefreshFromModel();
+        UpdateDetailsPanel();
     }
 
     void MainWindow::OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor)
@@ -4482,7 +5395,7 @@ namespace hyperbrowse::ui
         CheckMenuRadioItem(
             menu_,
             ID_VIEW_THUMBNAIL_SIZE_96,
-            ID_VIEW_THUMBNAIL_SIZE_320,
+            ID_VIEW_THUMBNAIL_SIZE_640,
             CommandIdFromThumbnailSizePreset(thumbnailSizePreset),
             MF_BYCOMMAND);
         CheckMenuItem(
@@ -4615,8 +5528,15 @@ namespace hyperbrowse::ui
             actionFieldBrush_ = nullptr;
         }
 
+        if (detailsPanelBrush_)
+        {
+            DeleteObject(detailsPanelBrush_);
+            detailsPanelBrush_ = nullptr;
+        }
+
         backgroundBrush_ = CreateSolidBrush(palette.windowBackground);
         actionFieldBrush_ = CreateSolidBrush(palette.actionFieldBackground);
+        detailsPanelBrush_ = CreateSolidBrush(palette.paneBackground);
 
         if (hwnd_)
         {
@@ -4650,8 +5570,11 @@ namespace hyperbrowse::ui
             diagnosticsWindow_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
         }
 
+        RefreshDetailsPanelBodyPresentation();
+
         if (hwnd_)
         {
+            InvalidateRect(detailsPanelText_, nullptr, TRUE);
             SetWindowPos(
                 hwnd_,
                 nullptr,
@@ -4920,7 +5843,7 @@ namespace hyperbrowse::ui
 
         UpdateStatusText();
         UpdateMenuState();
-        UpdateDetailsStripText();
+        UpdateDetailsPanel();
         return 0;
     }
 
@@ -4988,6 +5911,43 @@ namespace hyperbrowse::ui
         }
 
         UpdateStatusText();
+        return 0;
+    }
+
+    LRESULT MainWindow::OnDetailsPanelThumbnailMessage(LPARAM lParam)
+    {
+        std::unique_ptr<services::ThumbnailReadyUpdate> update(
+            reinterpret_cast<services::ThumbnailReadyUpdate*>(lParam));
+        if (!update
+            || !detailsPanelThumbnailScheduler_
+            || update->sessionId != detailsPanelThumbnailSessionId_
+            || update->requestEpoch != detailsPanelThumbnailRequestEpoch_
+            || update->modelIndex != detailsPanelHistogramModelIndex_
+            || !StringsEqualInsensitive(update->cacheKey.filePath, detailsPanelHistogramPath_)
+            || update->cacheKey.modifiedTimestampUtc != detailsPanelHistogramModifiedTimestampUtc_)
+        {
+            return 0;
+        }
+
+        detailsPanelHistogramLoading_ = false;
+        if (update->success)
+        {
+            if (const auto thumbnail = detailsPanelThumbnailScheduler_->FindCachedThumbnail(update->cacheKey))
+            {
+                ApplyDetailsPanelHistogram(*thumbnail);
+            }
+        }
+        else
+        {
+            detailsPanelHistogramVisible_ = false;
+            detailsPanelHistogramPeak_ = 0;
+        }
+
+        LayoutChildren();
+        if (hwnd_ && !IsRectEmpty(&detailsPanelRect_))
+        {
+            InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+        }
         return 0;
     }
 
@@ -5184,6 +6144,11 @@ namespace hyperbrowse::ui
         case ID_VIEW_THUMBNAIL_SIZE_192:
         case ID_VIEW_THUMBNAIL_SIZE_256:
         case ID_VIEW_THUMBNAIL_SIZE_320:
+        case ID_VIEW_THUMBNAIL_SIZE_360:
+        case ID_VIEW_THUMBNAIL_SIZE_420:
+        case ID_VIEW_THUMBNAIL_SIZE_480:
+        case ID_VIEW_THUMBNAIL_SIZE_560:
+        case ID_VIEW_THUMBNAIL_SIZE_640:
             thumbnailSizePreset_ = ThumbnailSizePresetFromCommandId(commandId);
             ApplyThumbnailDisplaySettings();
             UpdateStatusText();
@@ -5197,12 +6162,12 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_DETAILS_STRIP:
             detailsStripVisible_ = !detailsStripVisible_;
-            if (detailsStrip_)
+            if (detailsPanelText_)
             {
-                ShowWindow(detailsStrip_, detailsStripVisible_ ? SW_SHOW : SW_HIDE);
+                ShowWindow(detailsPanelText_, detailsStripVisible_ ? SW_SHOW : SW_HIDE);
             }
             LayoutChildren();
-            UpdateDetailsStripText();
+            UpdateDetailsPanel();
             UpdateMenuState();
             return true;
         case ID_VIEW_SORT_FILENAME:
@@ -5752,10 +6717,15 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_192, L"192 px");
             AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_256, L"256 px");
             AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_320, L"320 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_360, L"360 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_420, L"420 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_480, L"480 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_560, L"560 px");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"640 px");
 
             const browser::ThumbnailSizePreset preset = browserPaneController_
                 ? browserPaneController_->GetThumbnailSizePreset() : thumbnailSizePreset_;
-            CheckMenuRadioItem(menu, ID_VIEW_THUMBNAIL_SIZE_96, ID_VIEW_THUMBNAIL_SIZE_320,
+            CheckMenuRadioItem(menu, ID_VIEW_THUMBNAIL_SIZE_96, ID_VIEW_THUMBNAIL_SIZE_640,
                 CommandIdFromThumbnailSizePreset(preset), MF_BYCOMMAND);
 
             SetForegroundWindow(hwnd_);
@@ -5967,6 +6937,8 @@ namespace hyperbrowse::ui
             return OnBatchConvertMessage(lParam);
         case services::FileOperationService::kMessageId:
             return OnFileOperationMessage(lParam);
+        case services::ThumbnailScheduler::kMessageId:
+            return OnDetailsPanelThumbnailMessage(lParam);
         case viewer::ViewerWindow::kZoomChangedMessage:
             return OnViewerZoomMessage(lParam);
         case viewer::ViewerWindow::kActivityChangedMessage:
@@ -6006,14 +6978,21 @@ namespace hyperbrowse::ui
                 SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionFieldBackground);
                 return reinterpret_cast<INT_PTR>(actionFieldBrush_ ? actionFieldBrush_ : backgroundBrush_);
             }
-            break;
-        case WM_CTLCOLORSTATIC:
-            if (reinterpret_cast<HWND>(lParam) == detailsStrip_)
+            if (reinterpret_cast<HWND>(lParam) == detailsPanelText_)
             {
                 const ThemePalette palette = GetThemePalette();
                 SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
-                SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionStripBackground);
-                return reinterpret_cast<INT_PTR>(backgroundBrush_);
+                SetBkColor(reinterpret_cast<HDC>(wParam), palette.paneBackground);
+                return reinterpret_cast<INT_PTR>(detailsPanelBrush_ ? detailsPanelBrush_ : backgroundBrush_);
+            }
+            break;
+        case WM_CTLCOLORSTATIC:
+            if (reinterpret_cast<HWND>(lParam) == detailsPanelText_)
+            {
+                const ThemePalette palette = GetThemePalette();
+                SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
+                SetBkColor(reinterpret_cast<HDC>(wParam), palette.paneBackground);
+                return reinterpret_cast<INT_PTR>(detailsPanelBrush_ ? detailsPanelBrush_ : backgroundBrush_);
             }
             break;
         case WM_COMMAND:
@@ -6067,6 +7046,8 @@ namespace hyperbrowse::ui
             const HBRUSH splitterBrush = CreateSolidBrush(GetThemePalette().splitter);
             FillRect(hdc, &splitterRect, splitterBrush);
             DeleteObject(splitterBrush);
+
+            PaintDetailsPanel(hdc, client);
 
             EndPaint(hwnd_, &ps);
             return 0;

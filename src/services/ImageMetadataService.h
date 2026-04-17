@@ -19,6 +19,13 @@
 
 namespace hyperbrowse::services
 {
+    struct MetadataPropertyEntry
+    {
+        std::wstring canonicalName;
+        std::wstring displayName;
+        std::wstring value;
+    };
+
     struct ImageMetadata
     {
         bool hasExif{};
@@ -38,6 +45,7 @@ namespace hyperbrowse::services
         std::wstring keywords;
         std::wstring comment;
         std::int64_t dateTakenTimestampUtc{};
+        std::vector<MetadataPropertyEntry> properties;
     };
 
     struct MetadataWorkItem
