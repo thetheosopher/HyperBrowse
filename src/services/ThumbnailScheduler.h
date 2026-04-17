@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -77,6 +78,22 @@ namespace hyperbrowse::services
             int sequence{};
             std::uint64_t enqueuedTickCount{};
             ThumbnailWorkItem workItem;
+            bool isRaw{};
+            bool isJpeg{};
+        };
+
+        // Order pending jobs by (priority asc, sequence asc) so begin() is always the
+        // highest-priority oldest job. Sequence is unique so this is effectively strict.
+        struct PendingJobLess
+        {
+            bool operator()(const PendingJob& lhs, const PendingJob& rhs) const noexcept
+            {
+                if (lhs.workItem.priority != rhs.workItem.priority)
+                {
+                    return lhs.workItem.priority < rhs.workItem.priority;
+                }
+                return lhs.sequence < rhs.sequence;
+            }
         };
 
         struct InflightDecode
@@ -102,7 +119,7 @@ namespace hyperbrowse::services
         std::uint64_t activeSessionId_{};
         std::uint64_t activeRequestEpoch_{};
         int nextSequence_{};
-        std::vector<PendingJob> pendingJobs_;
+        std::multiset<PendingJob, PendingJobLess> pendingJobs_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> queuedKeys_;
         std::unordered_map<cache::ThumbnailCacheKey, std::vector<InflightDecode>, cache::ThumbnailCacheKeyHasher> inflightJobs_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> requestedKeys_;

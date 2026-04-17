@@ -95,7 +95,11 @@ HyperBrowse is branded around speed. The current GDI rendering pipeline is funct
 
 **ViewerWindow changes:**
 - Replace `WM_PAINT` handler: create `ID2D1HwndRenderTarget`, render directly
-- Replace `StretchBlt(HALFTONE)` → `DrawBitmap()` with `D2D1_BITMAP_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC`
+- Replace `StretchBlt(HALFTONE)` → `ID2D1DeviceContext::DrawBitmap()` with
+  `D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC` (acquired by QI on the
+  `ID2D1HwndRenderTarget`; requires the factory to be `ID2D1Factory1`,
+  Windows 8+). Falls back to `D2D1_BITMAP_INTERPOLATION_MODE_LINEAR` on
+  Windows 7 if QI fails.
 - Replace `PlgBlt()` rotation → `SetTransform()` with rotation matrix + `DrawBitmap()`
 - Replace info overlay panels: D2D rounded rectangles + DirectWrite text
 - Upload decoded full-resolution image as `ID2D1Bitmap` once on decode completion

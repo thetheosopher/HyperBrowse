@@ -25,12 +25,30 @@ namespace hyperbrowse::render
 
     bool D2DRenderer::Initialize()
     {
+        // Request the factory as ID2D1Factory1 (Windows 8+) so HwndRenderTargets
+        // created from it can be QueryInterface'd to ID2D1DeviceContext, which is
+        // required to use D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC for image
+        // scaling instead of the older D2D1_BITMAP_INTERPOLATION_MODE_LINEAR.
+        ComPtr<ID2D1Factory1> factory1;
         HRESULT hr = D2D1CreateFactory(
             D2D1_FACTORY_TYPE_SINGLE_THREADED,
-            d2dFactory_.GetAddressOf());
+            __uuidof(ID2D1Factory1),
+            reinterpret_cast<void**>(factory1.GetAddressOf()));
         if (FAILED(hr))
         {
-            return false;
+            // Fall back to the base factory (Windows 7). High-quality cubic will
+            // not be available; callers detect this via QI and use linear instead.
+            hr = D2D1CreateFactory(
+                D2D1_FACTORY_TYPE_SINGLE_THREADED,
+                d2dFactory_.GetAddressOf());
+            if (FAILED(hr))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            d2dFactory_ = factory1;
         }
 
         hr = DWriteCreateFactory(

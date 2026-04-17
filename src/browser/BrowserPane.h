@@ -310,11 +310,9 @@ namespace hyperbrowse::browser
 
         double smoothScrollTarget_{};
         double smoothScrollCurrent_{};
-        double smoothScrollVelocity_{};
         UINT_PTR smoothScrollTimerId_{};
         static constexpr UINT_PTR kSmoothScrollTimerId = 9001;
         static constexpr UINT kSmoothScrollIntervalMs = 16;
-        static constexpr double kSmoothScrollDeceleration = 0.82;
         static constexpr double kSmoothScrollSnapThreshold = 2.0;
     };
 

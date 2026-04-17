@@ -1,5 +1,22 @@
 # HyperBrowse Toolbar & UX Redesign
 
+## Implementation Status (as of 2026-04-17)
+
+| Section | Status |
+|---------|--------|
+| §5.1 Owner-drawn toolbar strip with grouped icon buttons, dropdowns, and right-aligned actions | **Done** ([`src/ui/MainWindow.cpp` `PaintToolbar` / `LayoutToolbar`](../src/ui/MainWindow.cpp), [`src/ui/ToolbarIconLibrary.cpp`](../src/ui/ToolbarIconLibrary.cpp)) |
+| §5.2 Double-buffered strip paint to eliminate flashing | **Done** — implemented as GDI `BitBlt` from a memory DC (not D2D). The flashing issue is resolved. The D2D upgrade for the strip itself remains deferred; thumbnails and viewer use D2D per spec 15. |
+| §6 Flashing fix (`WM_ERASEBKGND` excludes toolbar; `RDW_NOERASE`) | **Done** |
+| §4 NanoSVG icon pipeline | **Deferred** — current build embeds rasterised PNG icons under `assets/toolbar-icons/`. Switching to NanoSVG-rendered SVG is still on the table but adds a dependency. |
+| §7 Menu restructuring (consolidated File/View/Image/Help, new Tools menu) | **Partial** — the existing menu was tightened (sort direction, date-taken sort mode, configurable slideshow interval, image info dialog) but the full restructure described here has not been done. |
+| §10 Toolbar visual mockup | **Achieved in spirit** — current toolbar matches the layout intent (left = navigation/view, centre = filter, right = actions), albeit with PNG icons rather than SVG. |
+
+> **Note:** The repo memory previously claimed the toolbar redesign was
+> complete. That was overstated. The flashing fix and the icon-driven layout
+> are in place, but the D2D toolbar paint and full menu restructure are still
+> open. Treat the rest of this document as design intent for those remaining
+> items.
+
 ## 1. Purpose
 
 This document is a full UX review of the current HyperBrowse interface and a

@@ -85,4 +85,44 @@ namespace hyperbrowse::render
     {
         return D2D1::Point2F(x, y);
     }
+
+    // Draw a bitmap with the highest-quality interpolation supported by the runtime.
+    // On Windows 8+ this uses ID2D1DeviceContext::DrawBitmap with
+    // D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, which preserves significantly more
+    // detail than the older linear mode when scaling images. Falls back to linear if
+    // ID2D1DeviceContext is unavailable on the target.
+    //
+    // sourceRectangle may be nullptr to draw the entire bitmap.
+    inline void DrawBitmapHighQuality(ID2D1RenderTarget* renderTarget,
+                                      ID2D1Bitmap* bitmap,
+                                      const D2D1_RECT_F& destinationRectangle,
+                                      float opacity = 1.0f,
+                                      const D2D1_RECT_F* sourceRectangle = nullptr)
+    {
+        if (!renderTarget || !bitmap)
+        {
+            return;
+        }
+
+        ComPtr<ID2D1DeviceContext> deviceContext;
+        if (SUCCEEDED(renderTarget->QueryInterface(__uuidof(ID2D1DeviceContext),
+                                                   reinterpret_cast<void**>(deviceContext.GetAddressOf()))))
+        {
+            deviceContext->DrawBitmap(
+                bitmap,
+                &destinationRectangle,
+                opacity,
+                D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+                sourceRectangle,
+                nullptr);
+            return;
+        }
+
+        renderTarget->DrawBitmap(
+            bitmap,
+            &destinationRectangle,
+            opacity,
+            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+            sourceRectangle);
+    }
 }

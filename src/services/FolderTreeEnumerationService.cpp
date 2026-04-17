@@ -9,6 +9,7 @@
 
 #include "util/Diagnostics.h"
 #include "util/Log.h"
+#include "util/StringConvert.h"
 
 namespace fs = std::filesystem;
 
@@ -145,10 +146,9 @@ namespace
         }
         catch (const std::exception& exception)
         {
-            const std::string message = exception.what();
             PostFailure(stateView,
                         folderPath,
-                        L"Folder tree enumeration failed: " + std::wstring(message.begin(), message.end()));
+                        L"Folder tree enumeration failed: " + hyperbrowse::util::WidenExceptionMessage(exception.what()));
         }
     }
 }

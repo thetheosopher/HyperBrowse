@@ -196,14 +196,19 @@ namespace hyperbrowse::services
                     }
                 }
 
-                pendingJobs_.push_back(PendingJob{
+                const bool jobIsRaw = IsRawCacheKey(workItem.cacheKey);
+                const bool jobIsJpeg = IsJpegCacheKey(workItem.cacheKey);
+                cache::ThumbnailCacheKey insertedKey = workItem.cacheKey;
+                pendingJobs_.insert(PendingJob{
                     sessionId,
                     requestEpoch,
                     nextSequence_++,
                     static_cast<std::uint64_t>(GetTickCount64()),
                     std::move(workItem),
+                    jobIsRaw,
+                    jobIsJpeg,
                 });
-                queuedKeys_.insert(pendingJobs_.back().workItem.cacheKey);
+                queuedKeys_.insert(std::move(insertedKey));
             }
         }
 
@@ -319,71 +324,66 @@ namespace hyperbrowse::services
                     return;
                 }
 
-                std::vector<PendingJob> orderedJobs = pendingJobs_;
-                std::stable_sort(
-                    orderedJobs.begin(),
-                    orderedJobs.end(),
-                    [](const PendingJob& lhs, const PendingJob& rhs)
-                    {
-                        if (lhs.workItem.priority != rhs.workItem.priority)
-                        {
-                            return lhs.workItem.priority < rhs.workItem.priority;
-                        }
-
-                        return lhs.sequence < rhs.sequence;
-                    });
+                // pendingJobs_ is a multiset ordered by (priority asc, sequence asc),
+                // so begin() is always the highest-priority oldest job. Selection walks
+                // the set in order and collects iterators that we can erase in O(log n).
+                std::vector<std::multiset<PendingJob, PendingJobLess>::iterator> selectedIterators;
 
                 const auto selectJobsForKind = [&](WorkerKind jobKind)
                 {
                     if (jobKind == WorkerKind::Raw)
                     {
-                        for (const PendingJob& candidate : orderedJobs)
+                        for (auto iterator = pendingJobs_.begin(); iterator != pendingJobs_.end(); ++iterator)
                         {
-                            if (IsRawCacheKey(candidate.workItem.cacheKey))
+                            if (iterator->isRaw)
                             {
-                                jobs.push_back(candidate);
+                                jobs.push_back(*iterator);
+                                selectedIterators.push_back(iterator);
                                 break;
                             }
                         }
                         return;
                     }
 
-                    for (const PendingJob& candidate : orderedJobs)
+                    auto headIterator = pendingJobs_.end();
+                    for (auto iterator = pendingJobs_.begin(); iterator != pendingJobs_.end(); ++iterator)
                     {
-                        if (!IsRawCacheKey(candidate.workItem.cacheKey))
+                        if (!iterator->isRaw)
                         {
-                            jobs.push_back(candidate);
+                            headIterator = iterator;
+                            jobs.push_back(*iterator);
+                            selectedIterators.push_back(iterator);
                             break;
                         }
                     }
 
-                    if (!jobs.empty()
+                    if (headIterator != pendingJobs_.end()
                         && canUseNvJpegBatch
-                        && !jobs.front().workItem.preferCpu
-                        && IsJpegCacheKey(jobs.front().workItem.cacheKey))
+                        && !headIterator->workItem.preferCpu
+                        && headIterator->isJpeg)
                     {
-                        const int highestPriority = jobs.front().workItem.priority;
-                        for (std::size_t index = 1; index < orderedJobs.size() && jobs.size() < kMaxNvJpegBatchSize; ++index)
+                        const int highestPriority = headIterator->workItem.priority;
+                        auto iterator = std::next(headIterator);
+                        while (iterator != pendingJobs_.end() && jobs.size() < kMaxNvJpegBatchSize)
                         {
-                            const PendingJob& candidate = orderedJobs[index];
-                            if (candidate.workItem.priority > highestPriority + kNvJpegBatchPriorityWindow)
+                            if (iterator->workItem.priority > highestPriority + kNvJpegBatchPriorityWindow)
                             {
                                 break;
                             }
-
-                            if (IsRawCacheKey(candidate.workItem.cacheKey)
-                                || candidate.workItem.preferCpu
-                                || !IsJpegCacheKey(candidate.workItem.cacheKey))
+                            if (!iterator->isRaw
+                                && !iterator->workItem.preferCpu
+                                && iterator->isJpeg)
                             {
-                                continue;
+                                jobs.push_back(*iterator);
+                                selectedIterators.push_back(iterator);
                             }
-
-                            jobs.push_back(candidate);
+                            ++iterator;
                         }
 
                         if (jobs.size() < kMinNvJpegBatchSize)
                         {
                             jobs.resize(1);
+                            selectedIterators.resize(1);
                         }
                     }
                 };
@@ -402,11 +402,8 @@ namespace hyperbrowse::services
                     continue;
                 }
 
-                std::vector<int> selectedSequences;
-                selectedSequences.reserve(jobs.size());
                 for (const PendingJob& job : jobs)
                 {
-                    selectedSequences.push_back(job.sequence);
                     queuedKeys_.erase(job.workItem.cacheKey);
                     inflightJobs_[job.workItem.cacheKey].push_back(InflightDecode{
                         job.workItem.priority,
@@ -414,24 +411,17 @@ namespace hyperbrowse::services
                     });
                 }
 
-                pendingJobs_.erase(
-                    std::remove_if(
-                        pendingJobs_.begin(),
-                        pendingJobs_.end(),
-                        [&selectedSequences](const PendingJob& pendingJob)
-                        {
-                            return std::find(selectedSequences.begin(),
-                                             selectedSequences.end(),
-                                             pendingJob.sequence) != selectedSequences.end();
-                        }),
-                    pendingJobs_.end());
+                for (auto iterator : selectedIterators)
+                {
+                    pendingJobs_.erase(iterator);
+                }
             }
 
             const std::uint64_t dispatchTickCount = static_cast<std::uint64_t>(GetTickCount64());
             for (const PendingJob& job : jobs)
             {
                 const double queueWaitMs = static_cast<double>(dispatchTickCount - job.enqueuedTickCount);
-                if (IsRawCacheKey(job.workItem.cacheKey))
+                if (job.isRaw)
                 {
                     hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.raw", queueWaitMs);
                 }
@@ -445,6 +435,7 @@ namespace hyperbrowse::services
             std::vector<std::size_t> missingIndices;
             std::vector<cache::ThumbnailCacheKey> missingKeys;
             std::vector<decode::ThumbnailDecodeFailureKind> failureKinds(jobs.size(), decode::ThumbnailDecodeFailureKind::None);
+            std::vector<bool> cancelled(jobs.size(), false);
             missingIndices.reserve(jobs.size());
             missingKeys.reserve(jobs.size());
             for (std::size_t index = 0; index < jobs.size(); ++index)
@@ -455,6 +446,36 @@ namespace hyperbrowse::services
                     missingIndices.push_back(index);
                     missingKeys.push_back(jobs[index].workItem.cacheKey);
                 }
+            }
+
+            // Check whether the batch was cancelled while it sat in the worker's local
+            // queue. If every job's request epoch is now stale we skip the decode entirely
+            // (nothing is observing the result). This stops scroll-driven decode storms
+            // from continuing after the user has already moved on.
+            bool batchStillRelevant = false;
+            {
+                std::scoped_lock lock(mutex_);
+                if (shuttingDown_)
+                {
+                    return;
+                }
+                for (const PendingJob& job : jobs)
+                {
+                    if (job.requestEpoch == activeRequestEpoch_
+                        || requestedKeys_.contains(job.workItem.cacheKey))
+                    {
+                        batchStillRelevant = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!batchStillRelevant)
+            {
+                hyperbrowse::util::IncrementCounter(L"thumbnail.batch.cancelled_before_decode");
+                std::fill(cancelled.begin(), cancelled.end(), true);
+                missingKeys.clear();
+                missingIndices.clear();
             }
 
             if (missingKeys.size() > 1)
@@ -492,7 +513,13 @@ namespace hyperbrowse::services
                 bool shouldNotify = false;
                 {
                     std::scoped_lock lock(mutex_);
-                    if (thumbnail)
+                    if (cancelled[index])
+                    {
+                        // Cancelled jobs leave failedKeys_ untouched: a cancelled decode
+                        // is not a failed decode, and a future Schedule() must be free to
+                        // retry without first having to invalidate a poisoned entry.
+                    }
+                    else if (thumbnail)
                     {
                         failedKeys_.erase(jobs[index].workItem.cacheKey);
                     }
@@ -522,7 +549,8 @@ namespace hyperbrowse::services
                         }
                     }
 
-                    shouldNotify = targetWindow_ != nullptr
+                    shouldNotify = !cancelled[index]
+                        && targetWindow_ != nullptr
                         && jobs[index].sessionId == activeSessionId_
                         && (jobs[index].requestEpoch == activeRequestEpoch_ || requestedKeys_.contains(jobs[index].workItem.cacheKey));
                 }

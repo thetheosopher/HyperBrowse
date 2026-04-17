@@ -157,6 +157,10 @@ namespace hyperbrowse::viewer
                                                  IDB_HYPERBROWSE_BRAND_PNG,
                                                  kPlaceholderBrandArtSize,
                                                  kPlaceholderBrandArtSize);
+        // Two workers cover the common case (one for the foreground decode, one for
+        // a single adjacent prefetch). Bursty navigation cannot exceed two concurrent
+        // OS threads, in contrast to the prior std::async approach.
+        backgroundExecutor_ = std::make_unique<util::BackgroundExecutor>(2);
     }
 
     ViewerWindow::~ViewerWindow()
@@ -559,22 +563,14 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ReapCompletedBackgroundTasks()
     {
-        backgroundTasks_.erase(std::remove_if(backgroundTasks_.begin(), backgroundTasks_.end(), [](std::future<void>& task)
-        {
-            return !task.valid() || task.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
-        }), backgroundTasks_.end());
+        // The bounded executor handles its own backlog; nothing to reap here.
     }
 
     void ViewerWindow::WaitForBackgroundTasks()
     {
-        for (std::future<void>& task : backgroundTasks_)
-        {
-            if (task.valid())
-            {
-                task.wait();
-            }
-        }
-        backgroundTasks_.clear();
+        // Destroying the executor joins its worker threads, ensuring no in-flight
+        // decode can outlive the ViewerWindow.
+        backgroundExecutor_.reset();
     }
 
     void ViewerWindow::LoadCurrentImageAsync(LoadReason reason)
@@ -632,32 +628,35 @@ namespace hyperbrowse::viewer
 
         const std::shared_ptr<AsyncState> asyncState = asyncState_;
         ReapCompletedBackgroundTasks();
-        backgroundTasks_.push_back(std::async(std::launch::async, [asyncState, item, selectedIndex, requestId, navigationGeneration]()
+        if (backgroundExecutor_)
         {
-            std::wstring errorMessage;
-            auto image = decode::DecodeFullImage(item, &errorMessage);
-
-            if (asyncState->shutdown.load(std::memory_order_acquire)
-                || asyncState->activeRequestId.load(std::memory_order_acquire) != requestId)
+            backgroundExecutor_->Post([asyncState, item, selectedIndex, requestId, navigationGeneration]()
             {
-                return;
-            }
+                std::wstring errorMessage;
+                auto image = decode::DecodeFullImage(item, &errorMessage);
 
-            auto update = std::make_unique<DecodedImageResult>();
-            update->requestId = requestId;
-            update->navigationGeneration = navigationGeneration;
-            update->index = selectedIndex;
-            update->image = std::move(image);
-            update->errorMessage = std::move(errorMessage);
+                if (asyncState->shutdown.load(std::memory_order_acquire)
+                    || asyncState->activeRequestId.load(std::memory_order_acquire) != requestId)
+                {
+                    return;
+                }
 
-            HWND targetWindow = asyncState->targetWindow;
-            if (!targetWindow || !PostMessageW(targetWindow, kDecodedImageMessage, 0, reinterpret_cast<LPARAM>(update.get())))
-            {
-                return;
-            }
+                auto update = std::make_unique<DecodedImageResult>();
+                update->requestId = requestId;
+                update->navigationGeneration = navigationGeneration;
+                update->index = selectedIndex;
+                update->image = std::move(image);
+                update->errorMessage = std::move(errorMessage);
 
-            update.release();
-        }));
+                HWND targetWindow = asyncState->targetWindow;
+                if (!targetWindow || !PostMessageW(targetWindow, kDecodedImageMessage, 0, reinterpret_cast<LPARAM>(update.get())))
+                {
+                    return;
+                }
+
+                update.release();
+            });
+        }
     }
 
     void ViewerWindow::Navigate(int delta)
@@ -852,7 +851,11 @@ namespace hyperbrowse::viewer
         }
 
         ReapCompletedBackgroundTasks();
-        backgroundTasks_.push_back(std::async(std::launch::async, [asyncState, item, index, navigationGeneration]()
+        if (!backgroundExecutor_)
+        {
+            return;
+        }
+        backgroundExecutor_->Post([asyncState, item, index, navigationGeneration]()
         {
             std::wstring errorMessage;
             auto image = decode::DecodeFullImage(item, &errorMessage);
@@ -880,7 +883,7 @@ namespace hyperbrowse::viewer
             }
 
             update.release();
-        }));
+        });
     }
 
     void ViewerWindow::LogPrefetchStats() const
@@ -1337,9 +1340,10 @@ namespace hyperbrowse::viewer
 
         if (rotationQuarterTurns_ == 0)
         {
-            renderTarget->DrawBitmap(bitmap,
+            hyperbrowse::render::DrawBitmapHighQuality(renderTarget,
+                bitmap,
                 D2D1::RectF(cx, cy, cx + destW, cy + destH),
-                opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                opacity);
             return;
         }
 
@@ -1355,9 +1359,10 @@ namespace hyperbrowse::viewer
         renderTarget->SetTransform(previousTransform * D2D1::Matrix3x2F::Rotation(
             static_cast<float>(rotationQuarterTurns_) * 90.0f,
             D2D1::Point2F(centerX, centerY)));
-        renderTarget->DrawBitmap(bitmap,
+        hyperbrowse::render::DrawBitmapHighQuality(renderTarget,
+            bitmap,
             D2D1::RectF(drawX, drawY, drawX + unrotW, drawY + unrotH),
-            opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            opacity);
         renderTarget->SetTransform(previousTransform);
     }
 

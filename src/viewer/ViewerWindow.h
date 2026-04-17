@@ -7,13 +7,13 @@
 
 #include <atomic>
 #include <chrono>
-#include <future>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "browser/BrowserModel.h"
 #include "cache/ThumbnailCache.h"
+#include "util/BackgroundExecutor.h"
 
 namespace hyperbrowse::viewer
 {
@@ -194,7 +194,7 @@ namespace hyperbrowse::viewer
         std::chrono::steady_clock::time_point pendingLoadStartedAt_{};
         bool pendingLoadActive_{};
         bool preserveDisplayedImageWhileLoading_{};
-        std::vector<std::future<void>> backgroundTasks_;
+        std::unique_ptr<hyperbrowse::util::BackgroundExecutor> backgroundExecutor_;
 
         Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dBackgroundBrush_;

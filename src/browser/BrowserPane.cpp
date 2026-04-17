@@ -2586,10 +2586,10 @@ namespace hyperbrowse::browser
         const float drawY = imageBounds.top + ((imageBounds.bottom - imageBounds.top - thumbHeight) / 2.0f);
 
         rt->PushAxisAlignedClip(imageBounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        rt->DrawBitmap(d2dBitmap,
+        hyperbrowse::render::DrawBitmapHighQuality(rt,
+                   d2dBitmap,
                    D2D1::RectF(drawX, drawY, drawX + thumbWidth, drawY + thumbHeight),
-                   1.0f,
-                   D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                   1.0f);
         rt->PopAxisAlignedClip();
     }
 
@@ -3422,7 +3422,6 @@ namespace hyperbrowse::browser
                 }
 
                 smoothScrollTarget_ = smoothScrollCurrent_ - scrollAmount * 2.5;
-                smoothScrollVelocity_ = (smoothScrollTarget_ - smoothScrollCurrent_) * 0.3;
 
                 if (!smoothScrollTimerId_)
                 {
@@ -3440,7 +3439,6 @@ namespace hyperbrowse::browser
                     smoothScrollCurrent_ = smoothScrollTarget_;
                     KillTimer(hwnd_, kSmoothScrollTimerId);
                     smoothScrollTimerId_ = 0;
-                    smoothScrollVelocity_ = 0.0;
                 }
                 else
                 {
@@ -3457,7 +3455,6 @@ namespace hyperbrowse::browser
                     smoothScrollTarget_ = smoothScrollCurrent_;
                     KillTimer(hwnd_, kSmoothScrollTimerId);
                     smoothScrollTimerId_ = 0;
-                    smoothScrollVelocity_ = 0.0;
                 }
                 return 0;
             }

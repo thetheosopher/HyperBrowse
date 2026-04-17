@@ -2,7 +2,74 @@
 
 This document collects all features mentioned in the specification documents that are not yet implemented, organized by priority and source spec.
 
-Last reviewed: 2026-04-13
+Last reviewed: 2026-04-17
+
+---
+
+## Recently Completed (Hardening Pass — 2026-04-17)
+
+After a deep alignment review between spec and code, the following hardening
+items were addressed in priority order:
+
+- **P0 lifetime fix:** `WriteStringValue` now copies the `wstring_view` into a
+  `std::wstring` before passing to `RegSetValueExW` (eliminates a possible
+  heap over-read when the view did not point to a null-terminated buffer).
+- **P0 i18n:** Exception messages from STL/Win32 now go through
+  `hyperbrowse::util::WidenExceptionMessage` (CP_ACP) instead of
+  `std::wstring(begin, end)` widening, which mangled multi-byte text.
+- **P0 cancellation:** `ThumbnailScheduler` now tracks per-batch epochs and
+  skips poisoning `failedKeys_` and notifying decode failure for jobs whose
+  request was cancelled before decode started.
+- **P0 session end:** `WM_QUERYENDSESSION` and `WM_ENDSESSION` now save window
+  state so reboots/log-offs no longer lose layout.
+- **P1 priority queue:** `pendingJobs_` is now a `std::multiset` keyed by
+  (priority asc, sequence asc) so the highest-priority eligible job is
+  selected in O(log n) without copy-and-sort on every dequeue.
+- **P1 PendingJob caches extension kind:** `isRaw`/`isJpeg` are computed once
+  at insert time, removing repeated `IsRawCacheKey`/`IsJpegCacheKey`
+  recomputation on the hot path.
+- **P1 viewer thread pool:** Replaced `std::async` per request in
+  `ViewerWindow` with a small `BackgroundExecutor` (2 workers), bounding
+  thread creation under fast navigation.
+- **P1 ordinal compare helper:** `EqualsIgnoreCaseOrdinal` (CompareStringOrdinal)
+  removes per-call allocation in case-insensitive string comparison.
+- **P1 D2D HQ cubic:** `D2DRenderer` now requests `ID2D1Factory1` and the new
+  `DrawBitmapHighQuality` helper QIs the render target for
+  `ID2D1DeviceContext` and uses `D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC`
+  for image scaling. Used by `ViewerWindow::DrawImageBitmap` and the browser
+  thumbnail preview draw. Falls back to LINEAR on Windows 7. Spec 15 was
+  also corrected (the cubic enum referenced earlier did not exist on
+  `ID2D1RenderTarget`).
+- **P1 spec hygiene:** spec 16 now has an Implementation Status section that
+  honestly reflects the partial state of the toolbar redesign (icon strip and
+  flashing fix done, D2D toolbar paint and full menu restructure deferred).
+- **P2 dead code:** Removed `BrowserPane::smoothScrollVelocity_` and the
+  unused `kSmoothScrollDeceleration` constant; deleted empty `src/platform/`
+  directory; corrected `BUILD_TESTS` option help text.
+- **P2 catch-handler i18n:** `FolderEnumerationService` and
+  `FolderTreeEnumerationService` use `WidenExceptionMessage` for caught
+  `std::exception::what()` strings.
+- **P2 build refactor:** Extracted shared compilation units into a
+  `HyperBrowseCore` STATIC library so `HyperBrowse.exe` and
+  `HyperBrowseTests.exe` link against the same set of object files instead of
+  recompiling every translation unit twice.
+- **P2 CI:** Added `.github/workflows/ci.yml` running `cmake --preset
+  vs2022-x64`, debug build of tests, smoke test execution, and release build
+  of `HyperBrowse.exe` on `windows-latest`.
+
+### Deferred for a dedicated session
+
+- **MainWindow.cpp split (~6300 lines).** Recommended decomposition:
+  `ui/Toolbar.{h,cpp}`, `ui/Theme.{h,cpp}`, `ui/Registry.{h,cpp}`,
+  `ui/dialogs/{TextInputDialog,AboutDialog,ImageInfoDialog}.{h,cpp}`,
+  `ui/Commands.h`. This is mechanically straightforward but high-volume and
+  needs its own session with focused build verification after each
+  extraction.
+- **doctest migration of `tests/smoke.cpp`.** The throw-on-first-failure
+  harness works, scenarios are already isolated functions, and switching to
+  doctest is purely a developer-experience change. Drop `external/doctest/`
+  and convert each scenario to a `TEST_CASE` block when it next becomes
+  worthwhile.
 
 ---
 

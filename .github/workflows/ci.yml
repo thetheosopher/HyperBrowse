@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Configure (CMake)
+        # Disable CUDA redistributable bundling on CI; it requires NVIDIA's
+        # archive endpoints which are slow/unreliable from public runners.
+        # nvJPEG support itself stays compiled in (HYPERBROWSE_ENABLE_NVJPEG=ON);
+        # only the post-build copy of cudart64/nvjpeg64 DLLs is skipped.
+        run: >-
+          cmake --preset vs2022-x64
+          -DHYPERBROWSE_BUNDLE_CUDA_REDIST=OFF
+          -DHYPERBROWSE_WARNINGS_AS_ERRORS=ON
+
+      - name: Build (Debug)
+        run: cmake --build build --preset debug --target HyperBrowseTests -- /m /v:minimal
+
+      - name: Run smoke tests
+        run: build\tests\Debug\HyperBrowseTests.exe
+        shell: pwsh
+
+      - name: Build (Release)
+        run: cmake --build build --preset release --target HyperBrowse -- /m /v:minimal

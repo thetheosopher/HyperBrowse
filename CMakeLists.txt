@@ -31,7 +31,7 @@ set(HYPERBROWSE_RUNTIME_DEPENDENCIES "${CMAKE_CURRENT_BINARY_DIR}/RuntimeDepende
 set(HYPERBROWSE_TOOLBAR_ICONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/toolbar-icons")
 
 option(HYPERBROWSE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
-option(HYPERBROWSE_BUILD_TESTS "Build placeholder tests" ON)
+option(HYPERBROWSE_BUILD_TESTS "Build the HyperBrowse smoke/integration test suite" ON)
 option(HYPERBROWSE_ENABLE_LIBRAW "Build with vendored LibRaw support" ON)
 option(HYPERBROWSE_ENABLE_NVJPEG "Enable optional nvJPEG acceleration plumbing" ON)
 option(HYPERBROWSE_BUNDLE_CUDA_REDIST "Download and bundle NVIDIA CUDA runtime redistributables with HyperBrowse" ON)
@@ -79,9 +79,11 @@ if(HYPERBROWSE_ENABLE_LIBRAW)
     add_subdirectory(external/libraw EXCLUDE_FROM_ALL)
 endif()
 
-add_executable(HyperBrowse WIN32
-    src/app/WinMain.cpp
-    src/app/Application.cpp
+# ---------------------------------------------------------------------------
+# HyperBrowseCore — static library shared by the application and tests so each
+# translation unit is compiled exactly once per build.
+# ---------------------------------------------------------------------------
+add_library(HyperBrowseCore STATIC
     src/browser/BrowserModel.cpp
     src/browser/BrowserPane.cpp
     src/cache/ThumbnailCache.cpp
@@ -104,15 +106,14 @@ add_executable(HyperBrowse WIN32
     src/util/Diagnostics.cpp
     src/util/Log.cpp
     src/viewer/ViewerWindow.cpp
-    "${HYPERBROWSE_VERSION_RESOURCE}"
 )
 
-target_include_directories(HyperBrowse PRIVATE
+target_include_directories(HyperBrowseCore PUBLIC
     src
     external/nanosvg
 )
 
-target_link_libraries(HyperBrowse PRIVATE
+target_link_libraries(HyperBrowseCore PUBLIC
     comctl32
     dwmapi
     d2d1
@@ -126,13 +127,25 @@ target_link_libraries(HyperBrowse PRIVATE
 )
 
 if(HYPERBROWSE_ENABLE_LIBRAW)
-    target_link_libraries(HyperBrowse PRIVATE HyperBrowse::LibRaw)
-    target_compile_definitions(HyperBrowse PRIVATE HYPERBROWSE_ENABLE_LIBRAW=1)
+    target_link_libraries(HyperBrowseCore PUBLIC HyperBrowse::LibRaw)
+    target_compile_definitions(HyperBrowseCore PUBLIC HYPERBROWSE_ENABLE_LIBRAW=1)
 endif()
 
 if(HYPERBROWSE_ENABLE_NVJPEG)
-    target_compile_definitions(HyperBrowse PRIVATE HYPERBROWSE_ENABLE_NVJPEG=1)
+    target_compile_definitions(HyperBrowseCore PUBLIC HYPERBROWSE_ENABLE_NVJPEG=1)
 endif()
+
+if(MSVC)
+    target_compile_definitions(HyperBrowseCore PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+add_executable(HyperBrowse WIN32
+    src/app/WinMain.cpp
+    src/app/Application.cpp
+    "${HYPERBROWSE_VERSION_RESOURCE}"
+)
+
+target_link_libraries(HyperBrowse PRIVATE HyperBrowseCore)
 
 if(MSVC)
     target_compile_definitions(HyperBrowse PRIVATE _CRT_SECURE_NO_WARNINGS)

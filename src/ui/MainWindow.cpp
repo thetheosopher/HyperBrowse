@@ -35,6 +35,7 @@
 #include "util/Diagnostics.h"
 #include "util/Log.h"
 #include "util/ResourcePng.h"
+#include "util/StringConvert.h"
 #include "util/Timing.h"
 #include "viewer/ViewerWindow.h"
 
@@ -337,8 +338,12 @@ namespace
 
     void WriteStringValue(HKEY key, const wchar_t* valueName, std::wstring_view value)
     {
-        const DWORD size = static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t));
-        RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.data()), size);
+        // Copy into a guaranteed null-terminated buffer; std::wstring_view is not required to be
+        // null-terminated, so reading value.size() + 1 wchar_t's directly from value.data() risks
+        // a heap over-read (or writing trailing garbage to the registry) for non-string callers.
+        std::wstring buffer(value);
+        const DWORD size = static_cast<DWORD>((buffer.size() + 1) * sizeof(wchar_t));
+        RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(buffer.c_str()), size);
     }
 
     void ApplyWindowFrameTheme(HWND hwnd, bool useDarkMode)
@@ -521,7 +526,7 @@ namespace
 
     bool StringsEqualInsensitive(std::wstring_view lhs, std::wstring_view rhs)
     {
-        return _wcsicmp(std::wstring(lhs).c_str(), std::wstring(rhs).c_str()) == 0;
+        return hyperbrowse::util::EqualsIgnoreCaseOrdinal(lhs, rhs);
     }
 
     std::wstring BuildCameraSummaryLabel(const hyperbrowse::services::ImageMetadata& metadata)
@@ -7052,6 +7057,19 @@ namespace hyperbrowse::ui
             EndPaint(hwnd_, &ps);
             return 0;
         }
+        case WM_QUERYENDSESSION:
+            // Persist state before the session ends. WM_DESTROY is not guaranteed during
+            // a forced shutdown / Windows Update / sign-out.
+            SaveWindowState();
+            return TRUE;
+        case WM_ENDSESSION:
+            // Save again on a confirmed end-session in case any state changed between the
+            // query and the actual termination. Cheap and idempotent.
+            if (wParam)
+            {
+                SaveWindowState();
+            }
+            return 0;
         case WM_DESTROY:
             if (folderEnumerationService_)
             {
