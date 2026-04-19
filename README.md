@@ -8,7 +8,7 @@
 HyperBrowse is a native Windows image browser and viewer focused on fast folder navigation, responsive thumbnail browsing, quick full-image viewing, and practical desktop workflows. It is intentionally a browser/viewer first, not a general-purpose editor.
 
 > [!NOTE]
-> HyperBrowse is currently a pre-release Windows x64 application (`0.1.0`). The repository already includes a working browser/viewer, smoke tests, packaging scripts, and GitHub Actions CI, but several roadmap items are still intentionally deferred while the core workflow is being hardened.
+> HyperBrowse is currently a pre-release Windows x64 application (`1.0.0`). The repository already includes a working browser/viewer, smoke tests, packaging scripts, and GitHub Actions CI, but several roadmap items are still intentionally deferred while the core workflow is being hardened.
 
 ## Highlights
 
@@ -29,7 +29,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 | Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, EXIF-only JPEG orientation adjustment, batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, memory-bounded thumbnail cache, metadata cache, viewer prefetch, folder watch refresh, optional GPU-assisted JPEG decode |
-| Distribution | Debug and Release presets, smoke tests, portable layout, installer layout, zipped portable release, self-extracting per-user installer |
+| Distribution | Debug and Release presets, smoke tests, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode |
 
 ## Architecture Overview
 
@@ -51,7 +51,7 @@ The current implementation combines a Win32 shell with Direct2D and DirectWrite 
 - Windows 10 or Windows 11, x64.
 - Visual Studio 2022 with Desktop development for C++.
 - CMake 3.25 or newer.
-- PowerShell for packaging scripts.
+- PowerShell and Inno Setup 6 for release packaging.
 - Optional internet access when `HYPERBROWSE_BUNDLE_CUDA_REDIST=ON`, because CMake downloads NVIDIA redistributables for packaging.
 
 ## Build
@@ -89,6 +89,7 @@ Launch the `HyperBrowse` startup project from Visual Studio, or run the built ex
 | `HYPERBROWSE_ENABLE_NVJPEG` | `ON` | Compile the optional nvJPEG acceleration path |
 | `HYPERBROWSE_BUNDLE_CUDA_REDIST` | `ON` | Download and stage official NVIDIA runtime redistributables for packaging |
 | `HYPERBROWSE_STATIC_MSVC_RUNTIME` | `ON` | Link the MSVC runtime statically to simplify deployment |
+| `HYPERBROWSE_INNO_SETUP_COMPILER` | empty | Optional full path to `ISCC.exe` for the release packaging target |
 | `HYPERBROWSE_WARNINGS_AS_ERRORS` | `OFF` | Promote compiler warnings to errors |
 
 Examples:
@@ -118,22 +119,31 @@ The repository also includes a GitHub Actions workflow at [.github/workflows/ci.
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-0.1.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.0.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-0.1.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.0.0-installer-layout
 ```
 
-Create the full release artifact set, including a zipped portable package and a self-extracting per-user installer:
+Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -NoProfile -File .\tools\PackageRelease.ps1
+cmake --preset vs2022-x64-release-package
+cmake --build --preset release-package
 ```
 
-The packaging script builds the release preset, runs the release smoke tests, stages both install components under `build/dist/`, creates zip archives, and generates `HyperBrowse-<version>-installer.exe` with the built-in Windows IExpress packager. The generated installer expands under `%LOCALAPPDATA%\Programs\HyperBrowse` and creates a Start Menu shortcut.
+If you prefer the standalone packaging script, point it at the dedicated packaging build tree:
+
+```powershell
+powershell -ExecutionPolicy Bypass -NoProfile -File .\tools\PackageRelease.ps1 -BuildDir .\build-release-package
+```
+
+The dedicated release-packaging configure preset keeps the static MSVC runtime enabled, keeps LibRaw linked statically, and keeps CUDA redistributable bundling enabled so the portable zip and installer carry the RAW helper executable plus the nvJPEG runtime DLLs they need. The packaging target runs the release smoke tests, stages both install components under `build-release-package/dist/`, creates `HyperBrowse-<version>-portable-win64.zip`, and compiles `HyperBrowse-<version>-installer.exe` with Inno Setup 6.
+
+The generated installer supports either current-user or all-users installation, writes the correct Add/Remove Programs entry for the selected scope, creates a Start Menu shortcut automatically, and offers an optional desktop shortcut.
 
 When CUDA redistributable bundling is enabled, CMake downloads the official NVIDIA `cuda_cudart` and `libnvjpeg` redistributable archives, verifies their SHA256 hashes, and stages the runtime DLLs and license files beside the application. That keeps nvJPEG deployment self-contained instead of depending on a machine-wide CUDA install or `PATH` setup.
 

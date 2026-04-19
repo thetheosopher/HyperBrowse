@@ -19,6 +19,21 @@
                 "HYPERBROWSE_BUILD_TESTS": "ON",
                 "HYPERBROWSE_ENABLE_NVJPEG": "ON"
             }
+        },
+        {
+            "name": "vs2022-x64-release-package",
+            "displayName": "Visual Studio 2022 x64 Release Packaging",
+            "inherits": [
+                "vs2022-x64"
+            ],
+            "binaryDir": "${sourceDir}/build-release-package",
+            "cacheVariables": {
+                "HYPERBROWSE_BUILD_TESTS": "ON",
+                "HYPERBROWSE_ENABLE_LIBRAW": "ON",
+                "HYPERBROWSE_ENABLE_NVJPEG": "ON",
+                "HYPERBROWSE_BUNDLE_CUDA_REDIST": "ON",
+                "HYPERBROWSE_STATIC_MSVC_RUNTIME": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -33,6 +48,15 @@
             "displayName": "Release",
             "configurePreset": "vs2022-x64",
             "configuration": "Release"
+        },
+        {
+            "name": "release-package",
+            "displayName": "Release Package",
+            "configurePreset": "vs2022-x64-release-package",
+            "configuration": "Release",
+            "targets": [
+                "HyperBrowseReleaseArtifacts"
+            ]
         }
     ],
     "testPresets": [
@@ -49,6 +73,15 @@
             "name": "release-tests",
             "displayName": "Release Tests",
             "configurePreset": "vs2022-x64",
+            "configuration": "Release",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release-package-tests",
+            "displayName": "Release Package Tests",
+            "configurePreset": "vs2022-x64-release-package",
             "configuration": "Release",
             "output": {
                 "outputOnFailure": true

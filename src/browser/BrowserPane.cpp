@@ -3629,6 +3629,11 @@ namespace hyperbrowse::browser
                     InvalidateRect(hwnd_, nullptr, FALSE);
                     return 0;
                 }
+
+                if (dimensionsChanged)
+                {
+                    InvalidateThumbnailCellForModelIndex(update->modelIndex);
+                }
             }
 
             if (detailsList_ && viewMode_ == BrowserViewMode::Details)

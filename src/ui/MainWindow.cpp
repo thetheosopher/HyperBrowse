@@ -40,6 +40,7 @@
 #include "viewer/ViewerWindow.h"
 
 #include "app/resource.h"
+#include "HyperBrowseBuildInfo.h"
 
 namespace fs = std::filesystem;
 
@@ -137,6 +138,8 @@ namespace
     constexpr UINT ID_HELP_ABOUT = 9001;
     constexpr UINT ID_HELP_DIAGNOSTICS_SNAPSHOT = 9002;
     constexpr UINT ID_HELP_DIAGNOSTICS_RESET = 9003;
+    constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
+    constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
 
     constexpr int kActionStripPaddingX = 8;
     constexpr int kActionStripPaddingY = 6;
@@ -164,13 +167,20 @@ namespace
     constexpr int kTextInputButtonHeight = 28;
     constexpr int kTextInputEditControlId = 100;
     constexpr wchar_t kAboutDialogClassName[] = L"HyperBrowseAboutDialog";
+    constexpr wchar_t kAboutDialogGitHubLabel[] = L"GitHub Project";
+    constexpr wchar_t kAboutDialogSupportLabel[] = L"Buy Me A Coffee";
+    constexpr wchar_t kAboutDialogGitHubUrl[] = L"https://github.com/thetheosopher/HyperBrowse";
+    constexpr wchar_t kAboutDialogSupportUrl[] = L"https://buymeacoffee.com/theosopher";
     constexpr int kAboutDialogWidth = 1180;
     constexpr int kAboutDialogHeight = 720;
     constexpr int kAboutDialogMargin = 36;
     constexpr int kAboutDialogHeaderHeight = 224;
     constexpr int kAboutDialogFooterHeight = 96;
     constexpr int kAboutDialogButtonWidth = 104;
-    constexpr int kAboutDialogButtonHeight = 32;
+    constexpr int kAboutDialogButtonHeight = 38;
+    constexpr int kAboutDialogLinkButtonWidth = 172;
+    constexpr int kAboutDialogSupportButtonWidth = 196;
+    constexpr int kAboutDialogButtonGap = 12;
     constexpr int kAboutDialogBrandArtSize = 152;
 
     hyperbrowse::cache::ThumbnailCacheKey MakeThumbnailCacheKey(const hyperbrowse::browser::BrowserItem& item,
@@ -204,7 +214,11 @@ namespace
     struct AboutDialogState
     {
         HWND ownerWindow{};
+        HWND githubButton{};
+        HWND supportButton{};
         HWND okButton{};
+        int githubButtonWidth{};
+        int supportButtonWidth{};
         HINSTANCE instance{};
         HFONT titleFont{};
         HFONT subtitleFont{};
@@ -230,6 +244,8 @@ namespace
         std::wstring footer;
         std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> brandArt;
     };
+
+    bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
     {
@@ -476,6 +492,37 @@ namespace
         return std::max(minimumHeight, measuredHeight);
     }
 
+    int MeasureTextWidth(HFONT font, std::wstring_view text)
+    {
+        if (text.empty())
+        {
+            return 0;
+        }
+
+        std::wstring localText(text);
+        HDC screenDc = GetDC(nullptr);
+        if (!screenDc)
+        {
+            return 0;
+        }
+
+        const HGDIOBJ oldFont = font ? SelectObject(screenDc, font) : nullptr;
+        SIZE size{};
+        GetTextExtentPoint32W(screenDc, localText.c_str(), static_cast<int>(localText.size()), &size);
+        if (oldFont)
+        {
+            SelectObject(screenDc, oldFont);
+        }
+        ReleaseDC(nullptr, screenDc);
+        return static_cast<int>(size.cx);
+    }
+
+    int MeasureAboutDialogLinkButtonWidth(HFONT font, std::wstring_view firstLabel, std::wstring_view secondLabel)
+    {
+        const int textWidth = std::max(MeasureTextWidth(font, firstLabel), MeasureTextWidth(font, secondLabel));
+        return std::max(180, textWidth + 40);
+    }
+
     int MeasureAboutDialogClientHeight(const AboutDialogState& state)
     {
         const int contentRight = kAboutDialogWidth - kAboutDialogMargin;
@@ -502,22 +549,225 @@ namespace
         const int bodyTextHeight = MeasureTextBlockHeight(state.bodyFont, state.bodyContent, bodyWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
         const int bodyHeight = 24 + headingHeight + 12 + bodyTextHeight + 26;
 
-        const int footerTextWidth = kAboutDialogWidth - (kAboutDialogMargin * 2) - kAboutDialogButtonWidth - 20;
+        const int footerActionWidth = state.githubButtonWidth + state.supportButtonWidth + kAboutDialogButtonWidth + (kAboutDialogButtonGap * 2);
+        const int footerTextWidth = std::max(320, kAboutDialogWidth - (kAboutDialogMargin * 2) - footerActionWidth - 20);
         const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
         const int footerHeight = std::max(kAboutDialogFooterHeight, std::max(footerTextHeight + 34, kAboutDialogButtonHeight + 36));
 
         return headerHeight + bodyHeight + footerHeight;
     }
 
+    int MeasureAboutDialogFooterActionWidth(const AboutDialogState& state)
+    {
+        return state.githubButtonWidth + state.supportButtonWidth + kAboutDialogButtonWidth + (kAboutDialogButtonGap * 2);
+    }
+
+    int MeasureAboutDialogFooterTextWidth(const AboutDialogState& state, int clientWidth)
+    {
+        return std::max(320, clientWidth - (kAboutDialogMargin * 2) - MeasureAboutDialogFooterActionWidth(state) - 20);
+    }
+
+    int AboutDialogFooterButtonsLeft(const RECT& clientRect, const AboutDialogState& state)
+    {
+        const int buttonsLeft = static_cast<int>(clientRect.right) - kAboutDialogMargin - MeasureAboutDialogFooterActionWidth(state);
+        return std::max<int>(kAboutDialogMargin, buttonsLeft);
+    }
+
+    int AboutDialogFooterButtonsTop(const RECT& clientRect)
+    {
+        return clientRect.bottom - kAboutDialogMargin - kAboutDialogButtonHeight;
+    }
+
+    const wchar_t* GetAboutDialogLinkLabel(UINT controlId)
+    {
+        switch (controlId)
+        {
+        case ID_ABOUT_OPEN_GITHUB:
+            return kAboutDialogGitHubLabel;
+        case ID_ABOUT_OPEN_SUPPORT:
+            return kAboutDialogSupportLabel;
+        default:
+            return L"";
+        }
+    }
+
+    const wchar_t* GetAboutDialogLinkTarget(UINT controlId)
+    {
+        switch (controlId)
+        {
+        case ID_ABOUT_OPEN_GITHUB:
+            return kAboutDialogGitHubUrl;
+        case ID_ABOUT_OPEN_SUPPORT:
+            return kAboutDialogSupportUrl;
+        default:
+            return nullptr;
+        }
+    }
+
+    const wchar_t* GetAboutDialogLinkFailureMessage(UINT controlId)
+    {
+        switch (controlId)
+        {
+        case ID_ABOUT_OPEN_GITHUB:
+            return L"Failed to open the HyperBrowse GitHub project.";
+        case ID_ABOUT_OPEN_SUPPORT:
+            return L"Failed to open the Buy Me A Coffee page.";
+        default:
+            return L"Failed to open the selected link.";
+        }
+    }
+
+    COLORREF GetAboutDialogSupportAccent(bool darkMode)
+    {
+        return darkMode ? RGB(255, 214, 126) : RGB(145, 78, 16);
+    }
+
+    struct AboutDialogLinkPalette
+    {
+        COLORREF fill{};
+        COLORREF border{};
+        COLORREF text{};
+    };
+
+    AboutDialogLinkPalette BuildAboutDialogLinkPalette(UINT controlId, const AboutDialogState& state, UINT itemState)
+    {
+        const bool supportButton = controlId == ID_ABOUT_OPEN_SUPPORT;
+        const bool pressed = (itemState & ODS_SELECTED) != 0;
+        const bool hot = (itemState & ODS_HOTLIGHT) != 0;
+        const bool disabled = (itemState & ODS_DISABLED) != 0;
+
+        const COLORREF accent = supportButton ? GetAboutDialogSupportAccent(state.darkMode) : state.accent;
+        int fillMixAmount = supportButton
+            ? (state.darkMode ? 34 : 18)
+            : (state.darkMode ? 28 : 10);
+        if (hot)
+        {
+            fillMixAmount += supportButton ? 10 : 8;
+        }
+        if (pressed)
+        {
+            fillMixAmount += supportButton ? 18 : 14;
+        }
+        fillMixAmount = std::min(fillMixAmount, 96);
+
+        AboutDialogLinkPalette palette;
+        if (supportButton)
+        {
+            const COLORREF baseFill = state.darkMode ? RGB(88, 61, 19) : RGB(255, 245, 219);
+            palette.fill = BlendColor(baseFill, accent, static_cast<BYTE>(fillMixAmount));
+            palette.text = state.darkMode ? RGB(255, 236, 194) : RGB(112, 62, 15);
+        }
+        else
+        {
+            const COLORREF baseFill = state.darkMode ? state.footerBackground : RGB(255, 255, 255);
+            palette.fill = BlendColor(baseFill, accent, static_cast<BYTE>(fillMixAmount));
+            palette.text = accent;
+        }
+
+        palette.border = BlendColor(accent, state.border, supportButton ? 22 : 28);
+
+        if (disabled)
+        {
+            palette.fill = BlendColor(palette.fill, state.footerBackground, 120);
+            palette.border = BlendColor(palette.border, state.border, 120);
+            palette.text = state.mutedText;
+        }
+
+        return palette;
+    }
+
+    void OpenAboutDialogLink(HWND hwnd, UINT controlId)
+    {
+        const wchar_t* target = GetAboutDialogLinkTarget(controlId);
+        if (!target)
+        {
+            return;
+        }
+
+        if (!LaunchShellTarget(hwnd, L"open", target))
+        {
+            MessageBoxW(hwnd, GetAboutDialogLinkFailureMessage(controlId), L"About HyperBrowse", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void DrawAboutDialogLinkButton(const DRAWITEMSTRUCT& drawItem, const AboutDialogState& state)
+    {
+        RECT buttonRect{};
+        GetClientRect(drawItem.hwndItem, &buttonRect);
+
+        const HBRUSH footerBrush = CreateSolidBrush(state.footerBackground);
+        FillRect(drawItem.hDC, &buttonRect, footerBrush);
+        DeleteObject(footerBrush);
+
+        const AboutDialogLinkPalette palette = BuildAboutDialogLinkPalette(drawItem.CtlID, state, drawItem.itemState);
+        RECT pillRect = buttonRect;
+        InflateRect(&pillRect, -1, -1);
+
+        const HBRUSH fillBrush = CreateSolidBrush(palette.fill);
+        const HPEN borderPen = CreatePen(PS_SOLID, 1, palette.border);
+        const HGDIOBJ oldBrush = SelectObject(drawItem.hDC, fillBrush);
+        const HGDIOBJ oldPen = SelectObject(drawItem.hDC, borderPen);
+        RoundRect(drawItem.hDC, pillRect.left, pillRect.top, pillRect.right, pillRect.bottom, 16, 16);
+        SelectObject(drawItem.hDC, oldPen);
+        SelectObject(drawItem.hDC, oldBrush);
+        DeleteObject(borderPen);
+        DeleteObject(fillBrush);
+
+        SetBkMode(drawItem.hDC, TRANSPARENT);
+        SetTextColor(drawItem.hDC, palette.text);
+        const HGDIOBJ oldFont = SelectObject(drawItem.hDC,
+                                             state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        RECT textRect = pillRect;
+        InflateRect(&textRect, -12, -6);
+        DrawTextW(drawItem.hDC,
+                  GetAboutDialogLinkLabel(drawItem.CtlID),
+                  -1,
+                  &textRect,
+                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(drawItem.hDC, oldFont);
+
+        if ((drawItem.itemState & ODS_FOCUS) != 0)
+        {
+            RECT focusRect = pillRect;
+            InflateRect(&focusRect, -4, -4);
+            DrawFocusRect(drawItem.hDC, &focusRect);
+        }
+    }
+
     void LayoutAboutDialogControls(HWND hwnd, const AboutDialogState& state)
     {
         RECT client{};
         GetClientRect(hwnd, &client);
+        const int buttonTop = AboutDialogFooterButtonsTop(client);
+        int buttonLeft = AboutDialogFooterButtonsLeft(client, state);
+
+        if (state.githubButton)
+        {
+            MoveWindow(state.githubButton,
+                       buttonLeft,
+                       buttonTop,
+                       state.githubButtonWidth,
+                       kAboutDialogButtonHeight,
+                       TRUE);
+            buttonLeft += state.githubButtonWidth + kAboutDialogButtonGap;
+        }
+
+        if (state.supportButton)
+        {
+            MoveWindow(state.supportButton,
+                       buttonLeft,
+                       buttonTop,
+                       state.supportButtonWidth,
+                       kAboutDialogButtonHeight,
+                       TRUE);
+            buttonLeft += state.supportButtonWidth + kAboutDialogButtonGap;
+        }
+
         if (state.okButton)
         {
             MoveWindow(state.okButton,
-                       client.right - kAboutDialogMargin - kAboutDialogButtonWidth,
-                       client.bottom - kAboutDialogMargin - kAboutDialogButtonHeight,
+                       buttonLeft,
+                       buttonTop,
                        kAboutDialogButtonWidth,
                        kAboutDialogButtonHeight,
                        TRUE);
@@ -1008,7 +1258,7 @@ namespace
 
         const int bodyWidth = clientRect.right - (kAboutDialogMargin * 2);
         const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
-        const int footerTextWidth = clientRect.right - (kAboutDialogMargin * 2) - kAboutDialogButtonWidth - 20;
+        const int footerTextWidth = MeasureAboutDialogFooterTextWidth(state, clientRect.right);
         const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
         const int footerHeight = std::max(kAboutDialogFooterHeight, std::max(footerTextHeight + 34, kAboutDialogButtonHeight + 36));
 
@@ -1096,7 +1346,10 @@ namespace
                   &bodyTextRect,
                   DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
 
-        RECT footerTextRect{kAboutDialogMargin, footerRect.top + 18, clientRect.right - kAboutDialogMargin - kAboutDialogButtonWidth - 20, footerRect.bottom - 16};
+        RECT footerTextRect{kAboutDialogMargin,
+                    footerRect.top + 18,
+                    std::max(kAboutDialogMargin + 200, AboutDialogFooterButtonsLeft(clientRect, state) - 20),
+                    footerRect.bottom - 16};
         SelectObject(hdc, state.footerFont ? state.footerFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
         SetTextColor(hdc, state.mutedText);
         DrawTextW(hdc,
@@ -1128,19 +1381,59 @@ namespace
                 return -1;
             }
 
+            state->githubButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                kAboutDialogGitHubLabel,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                0,
+                0,
+                state->githubButtonWidth,
+                kAboutDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_ABOUT_OPEN_GITHUB)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+            state->supportButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                kAboutDialogSupportLabel,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                0,
+                0,
+                state->supportButtonWidth,
+                kAboutDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_ABOUT_OPEN_SUPPORT)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
             state->okButton = CreateWindowExW(
                 0,
                 L"BUTTON",
                 L"OK",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                kAboutDialogWidth - kAboutDialogMargin - kAboutDialogButtonWidth,
-                kAboutDialogHeight - kAboutDialogFooterHeight + 20,
+                0,
+                0,
                 kAboutDialogButtonWidth,
                 kAboutDialogButtonHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
                 nullptr);
+            if (state->githubButton)
+            {
+                SendMessageW(state->githubButton,
+                             WM_SETFONT,
+                             reinterpret_cast<WPARAM>(state->subtitleFont ? state->subtitleFont : GetStockObject(DEFAULT_GUI_FONT)),
+                             TRUE);
+            }
+            if (state->supportButton)
+            {
+                SendMessageW(state->supportButton,
+                             WM_SETFONT,
+                             reinterpret_cast<WPARAM>(state->subtitleFont ? state->subtitleFont : GetStockObject(DEFAULT_GUI_FONT)),
+                             TRUE);
+            }
             if (state->okButton)
             {
                 SendMessageW(state->okButton,
@@ -1190,7 +1483,19 @@ namespace
             EndPaint(hwnd, &ps);
             return 0;
         }
+        case WM_DRAWITEM:
+            if (state && (wParam == ID_ABOUT_OPEN_GITHUB || wParam == ID_ABOUT_OPEN_SUPPORT))
+            {
+                DrawAboutDialogLinkButton(*reinterpret_cast<const DRAWITEMSTRUCT*>(lParam), *state);
+                return TRUE;
+            }
+            break;
         case WM_COMMAND:
+            if (LOWORD(wParam) == ID_ABOUT_OPEN_GITHUB || LOWORD(wParam) == ID_ABOUT_OPEN_SUPPORT)
+            {
+                OpenAboutDialogLink(hwnd, LOWORD(wParam));
+                return 0;
+            }
             if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
             {
                 DestroyWindow(hwnd);
@@ -4167,7 +4472,7 @@ namespace hyperbrowse::ui
         state.text = palette.text;
         state.mutedText = palette.mutedText;
         state.accent = palette.accent;
-        state.title = L"HyperBrowse 0.1.0";
+        state.title = hyperbrowse::build::kDisplayName;
         state.subtitle = L"High-performance native image browser for Windows";
         state.intro = L"High-performance browsing and viewing for large Windows image folders.";
         state.bodyHeading = L"What sets it apart";
@@ -4195,6 +4500,11 @@ namespace hyperbrowse::ui
         if (!state.subtitleFont) state.subtitleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         if (!state.bodyFont) state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         if (!state.footerFont) state.footerFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+        state.githubButtonWidth = MeasureAboutDialogLinkButtonWidth(state.subtitleFont,
+                                         kAboutDialogGitHubLabel,
+                                         kAboutDialogSupportLabel);
+        state.supportButtonWidth = state.githubButtonWidth;
 
         const int aboutClientHeight = std::max(kAboutDialogHeight, MeasureAboutDialogClientHeight(state));
         RECT windowRect{0, 0, kAboutDialogWidth, aboutClientHeight};

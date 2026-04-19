@@ -1,0 +1,7 @@
+#pragma once
+
+namespace hyperbrowse::build
+{
+    inline constexpr wchar_t kVersion[] = L"@PROJECT_VERSION@";
+    inline constexpr wchar_t kDisplayName[] = L"HyperBrowse @PROJECT_VERSION@";
+}

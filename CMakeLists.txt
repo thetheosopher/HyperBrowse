@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(HyperBrowse VERSION 0.1.0 LANGUAGES CXX)
+project(HyperBrowse VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,15 +26,21 @@ set(HYPERBROWSE_INSTALLER_BIN_DIR "bin")
 set(HYPERBROWSE_INSTALLER_DOC_DIR "docs")
 
 set(HYPERBROWSE_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseVersion.rc")
+set(HYPERBROWSE_BUILD_INFO_HEADER "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseBuildInfo.h")
 set(HYPERBROWSE_PORTABLE_README "${CMAKE_CURRENT_BINARY_DIR}/PortableREADME.txt")
 set(HYPERBROWSE_RUNTIME_DEPENDENCIES "${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.txt")
+set(HYPERBROWSE_INNO_SETUP_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseInstaller.iss")
 set(HYPERBROWSE_TOOLBAR_ICONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/toolbar-icons")
+set(HYPERBROWSE_APP_PUBLISHER "thetheosopher")
+set(HYPERBROWSE_APP_PUBLISHER_URL "https://github.com/thetheosopher/HyperBrowse")
+file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/HyperBrowse.ico" HYPERBROWSE_APP_ICON_PATH)
 
 option(HYPERBROWSE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(HYPERBROWSE_BUILD_TESTS "Build the HyperBrowse smoke/integration test suite" ON)
 option(HYPERBROWSE_ENABLE_LIBRAW "Build with vendored LibRaw support" ON)
 option(HYPERBROWSE_ENABLE_NVJPEG "Enable optional nvJPEG acceleration plumbing" ON)
 option(HYPERBROWSE_BUNDLE_CUDA_REDIST "Download and bundle NVIDIA CUDA runtime redistributables with HyperBrowse" ON)
+set(HYPERBROWSE_INNO_SETUP_COMPILER "" CACHE FILEPATH "Optional path to the Inno Setup 6 compiler (ISCC.exe) used for release packaging")
 
 include(CTest)
 
@@ -60,8 +66,10 @@ if(HYPERBROWSE_ENABLE_NVJPEG AND HYPERBROWSE_BUNDLE_CUDA_REDIST)
 endif()
 
 configure_file(cmake/HyperBrowseVersion.rc.in "${HYPERBROWSE_VERSION_RESOURCE}" @ONLY)
+configure_file(cmake/HyperBrowseBuildInfo.h.in "${HYPERBROWSE_BUILD_INFO_HEADER}" @ONLY)
 configure_file(cmake/PortableREADME.txt.in "${HYPERBROWSE_PORTABLE_README}" @ONLY)
 configure_file(cmake/RuntimeDependencies.txt.in "${HYPERBROWSE_RUNTIME_DEPENDENCIES}" @ONLY)
+configure_file(cmake/HyperBrowseInstaller.iss.in "${HYPERBROWSE_INNO_SETUP_SCRIPT}" @ONLY)
 
 if(MSVC)
     add_compile_options(/permissive- /Zc:__cplusplus /W4 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX /DWIN32_LEAN_AND_MEAN)
@@ -108,9 +116,12 @@ add_library(HyperBrowseCore STATIC
     src/viewer/ViewerWindow.cpp
 )
 
-target_include_directories(HyperBrowseCore PUBLIC
-    src
-    external/nanosvg
+target_include_directories(HyperBrowseCore
+    PUBLIC
+        src
+        external/nanosvg
+    PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 target_link_libraries(HyperBrowseCore PUBLIC
@@ -298,3 +309,38 @@ endif()
 if(HYPERBROWSE_BUILD_TESTS AND BUILD_TESTING)
     add_subdirectory(tests)
 endif()
+
+set(_hyperbrowse_release_artifact_dependencies HyperBrowse)
+if(HYPERBROWSE_ENABLE_LIBRAW)
+    list(APPEND _hyperbrowse_release_artifact_dependencies HyperBrowseRawHelper)
+endif()
+if(HYPERBROWSE_BUILD_TESTS AND BUILD_TESTING)
+    list(APPEND _hyperbrowse_release_artifact_dependencies HyperBrowseTests)
+endif()
+
+set(_hyperbrowse_release_package_command
+    -ExecutionPolicy Bypass
+    -NoProfile
+    -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/PackageRelease.ps1"
+    -ProjectRoot "${CMAKE_CURRENT_SOURCE_DIR}"
+    -BuildDir "${CMAKE_BINARY_DIR}"
+    -Configuration "$<CONFIG>"
+    -SkipBuild)
+
+if(HYPERBROWSE_INNO_SETUP_COMPILER)
+    list(APPEND _hyperbrowse_release_package_command
+        -InnoSetupCompiler "${HYPERBROWSE_INNO_SETUP_COMPILER}")
+endif()
+
+if(NOT (HYPERBROWSE_BUILD_TESTS AND BUILD_TESTING))
+    list(APPEND _hyperbrowse_release_package_command -SkipTests)
+endif()
+
+add_custom_target(HyperBrowseReleaseArtifacts
+    COMMAND powershell.exe ${_hyperbrowse_release_package_command}
+    BYPRODUCTS
+        "${CMAKE_BINARY_DIR}/dist/HyperBrowse-${PROJECT_VERSION}-portable-win64.zip"
+        "${CMAKE_BINARY_DIR}/dist/HyperBrowse-${PROJECT_VERSION}-installer.exe"
+    DEPENDS ${_hyperbrowse_release_artifact_dependencies}
+    USES_TERMINAL
+    VERBATIM)
