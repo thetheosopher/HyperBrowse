@@ -3,12 +3,13 @@
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.25%2B-064F8C)
-![Status](https://img.shields.io/badge/Status-Pre--release-E67E22)
+![Status](https://img.shields.io/badge/Status-Release-2EA043)
 
 HyperBrowse is a native Windows image browser and viewer focused on fast folder navigation, responsive thumbnail browsing, quick full-image viewing, and practical desktop workflows. It is intentionally a browser/viewer first, not a general-purpose editor.
 
-> [!NOTE]
-> HyperBrowse is currently a pre-release Windows x64 application (`1.0.0`). The repository already includes a working browser/viewer, smoke tests, packaging scripts, and GitHub Actions CI, but several roadmap items are still intentionally deferred while the core workflow is being hardened.
+## Main Window
+
+![HyperBrowse main window](docs/MainWindow.PNG)
 
 ## Highlights
 
