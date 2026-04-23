@@ -1,9 +1,13 @@
 # HyperBrowse
 
+![Version](https://img.shields.io/badge/Version-1.0.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.25%2B-064F8C)
+![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Release-2EA043)
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-FFDD00?logo=buy-me-a-coffee&logoColor=000)](https://buymeacoffee.com/theosopher)
 
 HyperBrowse is a native Windows image browser and viewer focused on fast folder navigation, responsive thumbnail browsing, quick full-image viewing, and practical desktop workflows. It is intentionally a browser/viewer first, not a general-purpose editor.
 
@@ -184,3 +188,27 @@ HyperBrowse is already a capable browser/viewer, but it is still deliberately sc
 - Multipage TIFF navigation and animated GIF thumbnails.
 
 If you want the current backlog in detail, start with [specs/14-todo.md](specs/14-todo.md).
+
+## Version
+
+Current release: **1.0.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.0.0-portable-win64.zip` and `HyperBrowse-1.0.0-installer.exe`).
+
+## License
+
+HyperBrowse is released under the [MIT License](LICENSE).
+
+Copyright (c) 2026 Michael A. McCloskey.
+
+Third-party components retain their own licenses. Notable bundled components:
+
+- [LibRaw](external/libraw) is dual-licensed under [LGPL 2.1](external/libraw/LICENSE.LGPL) and [CDDL 1.0](external/libraw/LICENSE.CDDL).
+- [NanoSVG](external/nanosvg) is distributed under the [zlib license](external/nanosvg/LICENSE.txt).
+- When CUDA redistributable bundling is enabled, NVIDIA CUDA Runtime and nvJPEG redistributables are governed by their respective NVIDIA Software License Agreements, staged beside the application as `NVIDIA-CUDA-RUNTIME-LICENSE.txt` and `NVIDIA-NVJPEG-LICENSE.txt`.
+
+## Support the Project
+
+If HyperBrowse is useful to you, you can support continued development:
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-buymeacoffee.com%2Ftheosopher-FFDD00?logo=buy-me-a-coffee&logoColor=000)](https://buymeacoffee.com/theosopher)
+
+Thank you!
