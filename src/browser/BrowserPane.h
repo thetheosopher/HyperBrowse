@@ -117,6 +117,8 @@ namespace hyperbrowse::browser
         bool IsCompactThumbnailLayoutEnabled() const noexcept;
         void SetThumbnailDetailsVisible(bool visible);
         bool AreThumbnailDetailsVisible() const noexcept;
+        void SetPersistentThumbnailCacheEnabled(bool enabled);
+        bool IsPersistentThumbnailCacheEnabled() const noexcept;
         void SetDarkTheme(bool enabled);
 
         void ClearSelection();

@@ -34,6 +34,7 @@ namespace hyperbrowse::services
     class FolderTreeEnumerationService;
     class FolderWatchService;
     class ThumbnailScheduler;
+    class UserMetadataStore;
 }
 
 namespace hyperbrowse::cache
@@ -43,12 +44,11 @@ namespace hyperbrowse::cache
 
 namespace hyperbrowse::viewer
 {
+    enum class CompareDirection : int;
     enum class MouseWheelBehavior : int;
     enum class TransitionStyle : int;
     class ViewerWindow;
 }
-
-    enum class CompareDirection : int;
 namespace hyperbrowse::ui
 {
     class DiagnosticsWindow;
@@ -169,6 +169,7 @@ namespace hyperbrowse::ui
         void UpdateWindowTitle() const;
         void ApplyViewerMouseWheelSetting();
         void ApplyViewerTransitionSettings();
+        void ApplyPersistentThumbnailCacheSetting();
         void ApplyTheme();
         void LoadWindowState();
         void SaveWindowState() const;
@@ -193,6 +194,8 @@ namespace hyperbrowse::ui
         void ShowImageInformation();
         void StartRenameSelectedImage();
         void StartCompareSelected();
+        void SetSelectionRating(int rating);
+        void EditSelectionTags();
         void StartCopySelection();
         void StartMoveSelection();
         void StartDeleteSelection(bool permanent);
@@ -234,6 +237,7 @@ namespace hyperbrowse::ui
         void SetBrowserMode(BrowserMode mode);
         void ToggleRecursiveBrowsing();
         void ToggleCurrentFolderFavoriteDestination();
+        int CommonSelectionRating() const;
         void ApplyThumbnailDisplaySettings();
         void SetThemeMode(ThemeMode themeMode);
         bool IsFavoriteDestination(std::wstring_view folderPath) const;
@@ -295,6 +299,7 @@ namespace hyperbrowse::ui
         ThemeMode themeMode_{ThemeMode::Light};
         bool recursiveBrowsingEnabled_{false};
         bool rawJpegPairedOperationsEnabled_{false};
+        bool persistentThumbnailCacheEnabled_{true};
         bool suppressTreeSelectionChange_{};
         DragMode dragMode_{DragMode::None};
         HBRUSH backgroundBrush_{};
@@ -316,6 +321,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<services::FolderTreeEnumerationService> folderTreeEnumerationService_;
         std::unique_ptr<services::FolderWatchService> folderWatchService_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
+        std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;

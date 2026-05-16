@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "cache/DiskThumbnailCache.h"
 #include "cache/ThumbnailCache.h"
 
 namespace hyperbrowse::decode
@@ -54,6 +55,8 @@ namespace hyperbrowse::services
         void Schedule(std::uint64_t sessionId, std::uint64_t requestEpoch, std::vector<ThumbnailWorkItem> workItems);
         void CancelOutstanding();
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
+        void SetDiskCacheEnabled(bool enabled);
+        bool IsDiskCacheEnabled() const;
 
         std::shared_ptr<const cache::CachedThumbnail> FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const;
         bool HasKnownFailure(const cache::ThumbnailCacheKey& key) const;
@@ -127,5 +130,7 @@ namespace hyperbrowse::services
         std::vector<std::thread> generalWorkers_;
         std::vector<std::thread> rawWorkers_;
         cache::ThumbnailCache cache_;
+        cache::DiskThumbnailCache diskCache_;
+        bool diskCacheEnabled_{true};
     };
 }

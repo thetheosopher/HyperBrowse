@@ -605,6 +605,19 @@ namespace hyperbrowse::browser
         return thumbnailDetailsVisible_;
     }
 
+    void BrowserPane::SetPersistentThumbnailCacheEnabled(bool enabled)
+    {
+        if (thumbnailScheduler_)
+        {
+            thumbnailScheduler_->SetDiskCacheEnabled(enabled);
+        }
+    }
+
+    bool BrowserPane::IsPersistentThumbnailCacheEnabled() const noexcept
+    {
+        return thumbnailScheduler_ ? thumbnailScheduler_->IsDiskCacheEnabled() : false;
+    }
+
     void BrowserPane::SetDarkTheme(bool enabled)
     {
         darkTheme_ = enabled;

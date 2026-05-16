@@ -94,6 +94,7 @@ endif()
 add_library(HyperBrowseCore STATIC
     src/browser/BrowserModel.cpp
     src/browser/BrowserPane.cpp
+    src/cache/DiskThumbnailCache.cpp
     src/cache/ThumbnailCache.cpp
     src/decode/ImageDecoder.cpp
     src/decode/NvJpegDecoder.cpp
@@ -107,6 +108,7 @@ add_library(HyperBrowseCore STATIC
     src/services/ImageMetadataService.cpp
     src/services/JpegTransformService.cpp
     src/services/ThumbnailScheduler.cpp
+    src/services/UserMetadataStore.cpp
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
     src/ui/MainWindow.cpp

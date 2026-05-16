@@ -30,6 +30,7 @@
 #include "services/ImageMetadataService.h"
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
+#include "services/UserMetadataStore.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/ToolbarIconLibrary.h"
 #include "util/Diagnostics.h"
@@ -67,6 +68,7 @@ namespace
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
     constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
     constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
+    constexpr wchar_t kRegistryValuePersistentThumbnailCacheEnabled[] = L"PersistentThumbnailCacheEnabled";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -98,6 +100,13 @@ namespace
     constexpr UINT ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION = 1024;
     constexpr UINT ID_FILE_COMPARE_SELECTED = 1025;
     constexpr UINT ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS = 1026;
+    constexpr UINT ID_FILE_SET_RATING_0 = 1080;
+    constexpr UINT ID_FILE_SET_RATING_1 = 1081;
+    constexpr UINT ID_FILE_SET_RATING_2 = 1082;
+    constexpr UINT ID_FILE_SET_RATING_3 = 1083;
+    constexpr UINT ID_FILE_SET_RATING_4 = 1084;
+    constexpr UINT ID_FILE_SET_RATING_5 = 1085;
+    constexpr UINT ID_FILE_EDIT_TAGS = 1086;
     constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_BASE = 1030;
     constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_LAST = 1037;
     constexpr UINT ID_FILE_COPY_SELECTION_BROWSE = 1040;
@@ -117,6 +126,7 @@ namespace
     constexpr UINT ID_VIEW_THEME_DARK = 2102;
     constexpr UINT ID_VIEW_NVJPEG_ACCELERATION = 2103;
     constexpr UINT ID_VIEW_LIBRAW_OUT_OF_PROCESS = 2104;
+    constexpr UINT ID_VIEW_PERSISTENT_THUMBNAIL_CACHE = 2105;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_96 = 2110;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_128 = 2111;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_160 = 2112;
@@ -2485,6 +2495,37 @@ namespace
         return commandId >= firstCommandId && commandId <= lastCommandId;
     }
 
+    int RatingFromCommandId(UINT commandId)
+    {
+        if (commandId < ID_FILE_SET_RATING_0 || commandId > ID_FILE_SET_RATING_5)
+        {
+            return 0;
+        }
+
+        return static_cast<int>(commandId - ID_FILE_SET_RATING_0);
+    }
+
+    bool IsRatingCommand(UINT commandId)
+    {
+        return commandId >= ID_FILE_SET_RATING_0 && commandId <= ID_FILE_SET_RATING_5;
+    }
+
+    UINT CommandIdFromRating(int rating)
+    {
+        rating = std::clamp(rating, 0, 5);
+        return ID_FILE_SET_RATING_0 + static_cast<UINT>(rating);
+    }
+
+    std::wstring FormatRatingForDisplay(int rating)
+    {
+        if (rating <= 0)
+        {
+            return L"Unrated";
+        }
+
+        return std::to_wstring(std::clamp(rating, 0, 5)) + L"/5";
+    }
+
     bool IsJpegBrowserItem(const hyperbrowse::browser::BrowserItem& item)
     {
         return hyperbrowse::decode::IsWicFileType(item.fileType)
@@ -2556,6 +2597,7 @@ namespace hyperbrowse::ui
         , folderEnumerationService_(std::make_unique<services::FolderEnumerationService>())
         , folderTreeEnumerationService_(std::make_unique<services::FolderTreeEnumerationService>())
         , folderWatchService_(std::make_unique<services::FolderWatchService>())
+        , userMetadataStore_(std::make_unique<services::UserMetadataStore>())
         , diagnosticsWindow_(std::make_unique<DiagnosticsWindow>(instance))
         , viewerWindow_(std::make_unique<viewer::ViewerWindow>(instance))
         , slideshowTransitionStyle_(viewer::TransitionStyle::Crossfade)
@@ -2653,6 +2695,7 @@ namespace hyperbrowse::ui
             return false;
         }
 
+        ApplyPersistentThumbnailCacheSetting();
         ApplyTheme();
         UpdateMenuState();
         RefreshBrowserPane();
@@ -2733,6 +2776,7 @@ namespace hyperbrowse::ui
         moveSelectionToMenu_ = CreatePopupMenu();
         HMENU batchConvertSelectionMenu = CreatePopupMenu();
         HMENU batchConvertFolderMenu = CreatePopupMenu();
+        HMENU ratingMenu = CreatePopupMenu();
         HMENU viewMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
@@ -2742,7 +2786,7 @@ namespace hyperbrowse::ui
         HMENU themeMenu = CreatePopupMenu();
         HMENU helpMenu = CreatePopupMenu();
 
-        if (!menu_ || !fileMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !batchConvertSelectionMenu || !batchConvertFolderMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMouseWheelMenu || !themeMenu || !helpMenu)
+        if (!menu_ || !fileMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMouseWheelMenu || !themeMenu || !helpMenu)
         {
             return false;
         }
@@ -2761,6 +2805,14 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties\tAlt+Enter");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_2, L"&2 Stars");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_3, L"&3 Stars");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_4, L"&4 Stars");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_5, L"&5 Stars");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set &Rating");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_EDIT_TAGS, L"Edit &Tags...");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To");
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To");
@@ -2836,6 +2888,7 @@ namespace hyperbrowse::ui
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(themeMenu), L"&Theme");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE, L"Persistent Thumbnail &Cache");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
 
@@ -4118,6 +4171,27 @@ namespace hyperbrowse::ui
                 ? services::FormatImageMetadataReport(item, *metadata)
                 : L"Loading detailed metadata...";
 
+            if (userMetadataStore_)
+            {
+                const services::UserMetadataEntry metadataEntry = userMetadataStore_->EntryForPath(item.filePath);
+                if (metadataEntry.rating > 0 || !metadataEntry.tags.empty())
+                {
+                    if (!body.empty())
+                    {
+                        body.append(L"\r\n\r\n");
+                    }
+                    body.append(L"User Metadata\r\n");
+                    if (metadataEntry.rating > 0)
+                    {
+                        AppendLabeledLine(&body, L"Rating: ", FormatRatingForDisplay(metadataEntry.rating));
+                    }
+                    if (!metadataEntry.tags.empty())
+                    {
+                        AppendLabeledLine(&body, L"Tags: ", metadataEntry.tags);
+                    }
+                }
+            }
+
             ApplyDetailsPanelText(item.fileName, std::move(summary), std::move(body));
             RequestDetailsPanelHistogram(item, selectedModelIndices.front());
             LayoutChildren();
@@ -4191,6 +4265,58 @@ namespace hyperbrowse::ui
             hasCommonAttributes = true;
         }
 
+        bool wroteSelectionMetadataHeader = false;
+        if (userMetadataStore_)
+        {
+            bool firstRating = true;
+            int selectionRating = 0;
+            bool mixedRating = false;
+            bool firstTags = true;
+            std::wstring selectionTags;
+            bool mixedTags = false;
+
+            for (const browser::BrowserItem& item : selectedItems)
+            {
+                const services::UserMetadataEntry metadataEntry = userMetadataStore_->EntryForPath(item.filePath);
+                const int candidateRating = std::clamp(metadataEntry.rating, 0, 5);
+                if (firstRating)
+                {
+                    selectionRating = candidateRating;
+                    firstRating = false;
+                }
+                else if (candidateRating != selectionRating)
+                {
+                    mixedRating = true;
+                }
+
+                if (firstTags)
+                {
+                    selectionTags = metadataEntry.tags;
+                    firstTags = false;
+                }
+                else if (!util::EqualsIgnoreCaseOrdinal(selectionTags, metadataEntry.tags))
+                {
+                    mixedTags = true;
+                }
+            }
+
+            const bool showRating = mixedRating || selectionRating > 0;
+            const bool showTags = mixedTags || !selectionTags.empty();
+            if (showRating || showTags)
+            {
+                body.append(L"\r\nSelection Metadata\r\n");
+                wroteSelectionMetadataHeader = true;
+            }
+            if (showRating)
+            {
+                AppendLabeledLine(&body, L"Rating: ", mixedRating ? std::wstring(L"Mixed") : FormatRatingForDisplay(selectionRating));
+            }
+            if (showTags)
+            {
+                AppendLabeledLine(&body, L"Tags: ", mixedTags ? std::wstring(L"Mixed") : selectionTags);
+            }
+        }
+
         if (allMetadataLoaded)
         {
             bool wroteAdditionalHeader = false;
@@ -4222,7 +4348,7 @@ namespace hyperbrowse::ui
             body.append(L"\r\nLoading detailed metadata for the current selection...\r\n");
         }
 
-        if (!hasCommonAttributes)
+        if (!hasCommonAttributes && !wroteSelectionMetadataHeader)
         {
             body.append(L"No common file or metadata attributes are shared by the current selection.");
         }
@@ -4808,17 +4934,23 @@ namespace hyperbrowse::ui
         const bool hasSingleSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 1;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool allowMutatingFileCommands = hasSelection && !fileOperationActive_;
+        const int commonSelectionRating = hasSelection ? CommonSelectionRating() : -1;
         const bool allowRenameSelected = hasSingleSelection && !fileOperationActive_;
         const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
 
         HMENU menu = CreatePopupMenu();
         HMENU batchConvertSelectionMenu = CreatePopupMenu();
+        HMENU ratingMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
-        if (!menu || !batchConvertSelectionMenu || !sortMenu)
+        if (!menu || !batchConvertSelectionMenu || !ratingMenu || !sortMenu)
         {
             if (sortMenu)
             {
                 DestroyMenu(sortMenu);
+            }
+            if (ratingMenu)
+            {
+                DestroyMenu(ratingMenu);
             }
             if (batchConvertSelectionMenu)
             {
@@ -4840,6 +4972,14 @@ namespace hyperbrowse::ui
         AppendMenuW(menu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h");
         AppendMenuW(menu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...");
         AppendMenuW(menu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_2, L"&2 Stars");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_3, L"&3 Stars");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_4, L"&4 Stars");
+        AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_5, L"&5 Stars");
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set &Rating");
+        AppendMenuW(menu, MF_STRING, ID_FILE_EDIT_TAGS, L"Edit &Tags...");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
         AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
@@ -4882,6 +5022,16 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_RENAME_SELECTED, MF_BYCOMMAND | (allowRenameSelected ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_EDIT_TAGS, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+        for (UINT ratingCommandId = ID_FILE_SET_RATING_0; ratingCommandId <= ID_FILE_SET_RATING_5; ++ratingCommandId)
+        {
+            EnableMenuItem(ratingMenu, ratingCommandId, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+            CheckMenuItem(ratingMenu,
+                          ratingCommandId,
+                          MF_BYCOMMAND | (commonSelectionRating >= 0 && ratingCommandId == CommandIdFromRating(commonSelectionRating)
+                              ? MF_CHECKED
+                              : MF_UNCHECKED));
+        }
         EnableMenuItem(menu, ID_FILE_COPY_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_MOVE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
         CheckMenuItem(menu, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS,
@@ -5539,6 +5689,104 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::SetSelectionRating(int rating)
+    {
+        if (!browserPaneController_ || !userMetadataStore_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (selectedPaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more images first.", L"Set Rating", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        userMetadataStore_->SetRating(selectedPaths, rating);
+        UpdateDetailsPanel();
+        UpdateMenuState();
+    }
+
+    void MainWindow::EditSelectionTags()
+    {
+        if (!browserPaneController_ || !userMetadataStore_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (selectedPaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more images first.", L"Edit Tags", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::wstring initialTags;
+        bool firstEntry = true;
+        bool mixedTags = false;
+        for (const std::wstring& path : selectedPaths)
+        {
+            const std::wstring& tags = userMetadataStore_->EntryForPath(path).tags;
+            if (firstEntry)
+            {
+                initialTags = tags;
+                firstEntry = false;
+                continue;
+            }
+
+            if (!util::EqualsIgnoreCaseOrdinal(initialTags, tags))
+            {
+                mixedTags = true;
+                break;
+            }
+        }
+
+        std::wstring editedTags = mixedTags ? std::wstring{} : initialTags;
+        if (!PromptForSingleLineText(hwnd_,
+                                     instance_,
+                                     L"Edit Tags",
+                                     L"Enter comma-separated tags for the selected images. Leave blank to clear tags.",
+                                     L"Apply",
+                                     editedTags,
+                                     0,
+                                     -1,
+                                     &editedTags))
+        {
+            return;
+        }
+
+        userMetadataStore_->SetTags(selectedPaths, editedTags);
+        UpdateDetailsPanel();
+        UpdateMenuState();
+    }
+
+    int MainWindow::CommonSelectionRating() const
+    {
+        if (!browserPaneController_ || !userMetadataStore_)
+        {
+            return -1;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (selectedPaths.empty())
+        {
+            return -1;
+        }
+
+        int commonRating = std::clamp(userMetadataStore_->EntryForPath(selectedPaths.front()).rating, 0, 5);
+        for (std::size_t index = 1; index < selectedPaths.size(); ++index)
+        {
+            const int candidateRating = std::clamp(userMetadataStore_->EntryForPath(selectedPaths[index]).rating, 0, 5);
+            if (candidateRating != commonRating)
+            {
+                return -1;
+            }
+        }
+
+        return commonRating;
+    }
+
     void MainWindow::StartSlideshow(bool selectionScope)
     {
         if (!browserModel_ || !browserPaneController_)
@@ -5767,6 +6015,11 @@ namespace hyperbrowse::ui
                 }
                 break;
             }
+        }
+
+        if (userMetadataStore_)
+        {
+            userMetadataStore_->ApplyFileOperationUpdate(update.type, update.succeededSourcePaths, update.createdPaths);
         }
 
         bool reloadCurrentFolder = browserModel_
@@ -6170,6 +6423,8 @@ namespace hyperbrowse::ui
         const bool hasCompareSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 2;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
+        const bool allowMetadataEdit = hasSelection && !fileOperationActive_;
+        const int commonSelectionRating = hasSelection ? CommonSelectionRating() : -1;
         const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
             ? browserPaneController_->GetThumbnailSizePreset()
             : thumbnailSizePreset_;
@@ -6186,6 +6441,16 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_EDIT_TAGS, MF_BYCOMMAND | (allowMetadataEdit ? MF_ENABLED : MF_GRAYED));
+        for (UINT ratingCommandId = ID_FILE_SET_RATING_0; ratingCommandId <= ID_FILE_SET_RATING_5; ++ratingCommandId)
+        {
+            EnableMenuItem(menu_, ratingCommandId, MF_BYCOMMAND | (allowMetadataEdit ? MF_ENABLED : MF_GRAYED));
+            CheckMenuItem(menu_,
+                          ratingCommandId,
+                          MF_BYCOMMAND | (commonSelectionRating >= 0 && ratingCommandId == CommandIdFromRating(commonSelectionRating)
+                              ? MF_CHECKED
+                              : MF_UNCHECKED));
+        }
         EnableMenuItem(menu_, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         CheckMenuItem(menu_, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS,
                   MF_BYCOMMAND | (rawJpegPairedOperationsEnabled_ ? MF_CHECKED : MF_UNCHECKED));
@@ -6245,6 +6510,10 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_LIBRAW_OUT_OF_PROCESS,
             MF_BYCOMMAND | ((libRawOutOfProcessEnabled_ && decode::IsLibRawBuildEnabled()) ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_PERSISTENT_THUMBNAIL_CACHE,
+            MF_BYCOMMAND | (persistentThumbnailCacheEnabled_ ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(
             menu_,
             ID_VIEW_LIBRAW_OUT_OF_PROCESS,
@@ -6470,6 +6739,19 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ApplyPersistentThumbnailCacheSetting()
+    {
+        if (browserPaneController_)
+        {
+            browserPaneController_->SetPersistentThumbnailCacheEnabled(persistentThumbnailCacheEnabled_);
+        }
+
+        if (detailsPanelThumbnailScheduler_)
+        {
+            detailsPanelThumbnailScheduler_->SetDiskCacheEnabled(persistentThumbnailCacheEnabled_);
+        }
+    }
+
     void MainWindow::LoadWindowState()
     {
         // Always start non-recursive so restoring the last folder cannot trigger an expensive drive-wide scan.
@@ -6577,6 +6859,11 @@ namespace hyperbrowse::ui
                 rawJpegPairedOperationsEnabled_ = value != 0;
             }
 
+            if (TryReadDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, &value))
+            {
+                persistentThumbnailCacheEnabled_ = value != 0;
+            }
+
             RegCloseKey(key);
         }
 
@@ -6618,6 +6905,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueViewerMouseWheelBehavior, static_cast<DWORD>(viewerMouseWheelBehavior_));
             WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, persistentThumbnailCacheEnabled_ ? 1UL : 0UL);
             RegCloseKey(key);
         }
     }
@@ -6964,6 +7252,12 @@ namespace hyperbrowse::ui
             return true;
         }
 
+        if (IsRatingCommand(commandId))
+        {
+            SetSelectionRating(RatingFromCommandId(commandId));
+            return true;
+        }
+
         if (IsTransitionStyleCommand(commandId))
         {
             slideshowTransitionStyle_ = TransitionStyleFromCommandId(commandId);
@@ -7043,6 +7337,9 @@ namespace hyperbrowse::ui
             return true;
         case ID_FILE_PROPERTIES:
             ShowSelectedFileProperties();
+            return true;
+        case ID_FILE_EDIT_TAGS:
+            EditSelectionTags();
             return true;
         case ID_FILE_ROTATE_JPEG_LEFT:
             AdjustSelectedJpegOrientation(-1);
@@ -7130,6 +7427,11 @@ namespace hyperbrowse::ui
                 UpdateStatusText();
                 UpdateMenuState();
             }
+            return true;
+        case ID_VIEW_PERSISTENT_THUMBNAIL_CACHE:
+            persistentThumbnailCacheEnabled_ = !persistentThumbnailCacheEnabled_;
+            ApplyPersistentThumbnailCacheSetting();
+            UpdateMenuState();
             return true;
         case ID_VIEW_THUMBNAIL_SIZE_96:
         case ID_VIEW_THUMBNAIL_SIZE_128:

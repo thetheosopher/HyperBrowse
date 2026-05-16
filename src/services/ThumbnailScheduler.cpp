@@ -227,6 +227,7 @@ namespace hyperbrowse::services
     void ThumbnailScheduler::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
     {
         cache_.InvalidateFilePaths(filePaths);
+        diskCache_.InvalidateFilePaths(filePaths);
 
         if (filePaths.empty())
         {
@@ -257,6 +258,18 @@ namespace hyperbrowse::services
     std::shared_ptr<const cache::CachedThumbnail> ThumbnailScheduler::FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const
     {
         return cache_.Find(key);
+    }
+
+    void ThumbnailScheduler::SetDiskCacheEnabled(bool enabled)
+    {
+        std::scoped_lock lock(mutex_);
+        diskCacheEnabled_ = enabled;
+    }
+
+    bool ThumbnailScheduler::IsDiskCacheEnabled() const
+    {
+        std::scoped_lock lock(mutex_);
+        return diskCacheEnabled_;
     }
 
     bool ThumbnailScheduler::HasKnownFailure(const cache::ThumbnailCacheKey& key) const
@@ -436,11 +449,20 @@ namespace hyperbrowse::services
             std::vector<cache::ThumbnailCacheKey> missingKeys;
             std::vector<decode::ThumbnailDecodeFailureKind> failureKinds(jobs.size(), decode::ThumbnailDecodeFailureKind::None);
             std::vector<bool> cancelled(jobs.size(), false);
+            const bool useDiskCache = IsDiskCacheEnabled();
             missingIndices.reserve(jobs.size());
             missingKeys.reserve(jobs.size());
             for (std::size_t index = 0; index < jobs.size(); ++index)
             {
                 thumbnails[index] = cache_.Find(jobs[index].workItem.cacheKey);
+                if (!thumbnails[index] && useDiskCache)
+                {
+                    thumbnails[index] = diskCache_.TryLoad(jobs[index].workItem.cacheKey);
+                    if (thumbnails[index])
+                    {
+                        cache_.Insert(jobs[index].workItem.cacheKey, thumbnails[index]);
+                    }
+                }
                 if (!thumbnails[index])
                 {
                     missingIndices.push_back(index);
@@ -508,6 +530,10 @@ namespace hyperbrowse::services
                 if (thumbnail)
                 {
                     cache_.Insert(jobs[index].workItem.cacheKey, thumbnail);
+                    if (useDiskCache)
+                    {
+                        diskCache_.Store(jobs[index].workItem.cacheKey, thumbnail);
+                    }
                 }
 
                 bool shouldNotify = false;
