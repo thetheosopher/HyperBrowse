@@ -345,6 +345,11 @@ namespace hyperbrowse::viewer
         return slideshowActive_;
     }
 
+    void ViewerWindow::SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept
+    {
+        mouseWheelBehavior_ = behavior;
+    }
+
     void ViewerWindow::SetTransitionSettings(TransitionStyle style, UINT durationMs)
     {
         transitionStyle_ = style;
@@ -1616,8 +1621,33 @@ namespace hyperbrowse::viewer
             }
             break;
         case WM_MOUSEWHEEL:
-            ZoomBy(GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? 1.1 : 0.9);
+        {
+            const short wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+            const int wheelSteps = static_cast<int>(wheelDelta / WHEEL_DELTA);
+            int stepCount = wheelSteps < 0 ? -wheelSteps : wheelSteps;
+            if (stepCount == 0)
+            {
+                stepCount = 1;
+            }
+
+            if (mouseWheelBehavior_ == MouseWheelBehavior::Navigate)
+            {
+                const int navigateDelta = wheelDelta > 0 ? -1 : +1;
+                for (int step = 0; step < stepCount; ++step)
+                {
+                    Navigate(navigateDelta);
+                }
+            }
+            else
+            {
+                const double zoomFactor = wheelDelta > 0 ? 1.1 : 0.9;
+                for (int step = 0; step < stepCount; ++step)
+                {
+                    ZoomBy(zoomFactor);
+                }
+            }
             return 0;
+        }
         case WM_LBUTTONDOWN:
             if (currentImage_)
             {

@@ -43,6 +43,7 @@ namespace hyperbrowse::cache
 
 namespace hyperbrowse::viewer
 {
+    enum class MouseWheelBehavior : int;
     enum class TransitionStyle : int;
     class ViewerWindow;
 }
@@ -165,6 +166,7 @@ namespace hyperbrowse::ui
         void UpdateStatusText() const;
         void UpdateMenuState();
         void UpdateWindowTitle() const;
+        void ApplyViewerMouseWheelSetting();
         void ApplyViewerTransitionSettings();
         void ApplyTheme();
         void LoadWindowState();
@@ -193,6 +195,7 @@ namespace hyperbrowse::ui
         void StartDeleteSelection(bool permanent);
         void StartFolderTreeRename(std::wstring folderPath);
         void StartFolderTreeDelete(std::wstring folderPath, bool permanent);
+        void StartSelectionFileOperationToDestination(services::FileOperationType type, std::wstring destinationFolder);
         void StartFileOperation(services::FileOperationType type,
                     std::vector<std::wstring> sourcePaths,
                     std::wstring destinationFolder,
@@ -227,8 +230,14 @@ namespace hyperbrowse::ui
 
         void SetBrowserMode(BrowserMode mode);
         void ToggleRecursiveBrowsing();
+        void ToggleCurrentFolderFavoriteDestination();
         void ApplyThumbnailDisplaySettings();
         void SetThemeMode(ThemeMode themeMode);
+        bool IsFavoriteDestination(std::wstring_view folderPath) const;
+        std::vector<std::wstring> RecentDestinationShortcutPaths() const;
+        void RecordRecentFolder(std::wstring folderPath);
+        void RecordRecentDestination(std::wstring folderPath);
+        void RefreshQuickAccessMenus();
         void UpdateDetailsPanel();
         void ApplyDetailsPanelText(std::wstring title, std::wstring summary, std::wstring body);
         void RefreshDetailsPanelBodyPresentation();
@@ -268,6 +277,10 @@ namespace hyperbrowse::ui
         HMODULE detailsPanelRichEditModule_{};
         HIMAGELIST treeImageList_{};
         HMENU menu_{};
+        HMENU fileMenu_{};
+        HMENU openRecentFolderMenu_{};
+        HMENU copySelectionToMenu_{};
+        HMENU moveSelectionToMenu_{};
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
         int toolbarHotIndex_{-1};
@@ -287,6 +300,9 @@ namespace hyperbrowse::ui
         HFONT detailsPanelSummaryFont_{};
         HFONT detailsPanelBodyFont_{};
         std::wstring startupFolderPath_;
+        std::vector<std::wstring> recentFolders_;
+        std::vector<std::wstring> recentDestinationFolders_;
+        std::vector<std::wstring> favoriteDestinationFolders_;
         std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
         std::unique_ptr<browser::BrowserModel> browserModel_;
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
@@ -345,5 +361,6 @@ namespace hyperbrowse::ui
         viewer::TransitionStyle slideshowTransitionStyle_{};
         UINT slideshowTransitionDurationMs_{350};
         bool detailsStripVisible_{true};
+        viewer::MouseWheelBehavior viewerMouseWheelBehavior_{};
     };
 }

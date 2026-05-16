@@ -126,8 +126,8 @@ items were addressed in priority order:
 
 ### TODO: Configurable Mouse Wheel Behavior in Viewer
 - **Source:** spec 04 §8.3 (Mouse behavior)
-- **Status:** Mouse wheel always zooms. There is no option to switch to next/previous image navigation.
-- **Scope:** Add a viewer setting (registry + menu) to choose between zoom and navigate for mouse wheel.
+- **Status:** ~~Mouse wheel always zooms. There is no option to switch to next/previous image navigation.~~ Done. Added View > Viewer Mouse Wheel with Zoom and Next/Previous Image modes. Persisted to registry as `ViewerMouseWheelBehavior` and applied live to open viewer windows.
+- **Scope:** ~~Add a viewer setting (registry + menu) to choose between zoom and navigate for mouse wheel.~~ Done.
 
 ---
 
@@ -140,8 +140,8 @@ items were addressed in priority order:
 
 ### TODO: Recent Destinations and Favorites (P1.2)
 - **Source:** spec 10 §9.2 P1.2
-- **Status:** Not implemented.
-- **Scope:** Recent copy/move destinations, pinned favorites, quick access to recent folders, optional breadcrumb for current path.
+- **Status:** ~~Not implemented.~~ Done for the menu-shortcut pass. Added registry-backed recent copy/move destinations, pinned favorite destinations, quick access to recent folders, and File-menu shortcuts for opening recent folders or sending the current selection to recent/favorite destinations. Current-folder favorite pin/unpin is exposed from the File menu. The optional breadcrumb/path surface remains deferred.
+- **Scope:** ~~Recent copy/move destinations, pinned favorites, quick access to recent folders, optional breadcrumb for current path.~~ Done except for the optional breadcrumb/path surface.
 
 ### TODO: RAW+JPEG Paired Operations (P1.3)
 - **Source:** spec 10 §9.2 P1.3
@@ -169,8 +169,8 @@ items were addressed in priority order:
 
 ### TODO: Rename In Place (F2)
 - **Source:** spec 11 §2 (deferred items)
-- **Status:** Not implemented. FolderWatchService handles external renames, but there is no in-app rename command.
-- **Scope:** Add F2 rename for the focused item. Update model in place.
+- **Status:** ~~Not implemented. FolderWatchService handles external renames, but there is no in-app rename command.~~ Done for the shortcut gap. `F2` now invokes the existing single-item rename command. The app still uses its rename dialog rather than inline label editing in the browser surface.
+- **Scope:** ~~Add F2 rename for the focused item. Update model in place.~~ Done for `F2`. True inline label editing remains deferred.
 
 ### TODO: Drag-and-Drop File Operations
 - **Source:** spec 11 §2 (deferred items)

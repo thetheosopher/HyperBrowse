@@ -62,6 +62,10 @@ namespace
     constexpr wchar_t kRegistryValueSlideshowTransitionStyle[] = L"SlideshowTransitionStyle";
     constexpr wchar_t kRegistryValueSlideshowTransitionDuration[] = L"SlideshowTransitionDurationMs";
     constexpr wchar_t kRegistryValueDetailsStripVisible[] = L"DetailsStripVisible";
+    constexpr wchar_t kRegistryValueViewerMouseWheelBehavior[] = L"ViewerMouseWheelBehavior";
+    constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
+    constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
+    constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -90,6 +94,19 @@ namespace
     constexpr UINT ID_FILE_PROPERTIES = 1021;
     constexpr UINT ID_FILE_VIEW_ON_SECONDARY_MONITOR = 1022;
     constexpr UINT ID_FILE_RENAME_SELECTED = 1023;
+    constexpr UINT ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION = 1024;
+    constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_BASE = 1030;
+    constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_LAST = 1037;
+    constexpr UINT ID_FILE_COPY_SELECTION_BROWSE = 1040;
+    constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_BASE = 1041;
+    constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_LAST = 1048;
+    constexpr UINT ID_FILE_COPY_SELECTION_RECENT_BASE = 1051;
+    constexpr UINT ID_FILE_COPY_SELECTION_RECENT_LAST = 1058;
+    constexpr UINT ID_FILE_MOVE_SELECTION_BROWSE = 1060;
+    constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_BASE = 1061;
+    constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_LAST = 1068;
+    constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_BASE = 1071;
+    constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_LAST = 1078;
     constexpr UINT ID_VIEW_THUMBNAILS = 2001;
     constexpr UINT ID_VIEW_DETAILS = 2002;
     constexpr UINT ID_VIEW_RECURSIVE = 2003;
@@ -119,6 +136,8 @@ namespace
     constexpr UINT ID_VIEW_SORT_DATETAKEN = 2207;
     constexpr UINT ID_VIEW_SORT_DIRECTION = 2208;
     constexpr UINT ID_VIEW_DETAILS_STRIP = 2209;
+    constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM = 2210;
+    constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE = 2211;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CUT = 2303;
@@ -178,6 +197,7 @@ namespace
     constexpr int kAboutDialogFooterHeight = 96;
     constexpr int kAboutDialogButtonWidth = 104;
     constexpr int kAboutDialogButtonHeight = 38;
+    constexpr std::size_t kQuickAccessFolderLimit = 8;
     constexpr int kAboutDialogLinkButtonWidth = 172;
     constexpr int kAboutDialogSupportButtonWidth = 196;
     constexpr int kAboutDialogButtonGap = 12;
@@ -323,6 +343,19 @@ namespace
         RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE);
     }
 
+    void RemoveAllMenuItems(HMENU menu)
+    {
+        if (!menu)
+        {
+            return;
+        }
+
+        while (GetMenuItemCount(menu) > 0)
+        {
+            DeleteMenu(menu, 0, MF_BYPOSITION);
+        }
+    }
+
     bool TryReadStringValue(HKEY key, const wchar_t* valueName, std::wstring* value)
     {
         value->clear();
@@ -416,6 +449,17 @@ namespace
         const fs::path path(folderPath);
         const std::wstring leaf = path.filename().wstring();
         return leaf.empty() ? std::wstring(folderPath) : leaf;
+    }
+
+    std::wstring FormatFolderShortcutMenuLabel(std::wstring_view folderPath)
+    {
+        const std::wstring displayName = GetFolderDisplayName(folderPath);
+        if (displayName.empty() || displayName == folderPath)
+        {
+            return std::wstring(folderPath);
+        }
+
+        return displayName + L" (" + std::wstring(folderPath) + L")";
     }
 
     int CurrentCalendarYear()
@@ -1700,6 +1744,115 @@ namespace
         return _wcsicmp(normalizedLeft.c_str(), normalizedRight.c_str()) == 0;
     }
 
+    bool IsExistingDirectory(std::wstring_view folderPath)
+    {
+        if (folderPath.empty())
+        {
+            return false;
+        }
+
+        std::error_code error;
+        return fs::is_directory(fs::path(folderPath), error) && !error;
+    }
+
+    bool InsertFolderPath(std::vector<std::wstring>* paths,
+                          std::wstring folderPath,
+                          std::size_t maxCount,
+                          bool moveToFront)
+    {
+        if (!paths)
+        {
+            return false;
+        }
+
+        folderPath = NormalizeFolderPath(std::move(folderPath));
+        if (folderPath.empty())
+        {
+            return false;
+        }
+
+        const auto existing = std::find_if(paths->begin(), paths->end(), [&](const std::wstring& candidate)
+        {
+            return FolderPathsEqual(candidate, folderPath);
+        });
+
+        if (existing != paths->end())
+        {
+            if (!moveToFront)
+            {
+                return false;
+            }
+
+            if (existing == paths->begin())
+            {
+                return false;
+            }
+
+            paths->erase(existing);
+        }
+
+        if (moveToFront)
+        {
+            paths->insert(paths->begin(), std::move(folderPath));
+        }
+        else if (paths->size() < maxCount)
+        {
+            paths->push_back(std::move(folderPath));
+        }
+        else
+        {
+            return false;
+        }
+
+        if (paths->size() > maxCount)
+        {
+            paths->resize(maxCount);
+        }
+
+        return true;
+    }
+
+    std::vector<std::wstring> DeserializeFolderPathList(std::wstring_view serialized, std::size_t maxCount)
+    {
+        std::vector<std::wstring> paths;
+        std::wstring current;
+        for (const wchar_t character : serialized)
+        {
+            if (character == L'\r')
+            {
+                continue;
+            }
+
+            if (character == L'\n')
+            {
+                InsertFolderPath(&paths, std::move(current), maxCount, false);
+                current.clear();
+                continue;
+            }
+
+            current.push_back(character);
+        }
+
+        InsertFolderPath(&paths, std::move(current), maxCount, false);
+        return paths;
+    }
+
+    std::wstring SerializeFolderPathList(const std::vector<std::wstring>& paths)
+    {
+        std::wstring serialized;
+        for (std::size_t index = 0; index < paths.size(); ++index)
+        {
+            if (index > 0)
+            {
+                serialized.push_back(L'\n');
+            }
+
+            serialized.append(paths[index]);
+        }
+
+        return serialized;
+    }
+
     bool CopyTextToClipboard(HWND ownerWindow, std::wstring_view text)
     {
         if (!OpenClipboard(ownerWindow))
@@ -2286,6 +2439,41 @@ namespace
             && commandId <= ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000;
     }
 
+    hyperbrowse::viewer::MouseWheelBehavior ViewerMouseWheelBehaviorFromCommandId(UINT commandId)
+    {
+        switch (commandId)
+        {
+        case ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE:
+            return hyperbrowse::viewer::MouseWheelBehavior::Navigate;
+        case ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM:
+        default:
+            return hyperbrowse::viewer::MouseWheelBehavior::Zoom;
+        }
+    }
+
+    UINT CommandIdFromViewerMouseWheelBehavior(hyperbrowse::viewer::MouseWheelBehavior behavior)
+    {
+        switch (behavior)
+        {
+        case hyperbrowse::viewer::MouseWheelBehavior::Navigate:
+            return ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE;
+        case hyperbrowse::viewer::MouseWheelBehavior::Zoom:
+        default:
+            return ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM;
+        }
+    }
+
+    bool IsViewerMouseWheelBehaviorCommand(UINT commandId)
+    {
+        return commandId >= ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM
+            && commandId <= ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE;
+    }
+
+    bool IsCommandInRange(UINT commandId, UINT firstCommandId, UINT lastCommandId)
+    {
+        return commandId >= firstCommandId && commandId <= lastCommandId;
+    }
+
     bool IsJpegBrowserItem(const hyperbrowse::browser::BrowserItem& item)
     {
         return hyperbrowse::decode::IsWicFileType(item.fileType)
@@ -2426,6 +2614,7 @@ namespace hyperbrowse::ui
         }
 
         LoadWindowState();
+        ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
 
         hwnd_ = CreateWindowExW(
@@ -2502,6 +2691,7 @@ namespace hyperbrowse::ui
         ACCEL accelerators[] = {
             {FVIRTKEY | FCONTROL, static_cast<WORD>('O'), ID_FILE_OPEN_FOLDER},
             {FVIRTKEY, VK_F5, ID_FILE_REFRESH_TREE},
+            {FVIRTKEY, VK_F2, ID_FILE_RENAME_SELECTED},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('I'), ID_FILE_IMAGE_INFORMATION},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('C'), ID_FILE_COPY_PATH},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('E'), ID_FILE_REVEAL_IN_EXPLORER},
@@ -2526,7 +2716,10 @@ namespace hyperbrowse::ui
     bool MainWindow::CreateMenuBar()
     {
         menu_ = CreateMenu();
-        HMENU fileMenu = CreatePopupMenu();
+        fileMenu_ = CreatePopupMenu();
+        openRecentFolderMenu_ = CreatePopupMenu();
+        copySelectionToMenu_ = CreatePopupMenu();
+        moveSelectionToMenu_ = CreatePopupMenu();
         HMENU batchConvertSelectionMenu = CreatePopupMenu();
         HMENU batchConvertFolderMenu = CreatePopupMenu();
         HMENU viewMenu = CreatePopupMenu();
@@ -2534,44 +2727,48 @@ namespace hyperbrowse::ui
         HMENU thumbnailSizeMenu = CreatePopupMenu();
         HMENU slideshowTransitionMenu = CreatePopupMenu();
         HMENU slideshowTransitionDurationMenu = CreatePopupMenu();
+        HMENU viewerMouseWheelMenu = CreatePopupMenu();
         HMENU themeMenu = CreatePopupMenu();
         HMENU helpMenu = CreatePopupMenu();
 
-        if (!menu_ || !fileMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !themeMenu || !helpMenu)
+        if (!menu_ || !fileMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !batchConvertSelectionMenu || !batchConvertFolderMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMouseWheelMenu || !themeMenu || !helpMenu)
         {
             return false;
         }
 
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_OPEN_FOLDER, L"&Open Folder...\tCtrl+O");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information\tCtrl+I");
-        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties\tAlt+Enter");
-        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete\tDel");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently\tShift+Del");
-        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_ROTATE_JPEG_LEFT, L"Adjust JPEG Orientation &Left");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
-        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_FOLDER, L"&Open Folder...\tCtrl+O");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(openRecentFolderMenu_), L"Open &Recent Folder");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, L"Add Current Folder to Favorite &Destinations");
+        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information\tCtrl+I");
+        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties\tAlt+Enter");
+        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete\tDel");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently\tShift+Del");
+        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ROTATE_JPEG_LEFT, L"Adjust JPEG Orientation &Left");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
+        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_JPEG, L"Selection to &JPEG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_PNG, L"Selection to &PNG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_TIFF, L"Selection to &TIFF");
         AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_JPEG, L"Folder to JPE&G");
         AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_PNG, L"Folder to P&NG");
         AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_TIFF, L"Folder to TIF&F");
-        AppendMenuW(fileMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertSelectionMenu), L"Batch Convert &Selection");
-        AppendMenuW(fileMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertFolderMenu), L"Batch Convert &Folder");
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_BATCH_CONVERT_CANCEL, L"&Cancel Batch Convert");
-        AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu, MF_STRING, ID_FILE_EXIT, L"E&xit");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertSelectionMenu), L"Batch Convert &Selection");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertFolderMenu), L"Batch Convert &Folder");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_BATCH_CONVERT_CANCEL, L"&Cancel Batch Convert");
+        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_EXIT, L"E&xit");
 
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode\tCtrl+1");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS, L"&Details Mode\tCtrl+2");
@@ -2618,6 +2815,9 @@ namespace hyperbrowse::ui
         AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000, L"2&000 ms");
         AppendMenuW(slideshowTransitionMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionDurationMenu), L"&Duration");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionMenu), L"Slideshow &Transition");
+        AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM, L"&Zoom");
+        AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE, L"&Next/Previous Image");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMouseWheelMenu), L"Viewer Mouse &Wheel");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
@@ -2630,7 +2830,7 @@ namespace hyperbrowse::ui
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"Diagnostics &Snapshot\tCtrl+Shift+D");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"Reset Diagnostics\tCtrl+Shift+X");
 
-        AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"&File");
+        AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu_), L"&File");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(viewMenu), L"&View");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"&Help");
 
@@ -3453,6 +3653,127 @@ namespace hyperbrowse::ui
         SendMessageW(statusBar_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(selectionText.c_str()));
     }
 
+    void MainWindow::RecordRecentFolder(std::wstring folderPath)
+    {
+        if (InsertFolderPath(&recentFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
+        {
+            UpdateMenuState();
+        }
+    }
+
+    void MainWindow::RecordRecentDestination(std::wstring folderPath)
+    {
+        if (InsertFolderPath(&recentDestinationFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
+        {
+            UpdateMenuState();
+        }
+    }
+
+    void MainWindow::RefreshQuickAccessMenus()
+    {
+        if (!fileMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_)
+        {
+            return;
+        }
+
+        const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
+        const bool allowMutatingFileCommands = browserPaneController_ && browserPaneController_->SelectedCount() > 0 && !fileOperationActive_;
+        const std::wstring toggleLabel = hasFolder && IsFavoriteDestination(browserModel_->FolderPath())
+            ? L"Remove Current Folder from Favorite &Destinations"
+            : L"Add Current Folder to Favorite &Destinations";
+        ModifyMenuW(fileMenu_,
+                    ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION,
+                    MF_BYCOMMAND | MF_STRING,
+                    ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION,
+                    toggleLabel.c_str());
+
+        RemoveAllMenuItems(openRecentFolderMenu_);
+        if (recentFolders_.empty())
+        {
+            AppendMenuW(openRecentFolderMenu_, MF_STRING | MF_GRAYED, 0, L"(No recent folders)");
+        }
+        else
+        {
+            const std::size_t recentCount = std::min<std::size_t>(recentFolders_.size(), ID_FILE_OPEN_RECENT_FOLDER_LAST - ID_FILE_OPEN_RECENT_FOLDER_BASE + 1);
+            for (std::size_t index = 0; index < recentCount; ++index)
+            {
+                const std::wstring label = FormatFolderShortcutMenuLabel(recentFolders_[index]);
+                AppendMenuW(openRecentFolderMenu_, MF_STRING, ID_FILE_OPEN_RECENT_FOLDER_BASE + static_cast<UINT>(index), label.c_str());
+            }
+        }
+
+        const std::vector<std::wstring> recentDestinationPaths = RecentDestinationShortcutPaths();
+        const auto populateDestinationMenu = [&](HMENU menu,
+                                                 UINT browseCommandId,
+                                                 UINT favoriteBaseCommandId,
+                                                 UINT favoriteLastCommandId,
+                                                 UINT recentBaseCommandId,
+                                                 UINT recentLastCommandId)
+        {
+            RemoveAllMenuItems(menu);
+            AppendMenuW(menu,
+                        MF_STRING | (allowMutatingFileCommands ? 0 : MF_GRAYED),
+                        browseCommandId,
+                        L"Choose &Folder...");
+
+            const std::size_t favoriteCapacity = favoriteLastCommandId - favoriteBaseCommandId + 1;
+            const std::size_t recentCapacity = recentLastCommandId - recentBaseCommandId + 1;
+            const std::size_t favoriteCount = std::min<std::size_t>(favoriteDestinationFolders_.size(), favoriteCapacity);
+            const std::size_t recentCount = std::min<std::size_t>(recentDestinationPaths.size(), recentCapacity);
+            if (favoriteCount == 0 && recentCount == 0)
+            {
+                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"(No favorite or recent destinations)");
+                return;
+            }
+
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            if (favoriteCount > 0)
+            {
+                AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"Favorite Destinations");
+                for (std::size_t index = 0; index < favoriteCount; ++index)
+                {
+                    const std::wstring label = FormatFolderShortcutMenuLabel(favoriteDestinationFolders_[index]);
+                    AppendMenuW(menu,
+                                MF_STRING | (allowMutatingFileCommands ? 0 : MF_GRAYED),
+                                favoriteBaseCommandId + static_cast<UINT>(index),
+                                label.c_str());
+                }
+            }
+
+            if (recentCount > 0)
+            {
+                if (favoriteCount > 0)
+                {
+                    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                }
+
+                AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"Recent Destinations");
+                for (std::size_t index = 0; index < recentCount; ++index)
+                {
+                    const std::wstring label = FormatFolderShortcutMenuLabel(recentDestinationPaths[index]);
+                    AppendMenuW(menu,
+                                MF_STRING | (allowMutatingFileCommands ? 0 : MF_GRAYED),
+                                recentBaseCommandId + static_cast<UINT>(index),
+                                label.c_str());
+                }
+            }
+        };
+
+        populateDestinationMenu(copySelectionToMenu_,
+                                ID_FILE_COPY_SELECTION_BROWSE,
+                                ID_FILE_COPY_SELECTION_FAVORITE_BASE,
+                                ID_FILE_COPY_SELECTION_FAVORITE_LAST,
+                                ID_FILE_COPY_SELECTION_RECENT_BASE,
+                                ID_FILE_COPY_SELECTION_RECENT_LAST);
+        populateDestinationMenu(moveSelectionToMenu_,
+                                ID_FILE_MOVE_SELECTION_BROWSE,
+                                ID_FILE_MOVE_SELECTION_FAVORITE_BASE,
+                                ID_FILE_MOVE_SELECTION_FAVORITE_LAST,
+                                ID_FILE_MOVE_SELECTION_RECENT_BASE,
+                                ID_FILE_MOVE_SELECTION_RECENT_LAST);
+    }
+
     void MainWindow::ApplyDetailsPanelText(std::wstring title, std::wstring summary, std::wstring body)
     {
         detailsPanelTitleText_ = std::move(title);
@@ -4096,6 +4417,7 @@ namespace hyperbrowse::ui
             return;
         }
 
+        ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
@@ -4219,6 +4541,112 @@ namespace hyperbrowse::ui
         }
 
         return false;
+    }
+
+    bool MainWindow::IsFavoriteDestination(std::wstring_view folderPath) const
+    {
+        return std::any_of(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& candidate)
+        {
+            return FolderPathsEqual(candidate, folderPath);
+        });
+    }
+
+    std::vector<std::wstring> MainWindow::RecentDestinationShortcutPaths() const
+    {
+        std::vector<std::wstring> paths;
+        for (const std::wstring& recentPath : recentDestinationFolders_)
+        {
+            if (std::any_of(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& favoritePath)
+            {
+                return FolderPathsEqual(favoritePath, recentPath);
+            }))
+            {
+                continue;
+            }
+
+            InsertFolderPath(&paths, recentPath, kQuickAccessFolderLimit, false);
+        }
+
+        return paths;
+    }
+
+    void MainWindow::ToggleCurrentFolderFavoriteDestination()
+    {
+        if (!browserModel_ || browserModel_->FolderPath().empty())
+        {
+            return;
+        }
+
+        const std::wstring folderPath = NormalizeFolderPath(browserModel_->FolderPath());
+        const auto existing = std::find_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& candidate)
+        {
+            return FolderPathsEqual(candidate, folderPath);
+        });
+
+        if (existing != favoriteDestinationFolders_.end())
+        {
+            favoriteDestinationFolders_.erase(existing);
+        }
+        else
+        {
+            InsertFolderPath(&favoriteDestinationFolders_, folderPath, kQuickAccessFolderLimit, true);
+        }
+
+        UpdateMenuState();
+    }
+
+    void MainWindow::StartSelectionFileOperationToDestination(services::FileOperationType type, std::wstring destinationFolder)
+    {
+        if (!browserPaneController_ || fileOperationActive_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> sourcePaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (sourcePaths.empty())
+        {
+            MessageBoxW(hwnd_,
+                        L"Select one or more images first.",
+                        type == services::FileOperationType::Move ? L"Move Selection" : L"Copy Selection",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        destinationFolder = NormalizeFolderPath(std::move(destinationFolder));
+        if (!IsExistingDirectory(destinationFolder))
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected destination folder is no longer available.",
+                        type == services::FileOperationType::Move ? L"Move Selection" : L"Copy Selection",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const services::FileConflictPlan conflictPlan = services::PlanDestinationConflicts(
+            sourcePaths,
+            destinationFolder,
+            services::FileConflictPolicy::OverwriteExisting);
+
+        services::FileConflictPolicy conflictPolicy = services::FileConflictPolicy::PromptShell;
+        std::vector<std::wstring> targetLeafNames;
+        if (!PromptForFileConflictPolicy(hwnd_, type, conflictPlan.conflictCount, &conflictPolicy))
+        {
+            return;
+        }
+
+        if (conflictPolicy == services::FileConflictPolicy::AutoRenameNumericSuffix)
+        {
+            targetLeafNames = services::PlanDestinationConflicts(
+                sourcePaths,
+                destinationFolder,
+                conflictPolicy).targetLeafNames;
+        }
+
+        StartFileOperation(type,
+                           std::vector<std::wstring>(sourcePaths),
+                           std::move(destinationFolder),
+                           conflictPolicy,
+                           std::move(targetLeafNames));
     }
 
     void MainWindow::ShowBrowserContextMenu(POINT screenPoint)
@@ -4656,8 +5084,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::vector<std::wstring> sourcePaths = browserPaneController_->SelectedFilePathsSnapshot();
-        if (sourcePaths.empty())
+        if (browserPaneController_->SelectedFilePathsSnapshot().empty())
         {
             MessageBoxW(hwnd_, L"Select one or more images first.", L"Copy Selection", MB_OK | MB_ICONINFORMATION);
             return;
@@ -4669,31 +5096,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const services::FileConflictPlan conflictPlan = services::PlanDestinationConflicts(
-            sourcePaths,
-            destinationFolder,
-            services::FileConflictPolicy::OverwriteExisting);
-
-        services::FileConflictPolicy conflictPolicy = services::FileConflictPolicy::PromptShell;
-        std::vector<std::wstring> targetLeafNames;
-        if (!PromptForFileConflictPolicy(hwnd_, services::FileOperationType::Copy, conflictPlan.conflictCount, &conflictPolicy))
-        {
-            return;
-        }
-
-        if (conflictPolicy == services::FileConflictPolicy::AutoRenameNumericSuffix)
-        {
-            targetLeafNames = services::PlanDestinationConflicts(
-                sourcePaths,
-                destinationFolder,
-                conflictPolicy).targetLeafNames;
-        }
-
-        StartFileOperation(services::FileOperationType::Copy,
-                           std::vector<std::wstring>(sourcePaths),
-                           std::move(destinationFolder),
-                           conflictPolicy,
-                           std::move(targetLeafNames));
+        StartSelectionFileOperationToDestination(services::FileOperationType::Copy, std::move(destinationFolder));
     }
 
     void MainWindow::StartRenameSelectedImage()
@@ -4743,8 +5146,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::vector<std::wstring> sourcePaths = browserPaneController_->SelectedFilePathsSnapshot();
-        if (sourcePaths.empty())
+        if (browserPaneController_->SelectedFilePathsSnapshot().empty())
         {
             MessageBoxW(hwnd_, L"Select one or more images first.", L"Move Selection", MB_OK | MB_ICONINFORMATION);
             return;
@@ -4756,31 +5158,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const services::FileConflictPlan conflictPlan = services::PlanDestinationConflicts(
-            sourcePaths,
-            destinationFolder,
-            services::FileConflictPolicy::OverwriteExisting);
-
-        services::FileConflictPolicy conflictPolicy = services::FileConflictPolicy::PromptShell;
-        std::vector<std::wstring> targetLeafNames;
-        if (!PromptForFileConflictPolicy(hwnd_, services::FileOperationType::Move, conflictPlan.conflictCount, &conflictPolicy))
-        {
-            return;
-        }
-
-        if (conflictPolicy == services::FileConflictPolicy::AutoRenameNumericSuffix)
-        {
-            targetLeafNames = services::PlanDestinationConflicts(
-                sourcePaths,
-                destinationFolder,
-                conflictPolicy).targetLeafNames;
-        }
-
-        StartFileOperation(services::FileOperationType::Move,
-                           std::vector<std::wstring>(sourcePaths),
-                           std::move(destinationFolder),
-                           conflictPolicy,
-                           std::move(targetLeafNames));
+        StartSelectionFileOperationToDestination(services::FileOperationType::Move, std::move(destinationFolder));
     }
 
     void MainWindow::StartDeleteSelection(bool permanent)
@@ -5389,6 +5767,10 @@ namespace hyperbrowse::ui
             std::error_code destinationError;
             if (fs::is_directory(fs::path(update.destinationFolder), destinationError) && !destinationError)
             {
+                if (!update.succeededSourcePaths.empty() || !update.createdPaths.empty())
+                {
+                    RecordRecentDestination(update.destinationFolder);
+                }
                 InsertFolderTreeFolderIfParentLoaded(update.destinationFolder);
             }
         }
@@ -5628,6 +6010,8 @@ namespace hyperbrowse::ui
             return;
         }
 
+        RefreshQuickAccessMenus();
+
         const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
@@ -5647,6 +6031,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_SELECTION,
                        MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_MOVE_SELECTION,
@@ -5732,6 +6117,12 @@ namespace hyperbrowse::ui
             ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200,
             ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000,
             CommandIdFromTransitionDuration(slideshowTransitionDurationMs_),
+            MF_BYCOMMAND);
+        CheckMenuRadioItem(
+            menu_,
+            ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM,
+            ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE,
+            CommandIdFromViewerMouseWheelBehavior(viewerMouseWheelBehavior_),
             MF_BYCOMMAND);
         EnableMenuItem(
             menu_,
@@ -5902,6 +6293,14 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ApplyViewerMouseWheelSetting()
+    {
+        if (viewerWindow_)
+        {
+            viewerWindow_->SetMouseWheelBehavior(viewerMouseWheelBehavior_);
+        }
+    }
+
     void MainWindow::ApplyViewerTransitionSettings()
     {
         if (viewerWindow_)
@@ -5957,6 +6356,22 @@ namespace hyperbrowse::ui
 
             TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
 
+            std::wstring serializedPaths;
+            if (TryReadStringValue(key, kRegistryValueRecentFolders, &serializedPaths))
+            {
+                recentFolders_ = DeserializeFolderPathList(serializedPaths, kQuickAccessFolderLimit);
+            }
+
+            if (TryReadStringValue(key, kRegistryValueRecentDestinationFolders, &serializedPaths))
+            {
+                recentDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kQuickAccessFolderLimit);
+            }
+
+            if (TryReadStringValue(key, kRegistryValueFavoriteDestinationFolders, &serializedPaths))
+            {
+                favoriteDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kQuickAccessFolderLimit);
+            }
+
             if (TryReadDwordValue(key, kRegistryValueSortMode, &value) && value <= static_cast<DWORD>(browser::BrowserSortMode::DateTaken))
             {
                 sortMode_ = static_cast<browser::BrowserSortMode>(value);
@@ -5990,6 +6405,12 @@ namespace hyperbrowse::ui
                 detailsStripVisible_ = value != 0;
             }
 
+            if (TryReadDwordValue(key, kRegistryValueViewerMouseWheelBehavior, &value)
+                && value <= static_cast<DWORD>(viewer::MouseWheelBehavior::Navigate))
+            {
+                viewerMouseWheelBehavior_ = static_cast<viewer::MouseWheelBehavior>(value);
+            }
+
             RegCloseKey(key);
         }
 
@@ -6017,6 +6438,9 @@ namespace hyperbrowse::ui
             RegDeleteValueW(key, kRegistryValueCompactThumbnailLayout);
             WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
             WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
+            WriteStringValue(key, kRegistryValueRecentFolders, SerializeFolderPathList(recentFolders_));
+            WriteStringValue(key, kRegistryValueRecentDestinationFolders, SerializeFolderPathList(recentDestinationFolders_));
+            WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, SerializeFolderPathList(favoriteDestinationFolders_));
             if (browserPaneController_)
             {
                 WriteDwordValue(key, kRegistryValueSortMode, static_cast<DWORD>(browserPaneController_->GetSortMode()));
@@ -6026,6 +6450,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueSlideshowTransitionStyle, static_cast<DWORD>(slideshowTransitionStyle_));
             WriteDwordValue(key, kRegistryValueSlideshowTransitionDuration, static_cast<DWORD>(slideshowTransitionDurationMs_));
             WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueViewerMouseWheelBehavior, static_cast<DWORD>(viewerMouseWheelBehavior_));
             RegCloseKey(key);
         }
     }
@@ -6074,6 +6499,7 @@ namespace hyperbrowse::ui
         case services::FolderEnumerationUpdateKind::Completed:
             browserModel_->Complete();
             util::LogInfo(L"Completed folder enumeration for " + update->folderPath);
+            RecordRecentFolder(update->folderPath);
             if (folderWatchService_)
             {
                 activeFolderWatchRequestId_ = folderWatchService_->StartWatching(hwnd_, update->folderPath, browserModel_->IsRecursive());
@@ -6303,6 +6729,74 @@ namespace hyperbrowse::ui
 
     bool MainWindow::HandleCommand(UINT commandId)
     {
+        if (IsCommandInRange(commandId, ID_FILE_OPEN_RECENT_FOLDER_BASE, ID_FILE_OPEN_RECENT_FOLDER_LAST))
+        {
+            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_OPEN_RECENT_FOLDER_BASE);
+            if (index < recentFolders_.size())
+            {
+                const std::wstring folderPath = recentFolders_[index];
+                if (!IsExistingDirectory(folderPath))
+                {
+                    MessageBoxW(hwnd_, L"The selected recent folder is no longer available.", L"Open Recent Folder", MB_OK | MB_ICONINFORMATION);
+                }
+                else
+                {
+                    LoadFolderAsync(folderPath);
+                }
+            }
+            return true;
+        }
+
+        if (IsCommandInRange(commandId, ID_FILE_COPY_SELECTION_FAVORITE_BASE, ID_FILE_COPY_SELECTION_FAVORITE_LAST))
+        {
+            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_COPY_SELECTION_FAVORITE_BASE);
+            if (index < favoriteDestinationFolders_.size())
+            {
+                StartSelectionFileOperationToDestination(services::FileOperationType::Copy, favoriteDestinationFolders_[index]);
+            }
+            return true;
+        }
+
+        if (IsCommandInRange(commandId, ID_FILE_COPY_SELECTION_RECENT_BASE, ID_FILE_COPY_SELECTION_RECENT_LAST))
+        {
+            const std::vector<std::wstring> recentDestinationPaths = RecentDestinationShortcutPaths();
+            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_COPY_SELECTION_RECENT_BASE);
+            if (index < recentDestinationPaths.size())
+            {
+                StartSelectionFileOperationToDestination(services::FileOperationType::Copy, recentDestinationPaths[index]);
+            }
+            return true;
+        }
+
+        if (IsCommandInRange(commandId, ID_FILE_MOVE_SELECTION_FAVORITE_BASE, ID_FILE_MOVE_SELECTION_FAVORITE_LAST))
+        {
+            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_MOVE_SELECTION_FAVORITE_BASE);
+            if (index < favoriteDestinationFolders_.size())
+            {
+                StartSelectionFileOperationToDestination(services::FileOperationType::Move, favoriteDestinationFolders_[index]);
+            }
+            return true;
+        }
+
+        if (IsCommandInRange(commandId, ID_FILE_MOVE_SELECTION_RECENT_BASE, ID_FILE_MOVE_SELECTION_RECENT_LAST))
+        {
+            const std::vector<std::wstring> recentDestinationPaths = RecentDestinationShortcutPaths();
+            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_MOVE_SELECTION_RECENT_BASE);
+            if (index < recentDestinationPaths.size())
+            {
+                StartSelectionFileOperationToDestination(services::FileOperationType::Move, recentDestinationPaths[index]);
+            }
+            return true;
+        }
+
+        if (IsViewerMouseWheelBehaviorCommand(commandId))
+        {
+            viewerMouseWheelBehavior_ = ViewerMouseWheelBehaviorFromCommandId(commandId);
+            ApplyViewerMouseWheelSetting();
+            UpdateMenuState();
+            return true;
+        }
+
         if (IsTransitionStyleCommand(commandId))
         {
             slideshowTransitionStyle_ = TransitionStyleFromCommandId(commandId);
@@ -6324,6 +6818,9 @@ namespace hyperbrowse::ui
         case ID_FILE_OPEN_FOLDER:
             OpenFolder();
             return true;
+        case ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION:
+            ToggleCurrentFolderFavoriteDestination();
+            return true;
         case ID_FILE_EXIT:
             PostMessageW(hwnd_, WM_CLOSE, 0, 0);
             return true;
@@ -6342,10 +6839,16 @@ namespace hyperbrowse::ui
         case ID_FILE_COPY_SELECTION:
             StartCopySelection();
             return true;
+        case ID_FILE_COPY_SELECTION_BROWSE:
+            StartCopySelection();
+            return true;
         case ID_FILE_RENAME_SELECTED:
             StartRenameSelectedImage();
             return true;
         case ID_FILE_MOVE_SELECTION:
+            StartMoveSelection();
+            return true;
+        case ID_FILE_MOVE_SELECTION_BROWSE:
             StartMoveSelection();
             return true;
         case ID_FILE_DELETE_SELECTION:

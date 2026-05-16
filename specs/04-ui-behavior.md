@@ -205,7 +205,8 @@ Status bar should update incrementally and never block UI.
 
 ## 8.3 Mouse behavior
 - double-click toggles full screen
-- mouse wheel always zooms in viewer (configurable wheel behavior is deferred)
+- mouse wheel defaults to zoom in viewer
+- View > Viewer Mouse Wheel switches between zoom and next/previous image navigation
 - click-drag pans when zoomed
 
 ## 8.4 Zoom/Pan behavior

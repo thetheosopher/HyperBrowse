@@ -17,6 +17,12 @@
 
 namespace hyperbrowse::viewer
 {
+    enum class MouseWheelBehavior : int
+    {
+        Zoom = 0,
+        Navigate = 1,
+    };
+
     enum class TransitionStyle : int
     {
         Cut = 0,
@@ -51,6 +57,7 @@ namespace hyperbrowse::viewer
         void StartSlideshow(UINT intervalMs = 3000);
         void StopSlideshow();
         bool IsSlideshowActive() const noexcept;
+        void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
         void SetDarkTheme(bool enabled);
 
@@ -160,6 +167,7 @@ namespace hyperbrowse::viewer
         double panOffsetX_{};
         double panOffsetY_{};
         bool infoOverlaysVisible_{true};
+        MouseWheelBehavior mouseWheelBehavior_{MouseWheelBehavior::Zoom};
         bool panning_{};
         POINT lastPanPoint_{};
         bool fullScreen_{};
