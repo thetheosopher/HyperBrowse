@@ -66,6 +66,7 @@ namespace
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
     constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
+    constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -95,6 +96,8 @@ namespace
     constexpr UINT ID_FILE_VIEW_ON_SECONDARY_MONITOR = 1022;
     constexpr UINT ID_FILE_RENAME_SELECTED = 1023;
     constexpr UINT ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION = 1024;
+    constexpr UINT ID_FILE_COMPARE_SELECTED = 1025;
+    constexpr UINT ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS = 1026;
     constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_BASE = 1030;
     constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_LAST = 1037;
     constexpr UINT ID_FILE_COPY_SELECTION_BROWSE = 1040;
@@ -821,6 +824,14 @@ namespace
     bool StringsEqualInsensitive(std::wstring_view lhs, std::wstring_view rhs)
     {
         return hyperbrowse::util::EqualsIgnoreCaseOrdinal(lhs, rhs);
+    }
+
+    bool IsJpegFileType(std::wstring_view fileType)
+    {
+        return StringsEqualInsensitive(fileType, L"jpg")
+            || StringsEqualInsensitive(fileType, L"jpeg")
+            || StringsEqualInsensitive(fileType, L".jpg")
+            || StringsEqualInsensitive(fileType, L".jpeg");
     }
 
     std::wstring BuildCameraSummaryLabel(const hyperbrowse::services::ImageMetadata& metadata)
@@ -2742,6 +2753,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, L"Add Current Folder to Favorite &Destinations");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information\tCtrl+I");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
@@ -2752,6 +2764,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To");
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS, L"Include Paired &RAW+JPEG");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete\tDel");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently\tShift+Del");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
@@ -3646,8 +3659,20 @@ namespace hyperbrowse::ui
 
         const std::uint64_t selectedCount = browserPaneController_ ? browserPaneController_->SelectedCount() : 0;
         const std::uint64_t selectedBytes = browserPaneController_ ? browserPaneController_->SelectedBytes() : 0;
-        const std::wstring selectionText = L"Selected: " + std::to_wstring(selectedCount)
+        std::wstring selectionText = L"Selected: " + std::to_wstring(selectedCount)
             + L" items | " + browser::FormatByteSize(selectedBytes);
+        if (rawJpegPairedOperationsEnabled_)
+        {
+            std::size_t pairedCompanionCount = 0;
+            SelectedFileOperationPathsSnapshot(&pairedCompanionCount);
+            selectionText.append(L"  |  Paired RAW+JPEG On");
+            if (pairedCompanionCount > 0)
+            {
+                selectionText.append(L" (+");
+                selectionText.append(std::to_wstring(pairedCompanionCount));
+                selectionText.push_back(L')');
+            }
+        }
 
         SendMessageW(statusBar_, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(folderText.c_str()));
         SendMessageW(statusBar_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(selectionText.c_str()));
@@ -4397,14 +4422,14 @@ namespace hyperbrowse::ui
         OpenItemsInViewer(std::move(viewerItems), selectedViewerIndex, false, preferSecondaryMonitor);
     }
 
-    void MainWindow::OpenItemsInViewer(std::vector<browser::BrowserItem> items,
+    bool MainWindow::OpenItemsInViewer(std::vector<browser::BrowserItem> items,
                                        int selectedIndex,
                                        bool startSlideshow,
                                        bool preferSecondaryMonitor)
     {
         if (!viewerWindow_ || items.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(items.size()))
         {
-            return;
+            return false;
         }
 
         const HMONITOR targetMonitor = ResolveViewerMonitor(hwnd_, preferSecondaryMonitor);
@@ -4414,7 +4439,7 @@ namespace hyperbrowse::ui
                         L"A secondary monitor is not currently available.",
                         L"View on Secondary Monitor",
                         MB_OK | MB_ICONINFORMATION);
-            return;
+            return false;
         }
 
         ApplyViewerMouseWheelSetting();
@@ -4427,7 +4452,10 @@ namespace hyperbrowse::ui
             }
             viewerWindowActive_ = true;
             UpdateStatusText();
+            return true;
         }
+
+        return false;
     }
 
     std::vector<browser::BrowserItem> MainWindow::CollectItemsForScope(bool selectionScope) const
@@ -4472,6 +4500,84 @@ namespace hyperbrowse::ui
         }
 
         return items;
+    }
+
+    std::vector<std::wstring> MainWindow::SelectedFileOperationPathsSnapshot(std::size_t* pairedCompanionCount) const
+    {
+        if (pairedCompanionCount)
+        {
+            *pairedCompanionCount = 0;
+        }
+
+        if (!browserPaneController_)
+        {
+            return {};
+        }
+
+        std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (!rawJpegPairedOperationsEnabled_ || !browserModel_ || selectedPaths.empty())
+        {
+            return selectedPaths;
+        }
+
+        const auto& modelItems = browserModel_->Items();
+        std::vector<std::wstring> expandedPaths = selectedPaths;
+        for (const std::wstring& selectedPath : selectedPaths)
+        {
+            const int modelIndex = browserModel_->FindItemIndexByPath(selectedPath);
+            if (modelIndex < 0 || modelIndex >= static_cast<int>(modelItems.size()))
+            {
+                continue;
+            }
+
+            const browser::BrowserItem& selectedItem = modelItems[static_cast<std::size_t>(modelIndex)];
+            const bool selectedIsRaw = decode::IsRawFileType(selectedItem.fileType);
+            const bool selectedIsJpeg = IsJpegFileType(selectedItem.fileType);
+            if (!selectedIsRaw && !selectedIsJpeg)
+            {
+                continue;
+            }
+
+            const fs::path selectedFsPath(selectedItem.filePath);
+            const std::wstring selectedParent = selectedFsPath.parent_path().wstring();
+            const std::wstring selectedStem = selectedFsPath.stem().wstring();
+            for (const browser::BrowserItem& candidate : modelItems)
+            {
+                if (browser::FilePathsEqual(candidate.filePath, selectedItem.filePath))
+                {
+                    continue;
+                }
+
+                if (!FolderPathsEqual(fs::path(candidate.filePath).parent_path().wstring(), selectedParent)
+                    || !StringsEqualInsensitive(fs::path(candidate.filePath).stem().wstring(), selectedStem))
+                {
+                    continue;
+                }
+
+                const bool candidateIsRaw = decode::IsRawFileType(candidate.fileType);
+                const bool candidateIsJpeg = IsJpegFileType(candidate.fileType);
+                if (!((selectedIsRaw && candidateIsJpeg) || (selectedIsJpeg && candidateIsRaw)))
+                {
+                    continue;
+                }
+
+                const auto existing = std::find_if(expandedPaths.begin(), expandedPaths.end(), [&](const std::wstring& existingPath)
+                {
+                    return browser::FilePathsEqual(existingPath, candidate.filePath);
+                });
+                if (existing == expandedPaths.end())
+                {
+                    expandedPaths.push_back(candidate.filePath);
+                }
+            }
+        }
+
+        if (pairedCompanionCount && expandedPaths.size() > selectedPaths.size())
+        {
+            *pairedCompanionCount = expandedPaths.size() - selectedPaths.size();
+        }
+
+        return expandedPaths;
     }
 
     void MainWindow::OpenFolder()
@@ -4543,6 +4649,46 @@ namespace hyperbrowse::ui
         return false;
     }
 
+    void MainWindow::StartCompareSelected()
+    {
+        if (!browserModel_ || !browserPaneController_ || !viewerWindow_)
+        {
+            return;
+        }
+
+        if (browserPaneController_->SelectedCount() != 2)
+        {
+            MessageBoxW(hwnd_, L"Select exactly two images to compare.", L"Compare Selected", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::vector<browser::BrowserItem> items = CollectItemsForScope(true);
+        if (items.size() != 2)
+        {
+            return;
+        }
+
+        int selectedIndex = 0;
+        const int primaryModelIndex = browserPaneController_->PrimarySelectedModelIndex();
+        const auto& modelItems = browserModel_->Items();
+        if (primaryModelIndex >= 0 && primaryModelIndex < static_cast<int>(modelItems.size()))
+        {
+            const std::wstring& primaryPath = modelItems[static_cast<std::size_t>(primaryModelIndex)].filePath;
+            if (browser::FilePathsEqual(items[1].filePath, primaryPath))
+            {
+                selectedIndex = 1;
+            }
+        }
+
+        const viewer::CompareDirection compareDirection = selectedIndex == 0
+            ? viewer::CompareDirection::Next
+            : viewer::CompareDirection::Previous;
+        if (OpenItemsInViewer(std::move(items), selectedIndex, false))
+        {
+            viewerWindow_->SetCompareMode(true, compareDirection);
+        }
+    }
+
     bool MainWindow::IsFavoriteDestination(std::wstring_view folderPath) const
     {
         return std::any_of(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& candidate)
@@ -4602,7 +4748,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::vector<std::wstring> sourcePaths = browserPaneController_->SelectedFilePathsSnapshot();
+        const std::vector<std::wstring> sourcePaths = SelectedFileOperationPathsSnapshot();
         if (sourcePaths.empty())
         {
             MessageBoxW(hwnd_,
@@ -4685,6 +4831,7 @@ namespace hyperbrowse::ui
         }
 
         AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+        AppendMenuW(menu, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
         AppendMenuW(menu, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
         AppendMenuW(menu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information");
         AppendMenuW(menu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer");
@@ -4695,6 +4842,7 @@ namespace hyperbrowse::ui
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
         AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
+        AppendMenuW(menu, MF_STRING, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS, L"Include Paired &RAW+JPEG");
         AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete");
         AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -4723,6 +4871,8 @@ namespace hyperbrowse::ui
         AppendMenuW(menu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree");
 
         EnableMenuItem(menu, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_COMPARE_SELECTED,
+                   MF_BYCOMMAND | ((browserPaneController_ && browserPaneController_->SelectedCount() == 2) ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
                    MF_BYCOMMAND | ((hasSelection && hasSecondaryMonitor) ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
@@ -4733,6 +4883,8 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_COPY_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_MOVE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+        CheckMenuItem(menu, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS,
+                  MF_BYCOMMAND | (rawJpegPairedOperationsEnabled_ ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(menu, ID_FILE_DELETE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_DELETE_SELECTION_PERMANENT, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
@@ -5168,7 +5320,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::vector<std::wstring> sourcePaths = browserPaneController_->SelectedFilePathsSnapshot();
+        const std::vector<std::wstring> sourcePaths = SelectedFileOperationPathsSnapshot();
         if (sourcePaths.empty())
         {
             MessageBoxW(hwnd_, L"Select one or more images first.", permanent ? L"Permanent Delete" : L"Delete", MB_OK | MB_ICONINFORMATION);
@@ -6014,6 +6166,7 @@ namespace hyperbrowse::ui
 
         const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
+        const bool hasCompareSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 2;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
         const browser::ThumbnailSizePreset thumbnailSizePreset = browserPaneController_
@@ -6024,6 +6177,7 @@ namespace hyperbrowse::ui
             : thumbnailDetailsVisible_;
 
         EnableMenuItem(menu_, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_COMPARE_SELECTED, MF_BYCOMMAND | (hasCompareSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
                    MF_BYCOMMAND | ((hasSelection && hasSecondaryMonitor) ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
@@ -6032,6 +6186,8 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+        CheckMenuItem(menu_, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS,
+                  MF_BYCOMMAND | (rawJpegPairedOperationsEnabled_ ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(menu_, ID_FILE_COPY_SELECTION,
                        MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_MOVE_SELECTION,
@@ -6411,6 +6567,11 @@ namespace hyperbrowse::ui
                 viewerMouseWheelBehavior_ = static_cast<viewer::MouseWheelBehavior>(value);
             }
 
+            if (TryReadDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, &value))
+            {
+                rawJpegPairedOperationsEnabled_ = value != 0;
+            }
+
             RegCloseKey(key);
         }
 
@@ -6451,6 +6612,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueSlideshowTransitionDuration, static_cast<DWORD>(slideshowTransitionDurationMs_));
             WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueViewerMouseWheelBehavior, static_cast<DWORD>(viewerMouseWheelBehavior_));
+            WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
             RegCloseKey(key);
         }
     }
@@ -6830,6 +6992,9 @@ namespace hyperbrowse::ui
         case ID_FILE_OPEN_SELECTED:
             OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1);
             return true;
+        case ID_FILE_COMPARE_SELECTED:
+            StartCompareSelected();
+            return true;
         case ID_FILE_VIEW_ON_SECONDARY_MONITOR:
             OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1, true);
             return true;
@@ -6850,6 +7015,11 @@ namespace hyperbrowse::ui
             return true;
         case ID_FILE_MOVE_SELECTION_BROWSE:
             StartMoveSelection();
+            return true;
+        case ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS:
+            rawJpegPairedOperationsEnabled_ = !rawJpegPairedOperationsEnabled_;
+            UpdateStatusText();
+            UpdateMenuState();
             return true;
         case ID_FILE_DELETE_SELECTION:
             StartDeleteSelection(false);

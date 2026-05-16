@@ -198,6 +198,8 @@ namespace hyperbrowse::viewer
 
         currentIndex_ = selectedIndex;
         darkTheme_ = darkTheme;
+        compareMode_ = false;
+        compareDirection_ = CompareDirection::Next;
         StopSlideshow();
         StopTransition();
         ResetCachedImageSlots();
@@ -345,6 +347,43 @@ namespace hyperbrowse::viewer
         return slideshowActive_;
     }
 
+    void ViewerWindow::SetCompareMode(bool enabled, CompareDirection direction)
+    {
+        if (!enabled)
+        {
+            compareMode_ = false;
+            d2dCompareImageBitmap_.Reset();
+            d2dCompareImageIndex_ = -1;
+            StopTransition();
+            UpdateWindowTitle();
+            if (hwnd_ && IsWindow(hwnd_) != FALSE)
+            {
+                RequestRepaint();
+            }
+            return;
+        }
+
+        compareDirection_ = ResolveCompareDirection(direction);
+        compareMode_ = ActiveCompareIndex() >= 0;
+        d2dCompareImageBitmap_.Reset();
+        d2dCompareImageIndex_ = -1;
+        StopTransition();
+        UpdateWindowTitle();
+        if (compareMode_ && currentImage_ && !pendingLoadActive_)
+        {
+            ScheduleAdjacentPrefetch(asyncState_->navigationGeneration.load(std::memory_order_acquire));
+        }
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            RequestRepaint();
+        }
+    }
+
+    bool ViewerWindow::IsCompareModeEnabled() const noexcept
+    {
+        return compareMode_;
+    }
+
     void ViewerWindow::SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept
     {
         mouseWheelBehavior_ = behavior;
@@ -439,6 +478,7 @@ namespace hyperbrowse::viewer
         }
 
         d2dCurrentImageBitmap_.Reset();
+        d2dCompareImageBitmap_.Reset();
         transitionFromBitmap_.Reset();
         pendingTransitionFromBitmap_.Reset();
         d2dStatusArtBitmap_.Reset();
@@ -451,6 +491,7 @@ namespace hyperbrowse::viewer
         d2dPanelBorderBrush_.Reset();
         d2dRenderTarget_.Reset();
         d2dCurrentImageIndex_ = -1;
+        d2dCompareImageIndex_ = -1;
     }
 
     void ViewerWindow::RebuildD2DBrushes()
@@ -514,6 +555,10 @@ namespace hyperbrowse::viewer
             title.append(std::to_wstring(items_.size()));
             title.append(L")");
         }
+        if (compareMode_ && ActiveCompareIndex() >= 0)
+        {
+            title.append(L" [Compare]");
+        }
 
         SetWindowTextW(hwnd_, title.c_str());
     }
@@ -541,10 +586,48 @@ namespace hyperbrowse::viewer
     {
         currentImage_.reset();
         d2dCurrentImageBitmap_.Reset();
+        d2dCompareImageBitmap_.Reset();
         d2dCurrentImageIndex_ = -1;
+        d2dCompareImageIndex_ = -1;
         currentSlot_ = {};
         previousSlot_ = {};
         nextSlot_ = {};
+    }
+
+    CompareDirection ViewerWindow::ResolveCompareDirection(CompareDirection preferred) const noexcept
+    {
+        if (CompareIndexForDirection(preferred) >= 0)
+        {
+            return preferred;
+        }
+
+        const CompareDirection alternate = preferred == CompareDirection::Next
+            ? CompareDirection::Previous
+            : CompareDirection::Next;
+        if (CompareIndexForDirection(alternate) >= 0)
+        {
+            return alternate;
+        }
+
+        return preferred;
+    }
+
+    int ViewerWindow::CompareIndexForDirection(CompareDirection direction) const noexcept
+    {
+        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        {
+            return -1;
+        }
+
+        const int compareIndex = currentIndex_ + static_cast<int>(direction);
+        return compareIndex >= 0 && compareIndex < static_cast<int>(items_.size())
+            ? compareIndex
+            : -1;
+    }
+
+    int ViewerWindow::ActiveCompareIndex() const noexcept
+    {
+        return CompareIndexForDirection(ResolveCompareDirection(compareDirection_));
     }
 
     void ViewerWindow::ResetPrefetchStatistics()
@@ -747,7 +830,8 @@ namespace hyperbrowse::viewer
     void ViewerWindow::ScheduleAdjacentPrefetch(std::uint64_t navigationGeneration)
     {
         const bool slideshowAheadPrefetch = slideshowActive_ && items_.size() > 1;
-        if (!kEnableFullImagePrefetch && !slideshowAheadPrefetch)
+        const bool comparePrefetch = compareMode_ && items_.size() > 1;
+        if (!kEnableFullImagePrefetch && !slideshowAheadPrefetch && !comparePrefetch)
         {
             (void)navigationGeneration;
             return;
@@ -760,7 +844,7 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        if (slideshowAheadPrefetch)
+        if (slideshowAheadPrefetch && !comparePrefetch)
         {
             const int nextIndex = (currentIndex_ + 1) % static_cast<int>(items_.size());
             if (nextSlot_.index == nextIndex && nextSlot_.image)
@@ -997,6 +1081,30 @@ namespace hyperbrowse::viewer
         {
             RequestRepaint();
         }
+    }
+
+    void ViewerWindow::ToggleCompareMode()
+    {
+        SetCompareMode(!compareMode_, compareDirection_);
+    }
+
+    void ViewerWindow::ActivateComparedImage()
+    {
+        if (!compareMode_)
+        {
+            return;
+        }
+
+        const CompareDirection activeDirection = ResolveCompareDirection(compareDirection_);
+        if (CompareIndexForDirection(activeDirection) < 0)
+        {
+            return;
+        }
+
+        compareDirection_ = activeDirection == CompareDirection::Next
+            ? CompareDirection::Previous
+            : CompareDirection::Next;
+        Navigate(activeDirection == CompareDirection::Next ? +1 : -1);
     }
 
     void ViewerWindow::ToggleInfoOverlays()
@@ -1517,6 +1625,10 @@ namespace hyperbrowse::viewer
             previousSlot_.prefetched = true;
             prefetchCompletedCount_.fetch_add(1, std::memory_order_acq_rel);
             util::IncrementCounter(L"viewer.prefetch.completed");
+            if (hwnd_ && compareMode_)
+            {
+                RequestRepaint();
+            }
             return 0;
         }
 
@@ -1527,6 +1639,10 @@ namespace hyperbrowse::viewer
             nextSlot_.prefetched = true;
             prefetchCompletedCount_.fetch_add(1, std::memory_order_acq_rel);
             util::IncrementCounter(L"viewer.prefetch.completed");
+            if (hwnd_ && compareMode_)
+            {
+                RequestRepaint();
+            }
             if (slideshowAdvancePending_ && slideshowActive_ && !pendingLoadActive_ && !transitionActive_)
             {
                 slideshowAdvancePending_ = false;
@@ -1567,10 +1683,24 @@ namespace hyperbrowse::viewer
             switch (wParam)
             {
             case VK_RIGHT:
-                Navigate(+1);
+                if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
+                {
+                    SetCompareMode(true, CompareDirection::Next);
+                }
+                else
+                {
+                    Navigate(+1);
+                }
                 return 0;
             case VK_LEFT:
-                Navigate(-1);
+                if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
+                {
+                    SetCompareMode(true, CompareDirection::Previous);
+                }
+                else
+                {
+                    Navigate(-1);
+                }
                 return 0;
             case VK_TAB:
                 ToggleInfoOverlays();
@@ -1594,6 +1724,12 @@ namespace hyperbrowse::viewer
                 return 0;
             case 'R':
                 RotateRight();
+                return 0;
+            case 'C':
+                ToggleCompareMode();
+                return 0;
+            case 'X':
+                ActivateComparedImage();
                 return 0;
             case VK_SPACE:
                 if (IsSlideshowActive())
@@ -1846,7 +1982,28 @@ namespace hyperbrowse::viewer
                 else
                 {
                     RECT gdiClientRect{0, 0, static_cast<LONG>(clientWidth), static_cast<LONG>(clientHeight)};
-                    const double scale = EffectiveScaleForClient(gdiClientRect);
+                    const CompareDirection activeCompareDirection = ResolveCompareDirection(compareDirection_);
+                    const int compareIndex = compareMode_ ? CompareIndexForDirection(activeCompareDirection) : -1;
+                    const browser::BrowserItem* compareItem =
+                        (compareIndex >= 0 && compareIndex < static_cast<int>(items_.size()))
+                        ? &items_[static_cast<std::size_t>(compareIndex)]
+                        : nullptr;
+                    const bool compareLayout = compareMode_ && compareItem != nullptr;
+                    RECT primaryRect = gdiClientRect;
+                    RECT compareRect{};
+                    if (compareLayout)
+                    {
+                        const LONG totalWidth = gdiClientRect.right - gdiClientRect.left;
+                        const LONG gapWidth = std::clamp<LONG>(totalWidth / 40, 12, 24);
+                        const LONG paneWidth = std::max<LONG>(1, (totalWidth - gapWidth) / 2);
+                        primaryRect.right = primaryRect.left + paneWidth;
+                        compareRect.left = primaryRect.right + gapWidth;
+                        compareRect.top = gdiClientRect.top;
+                        compareRect.right = gdiClientRect.right;
+                        compareRect.bottom = gdiClientRect.bottom;
+                    }
+
+                    const double scale = EffectiveScaleForClient(primaryRect);
                     const int zoomPercent = std::max(1, static_cast<int>(std::lround(scale * 100.0)));
                     if (zoomPercent != currentZoomPercent_)
                     {
@@ -1880,18 +2037,93 @@ namespace hyperbrowse::viewer
                         d2dCurrentImageIndex_ = d2dCurrentImageBitmap_ ? displayedImageIndex : -1;
                     };
 
+                    const cache::CachedThumbnail* compareImage = nullptr;
+                    auto ensureCompareBitmap = [&]()
+                    {
+                        if (!compareLayout)
+                        {
+                            d2dCompareImageBitmap_.Reset();
+                            d2dCompareImageIndex_ = -1;
+                            return;
+                        }
+
+                        const CachedImageSlot& compareSlot = activeCompareDirection == CompareDirection::Previous
+                            ? previousSlot_
+                            : nextSlot_;
+                        if (compareSlot.index != compareIndex || !compareSlot.image)
+                        {
+                            d2dCompareImageBitmap_.Reset();
+                            d2dCompareImageIndex_ = -1;
+                            return;
+                        }
+
+                        compareImage = compareSlot.image.get();
+                        if (d2dCompareImageIndex_ == compareIndex && d2dCompareImageBitmap_)
+                        {
+                            return;
+                        }
+
+                        const auto uploadStartedAt = std::chrono::steady_clock::now();
+                        d2dCompareImageBitmap_ = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(
+                            d2dRenderTarget_.Get(), *compareSlot.image);
+                        const double uploadMs = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - uploadStartedAt).count();
+                        util::RecordTiming(L"viewer.upload.d2d.compare", uploadMs);
+                        d2dCompareImageIndex_ = d2dCompareImageBitmap_ ? compareIndex : -1;
+                    };
+
+                    auto drawComparePlaceholder = [&](std::wstring_view text)
+                    {
+                        if (!compareLayout)
+                        {
+                            return;
+                        }
+
+                        const D2D1_RECT_F panelRect = D2D1::RectF(
+                            static_cast<float>(compareRect.left + 24),
+                            static_cast<float>(compareRect.top + 24),
+                            static_cast<float>(compareRect.right - 24),
+                            static_cast<float>(compareRect.bottom - 24));
+                        const D2D1_ROUNDED_RECT roundedPanel = D2D1::RoundedRect(panelRect, 10.0f, 10.0f);
+                        if (d2dPanelFillBrush_)
+                        {
+                            d2dRenderTarget_->FillRoundedRectangle(roundedPanel, d2dPanelFillBrush_.Get());
+                        }
+                        if (d2dPanelBorderBrush_)
+                        {
+                            d2dRenderTarget_->DrawRoundedRectangle(roundedPanel, d2dPanelBorderBrush_.Get(), 1.0f);
+                        }
+                        if (d2dInfoFormat_ && d2dMutedTextBrush_)
+                        {
+                            d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                            d2dRenderTarget_->DrawText(
+                                text.data(),
+                                static_cast<UINT32>(text.size()),
+                                d2dInfoFormat_.Get(),
+                                panelRect,
+                                d2dMutedTextBrush_.Get());
+                            d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                        }
+                    };
+
                     const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
                     const int sourceWidth = currentImage_->SourceWidth();
                     const int sourceHeight = currentImage_->SourceHeight();
                     const int rotatedWidth = swapDimensions ? sourceHeight : sourceWidth;
                     const int rotatedHeight = swapDimensions ? sourceWidth : sourceHeight;
                     ensureCurrentBitmap();
+                    ensureCompareBitmap();
 
-                    const double fitScale = FitScaleForImage(*currentImage_, gdiClientRect);
+                    const double fitScale = FitScaleForImage(*currentImage_, primaryRect);
                     const float currentScaleMultiplier = static_cast<float>(scale / std::max(0.01, fitScale));
                     bool drewTransition = false;
 
-                    if (transitionActive_ && transitionFromImage_)
+                    if (compareLayout && transitionActive_)
+                    {
+                        StopTransition();
+                    }
+
+                    if (!compareLayout && transitionActive_ && transitionFromImage_)
                     {
                         const double elapsedMs = std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - transitionStartedAt_).count();
@@ -1957,13 +2189,41 @@ namespace hyperbrowse::viewer
                     if (!drewTransition && d2dCurrentImageBitmap_)
                     {
                         DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
-                                        gdiClientRect, 1.0f, currentScaleMultiplier,
+                                        primaryRect, 1.0f, currentScaleMultiplier,
                                         static_cast<float>(panOffsetX_), static_cast<float>(panOffsetY_));
+                        if (compareLayout)
+                        {
+                            if (compareImage && d2dCompareImageBitmap_)
+                            {
+                                DrawImageBitmap(d2dRenderTarget_.Get(), d2dCompareImageBitmap_.Get(), *compareImage,
+                                                compareRect, 1.0f, currentScaleMultiplier,
+                                                static_cast<float>(panOffsetX_), static_cast<float>(panOffsetY_));
+                            }
+                            else
+                            {
+                                drawComparePlaceholder(loading_ ? L"Loading compare image..." : L"Preparing adjacent image...");
+                            }
+
+                            if (d2dPanelBorderBrush_)
+                            {
+                                const float dividerX = static_cast<float>(primaryRect.right + ((compareRect.left - primaryRect.right) / 2));
+                                d2dRenderTarget_->DrawLine(D2D1::Point2F(dividerX, 20.0f),
+                                                           D2D1::Point2F(dividerX, clientHeight - 20.0f),
+                                                           d2dPanelBorderBrush_.Get(),
+                                                           1.0f);
+                            }
+                        }
                     }
 
                     if (infoOverlaysVisible_)
                     {
-                        const std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
+                        std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
+                        if (compareLayout && compareItem)
+                        {
+                            fileName.append(L"  <->  ");
+                            fileName.append(compareItem->fileName);
+                        }
+
                         std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
                             + std::to_wstring(static_cast<int>(items_.size()));
                         if (currentItem)
@@ -1973,6 +2233,11 @@ namespace hyperbrowse::viewer
                             topLine.append(L"  |  ");
                             topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
                         }
+                        if (compareLayout)
+                        {
+                            topLine.append(L"  |  Compare ");
+                            topLine.append(activeCompareDirection == CompareDirection::Next ? L"next" : L"previous");
+                        }
 
                         std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
                         bottomLine.append(L"  |  ");
@@ -1980,10 +2245,16 @@ namespace hyperbrowse::viewer
                         bottomLine.append(L"%");
                         bottomLine.append(L"  |  ");
                         bottomLine.append(zoomMode_ == ZoomMode::Fit ? L"Fit" : L"Custom");
+                        if (compareLayout)
+                        {
+                            bottomLine.append(compareImage
+                                ? L"  |  Shift+Left/Right change pair  |  C toggle  |  X swap"
+                                : L"  |  Loading compare image...");
+                        }
 
                         const float availablePanelWidth = std::max(120.0f, clientWidth - 32.0f);
-                        const float topPanelWidth = std::min(560.0f, availablePanelWidth);
-                        const float bottomPanelWidth = std::min(320.0f, availablePanelWidth);
+                        const float topPanelWidth = std::min(compareLayout ? 760.0f : 560.0f, availablePanelWidth);
+                        const float bottomPanelWidth = std::min(compareLayout ? 560.0f : 320.0f, availablePanelWidth);
                         D2D1_RECT_F topPanel = D2D1::RectF(16, 16, 16 + topPanelWidth, 74);
                         D2D1_RECT_F bottomPanel = D2D1::RectF(clientWidth - 16 - bottomPanelWidth, clientHeight - 52, clientWidth - 16, clientHeight - 16);
 

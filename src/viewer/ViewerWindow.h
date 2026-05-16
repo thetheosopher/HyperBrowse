@@ -17,6 +17,12 @@
 
 namespace hyperbrowse::viewer
 {
+    enum class CompareDirection : int
+    {
+        Previous = -1,
+        Next = 1,
+    };
+
     enum class MouseWheelBehavior : int
     {
         Zoom = 0,
@@ -57,6 +63,8 @@ namespace hyperbrowse::viewer
         void StartSlideshow(UINT intervalMs = 3000);
         void StopSlideshow();
         bool IsSlideshowActive() const noexcept;
+        void SetCompareMode(bool enabled, CompareDirection direction = CompareDirection::Next);
+        bool IsCompareModeEnabled() const noexcept;
         void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
         void SetDarkTheme(bool enabled);
@@ -113,6 +121,8 @@ namespace hyperbrowse::viewer
         void SetActualSize();
         void RotateLeft();
         void RotateRight();
+        void ToggleCompareMode();
+        void ActivateComparedImage();
         void ToggleInfoOverlays();
         HMONITOR ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept;
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
@@ -123,6 +133,9 @@ namespace hyperbrowse::viewer
         void BeginTransitionFromPending();
         void StopTransition(bool clearPending = true);
         void ResetViewState();
+        CompareDirection ResolveCompareDirection(CompareDirection preferred) const noexcept;
+        int CompareIndexForDirection(CompareDirection direction) const noexcept;
+        int ActiveCompareIndex() const noexcept;
         double FitScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const;
         double FitScaleForClient(const RECT& clientRect) const;
         double EffectiveScaleForClient(const RECT& clientRect) const;
@@ -166,6 +179,8 @@ namespace hyperbrowse::viewer
         int rotationQuarterTurns_{};
         double panOffsetX_{};
         double panOffsetY_{};
+        bool compareMode_{};
+        CompareDirection compareDirection_{CompareDirection::Next};
         bool infoOverlaysVisible_{true};
         MouseWheelBehavior mouseWheelBehavior_{MouseWheelBehavior::Zoom};
         bool panning_{};
@@ -213,8 +228,10 @@ namespace hyperbrowse::viewer
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dNameFormat_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dInfoFormat_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dCurrentImageBitmap_;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dCompareImageBitmap_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dStatusArtBitmap_;
         int d2dCurrentImageIndex_{-1};
+        int d2dCompareImageIndex_{-1};
 
         double smoothZoomTarget_{1.0};
         double smoothZoomCurrent_{1.0};

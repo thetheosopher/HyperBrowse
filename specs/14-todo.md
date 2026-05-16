@@ -135,8 +135,8 @@ items were addressed in priority order:
 
 ### TODO: Compare/Cull Lite (P1.1)
 - **Source:** spec 10 §9.2 P1.1
-- **Status:** Not implemented.
-- **Scope:** Lightweight 2-up compare in the viewer for culling similar shots. Start with two-image compare only.
+- **Status:** ~~Not implemented.~~ Done for the lightweight pass. Added a two-up viewer compare mode that reuses adjacent full-image slots, browser-side `Compare Selected` launch for exactly two selected items, and viewer controls for compare (`C` toggle, `Shift+Left/Right` choose previous/next, `X` swap into the compared image).
+- **Scope:** ~~Lightweight 2-up compare in the viewer for culling similar shots. Start with two-image compare only.~~ Done for the initial lightweight viewer/browser slice.
 
 ### TODO: Recent Destinations and Favorites (P1.2)
 - **Source:** spec 10 §9.2 P1.2
@@ -145,8 +145,8 @@ items were addressed in priority order:
 
 ### TODO: RAW+JPEG Paired Operations (P1.3)
 - **Source:** spec 10 §9.2 P1.3
-- **Status:** Not implemented.
-- **Scope:** Optional paired-action mode: copy/move/delete RAW and matching JPEG together.
+- **Status:** ~~Not implemented.~~ Done for copy/move/delete. Added a persisted `Include Paired RAW+JPEG` mode that expands selected file-operation source paths to matching same-folder/same-stem RAW or JPEG companions, exposes the mode in the File menu and browser context menu, and shows paired companion counts in the status bar when the mode is on.
+- **Scope:** ~~Optional paired-action mode: copy/move/delete RAW and matching JPEG together.~~ Done for the file-operation pass.
 
 ### TODO: Persistent Disk Thumbnail Cache (P2.1)
 - **Source:** spec 10 §9.3 P2.1

@@ -48,6 +48,7 @@ namespace hyperbrowse::viewer
     class ViewerWindow;
 }
 
+    enum class CompareDirection : int;
 namespace hyperbrowse::ui
 {
     class DiagnosticsWindow;
@@ -176,11 +177,12 @@ namespace hyperbrowse::ui
         void LoadFolderAsync(std::wstring folderPath);
         void RefreshBrowserPane();
         void OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor = false);
-        void OpenItemsInViewer(std::vector<browser::BrowserItem> items,
+        bool OpenItemsInViewer(std::vector<browser::BrowserItem> items,
                        int selectedIndex,
                        bool startSlideshow,
                        bool preferSecondaryMonitor = false);
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
+        std::vector<std::wstring> SelectedFileOperationPathsSnapshot(std::size_t* pairedCompanionCount = nullptr) const;
         bool ChooseFolder(std::wstring* folderPath) const;
         bool HasSelectedJpegItems() const;
         void ShowBrowserContextMenu(POINT screenPoint);
@@ -190,6 +192,7 @@ namespace hyperbrowse::ui
         void ResetDiagnosticsState();
         void ShowImageInformation();
         void StartRenameSelectedImage();
+        void StartCompareSelected();
         void StartCopySelection();
         void StartMoveSelection();
         void StartDeleteSelection(bool permanent);
@@ -291,6 +294,7 @@ namespace hyperbrowse::ui
         BrowserMode browserMode_{BrowserMode::Thumbnails};
         ThemeMode themeMode_{ThemeMode::Light};
         bool recursiveBrowsingEnabled_{false};
+        bool rawJpegPairedOperationsEnabled_{false};
         bool suppressTreeSelectionChange_{};
         DragMode dragMode_{DragMode::None};
         HBRUSH backgroundBrush_{};
