@@ -182,10 +182,10 @@ The `specs/` directory tracks both design intent and implementation follow-up. U
 
 HyperBrowse is already a capable browser/viewer, but it is still deliberately scoped. Current non-goals or deferred items include:
 
-- Heavy image editing, annotations, and organizer-style database features.
-- Persistent disk thumbnail caching.
-- In-app rename, drag-and-drop file operations, and compare/cull mode.
+- Heavy image editing, annotations, cropping, and organizer-style database features.
+- Drag-and-drop file operations between panes or instances.
 - Multipage TIFF navigation and animated GIF thumbnails.
+- Plugin ecosystems, duplicate finders, face detection, and library/database back ends.
 
 If you want the current backlog in detail, start with [specs/14-todo.md](specs/14-todo.md).
 

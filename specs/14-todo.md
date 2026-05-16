@@ -1,246 +1,432 @@
-# HyperBrowse TODO — Unimplemented Spec Items
+# HyperBrowse Enhancement Plan
 
-This document collects all features mentioned in the specification documents that are not yet implemented, organized by priority and source spec.
+Last reviewed: 2026-05-16
 
-Last reviewed: 2026-04-17
+This document tracks the **forward-looking** HyperBrowse backlog. Completed
+items have been archived (see [Appendix A](#appendix-a--recently-completed-archive))
+so the active plan stays focused.
 
----
+The plan is organized around a single product north star:
 
-## Recently Completed (Hardening Pass — 2026-04-17)
-
-After a deep alignment review between spec and code, the following hardening
-items were addressed in priority order:
-
-- **P0 lifetime fix:** `WriteStringValue` now copies the `wstring_view` into a
-  `std::wstring` before passing to `RegSetValueExW` (eliminates a possible
-  heap over-read when the view did not point to a null-terminated buffer).
-- **P0 i18n:** Exception messages from STL/Win32 now go through
-  `hyperbrowse::util::WidenExceptionMessage` (CP_ACP) instead of
-  `std::wstring(begin, end)` widening, which mangled multi-byte text.
-- **P0 cancellation:** `ThumbnailScheduler` now tracks per-batch epochs and
-  skips poisoning `failedKeys_` and notifying decode failure for jobs whose
-  request was cancelled before decode started.
-- **P0 session end:** `WM_QUERYENDSESSION` and `WM_ENDSESSION` now save window
-  state so reboots/log-offs no longer lose layout.
-- **P1 priority queue:** `pendingJobs_` is now a `std::multiset` keyed by
-  (priority asc, sequence asc) so the highest-priority eligible job is
-  selected in O(log n) without copy-and-sort on every dequeue.
-- **P1 PendingJob caches extension kind:** `isRaw`/`isJpeg` are computed once
-  at insert time, removing repeated `IsRawCacheKey`/`IsJpegCacheKey`
-  recomputation on the hot path.
-- **P1 viewer thread pool:** Replaced `std::async` per request in
-  `ViewerWindow` with a small `BackgroundExecutor` (2 workers), bounding
-  thread creation under fast navigation.
-- **P1 ordinal compare helper:** `EqualsIgnoreCaseOrdinal` (CompareStringOrdinal)
-  removes per-call allocation in case-insensitive string comparison.
-- **P1 D2D HQ cubic:** `D2DRenderer` now requests `ID2D1Factory1` and the new
-  `DrawBitmapHighQuality` helper QIs the render target for
-  `ID2D1DeviceContext` and uses `D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC`
-  for image scaling. Used by `ViewerWindow::DrawImageBitmap` and the browser
-  thumbnail preview draw. Falls back to LINEAR on Windows 7. Spec 15 was
-  also corrected (the cubic enum referenced earlier did not exist on
-  `ID2D1RenderTarget`).
-- **P1 spec hygiene:** spec 16 now has an Implementation Status section that
-  honestly reflects the partial state of the toolbar redesign (icon strip and
-  flashing fix done, D2D toolbar paint and full menu restructure deferred).
-- **P2 dead code:** Removed `BrowserPane::smoothScrollVelocity_` and the
-  unused `kSmoothScrollDeceleration` constant; deleted empty `src/platform/`
-  directory; corrected `BUILD_TESTS` option help text.
-- **P2 catch-handler i18n:** `FolderEnumerationService` and
-  `FolderTreeEnumerationService` use `WidenExceptionMessage` for caught
-  `std::exception::what()` strings.
-- **P2 build refactor:** Extracted shared compilation units into a
-  `HyperBrowseCore` STATIC library so `HyperBrowse.exe` and
-  `HyperBrowseTests.exe` link against the same set of object files instead of
-  recompiling every translation unit twice.
-- **P2 CI:** Added `.github/workflows/ci.yml` running `cmake --preset
-  vs2022-x64`, debug build of tests, smoke test execution, and release build
-  of `HyperBrowse.exe` on `windows-latest`.
-
-### Deferred for a dedicated session
-
-- **MainWindow.cpp split (~6300 lines).** Recommended decomposition:
-  `ui/Toolbar.{h,cpp}`, `ui/Theme.{h,cpp}`, `ui/Registry.{h,cpp}`,
-  `ui/dialogs/{TextInputDialog,AboutDialog,ImageInfoDialog}.{h,cpp}`,
-  `ui/Commands.h`. This is mechanically straightforward but high-volume and
-  needs its own session with focused build verification after each
-  extraction.
-- **doctest migration of `tests/smoke.cpp`.** The throw-on-first-failure
-  harness works, scenarios are already isolated functions, and switching to
-  doctest is purely a developer-experience change. Drop `external/doctest/`
-  and convert each scenario to a `TEST_CASE` block when it next becomes
-  worthwhile.
+> **HyperBrowse is the fastest practical Windows image browser/viewer.**
+> Every accepted item must either (a) extend competitive workflow depth without
+> diluting that brand, or (b) measurably improve perceived speed, throughput,
+> or resource efficiency on real hardware.
 
 ---
 
-## P0 — High-Value Gaps in Current v1 Scope
+## 1. Guiding Principles
 
-### TODO: Sort Direction Toggle (ascending/descending)
-- **Source:** spec 01 §7 (Sorting), spec 04 §3 (View menu)
-- **Status:** ~~Not implemented.~~ Done. Ascending/descending toggle added to all sort menus (menu bar, action strip, context menu). Direction arrow (↑/↓) shown on action strip sort button. Persisted to registry as `SortAscending`.
-- **Scope:** ~~Add ascending/descending toggle to View > Sort By and action strip Sort dropdown. Persist to registry.~~ Done.
-
-### TODO: Date-Taken Sort Mode
-- **Source:** spec 10 §7.1 (Workflow gaps), spec 10 §9.1 P0.4
-- **Status:** ~~Not available as a sort mode.~~ Done. `DateTaken = 6` added to `BrowserSortMode`. Uses `dateTakenTimestampUtc` from Shell/LibRaw. Items without timestamp sort to end.
-- **Scope:** ~~Add `DateTaken` to `BrowserSortMode`.~~ Done.
-
-### TODO: Selected-Item Details Strip or Side Panel
-- **Source:** spec 10 §9.1 P0.4, spec 12 §8 (follow-up item 3), spec 13 §5 (recommendation 3)
-- **Status:** ~~Not implemented.~~ Done. Added a toggleable info strip below the browser pane showing filename, type, file size, dimensions, camera model, and date taken for the focused item. Toggle via View > Show Info Strip. Persisted to registry as `DetailsStripVisible`. Theme-aware via `WM_CTLCOLORSTATIC`.
-- **Scope:** ~~Add a compact info strip or collapsible side panel showing metadata for the focused/selected item without opening the viewer.~~ Done.
-
-### TODO: Configurable Slideshow Interval
-- **Source:** spec 04 §9 (Slideshow)
-- **Status:** ~~No UI to configure it.~~ Done. `TaskDialogIndirect` picker offers 1/2/3/5/10 second intervals before starting slideshow. Persisted to registry as `SlideshowIntervalMs`.
-- **Scope:** ~~Add a slideshow settings surface.~~ Done.
-
-### TODO: Image Information as Proper Dialog
-- **Source:** spec 04 §10 (Metadata surfaces)
-- **Status:** ~~Currently uses `MessageBoxW` with formatted text.~~ Implemented using `TaskDialogIndirect` with app icon, file info content area, and expandable EXIF/IPTC details section.
-- **Scope:** ~~Replace with a custom dialog that shows the app icon, structured metadata fields, and optionally a thumbnail preview.~~ Done.
+1. **Performance is the brand.** Cold-start latency, first-visible-thumbnail
+   latency, scroll smoothness, and viewer-open latency are budgeted and
+   defended in CI (see Theme D).
+2. **Browser/viewer first.** No editor surface, no organizer/database
+   lock-in, no plugin ecosystem.
+3. **Adapt to the host.** Thread pools, cache budgets, prefetch depth, and
+   GPU paths all auto-scale to the machine they run on, with explicit user
+   override available.
+4. **Native and lean.** Win32 + D2D + DirectWrite + WIC + LibRaw + optional
+   nvJPEG. New dependencies require justification and an opt-out.
+5. **No regressions.** Every shipped feature has a measurable hold-the-line
+   target captured in the benchmark suite.
 
 ---
 
-## P1 — Architecture and Rendering Gaps
+## 2. Current Capability Snapshot
 
-### TODO: Direct2D / Direct3D 11 Rendering Backend
-- **Source:** spec 02 §1 (Recommended Approach), spec 02 §6 (Rendering Architecture), spec 15
-- **Status:** ~~All rendering uses GDI.~~ Done. D2D rendering implemented for BrowserPane (thumbnail grid) and ViewerWindow (full-image viewer). DirectWrite text throughout. Per-monitor DPI awareness v2. Smooth inertial scroll and smooth zoom animations. GDI fallback retained for details view and edge cases. See spec 15 for full details.
-- **Scope:** ~~Deferred.~~ Done.
+The active plan assumes the following are already shipped and stable:
 
-### TODO: Formal Decoder Abstraction Interface
-- **Source:** spec 02 §5 (Decoder Abstraction)
-- **Status:** Decode layer uses free functions and static methods. No formal `CanDecode`/`ReadHeader`/`ReadMetadata`/`DecodeThumbnail`/`DecodeFullImage` polymorphic interface.
-- **Scope:** Deferred. Current ad-hoc decode chain (nvJPEG → WIC → LibRaw) works and the function-level interface is adequate for the current format set.
+- D2D/DirectWrite rendering in the browser grid and viewer; per-monitor DPI v2.
+- Async folder enumeration, folder tree, metadata, watching, thumbnail
+  scheduling, and batch convert.
+- Runtime-adaptive thumbnail cache (128 MB–1 GB) and metadata cache (2,048–
+  65,536 entries) sized from `GlobalMemoryStatusEx`.
+- Optional `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache` persistent cache.
+- Optional nvJPEG acceleration and optional out-of-process LibRaw helper.
+- File management: copy, move, rename, batch rename, delete, permanent
+  delete, reveal, copy path, properties, recent destinations, pinned
+  favorites, RAW+JPEG paired operations.
+- Compare/cull lite (two-up viewer), ratings/tags, filter-box (including
+  `rating:>=N` / `tag:*`), date-taken sort, sort direction toggle,
+  configurable viewer mouse wheel, slideshow with transition styles.
+- Diagnostics window, structured log, smoke + integration tests, GitHub
+  Actions CI, portable zip + Inno Setup 6 installer.
 
-### TODO: Memory Pools for Hot-Path Buffers
-- **Source:** spec 03 §7.2 (Memory pools)
-- **Status:** Not implemented. Temporary buffers are allocated per-decode.
-- **Scope:** Deferred. Only pursue if profiling shows allocation pressure in the decode/scale/render pipeline.
-
-### TODO: Memory Pressure Response
-- **Source:** spec 03 §7.4 (Memory pressure response)
-- **Status:** Not implemented beyond basic LRU eviction. No active monitoring of system memory or adaptive prefetch reduction.
-- **Scope:** Deferred. The 96 MB thumbnail cache cap and 512-entry metadata cache provide sufficient bounded behavior for current workloads.
-
-### TODO: Configurable Mouse Wheel Behavior in Viewer
-- **Source:** spec 04 §8.3 (Mouse behavior)
-- **Status:** ~~Mouse wheel always zooms. There is no option to switch to next/previous image navigation.~~ Done. Added View > Viewer Mouse Wheel with Zoom and Next/Previous Image modes. Persisted to registry as `ViewerMouseWheelBehavior` and applied live to open viewer windows.
-- **Scope:** ~~Add a viewer setting (registry + menu) to choose between zoom and navigate for mouse wheel.~~ Done.
+See [01-product-spec.md](01-product-spec.md), [03-performance-strategy.md](03-performance-strategy.md),
+and [15-d2d-rendering-migration.md](15-d2d-rendering-migration.md) for design
+detail.
 
 ---
 
-## P2 — Enhancement Backlog (from spec 10)
+## 3. Theme A — Performance & Adaptive Resource Controls
 
-### TODO: Compare/Cull Lite (P1.1)
-- **Source:** spec 10 §9.2 P1.1
-- **Status:** ~~Not implemented.~~ Done for the lightweight pass. Added a two-up viewer compare mode that reuses adjacent full-image slots, browser-side `Compare Selected` launch for exactly two selected items, explicit View-menu and toolbar compare entry points, and viewer controls for compare (`C` toggle, `Shift+Left/Right` choose previous/next, `X` swap into the compared image).
-- **Scope:** ~~Lightweight 2-up compare in the viewer for culling similar shots. Start with two-image compare only.~~ Done for the initial lightweight viewer/browser slice.
+The single most differentiating area HyperBrowse can press on right now.
+Competitors expose almost no resource controls. HyperBrowse should ship a
+small, opinionated set that is **safe by default** and **explicit when
+asked**.
 
-### TODO: Recent Destinations and Favorites (P1.2)
-- **Source:** spec 10 §9.2 P1.2
-- **Status:** ~~Not implemented.~~ Done for the menu-shortcut pass. Added registry-backed recent copy/move destinations, pinned favorite destinations, quick access to recent folders, and File-menu shortcuts for opening recent folders or sending the current selection to recent/favorite destinations. Current-folder favorite pin/unpin is exposed from the File menu. The optional breadcrumb/path surface remains deferred.
-- **Scope:** ~~Recent copy/move destinations, pinned favorites, quick access to recent folders, optional breadcrumb for current path.~~ Done except for the optional breadcrumb/path surface.
+### `A1` Adaptive Resource Profile (P0)
 
-### TODO: RAW+JPEG Paired Operations (P1.3)
-- **Source:** spec 10 §9.2 P1.3
-- **Status:** ~~Not implemented.~~ Done for copy/move/delete plus paired-action visibility. Added a persisted `Include Paired RAW+JPEG` mode that expands selected file-operation source paths to matching same-folder/same-stem RAW or JPEG companions, exposes the mode in the File menu and browser context menu, reuses the paired expansion for `Reveal in Explorer` and `Copy Path`, and shows paired companion counts in the status bar when the mode is on.
-- **Scope:** ~~Optional paired-action mode: copy/move/delete RAW and matching JPEG together.~~ Done for the file-operation pass.
+**Goal:** A first-class, user-visible resource profile that drives every
+cache budget, worker count, and prefetch depth from a single decision.
 
-### TODO: Persistent Disk Thumbnail Cache (P2.1)
-- **Source:** spec 10 §9.3 P2.1
-- **Status:** ~~Not implemented.~~ Done for the first persistence pass. Added an optional `%LOCALAPPDATA%\\HyperBrowse\\thumbnail-cache` backing store with lazy index loading, worker-thread reads/writes in `ThumbnailScheduler`, invalidation on media changes, and a persisted `Persistent Thumbnail Cache` toggle in the View menu.
-- **Scope:** ~~Deferred.~~ Done for the initial optional-cache slice; benchmark proof and deeper eviction tuning remain follow-up work.
+- Introduce a `ResourceProfile` enum: `Conservative`, `Balanced` (default),
+  `Performance`, `Custom`.
+- Profile selection lives in a new **Help ▸ Settings… ▸ Performance** tab
+  (also a Tools menu shortcut). Persisted under `Software\HyperBrowse` as
+  `ResourceProfile` plus per-knob overrides for `Custom`.
+- Each profile maps to concrete multipliers fed into the existing
+  `ResolveThumbnailCacheCapacityBytes`, `ResolveMetadataCacheCapacityEntries`,
+  and worker-count helpers. Example mapping (subject to bench tuning):
 
-### TODO: Ratings/Tags (P2.2)
-- **Source:** spec 10 §9.3 P2.2
-- **Status:** ~~Not implemented.~~ Done for the first metadata pass. Added a lazy `%LOCALAPPDATA%\\HyperBrowse\\user-metadata.tsv` store for ratings and tags, File/browser-context menu commands to edit them, details-panel display for single and multi-selection, propagation across copy/move/rename/delete file operations, metadata-aware sort modes, and filter-box support for queries like `rating:>=3` and `tag:pick`.
-- **Scope:** ~~Deferred.~~ Done for the lightweight path-keyed pass without broader organizer/search taxonomy features.
+  | Profile | Thumb cache cap | Metadata cap | Prefetch radius | Workers |
+  | --- | --- | --- | --- | --- |
+  | Conservative | min(totalRam/16, 256 MB) | 4,096 | 1 | hc/4 |
+  | Balanced (default) | min(totalRam/8, 1 GB) | 16,384 | 3 | hc, raw=hc/4 |
+  | Performance | min(totalRam/4, 4 GB*) | 65,536 | 8 | hc, raw=hc/2 |
+  | Custom | user-set | user-set | user-set | user-set |
 
-### TODO: Batch Rename (P2.3)
-- **Source:** spec 10 §9.3 P2.3
-- **Status:** ~~Not implemented.~~ Done for the initial batch pass. Added `Batch Rename...` in the File menu and browser context menu; it now supports tokenized rename patterns such as `{name}`, `{num}`, `{ext}`, and `{folder}`, shows a live preview grid of current versus generated names, validates duplicates/invalid names before submit, and dispatches through the existing async rename file-operation pipeline.
-- **Scope:** ~~Deferred.~~ Done for the initial tokenized-preview pass; richer pattern libraries and bulk preview actions remain follow-up work.
+  *Performance is hard-capped at `availablePhysicalBytes / 3` regardless of
+  user input to keep the OS healthy.
+
+- Implementation surface: thread the resolved profile through
+  `ThumbnailScheduler`, `ImageMetadataService`, `ViewerWindow` prefetch,
+  and the folder warm-up window (A7).
+
+### `A2` Cache Sizing UI With Live Feedback (P0)
+
+**Goal:** A compact controller users can trust, with no math.
+
+- Sliders in the Performance tab show:
+  - Thumbnail cache budget (MB), bounded by detected RAM, with live readouts
+    of current bytes-in-use vs cap and current hit rate.
+  - Metadata cache entry budget, with live entry count and hit rate.
+  - Persistent thumbnail cache budget (MB) and on-disk size today, with a
+    **Trim Now** button.
+- Each slider shows a recommended range derived from `QueryMemorySnapshot()`
+  plus the active `ResourceProfile`.
+- Persisted as `ThumbnailCacheCapBytesOverride`,
+  `MetadataCacheCapEntriesOverride`, `PersistentThumbnailCacheCapBytes`.
+- Values are honored at next service construction; apply-without-restart is
+  acceptable but not required for v1 of the UI.
+
+### `A3` Persistent Thumbnail Cache Maturity (P0)
+
+The first persistence pass shipped; now harden it.
+
+- Sharded directory layout (`xx/yy/<hash>.bin`) to keep per-directory entry
+  counts low on huge libraries.
+- LRU eviction by size, driven by `PersistentThumbnailCacheCapBytes` (see
+  A2), default `min(totalRam/2, 8 GB)` capped by free-disk headroom on the
+  cache volume.
+- Background compaction pass on idle: deduplicate, drop entries for missing
+  files, repack shards.
+- Move I/O off the scheduler worker threads onto a dedicated low-priority
+  cache thread so decode workers never block on disk writes.
+- Surfaces from the **Cache Inspector** dialog (see D4) for per-shard stats
+  and one-click purge.
+
+### `A4` Memory-Pressure Response & Adaptive Prefetch (P1)
+
+- Sample `GlobalMemoryStatusEx` on a low-frequency timer (1–2 Hz) on a
+  background thread, never the UI thread.
+- When `dwMemoryLoad >= 85` or `availablePhysicalBytes < 1 GB`:
+  - Halve viewer prefetch radius.
+  - Cap thumbnail decode concurrency to `max(1, workers/2)`.
+  - Trigger eviction toward `cacheCapBytes / 2` on the thumbnail cache.
+- Recovery hysteresis: only restore when load drops below 70 % for two
+  consecutive samples.
+- Expose current state in the Performance HUD (C3).
+
+### `A5` Decode/Scale Buffer Pools (P1)
+
+- Add a small `ScratchBufferPool` (per-size class, max N buffers) consumed
+  by WIC scale, nvJPEG output, and LibRaw embedded-preview decode paths.
+- Initial size classes keyed off active thumbnail size preset.
+- Justified only if benchmarks (D2) show meaningful allocation pressure on
+  the decode/scale hot path; otherwise leave as planned-but-gated.
+
+### `A6` GPU-Accelerated Thumbnail Scale Pipeline (P1)
+
+- Replace CPU-side `IWICBitmapScaler` for the largest thumbnail sizes with
+  a Direct2D image effect chain (`ID2D1Effect` scale + linear gamma).
+- Source bitmaps land directly in an `ID2D1Bitmap1` on the render device;
+  scaled outputs are cached in the existing thumbnail LRU as BGRA byte
+  arrays for cheap re-upload.
+- Fall back transparently when D2D device is lost or unavailable.
+- Target to validate in benchmarks: ≥30 % thumb-scale CPU reduction at
+  256 px on a representative folder.
+
+### `A7` Folder Warm-Up Window (P1)
+
+- After enumeration completes, schedule a small batch of "top-of-folder
+  warm-up" thumbnail jobs at low priority so the first scroll feels instant
+  even before the user clicks the grid.
+- Window size = `ResourceProfile`-derived prefetch radius × visible row
+  estimate; cancellable on scroll.
+
+### `A8` Startup Latency Budget Gate (P1)
+
+- Capture `process-start → first-window-visible` and
+  `first-window-visible → first-thumbnail-painted` spans through the
+  existing diagnostics system.
+- Emit a structured JSON snapshot on shutdown when launched with a
+  `--bench-startup` flag.
+- CI job runs HyperBrowse against a small fixed dataset and fails if any
+  budget regresses beyond a configurable threshold.
 
 ---
 
-## P2 — File Management Gaps (from spec 11)
+## 4. Theme B — Competitive Workflow Features
 
-### TODO: Rename In Place (F2)
-- **Source:** spec 11 §2 (deferred items)
-- **Status:** ~~Not implemented. FolderWatchService handles external renames, but there is no in-app rename command.~~ Done for the shortcut gap. `F2` now invokes the existing single-item rename command. The app still uses its rename dialog rather than inline label editing in the browser surface.
-- **Scope:** ~~Add F2 rename for the focused item. Update model in place.~~ Done for `F2`. True inline label editing remains deferred.
+Each item targets a specific gap versus FastStone, XnView MP, ImageGlass, or
+qView while staying inside HyperBrowse's identity.
 
-### TODO: Drag-and-Drop File Operations
-- **Source:** spec 11 §2 (deferred items)
-- **Status:** Not implemented.
-- **Scope:** Drag thumbnails to Explorer or other targets for copy/move.
+### `B1` Drag-and-Drop File Operations (P0)
 
-### TODO: Undo Surface Inside HyperBrowse
-- **Source:** spec 11 §2 (deferred items)
-- **Status:** Not implemented. File operations rely on `IFileOperation` undo behavior (Explorer-level undo).
-- **Scope:** Low priority. The system Recycle Bin provides adequate undo for deletes.
+- **Drag out:** thumbnails as `CFSTR_FILECONTENTS` / `CF_HDROP` so users
+  can drop into Explorer, mail clients, or chat apps.
+- **Drag in:** drop folders or files onto the browser pane to navigate or
+  copy into the current folder.
+- Holding `Ctrl` forces copy, `Shift` forces move; default mirrors Explorer
+  semantics by destination type.
+- Reuses `FileOperationService` for in-app handling.
+
+### `B2` n-Up Compare & Side-by-Side Zoom Sync (P0)
+
+- Extend the current two-up compare to 3-up and 4-up with a responsive
+  flex-style layout in the viewer.
+- Synchronized zoom and pan across tiles (toggleable).
+- Per-tile rating/tag controls so culling happens during compare.
+- Keyboard: `1`/`2`/`3`/`4` cycles candidate into focused tile,
+  `,` / `.` rotates the candidate set.
+
+### `B3` Quick-Pick Destination Panel (P1)
+
+- Optional right-rail strip listing favorite + recent destinations as drop
+  targets and one-click "Send Selection To" actions.
+- Backed by the existing recent/favorite destination store.
+- Per-row hover hint shows folder image count and last-used time.
+
+### `B4` Color-Managed Display Path (P1)
+
+- Use WIC's color management transform to convert decoded bitmaps to the
+  active monitor profile.
+- Per-monitor refresh when the user drags the viewer across displays
+  (`WM_DPICHANGED` / `WM_DISPLAYCHANGE`).
+- Toggle under **View ▸ Color Management** so users on accurate displays
+  can opt out for raw speed.
+
+### `B5` Saved Searches / Smart Folders (P1)
+
+- Persist named filter expressions (e.g. `rating:>=4 tag:keeper type:raw`)
+  in `%LOCALAPPDATA%\HyperBrowse\saved-searches.tsv`.
+- File ▸ Open Saved Search… exposes them; filter box gains an inline
+  "Save current filter" affordance.
+- Pure in-memory evaluation — no background indexer.
+
+### `B6` Histogram + Clip Warning Overlay (P1)
+
+- Compute a per-image RGB+luma histogram on the existing viewer decode
+  thread after the image becomes stable.
+- Render with a single D2D path geometry; toggle with `H`.
+- Optional clip warning overlay: pixels with any channel ≥ 254 or ≤ 1 get
+  a flashing tint (toggle with `Shift+H`).
+
+### `B7` Animated GIF / WebP Playback in Viewer (P2)
+
+- Animated playback only inside the viewer (thumbnails stay first-frame).
+- Reuses the existing WIC decode pipeline; new `AnimationController` drives
+  frame timing through a DWM-synced timer.
+- Pause/play and frame-step (`Space`, `[`, `]`).
+
+### `B8` PSD/PSB Composite Preview (P2)
+
+- Read the embedded composite preview via WIC so HyperBrowse can browse
+  photographer master files without depending on Photoshop.
+- No layer editing.
 
 ---
 
-## P2 — UI Polish Gaps (from specs 12, 13)
+## 5. Theme C — Performance Branding & Polish
 
-### TODO: Move Acceleration Toggles Out of View Menu
-- **Source:** spec 13 §5 (recommendation 1)
-- **Status:** "Enable NVIDIA JPEG Acceleration" and "Use Out-of-Process LibRaw Fallback" are in the View menu.
-- **Scope:** Move to Help menu or a Settings submenu. These are rarely changed and are not "view" concepts.
+The brand is "fast". The product should look the part.
 
-### TODO: Trim Context Menu
-- **Source:** spec 13 §3.3 G (recommendation)
-- **Status:** Context menu has ~27 items including sort and view mode radio groups.
-- **Scope:** Remove sort, view mode, and folder tree commands from the context menu. Keep selection-specific actions only.
+### `C1` Custom About Dialog (P1)
 
-### TODO: Custom About Dialog
-- **Source:** spec 13 §3.3 F
-- **Status:** About dialog is a plain `MessageBoxW`.
-- **Scope:** Low priority. Create a small custom dialog rendering the app icon at 48–64 px alongside version/feature info.
+- Replace the `MessageBoxW` About with a small custom dialog showing the
+  app icon at 64 px, version, build info, GPU vendor, and a one-line
+  "started in N ms / first thumbnail in M ms" performance summary pulled
+  from the diagnostics layer.
 
-### TODO: Empty-State Icon Watermark
-- **Source:** spec 13 §3.3 H
-- **Status:** Centered placeholder states use plain text only.
-- **Scope:** Low priority. Render a muted version of the app icon above the "Select a folder to begin browsing" text.
+### `C2` Empty-State Watermark (P2)
 
-### TODO: Common-Control Theming Improvements
-- **Source:** spec 12 §8 (follow-up item 4)
-- **Status:** Not implemented.
-- **Scope:** Low priority. Explore `SetWindowTheme` and other light theming tweaks for TreeView scrollbars and other common controls.
+- Render a muted app icon above the existing "Select a folder to begin
+  browsing" text. Same in viewer for "Open an image to begin viewing".
+
+### `C3` Performance HUD Overlay (P1)
+
+- Optional translucent overlay (toggle `Ctrl+Shift+P`) showing live decode
+  count, scale ms, cache hit rate, memory-pressure state, and thumbnail
+  worker queue depth.
+- Reuses diagnostics counters; zero cost when disabled.
+
+### `C4` Settings Reorganization (P1)
+
+- Move **Enable NVIDIA JPEG Acceleration** and **Use Out-of-Process LibRaw
+  Fallback** out of the View menu into the new Settings dialog (Performance
+  tab).
+- Trim the browser context menu to selection-relevant actions only
+  (carry-over from prior P2 backlog).
+
+### `C5` Tools Menu (P1)
+
+- New top-level Tools menu:
+  - Settings…
+  - Benchmark…
+  - Cache Inspector…
+  - Diagnostics Snapshot
+  - Open Log Folder
+
+### `C6` Inline Rename / In-Place Label Edit (P2)
+
+- True in-place label editing in the thumbnail and details surfaces; `F2`
+  currently opens a dialog.
+
+### `C7` Breadcrumb / Path Bar (P2)
+
+- Lightweight breadcrumb above the browser pane with clickable segments
+  for fast parent navigation; complements the folder tree.
 
 ---
 
-## P3 — Benchmarking Infrastructure (from spec 05)
+## 6. Theme D — Benchmarking & Diagnostics
 
-### TODO: Benchmark Datasets
-- **Source:** spec 05 §3
-- **Status:** No formal benchmark datasets exist. Testing uses ad-hoc folders.
-- **Scope:** Create standardized datasets A–E as defined in the benchmarking plan.
+Performance branding requires evidence.
 
-### TODO: Benchmark Harness and Reporting
-- **Source:** spec 05 §6, §10
-- **Status:** Diagnostics infrastructure captures timing spans and counters, but there is no automated benchmark runner or reporting pipeline.
-- **Scope:** Create a repeatable benchmark runner that uses the diagnostics system and produces structured reports.
+### `D1` Standard Benchmark Datasets (P0)
 
-### TODO: Performance Budget Validation
-- **Source:** spec 05 §9 (Acceptance Thresholds)
-- **Status:** No automated threshold checking.
-- **Scope:** Define concrete numeric thresholds and validate in CI or manual benchmark passes.
+- Datasets A–E per [05-benchmarking-plan.md](05-benchmarking-plan.md)
+  staged under `tests/benchmark-datasets/` with a generator script for
+  synthetic inputs (and pointers to user-supplied real datasets).
+
+### `D2` Benchmark Runner & JSON Report (P0)
+
+- `tools/RunBenchmarks.ps1` invoking `HyperBrowse.exe --bench-startup
+  --bench-folder <path>` and aggregating runs into
+  `build/bench/<git-sha>/report.json`.
+- Markdown summary rendered into `docs/perf/latest.md`.
+
+### `D3` CI Perf Regression Gate (P1)
+
+- GitHub Actions job runs a small dataset bench against the release build,
+  compares against a checked-in baseline (`docs/perf/baseline.json`), and
+  fails on threshold breach.
+
+### `D4` Cache Inspector Window (P1)
+
+- Diagnostics-style window showing thumbnail cache contents
+  (count/bytes/hit rate), metadata cache stats, persistent cache shard
+  stats, and a Trim/Purge control.
+
+### `D5` ETW / WPR Trace Hooks (P2)
+
+- Emit ETW events for enumeration, thumbnail decode, scale, viewer decode,
+  cache hit/miss; ship a `tools/CaptureTrace.wprp` profile for tracing
+  releases on customer machines.
 
 ---
 
-## Items Intentionally Deferred (Not TODOs)
+## 7. Theme E — Format & Decode Frontier
 
-These items were explicitly scoped out and should remain deferred unless product direction changes:
+Lower priority than A–D but where competitors are starting to differentiate.
 
-- Heavy image editing, annotations, cropping (spec 01 out-of-scope)
-- Animated GIF thumbnails (spec 01 out-of-scope)
-- Multipage TIFF navigation (spec 01 out-of-scope)
-- Per-image zoom/pan persistence (spec 01 out-of-scope)
-- Plugin ecosystems, duplicate finder, face detection, library/database (spec 10 §10)
-- Separate module decomposition for controllers (ZoomPanController, SlideshowController, etc.) — consolidated into ViewerWindow/MainWindow/BrowserPane for pragmatic simplicity
-- SettingsService as separate module — registry calls are simple enough to inline
-- RawPreviewCache as separate module — embedded previews are decoded on demand through the LibRaw path
+### `E1` AVIF Support (P2)
+
+- Add optional libavif decode behind `HYPERBROWSE_ENABLE_AVIF`.
+- Thumbnail via embedded preview where present; viewer via full decode.
+
+### `E2` HEIC Support via Microsoft HEIF Extensions (P2)
+
+- Detect the Microsoft HEIF Image Extension at startup; route HEIC/HEIF
+  through WIC when available with a clear unsupported state otherwise.
+
+### `E3` Multipage TIFF Navigation (P2)
+
+- Per-page navigation inside the viewer (`PgUp`/`PgDn`) for multipage
+  TIFFs. Browser still uses page 0 for the thumbnail.
+
+### `E4` Lossless JPEG Crop & Trim (P3)
+
+- Extend the existing EXIF-only orientation pipeline with lossless crop
+  alignment (mcu-aligned) via libjpeg-turbo's transform API. Strictly
+  opt-in; no other editing follows.
+
+---
+
+## 8. Items Intentionally Deferred (Not TODOs)
+
+- Heavy image editing, painting, layered editing, RAW develop.
+- Annotations and freehand markup.
+- Per-image zoom/pan persistence.
+- Plugin ecosystem and scripting.
+- Face detection, duplicate finding, content-based similarity search.
+- Library/database back end (Lightroom-style catalog).
+- Cloud sync, mobile companion, web preview.
+- Formal decoder polymorphic interface (`CanDecode` / `ReadHeader` / …):
+  current free-function chain (nvJPEG → WIC → LibRaw) is adequate.
+- `MainWindow.cpp` decomposition into per-controller files: tracked
+  separately as ongoing hygiene; not a product feature.
+- doctest migration: catch2 stays for now.
+
+These remain deferred unless product direction changes.
+
+---
+
+## 9. Acceptance Bars
+
+Each accepted item must satisfy:
+
+1. **Performance hold-the-line.** No regression in startup, first-visible-
+   thumbnail, scroll smoothness, or viewer-open latency on the Theme D
+   reference dataset.
+2. **Adaptive defaults.** Any new resource consumer plumbs into the
+   `ResourceProfile` (A1) and respects memory pressure (A4).
+3. **Native dependency budget.** New dependencies require an opt-out build
+   flag and a documented runtime fallback.
+4. **Tested.** Smoke or integration coverage added/updated under `tests/`.
+5. **Documented.** README capability table and the relevant spec are
+   updated in the same change.
+
+---
+
+## Appendix A — Recently Completed Archive
+
+Detail-level history was removed from the active backlog to keep this file
+focused. The summarized status as of this revision:
+
+- **Rendering:** D2D/DirectWrite pipeline in browser grid and viewer, per-
+  monitor DPI v2, smooth inertial scroll, high-quality cubic scaling
+  ([15-d2d-rendering-migration.md](15-d2d-rendering-migration.md)).
+- **File management:** copy, move, rename, batch rename (tokenized
+  preview), delete, permanent delete, reveal, copy path, properties,
+  recent destinations, pinned favorites, RAW+JPEG paired operations
+  ([11-file-management-workflow.md](11-file-management-workflow.md)).
+- **Browse workflow:** compare/cull lite, ratings and tags with filter
+  syntax, date-taken sort, sort-direction toggle, configurable viewer
+  mouse wheel, slideshow interval + transitions, info strip / details
+  panel, rich image-information dialog
+  ([10-prioritized-enhancements.md](10-prioritized-enhancements.md)).
+- **Caching:** runtime-adaptive thumbnail and metadata cache sizing keyed
+  off `GlobalMemoryStatusEx`, optional persistent thumbnail cache under
+  `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache`.
+- **Architecture / hygiene:** shared `HyperBrowseCore` static library,
+  smoke + integration test suite, GitHub Actions CI, portable zip + Inno
+  Setup 6 installer with CUDA redistributable bundling, static MSVC
+  runtime by default ([09-hardening-pass.md](09-hardening-pass.md)).
+- **Toolbar:** owner-drawn double-buffered toolbar strip with grouped icon
+  buttons and right-aligned actions
+  ([16-toolbar-ux-redesign.md](16-toolbar-ux-redesign.md)).
+
+For a deeper change log, consult the git history; this appendix exists only
+to anchor the active plan above.

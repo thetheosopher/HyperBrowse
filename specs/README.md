@@ -24,7 +24,8 @@ This folder contains a repo-ready planning pack for building a high-performance 
 ## Rendering stack
 
 - Win32 shell
-- GDI rendering (double-buffered StretchBlt/PlgBlt) — D2D/D3D11 deferred
+- Direct2D and DirectWrite rendering for the thumbnail grid and viewer; double-buffered GDI for the toolbar strip and details mode
+- Per-monitor DPI awareness v2
 - WIC for baseline common-format decoding
 - LibRaw for supported mainstream RAW formats (in-process or out-of-process)
 - optional nvJPEG for accelerated JPEG thumbnail batches

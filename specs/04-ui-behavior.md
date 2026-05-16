@@ -65,7 +65,7 @@ Keep menus compact and practical.
 - Enable NVIDIA JPEG Acceleration
 - Use Out-of-Process LibRaw Fallback
 
-Note: Sort Direction (ascending/descending) is not yet implemented.
+Sort Direction (ascending/descending) is implemented and persisted to the registry as `SortAscending`.
 
 ### Image
 - Open in Viewer

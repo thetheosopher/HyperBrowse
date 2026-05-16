@@ -75,19 +75,13 @@ The application is intentionally scoped as a **pure viewer/browser** rather than
 - Heavy image editing
 - Annotations / painting
 - Cropping workflows
-- Compare mode
-- Tagging / rating
 - Contact sheet export
-- Persistent disk thumbnail cache
 - Animated GIF thumbnails
 - Multipage TIFF navigation
 - Per-image zoom/pan persistence
-- Sort direction toggle (ascending/descending)
-- Configurable mouse wheel behavior in viewer
-- In-app rename (F2)
-- Batch rename
-- RAW+JPEG paired operations
 - Drag-and-drop file operations
+
+Note: Compare/cull, ratings and tags, persistent disk thumbnail cache, sort direction toggle, configurable viewer mouse wheel behavior, in-app rename (F2), batch rename, and RAW+JPEG paired operations were originally deferred but are now implemented. See [14-todo.md](14-todo.md) for the current backlog.
 
 ## 6. Main Window Layout
 
@@ -128,8 +122,9 @@ Support custom sort options:
 - image dimensions
 - type
 - random
+- date taken
 
-Note: Sort direction toggle (ascending/descending) is deferred to a future release.
+Sort direction (ascending/descending) is implemented and persisted per session.
 
 ### Selection modes
 Support:
@@ -207,9 +202,10 @@ Expose EXIF, IPTC, and XMP data where available.
 ### Folder scale target
 - optimized for folders with thousands of images
 
-### Caching policy (v1)
-- memory cache only
-- no disk thumbnail cache
+### Caching policy
+- runtime-adaptive in-memory thumbnail cache sized to host RAM (default ~`min(totalRam/8, availableRam/5)`, clamped 128 MB–1 GB)
+- runtime-adaptive metadata cache (default sized from host RAM, clamped 2,048–65,536 entries)
+- optional persistent thumbnail cache under `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache`, toggleable from the View menu
 
 ## 12. Distribution
 
