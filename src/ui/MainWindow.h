@@ -193,6 +193,7 @@ namespace hyperbrowse::ui
         void ResetDiagnosticsState();
         void ShowImageInformation();
         void StartRenameSelectedImage();
+        void StartBatchRenameSelection();
         void StartCompareSelected();
         void SetSelectionRating(int rating);
         void EditSelectionTags();

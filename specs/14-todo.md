@@ -150,18 +150,18 @@ items were addressed in priority order:
 
 ### TODO: Persistent Disk Thumbnail Cache (P2.1)
 - **Source:** spec 10 §9.3 P2.1
-- **Status:** Not implemented. Memory-only caching per spec 01.
-- **Scope:** Deferred. Requires fully lazy initialization, no startup scan, benchmark proof of warm-revisit improvement.
+- **Status:** ~~Not implemented.~~ Done for the first persistence pass. Added an optional `%LOCALAPPDATA%\\HyperBrowse\\thumbnail-cache` backing store with lazy index loading, worker-thread reads/writes in `ThumbnailScheduler`, invalidation on media changes, and a persisted `Persistent Thumbnail Cache` toggle in the View menu.
+- **Scope:** ~~Deferred.~~ Done for the initial optional-cache slice; benchmark proof and deeper eviction tuning remain follow-up work.
 
 ### TODO: Ratings/Tags (P2.2)
 - **Source:** spec 10 §9.3 P2.2
-- **Status:** Not implemented.
-- **Scope:** Deferred. Pushes product toward organizer territory.
+- **Status:** ~~Not implemented.~~ Done for the first metadata pass. Added a lazy `%LOCALAPPDATA%\\HyperBrowse\\user-metadata.tsv` store for ratings and tags, File/browser-context menu commands to edit them, details-panel display for single and multi-selection, propagation across copy/move/rename/delete file operations, metadata-aware sort modes, and filter-box support for queries like `rating:>=3` and `tag:pick`.
+- **Scope:** ~~Deferred.~~ Done for the lightweight path-keyed pass without broader organizer/search taxonomy features.
 
 ### TODO: Batch Rename (P2.3)
 - **Source:** spec 10 §9.3 P2.3
-- **Status:** Not implemented.
-- **Scope:** Deferred. Should come after the core file-operation layer is mature.
+- **Status:** ~~Not implemented.~~ Done for the initial batch pass. Added `Batch Rename...` in the File menu and browser context menu; it now supports tokenized rename patterns such as `{name}`, `{num}`, `{ext}`, and `{folder}`, shows a live preview grid of current versus generated names, validates duplicates/invalid names before submit, and dispatches through the existing async rename file-operation pipeline.
+- **Scope:** ~~Deferred.~~ Done for the initial tokenized-preview pass; richer pattern libraries and bulk preview actions remain follow-up work.
 
 ---
 

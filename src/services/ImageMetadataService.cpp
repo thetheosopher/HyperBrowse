@@ -3,9 +3,11 @@
 #include <propsys.h>
 #include <propvarutil.h>
 #include <shobjidl.h>
+#include <wincodec.h>
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <condition_variable>
 #include <cwctype>
 #include <cstring>
@@ -19,6 +21,7 @@
 #include "decode/ImageDecoder.h"
 #include "util/HashUtils.h"
 #include "util/ResourceSizing.h"
+#include "util/StringConvert.h"
 
 namespace
 {
@@ -328,6 +331,547 @@ namespace
         }
 
         return normalized.empty() ? trimmedDisplayName : normalized;
+    }
+
+    void UpsertMetadataProperty(hyperbrowse::services::ImageMetadata* metadata,
+                                std::wstring canonicalName,
+                                std::wstring displayName,
+                                std::wstring value);
+
+    std::size_t FindInsensitive(std::wstring_view text, std::wstring_view needle)
+    {
+        if (needle.empty() || needle.size() > text.size())
+        {
+            return std::wstring_view::npos;
+        }
+
+        for (std::size_t index = 0; index + needle.size() <= text.size(); ++index)
+        {
+            if (hyperbrowse::util::EqualsIgnoreCaseOrdinal(text.substr(index, needle.size()), needle))
+            {
+                return index;
+            }
+        }
+
+        return std::wstring_view::npos;
+    }
+
+    bool ContainsInsensitive(std::wstring_view text, std::wstring_view needle)
+    {
+        return FindInsensitive(text, needle) != std::wstring_view::npos;
+    }
+
+    std::wstring StripMatchingQuotes(std::wstring value)
+    {
+        value = TrimWhitespace(value);
+        if (value.size() >= 2
+            && ((value.front() == L'"' && value.back() == L'"')
+                || (value.front() == L'\'' && value.back() == L'\'')))
+        {
+            value = value.substr(1, value.size() - 2);
+        }
+
+        return TrimWhitespace(value);
+    }
+
+    std::wstring WidenMetadataText(std::string_view text)
+    {
+        if (text.empty())
+        {
+            return {};
+        }
+
+        const int utf8Size = MultiByteToWideChar(CP_UTF8,
+                                                 MB_ERR_INVALID_CHARS,
+                                                 text.data(),
+                                                 static_cast<int>(text.size()),
+                                                 nullptr,
+                                                 0);
+        if (utf8Size > 0)
+        {
+            std::wstring utf8(static_cast<std::size_t>(utf8Size), L'\0');
+            const int written = MultiByteToWideChar(CP_UTF8,
+                                                    MB_ERR_INVALID_CHARS,
+                                                    text.data(),
+                                                    static_cast<int>(text.size()),
+                                                    utf8.data(),
+                                                    utf8Size);
+            if (written > 0)
+            {
+                utf8.resize(static_cast<std::size_t>(written));
+                return utf8;
+            }
+        }
+
+        // PNG tEXt is Latin-1 by spec; fall back there when the payload is not UTF-8.
+    return hyperbrowse::util::WidenWithCodePage(text, 28591U);
+    }
+
+    std::wstring PropVariantToWideString(const PROPVARIANT& value)
+    {
+        switch (value.vt)
+        {
+        case VT_EMPTY:
+        case VT_NULL:
+            return {};
+        case VT_LPWSTR:
+            return value.pwszVal ? std::wstring(value.pwszVal) : std::wstring{};
+        case VT_BSTR:
+            return value.bstrVal ? std::wstring(value.bstrVal, SysStringLen(value.bstrVal)) : std::wstring{};
+        case VT_LPSTR:
+            return value.pszVal ? WidenMetadataText(value.pszVal) : std::wstring{};
+        default:
+            break;
+        }
+
+        PWSTR converted = nullptr;
+        if (SUCCEEDED(PropVariantToStringAlloc(value, &converted)) && converted)
+        {
+            std::wstring result = converted;
+            CoTaskMemFree(converted);
+            return result;
+        }
+
+        return {};
+    }
+
+    struct SwarmUiFieldDefinition
+    {
+        std::wstring_view key;
+        std::wstring_view displayName;
+    };
+
+    constexpr std::array<SwarmUiFieldDefinition, 13> kSwarmUiFieldDefinitions{{
+        {L"prompt", L"Prompt"},
+        {L"negativeprompt", L"Negative prompt"},
+        {L"model", L"Model"},
+        {L"seed", L"Seed"},
+        {L"steps", L"Steps"},
+        {L"sampler", L"Sampler"},
+        {L"scheduler", L"Scheduler"},
+        {L"cfgscale", L"CFG scale"},
+        {L"width", L"Width"},
+        {L"height", L"Height"},
+        {L"swarm_version", L"Swarm version"},
+        {L"date", L"Date"},
+        {L"generation_time", L"Generation time"},
+    }};
+
+    constexpr std::array<std::wstring_view, 17> kKnownPngTextMetadataKeys{{
+        L"parameters",
+        L"sui_image_params",
+        L"prompt",
+        L"negativeprompt",
+        L"model",
+        L"seed",
+        L"steps",
+        L"sampler",
+        L"scheduler",
+        L"cfgscale",
+        L"width",
+        L"height",
+        L"swarm_version",
+        L"date",
+        L"generation_time",
+        L"comment",
+        L"description",
+    }};
+
+    const SwarmUiFieldDefinition* FindSwarmUiFieldDefinition(std::wstring_view key)
+    {
+        const std::wstring normalizedKey = StripMatchingQuotes(std::wstring(key));
+        const auto match = std::find_if(kSwarmUiFieldDefinitions.begin(),
+                                        kSwarmUiFieldDefinitions.end(),
+                                        [&](const SwarmUiFieldDefinition& field)
+                                        {
+                                            return hyperbrowse::util::EqualsIgnoreCaseOrdinal(normalizedKey, field.key);
+                                        });
+        return match != kSwarmUiFieldDefinitions.end() ? &(*match) : nullptr;
+    }
+
+    std::wstring BuildCustomMetadataCanonicalName(std::wstring_view prefix, std::wstring_view key)
+    {
+        std::wstring canonicalName(prefix);
+        canonicalName.push_back(L'.');
+        canonicalName.append(key);
+        return canonicalName;
+    }
+
+    bool IsPngFile(const hyperbrowse::browser::BrowserItem& item)
+    {
+        if (hyperbrowse::util::EqualsIgnoreCaseOrdinal(item.fileType, L"PNG"))
+        {
+            return true;
+        }
+
+        const std::size_t extensionOffset = item.filePath.find_last_of(L'.');
+        if (extensionOffset == std::wstring::npos || extensionOffset + 1 >= item.filePath.size())
+        {
+            return false;
+        }
+
+        return hyperbrowse::util::EqualsIgnoreCaseOrdinal(std::wstring_view(item.filePath).substr(extensionOffset + 1), L"png");
+    }
+
+    bool IsSwarmUiCarrierMetadataKey(std::wstring_view key)
+    {
+        return hyperbrowse::util::EqualsIgnoreCaseOrdinal(key, L"parameters")
+            || hyperbrowse::util::EqualsIgnoreCaseOrdinal(key, L"sui_image_params")
+            || hyperbrowse::util::EqualsIgnoreCaseOrdinal(key, L"comment")
+            || hyperbrowse::util::EqualsIgnoreCaseOrdinal(key, L"description");
+    }
+
+    bool LooksLikeSwarmUiPayload(std::wstring_view text)
+    {
+        return ContainsInsensitive(text, L"sui_image_params")
+            || (ContainsInsensitive(text, L"prompt")
+                && ContainsInsensitive(text, L"negativeprompt")
+                && (ContainsInsensitive(text, L"swarm_version")
+                    || ContainsInsensitive(text, L"generation_time")
+                    || ContainsInsensitive(text, L"model")));
+    }
+
+    std::wstring ExtractSwarmUiPayload(std::wstring_view text)
+    {
+        const std::wstring trimmed = TrimWhitespace(text);
+        if (trimmed.empty())
+        {
+            return {};
+        }
+
+        const std::size_t anchor = FindInsensitive(trimmed, L"sui_image_params");
+        const std::size_t searchStart = anchor == std::wstring_view::npos
+            ? 0
+            : anchor + std::size(L"sui_image_params") - 1;
+        const std::size_t braceStart = trimmed.find(L'{', searchStart);
+        if (braceStart == std::wstring::npos)
+        {
+            return trimmed;
+        }
+
+        int depth = 0;
+        for (std::size_t index = braceStart; index < trimmed.size(); ++index)
+        {
+            if (trimmed[index] == L'{')
+            {
+                ++depth;
+            }
+            else if (trimmed[index] == L'}')
+            {
+                --depth;
+                if (depth == 0)
+                {
+                    return trimmed.substr(braceStart, index - braceStart + 1);
+                }
+            }
+        }
+
+        return trimmed.substr(braceStart);
+    }
+
+    bool LooksLikeRecognizedSwarmUiFieldAfterComma(std::wstring_view text, std::size_t commaIndex)
+    {
+        std::size_t index = commaIndex + 1;
+        while (index < text.size() && iswspace(text[index]) != 0)
+        {
+            ++index;
+        }
+
+        const std::size_t keyStart = index;
+        while (index < text.size()
+               && (iswalnum(text[index]) != 0 || text[index] == L'_' || text[index] == L'-'))
+        {
+            ++index;
+        }
+        if (keyStart == index)
+        {
+            return false;
+        }
+
+        const std::wstring key = StripMatchingQuotes(std::wstring(text.substr(keyStart, index - keyStart)));
+        while (index < text.size() && iswspace(text[index]) != 0)
+        {
+            ++index;
+        }
+
+        return index < text.size() && text[index] == L':' && FindSwarmUiFieldDefinition(key) != nullptr;
+    }
+
+    void ParseSwarmUiMetadataPayload(std::wstring_view rawText,
+                                     hyperbrowse::services::ImageMetadata* metadata)
+    {
+        if (!metadata || rawText.empty() || !LooksLikeSwarmUiPayload(rawText))
+        {
+            return;
+        }
+
+        const std::wstring payload = ExtractSwarmUiPayload(rawText);
+        if (payload.empty())
+        {
+            return;
+        }
+
+        std::size_t index = 0;
+        while (index < payload.size())
+        {
+            while (index < payload.size()
+                   && (iswspace(payload[index]) != 0 || payload[index] == L',' || payload[index] == L'{'))
+            {
+                ++index;
+            }
+            if (index >= payload.size() || payload[index] == L'}')
+            {
+                break;
+            }
+
+            const std::size_t keyStart = index;
+            while (index < payload.size()
+                   && payload[index] != L':'
+                   && payload[index] != L','
+                   && payload[index] != L'}')
+            {
+                ++index;
+            }
+            if (index >= payload.size() || payload[index] != L':')
+            {
+                while (index < payload.size() && payload[index] != L',' && payload[index] != L'}')
+                {
+                    ++index;
+                }
+                if (index < payload.size() && payload[index] == L',')
+                {
+                    ++index;
+                }
+                continue;
+            }
+
+            const std::wstring key = StripMatchingQuotes(payload.substr(keyStart, index - keyStart));
+            ++index;
+            while (index < payload.size() && iswspace(payload[index]) != 0)
+            {
+                ++index;
+            }
+
+            const std::size_t valueStart = index;
+            int braceDepth = 0;
+            int bracketDepth = 0;
+            int parenDepth = 0;
+            bool inSingleQuote = false;
+            bool inDoubleQuote = false;
+            bool escaped = false;
+            while (index < payload.size())
+            {
+                const wchar_t current = payload[index];
+
+                if (escaped)
+                {
+                    escaped = false;
+                    ++index;
+                    continue;
+                }
+
+                if ((inSingleQuote || inDoubleQuote) && current == L'\\')
+                {
+                    escaped = true;
+                    ++index;
+                    continue;
+                }
+
+                if (!inDoubleQuote && current == L'\'')
+                {
+                    inSingleQuote = !inSingleQuote;
+                    ++index;
+                    continue;
+                }
+                if (!inSingleQuote && current == L'"')
+                {
+                    inDoubleQuote = !inDoubleQuote;
+                    ++index;
+                    continue;
+                }
+
+                if (!inSingleQuote && !inDoubleQuote)
+                {
+                    switch (current)
+                    {
+                    case L'{':
+                        ++braceDepth;
+                        break;
+                    case L'[':
+                        ++bracketDepth;
+                        break;
+                    case L'(':
+                        ++parenDepth;
+                        break;
+                    case L'}':
+                        if (braceDepth == 0 && bracketDepth == 0 && parenDepth == 0)
+                        {
+                            goto SwarmValueDone;
+                        }
+                        --braceDepth;
+                        break;
+                    case L']':
+                        if (bracketDepth > 0)
+                        {
+                            --bracketDepth;
+                        }
+                        break;
+                    case L')':
+                        if (parenDepth > 0)
+                        {
+                            --parenDepth;
+                        }
+                        break;
+                    case L',':
+                        if (braceDepth == 0
+                            && bracketDepth == 0
+                            && parenDepth == 0
+                            && LooksLikeRecognizedSwarmUiFieldAfterComma(payload, index))
+                        {
+                            goto SwarmValueDone;
+                        }
+                        break;
+                    default:
+                        break;
+                    }
+                }
+
+                ++index;
+            }
+
+SwarmValueDone:
+            if (const SwarmUiFieldDefinition* field = FindSwarmUiFieldDefinition(key))
+            {
+                const std::wstring value = StripMatchingQuotes(payload.substr(valueStart, index - valueStart));
+                if (!value.empty())
+                {
+                    UpsertMetadataProperty(metadata,
+                                           BuildCustomMetadataCanonicalName(L"SwarmUI", field->key),
+                                           std::wstring(field->displayName),
+                                           value);
+                }
+            }
+
+            if (index < payload.size() && payload[index] == L',')
+            {
+                ++index;
+            }
+            else if (index < payload.size() && payload[index] == L'}')
+            {
+                ++index;
+            }
+        }
+    }
+
+    std::wstring QueryMetadataText(IWICMetadataQueryReader* metadataReader, std::wstring_view query)
+    {
+        if (!metadataReader || query.empty())
+        {
+            return {};
+        }
+
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        const HRESULT result = metadataReader->GetMetadataByName(std::wstring(query).c_str(), &value);
+        std::wstring text = SUCCEEDED(result) ? StripMatchingQuotes(PropVariantToWideString(value)) : std::wstring{};
+        PropVariantClear(&value);
+        return text;
+    }
+
+    void ExtractCustomPngTextProperty(std::wstring key,
+                                      std::wstring value,
+                                      hyperbrowse::services::ImageMetadata* metadata)
+    {
+        if (!metadata)
+        {
+            return;
+        }
+
+        key = StripMatchingQuotes(std::move(key));
+        value = StripMatchingQuotes(std::move(value));
+        if (key.empty() || value.empty())
+        {
+            return;
+        }
+
+        const bool duplicateComment = !metadata->comment.empty()
+            && IsSwarmUiCarrierMetadataKey(key)
+            && hyperbrowse::util::EqualsIgnoreCaseOrdinal(metadata->comment, value);
+
+        if (const SwarmUiFieldDefinition* field = FindSwarmUiFieldDefinition(key))
+        {
+            UpsertMetadataProperty(metadata,
+                                   BuildCustomMetadataCanonicalName(L"SwarmUI", field->key),
+                                   std::wstring(field->displayName),
+                                   value);
+        }
+        else if (!duplicateComment)
+        {
+            UpsertMetadataProperty(metadata,
+                                   BuildCustomMetadataCanonicalName(L"PNG.Text", key),
+                                   HumanizeMetadataToken(key),
+                                   value);
+        }
+
+        if (IsSwarmUiCarrierMetadataKey(key) || LooksLikeSwarmUiPayload(value))
+        {
+            ParseSwarmUiMetadataPayload(value, metadata);
+        }
+    }
+
+    void ExtractSwarmUiPngTextMetadata(const std::wstring& filePath,
+                                       hyperbrowse::services::ImageMetadata* metadata)
+    {
+        if (!metadata || filePath.empty())
+        {
+            return;
+        }
+
+        ComPtr<IWICImagingFactory> factory;
+        if (FAILED(CoCreateInstance(CLSID_WICImagingFactory,
+                                    nullptr,
+                                    CLSCTX_INPROC_SERVER,
+                                    IID_PPV_ARGS(factory.GetAddressOf())))
+            || !factory)
+        {
+            return;
+        }
+
+        ComPtr<IWICBitmapDecoder> decoder;
+        if (FAILED(factory->CreateDecoderFromFilename(filePath.c_str(),
+                                                      nullptr,
+                                                      GENERIC_READ,
+                                                      WICDecodeMetadataCacheOnLoad,
+                                                      decoder.GetAddressOf()))
+            || !decoder)
+        {
+            return;
+        }
+
+        ComPtr<IWICBitmapFrameDecode> frame;
+        if (FAILED(decoder->GetFrame(0, frame.GetAddressOf())) || !frame)
+        {
+            return;
+        }
+
+        ComPtr<IWICMetadataQueryReader> metadataReader;
+        if (FAILED(frame->GetMetadataQueryReader(metadataReader.GetAddressOf())) || !metadataReader)
+        {
+            return;
+        }
+
+        for (std::wstring_view key : kKnownPngTextMetadataKeys)
+        {
+            std::wstring query = L"/tEXt/{str=";
+            query.append(key);
+            query.append(L"}");
+
+            const std::wstring value = QueryMetadataText(metadataReader.Get(), query);
+            if (!value.empty())
+            {
+                ExtractCustomPngTextProperty(std::wstring(key), value, metadata);
+            }
+        }
     }
 
     bool ShouldSuppressDetailedMetadataProperty(std::wstring_view canonicalName)
@@ -646,6 +1190,16 @@ namespace hyperbrowse::services
             metadata->dateTakenTimestampUtc = PropertyToFileTime(propertyStore.Get(), L"System.Photo.DateTaken");
         }
 
+        if (IsPngFile(item))
+        {
+            ExtractSwarmUiPngTextMetadata(item.filePath, metadata.get());
+        }
+
+        if (!metadata->comment.empty())
+        {
+            ParseSwarmUiMetadataPayload(metadata->comment, metadata.get());
+        }
+
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
         PopulateRawFallback(item, metadata.get());
 #endif
@@ -747,19 +1301,36 @@ namespace hyperbrowse::services
     {
         std::wstring expanded;
         expanded.reserve(512);
-        expanded.append(L"EXIF\r\n");
-        expanded.append(JoinLine(L"Camera Make: ", metadata.cameraMake));
-        expanded.append(JoinLine(L"Camera Model: ", metadata.cameraModel));
-        expanded.append(JoinLine(L"Date Taken: ", metadata.dateTaken));
-        expanded.append(JoinLine(L"Exposure: ", metadata.exposureTime));
-        expanded.append(JoinLine(L"Aperture: ", metadata.fNumber));
-        expanded.append(JoinLine(L"ISO: ", metadata.isoSpeed));
-        expanded.append(JoinLine(L"Focal Length: ", metadata.focalLength));
-        expanded.append(L"\r\nIPTC / XMP\r\n");
-        expanded.append(JoinLine(L"Title: ", metadata.title));
-        expanded.append(JoinLine(L"Author: ", metadata.author));
-        expanded.append(JoinLine(L"Keywords: ", metadata.keywords));
-        expanded.append(JoinLine(L"Comment: ", metadata.comment));
+
+        std::wstring exifSection;
+        exifSection.append(JoinLine(L"Camera Make: ", metadata.cameraMake));
+        exifSection.append(JoinLine(L"Camera Model: ", metadata.cameraModel));
+        exifSection.append(JoinLine(L"Date Taken: ", metadata.dateTaken));
+        exifSection.append(JoinLine(L"Exposure: ", metadata.exposureTime));
+        exifSection.append(JoinLine(L"Aperture: ", metadata.fNumber));
+        exifSection.append(JoinLine(L"ISO: ", metadata.isoSpeed));
+        exifSection.append(JoinLine(L"Focal Length: ", metadata.focalLength));
+        if (!exifSection.empty())
+        {
+            expanded.append(L"EXIF\r\n");
+            expanded.append(exifSection);
+        }
+
+        std::wstring descriptiveSection;
+        descriptiveSection.append(JoinLine(L"Title: ", metadata.title));
+        descriptiveSection.append(JoinLine(L"Author: ", metadata.author));
+        descriptiveSection.append(JoinLine(L"Keywords: ", metadata.keywords));
+        descriptiveSection.append(JoinLine(L"Comment: ", metadata.comment));
+        if (!descriptiveSection.empty())
+        {
+            if (!expanded.empty())
+            {
+                expanded.append(L"\r\n");
+            }
+            expanded.append(L"IPTC / XMP\r\n");
+            expanded.append(descriptiveSection);
+        }
+
         AppendAllAvailableMetadata(&expanded, metadata);
         // Trim any trailing whitespace
         while (!expanded.empty() && (expanded.back() == L'\r' || expanded.back() == L'\n'))

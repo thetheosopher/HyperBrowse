@@ -32,6 +32,8 @@ namespace hyperbrowse::browser
         FileType = 4,
         Random = 5,
         DateTaken = 6,
+        Rating = 7,
+        Tags = 8,
     };
 
     enum class ThumbnailSizePreset : int
@@ -55,6 +57,7 @@ namespace hyperbrowse::services
     class ThumbnailScheduler;
     struct ImageMetadata;
     class ImageMetadataService;
+    class UserMetadataStore;
 }
 
 namespace hyperbrowse::decode
@@ -107,6 +110,7 @@ namespace hyperbrowse::browser
         BrowserSortMode GetSortMode() const noexcept;
         void SetSortAscending(bool ascending);
         bool IsSortAscending() const noexcept;
+        void SetUserMetadataStore(hyperbrowse::services::UserMetadataStore* userMetadataStore);
         void SetFilterQuery(std::wstring query);
         const std::wstring& GetFilterQuery() const noexcept;
         bool HasActiveFilter() const noexcept;
@@ -260,6 +264,7 @@ namespace hyperbrowse::browser
         ThemeColors colors_{};
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
+        hyperbrowse::services::UserMetadataStore* userMetadataStore_{};
         bool darkTheme_{};
         bool syncingDetailsSelection_{};
         BrowserViewMode viewMode_{BrowserViewMode::Thumbnails};

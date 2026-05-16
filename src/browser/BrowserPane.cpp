@@ -19,6 +19,7 @@
 #include "render/D2DRenderer.h"
 #include "services/ImageMetadataService.h"
 #include "services/ThumbnailScheduler.h"
+#include "services/UserMetadataStore.h"
 #include "util/ResourcePng.h"
 
 namespace
@@ -146,6 +147,195 @@ namespace
         }
 
         return std::wstring(first, last);
+    }
+
+    struct StructuredFilterQuery
+    {
+        std::vector<std::wstring> fileNameTerms;
+        std::vector<std::wstring> tagTerms;
+        bool ratingFilterEnabled{};
+        int minimumRating{};
+        int maximumRating{5};
+        bool ratedOnly{};
+        bool unratedOnly{};
+    };
+
+    std::vector<std::wstring> SplitWhitespaceTerms(std::wstring_view query)
+    {
+        std::vector<std::wstring> terms;
+        std::wstring current;
+        for (const wchar_t character : query)
+        {
+            if (iswspace(character) != 0)
+            {
+                if (!current.empty())
+                {
+                    terms.push_back(std::move(current));
+                    current.clear();
+                }
+                continue;
+            }
+
+            current.push_back(character);
+        }
+
+        if (!current.empty())
+        {
+            terms.push_back(std::move(current));
+        }
+        return terms;
+    }
+
+    bool HasStructuredFilterTokens(std::wstring_view queryLower)
+    {
+        return queryLower.find(L"rating:") != std::wstring_view::npos
+            || queryLower.find(L"tag:") != std::wstring_view::npos
+            || queryLower.find(L"tags:") != std::wstring_view::npos;
+    }
+
+    bool TryApplyRatingConstraint(std::wstring_view rawValue, StructuredFilterQuery* filter)
+    {
+        if (!filter)
+        {
+            return false;
+        }
+
+        std::wstring value = TrimWhitespace(std::wstring(rawValue));
+        if (value.empty())
+        {
+            return false;
+        }
+
+        if (value == L"rated")
+        {
+            filter->ratedOnly = true;
+            return true;
+        }
+        if (value == L"unrated")
+        {
+            filter->unratedOnly = true;
+            return true;
+        }
+
+        wchar_t comparator = L'=';
+        bool inclusive = true;
+        std::size_t numberOffset = 0;
+        if (value.rfind(L">=", 0) == 0 || value.rfind(L"<=", 0) == 0)
+        {
+            comparator = value[0];
+            inclusive = true;
+            numberOffset = 2;
+        }
+        else if (value[0] == L'>' || value[0] == L'<' || value[0] == L'=')
+        {
+            comparator = value[0];
+            inclusive = comparator == L'=';
+            numberOffset = 1;
+        }
+
+        const wchar_t* numberText = value.c_str() + numberOffset;
+        wchar_t* numberEnd = nullptr;
+        const long parsedRating = wcstol(numberText, &numberEnd, 10);
+        if (numberEnd == numberText || *numberEnd != L'\0')
+        {
+            return false;
+        }
+
+        const int clampedRating = std::clamp(static_cast<int>(parsedRating), 0, 5);
+        filter->ratingFilterEnabled = true;
+        switch (comparator)
+        {
+        case L'>':
+            filter->minimumRating = std::max(filter->minimumRating, clampedRating + (inclusive ? 0 : 1));
+            break;
+        case L'<':
+            filter->maximumRating = std::min(filter->maximumRating, clampedRating - (inclusive ? 0 : 1));
+            break;
+        case L'=':
+        default:
+            filter->minimumRating = std::max(filter->minimumRating, clampedRating);
+            filter->maximumRating = std::min(filter->maximumRating, clampedRating);
+            break;
+        }
+
+        if (clampedRating == 0 && comparator == L'=')
+        {
+            filter->unratedOnly = true;
+        }
+        return true;
+    }
+
+    StructuredFilterQuery ParseStructuredFilterQuery(std::wstring_view queryLower)
+    {
+        StructuredFilterQuery filter;
+        for (const std::wstring& term : SplitWhitespaceTerms(queryLower))
+        {
+            if (term.rfind(L"rating:", 0) == 0)
+            {
+                if (!TryApplyRatingConstraint(term.substr(7), &filter))
+                {
+                    filter.fileNameTerms.push_back(term);
+                }
+                continue;
+            }
+
+            if (term.rfind(L"tag:", 0) == 0 || term.rfind(L"tags:", 0) == 0)
+            {
+                const std::size_t valueOffset = term.rfind(L':') + 1;
+                std::wstring value = TrimWhitespace(term.substr(valueOffset));
+                if (!value.empty())
+                {
+                    filter.tagTerms.push_back(std::move(value));
+                }
+                continue;
+            }
+
+            filter.fileNameTerms.push_back(term);
+        }
+
+        return filter;
+    }
+
+    bool MatchesStructuredFilter(const hyperbrowse::browser::BrowserItem& item,
+                                 const hyperbrowse::services::UserMetadataEntry& userMetadata,
+                                 const StructuredFilterQuery& filter)
+    {
+        const std::wstring fileNameLower = ToLowercase(item.fileName);
+        for (const std::wstring& term : filter.fileNameTerms)
+        {
+            if (fileNameLower.find(term) == std::wstring::npos)
+            {
+                return false;
+            }
+        }
+
+        const int rating = std::clamp(userMetadata.rating, 0, 5);
+        if (filter.ratedOnly && rating <= 0)
+        {
+            return false;
+        }
+        if (filter.unratedOnly && rating > 0)
+        {
+            return false;
+        }
+        if (filter.ratingFilterEnabled && (rating < filter.minimumRating || rating > filter.maximumRating))
+        {
+            return false;
+        }
+
+        if (!filter.tagTerms.empty())
+        {
+            const std::wstring tagsLower = ToLowercase(userMetadata.tags);
+            for (const std::wstring& term : filter.tagTerms)
+            {
+                if (tagsLower.find(term) == std::wstring::npos)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     int CompareCaseInsensitive(const std::wstring& lhs, const std::wstring& rhs)
@@ -322,6 +512,10 @@ namespace hyperbrowse::browser
             return L"Random";
         case BrowserSortMode::DateTaken:
             return L"Date Taken";
+        case BrowserSortMode::Rating:
+            return L"Rating";
+        case BrowserSortMode::Tags:
+            return L"Tags";
         default:
             return L"Unknown";
         }
@@ -503,6 +697,24 @@ namespace hyperbrowse::browser
     bool BrowserPane::IsSortAscending() const noexcept
     {
         return sortAscending_;
+    }
+
+    void BrowserPane::SetUserMetadataStore(hyperbrowse::services::UserMetadataStore* userMetadataStore)
+    {
+        if (userMetadataStore_ == userMetadataStore)
+        {
+            return;
+        }
+
+        userMetadataStore_ = userMetadataStore;
+        RebuildOrder();
+        UpdateSelectionBytes();
+        UpdateDetailsListView();
+        SyncDetailsListSelectionFromModel();
+        UpdateVerticalScrollBar();
+        ScheduleVisibleThumbnailWork();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
     void BrowserPane::SetFilterQuery(std::wstring query)
@@ -1071,15 +1283,32 @@ namespace hyperbrowse::browser
         }
 
         const auto& items = model_->Items();
+        const bool useStructuredFilter = HasStructuredFilterTokens(filterQueryLower_);
+        const StructuredFilterQuery structuredFilter = useStructuredFilter
+            ? ParseStructuredFilterQuery(filterQueryLower_)
+            : StructuredFilterQuery{};
         orderedModelIndices_.reserve(items.size());
         for (std::size_t index = 0; index < items.size(); ++index)
         {
             if (!filterQueryLower_.empty())
             {
                 const BrowserItem& item = items[index];
-                if (ToLowercase(item.fileName).find(filterQueryLower_) == std::wstring::npos)
+                if (!useStructuredFilter)
                 {
-                    continue;
+                    if (ToLowercase(item.fileName).find(filterQueryLower_) == std::wstring::npos)
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    const services::UserMetadataEntry userMetadata = userMetadataStore_
+                        ? userMetadataStore_->EntryForPath(item.filePath)
+                        : services::UserMetadataEntry{};
+                    if (!MatchesStructuredFilter(item, userMetadata, structuredFilter))
+                    {
+                        continue;
+                    }
                 }
             }
 
@@ -1090,6 +1319,12 @@ namespace hyperbrowse::browser
         {
             const BrowserItem& lhs = items[static_cast<std::size_t>(lhsIndex)];
             const BrowserItem& rhs = items[static_cast<std::size_t>(rhsIndex)];
+            const services::UserMetadataEntry lhsUserMetadata = userMetadataStore_
+                ? userMetadataStore_->EntryForPath(lhs.filePath)
+                : services::UserMetadataEntry{};
+            const services::UserMetadataEntry rhsUserMetadata = userMetadataStore_
+                ? userMetadataStore_->EntryForPath(rhs.filePath)
+                : services::UserMetadataEntry{};
 
             auto tieBreakByName = [&]() -> bool
             {
@@ -1165,6 +1400,38 @@ namespace hyperbrowse::browser
                     }
                     return tieBreakByName();
                 }
+                case BrowserSortMode::Rating:
+                {
+                    const int lhsRating = std::clamp(lhsUserMetadata.rating, 0, 5);
+                    const int rhsRating = std::clamp(rhsUserMetadata.rating, 0, 5);
+                    const bool lhsHas = lhsRating > 0;
+                    const bool rhsHas = rhsRating > 0;
+                    if (lhsHas != rhsHas)
+                    {
+                        return lhsHas;
+                    }
+                    if (lhsRating != rhsRating)
+                    {
+                        return sortAscending_ ? lhsRating < rhsRating : lhsRating > rhsRating;
+                    }
+                    return tieBreakByName();
+                }
+                case BrowserSortMode::Tags:
+                {
+                    const bool lhsHas = !lhsUserMetadata.tags.empty();
+                    const bool rhsHas = !rhsUserMetadata.tags.empty();
+                    if (lhsHas != rhsHas)
+                    {
+                        return lhsHas;
+                    }
+
+                    const int tagCompare = CompareCaseInsensitive(lhsUserMetadata.tags, rhsUserMetadata.tags);
+                    if (tagCompare != 0)
+                    {
+                        return sortAscending_ ? tagCompare < 0 : tagCompare > 0;
+                    }
+                    return tieBreakByName();
+                }
                 case BrowserSortMode::Random:
                 {
                     const auto lhsHash = std::hash<std::wstring>{}(lhs.filePath);
@@ -1181,7 +1448,10 @@ namespace hyperbrowse::browser
             };
 
             const bool ascending = compareAscending();
-            if (!sortAscending_ && sortMode_ != BrowserSortMode::Random)
+            if (!sortAscending_
+                && sortMode_ != BrowserSortMode::Random
+                && sortMode_ != BrowserSortMode::Rating
+                && sortMode_ != BrowserSortMode::Tags)
             {
                 return !ascending && !(lhs.filePath == rhs.filePath);
             }

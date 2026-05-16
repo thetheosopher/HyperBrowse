@@ -21,6 +21,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "browser/BrowserModel.h"
@@ -577,11 +578,29 @@ namespace
         return pixels;
     }
 
+    void InitPropVariantFromAnsiText(std::string_view text, PROPVARIANT* value)
+    {
+        if (!value)
+        {
+            return;
+        }
+
+        PropVariantInit(value);
+        char* buffer = static_cast<char*>(CoTaskMemAlloc(text.size() + 1));
+        Expect(buffer != nullptr, "Failed to allocate the PNG text metadata buffer");
+        std::memcpy(buffer, text.data(), text.size());
+        buffer[text.size()] = '\0';
+        value->vt = VT_LPSTR;
+        value->pszVal = buffer;
+    }
+
     void WriteTestImage(const fs::path& path,
                         TestImageFormat format,
                         UINT width,
                         UINT height,
-                        std::uint16_t orientation = 1)
+                        std::uint16_t orientation = 1,
+                        std::wstring_view pngTextKey = {},
+                        std::string_view pngTextValue = {})
     {
         fs::create_directories(path.parent_path());
 
@@ -630,6 +649,20 @@ namespace
             PropVariantInit(&value);
             CheckHResult(InitPropVariantFromUInt16(orientation, &value), "Failed to build the JPEG orientation metadata value");
             CheckHResult(metadataWriter->SetMetadataByName(L"/app1/ifd/{ushort=274}", &value), "Failed to write the JPEG orientation metadata");
+            PropVariantClear(&value);
+        }
+        else if (format == TestImageFormat::Png && !pngTextKey.empty() && !pngTextValue.empty())
+        {
+            ComPtr<IWICMetadataQueryWriter> metadataWriter;
+            CheckHResult(frame->GetMetadataQueryWriter(&metadataWriter), "Failed to acquire the PNG metadata writer");
+
+            std::wstring query = L"/tEXt/{str=";
+            query.append(pngTextKey);
+            query.append(L"}");
+
+            PROPVARIANT value;
+            InitPropVariantFromAnsiText(pngTextValue, &value);
+            CheckHResult(metadataWriter->SetMetadataByName(query.c_str(), &value), "Failed to write the PNG text metadata");
             PropVariantClear(&value);
         }
 
@@ -1282,6 +1315,63 @@ namespace
         }
     }
 
+    void RunSwarmUiMetadataExtractionScenario()
+    {
+        TempFolder root(L"HyperBrowsePrompt9SwarmMetadata");
+        const fs::path pngPath = root.Root() / L"swarm-ui.png";
+        const std::string parameters =
+            "{ sui_image_params : { prompt : cinematic portrait, volumetric lighting, sharp focus, negativeprompt : low quality, deformed hands, text, model : swarm-model-xl, seed : 12345, steps : 30, cfgscale : 7, swarm_version : 0.9.1.1, date : 2026-05-16, generation_time : 1.23 seconds } }";
+        WriteTestImage(pngPath,
+                       TestImageFormat::Png,
+                       96,
+                       48,
+                       1,
+                       L"parameters",
+                       parameters);
+
+        hyperbrowse::browser::BrowserItem item;
+        item.fileName = pngPath.filename().wstring();
+        item.filePath = pngPath.wstring();
+        item.fileType = L"PNG";
+        item.modifiedTimestampUtc = 77;
+
+        std::wstring errorMessage;
+        const auto metadata = hyperbrowse::services::ExtractImageMetadata(item, &errorMessage);
+        Expect(metadata != nullptr, "SwarmUI PNG metadata extraction returned a null result");
+
+        const auto findProperty = [&](std::wstring_view canonicalName)
+            -> const hyperbrowse::services::MetadataPropertyEntry*
+        {
+            const auto match = std::find_if(metadata->properties.begin(),
+                                            metadata->properties.end(),
+                                            [&](const hyperbrowse::services::MetadataPropertyEntry& property)
+                                            {
+                                                return property.canonicalName == canonicalName;
+                                            });
+            return match != metadata->properties.end() ? &(*match) : nullptr;
+        };
+
+        const auto* prompt = findProperty(L"SwarmUI.prompt");
+        Expect(prompt != nullptr
+                   && prompt->value == L"cinematic portrait, volumetric lighting, sharp focus",
+               "SwarmUI prompt metadata was not extracted from the PNG parameters chunk");
+
+        const auto* negativePrompt = findProperty(L"SwarmUI.negativeprompt");
+        Expect(negativePrompt != nullptr
+                   && negativePrompt->value == L"low quality, deformed hands, text",
+               "SwarmUI negative prompt metadata was not extracted from the PNG parameters chunk");
+
+        const auto* swarmVersion = findProperty(L"SwarmUI.swarm_version");
+        Expect(swarmVersion != nullptr && swarmVersion->value == L"0.9.1.1",
+               "SwarmUI version metadata was not extracted from the PNG parameters chunk");
+
+        const std::wstring expanded = hyperbrowse::services::FormatImageInfoExpanded(*metadata);
+        Expect(expanded.find(L"Prompt: cinematic portrait, volumetric lighting, sharp focus") != std::wstring::npos,
+               "Expanded image information did not surface the extracted SwarmUI prompt");
+        Expect(expanded.find(L"Negative prompt: low quality, deformed hands, text") != std::wstring::npos,
+               "Expanded image information did not surface the extracted SwarmUI negative prompt");
+    }
+
     void RunRawFormatAllowlistScenario()
     {
         const std::vector<std::wstring> supportedRawFormats{
@@ -1657,6 +1747,7 @@ int main()
         RunThumbnailSchedulerFailureScenario(hwnd, &state);
         RunThumbnailFailureClassificationScenario();
         RunImageMetadataServiceScenario();
+        RunSwarmUiMetadataExtractionScenario();
         RunRawFormatAllowlistScenario();
         RunRawDecoderScenario();
         RunBrowserPaneScenario(instance);

@@ -16,6 +16,7 @@
 #include <functional>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -100,6 +101,7 @@ namespace
     constexpr UINT ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION = 1024;
     constexpr UINT ID_FILE_COMPARE_SELECTED = 1025;
     constexpr UINT ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS = 1026;
+    constexpr UINT ID_FILE_BATCH_RENAME_SELECTION = 1027;
     constexpr UINT ID_FILE_SET_RATING_0 = 1080;
     constexpr UINT ID_FILE_SET_RATING_1 = 1081;
     constexpr UINT ID_FILE_SET_RATING_2 = 1082;
@@ -119,6 +121,16 @@ namespace
     constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_LAST = 1068;
     constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_BASE = 1071;
     constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_LAST = 1078;
+
+    std::wstring ToLowercaseCopy(std::wstring value);
+    int CountDecimalDigits(std::size_t value);
+    bool TryBuildBatchRenamePatternLeafName(std::wstring_view pattern,
+                                            const hyperbrowse::browser::BrowserItem& item,
+                                            std::size_t ordinal,
+                                            std::size_t selectionCount,
+                                            int defaultNumberWidth,
+                                            std::wstring* leafName,
+                                            std::wstring* errorMessage);
     constexpr UINT ID_VIEW_THUMBNAILS = 2001;
     constexpr UINT ID_VIEW_DETAILS = 2002;
     constexpr UINT ID_VIEW_RECURSIVE = 2003;
@@ -147,10 +159,12 @@ namespace
     constexpr UINT ID_VIEW_SORT_TYPE = 2205;
     constexpr UINT ID_VIEW_SORT_RANDOM = 2206;
     constexpr UINT ID_VIEW_SORT_DATETAKEN = 2207;
-    constexpr UINT ID_VIEW_SORT_DIRECTION = 2208;
-    constexpr UINT ID_VIEW_DETAILS_STRIP = 2209;
-    constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM = 2210;
-    constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE = 2211;
+    constexpr UINT ID_VIEW_SORT_RATING = 2208;
+    constexpr UINT ID_VIEW_SORT_TAGS = 2209;
+    constexpr UINT ID_VIEW_SORT_DIRECTION = 2210;
+    constexpr UINT ID_VIEW_DETAILS_STRIP = 2211;
+    constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM = 2212;
+    constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE = 2213;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CUT = 2303;
@@ -198,6 +212,11 @@ namespace
     constexpr int kTextInputButtonWidth = 88;
     constexpr int kTextInputButtonHeight = 28;
     constexpr int kTextInputEditControlId = 100;
+    constexpr wchar_t kBatchRenameDialogClassName[] = L"HyperBrowseBatchRenameDialog";
+    constexpr int kBatchRenameDialogWidth = 760;
+    constexpr int kBatchRenameDialogHeight = 460;
+    constexpr int kBatchRenamePatternEditControlId = 200;
+    constexpr int kBatchRenamePreviewListControlId = 201;
     constexpr wchar_t kAboutDialogClassName[] = L"HyperBrowseAboutDialog";
     constexpr wchar_t kAboutDialogGitHubLabel[] = L"GitHub Project";
     constexpr wchar_t kAboutDialogSupportLabel[] = L"Buy Me A Coffee";
@@ -240,6 +259,33 @@ namespace
         std::wstring resultText;
         int selectionStart{};
         int selectionEnd{};
+        bool accepted{};
+        bool done{};
+    };
+
+    struct BatchRenamePreviewRow
+    {
+        std::wstring currentLeafName;
+        std::wstring renamedLeafName;
+        std::wstring status;
+        bool valid{true};
+    };
+
+    struct BatchRenameDialogState
+    {
+        HWND ownerWindow{};
+        HWND patternEditWindow{};
+        HWND previewListWindow{};
+        HWND okButton{};
+        std::wstring title;
+        std::wstring instruction;
+        std::wstring initialPattern;
+        std::wstring pattern;
+        std::vector<hyperbrowse::browser::BrowserItem> items;
+        std::vector<std::wstring> resultLeafNames;
+        std::vector<BatchRenamePreviewRow> previewRows;
+        int numberWidth{};
+        bool canAccept{};
         bool accepted{};
         bool done{};
     };
@@ -1077,6 +1123,10 @@ namespace
             return L"Type";
         case hyperbrowse::browser::BrowserSortMode::DateTaken:
             return L"Taken";
+        case hyperbrowse::browser::BrowserSortMode::Rating:
+            return L"Rating";
+        case hyperbrowse::browser::BrowserSortMode::Tags:
+            return L"Tags";
         case hyperbrowse::browser::BrowserSortMode::Random:
         default:
             return L"Random";
@@ -1296,6 +1346,490 @@ namespace
         }
 
         return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    void LayoutBatchRenameDialogControls(HWND hwnd, const BatchRenameDialogState& state)
+    {
+        RECT clientRect{};
+        GetClientRect(hwnd, &clientRect);
+
+        const int clientWidth = clientRect.right - clientRect.left;
+        const int clientHeight = clientRect.bottom - clientRect.top;
+        const int contentWidth = clientWidth - (kTextInputDialogMargin * 2);
+        const int instructionHeight = 44;
+        const int helpHeight = 38;
+        const int buttonTop = clientHeight - kTextInputDialogMargin - kTextInputButtonHeight;
+        const int listTop = kTextInputDialogMargin + instructionHeight + 6 + kTextInputEditHeight + 10 + helpHeight + 8;
+        const int listHeight = std::max(120, buttonTop - 12 - listTop);
+        const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
+        const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
+
+        const HWND instructionWindow = GetDlgItem(hwnd, 1);
+        if (instructionWindow)
+        {
+            MoveWindow(instructionWindow,
+                       kTextInputDialogMargin,
+                       kTextInputDialogMargin,
+                       contentWidth,
+                       instructionHeight,
+                       TRUE);
+        }
+
+        if (state.patternEditWindow)
+        {
+            MoveWindow(state.patternEditWindow,
+                       kTextInputDialogMargin,
+                       kTextInputDialogMargin + instructionHeight + 6,
+                       contentWidth,
+                       kTextInputEditHeight,
+                       TRUE);
+        }
+
+        const HWND helpWindow = GetDlgItem(hwnd, 2);
+        if (helpWindow)
+        {
+            MoveWindow(helpWindow,
+                       kTextInputDialogMargin,
+                       kTextInputDialogMargin + instructionHeight + 6 + kTextInputEditHeight + 10,
+                       contentWidth,
+                       helpHeight,
+                       TRUE);
+        }
+
+        if (state.previewListWindow)
+        {
+            MoveWindow(state.previewListWindow,
+                       kTextInputDialogMargin,
+                       listTop,
+                       contentWidth,
+                       listHeight,
+                       TRUE);
+
+            ListView_SetColumnWidth(state.previewListWindow, 0, std::max(160, contentWidth / 3));
+            ListView_SetColumnWidth(state.previewListWindow, 1, std::max(200, contentWidth / 2));
+            ListView_SetColumnWidth(state.previewListWindow, 2, std::max(110, contentWidth - (std::max(160, contentWidth / 3) + std::max(200, contentWidth / 2)) - 8));
+        }
+
+        if (state.okButton)
+        {
+            MoveWindow(state.okButton, okLeft, buttonTop, kTextInputButtonWidth, kTextInputButtonHeight, TRUE);
+        }
+
+        const HWND cancelButton = GetDlgItem(hwnd, IDCANCEL);
+        if (cancelButton)
+        {
+            MoveWindow(cancelButton, cancelLeft, buttonTop, kTextInputButtonWidth, kTextInputButtonHeight, TRUE);
+        }
+    }
+
+    void RefreshBatchRenameDialogPreview(BatchRenameDialogState* state)
+    {
+        if (!state || !state->patternEditWindow || !state->previewListWindow)
+        {
+            return;
+        }
+
+        const int textLength = GetWindowTextLengthW(state->patternEditWindow);
+        std::wstring pattern(static_cast<std::size_t>(textLength) + 1, L'\0');
+        GetWindowTextW(state->patternEditWindow, pattern.data(), static_cast<int>(pattern.size()));
+        pattern.resize(wcslen(pattern.c_str()));
+
+        state->pattern = pattern;
+        state->previewRows.clear();
+        state->resultLeafNames.clear();
+        state->canAccept = false;
+
+        std::vector<std::wstring> generatedLeafNames;
+        generatedLeafNames.reserve(state->items.size());
+        state->previewRows.reserve(state->items.size());
+
+        bool hasErrors = false;
+        bool hasChanges = false;
+        for (std::size_t index = 0; index < state->items.size(); ++index)
+        {
+            const auto& item = state->items[index];
+            BatchRenamePreviewRow row;
+            row.currentLeafName = item.fileName;
+
+            std::wstring validationMessage;
+            if (TryBuildBatchRenamePatternLeafName(pattern,
+                                                   item,
+                                                   index + 1,
+                                                   state->items.size(),
+                                                   state->numberWidth,
+                                                   &row.renamedLeafName,
+                                                   &validationMessage))
+            {
+                row.status = StringsEqualInsensitive(row.renamedLeafName, item.fileName)
+                    ? L"No change"
+                    : L"Ready";
+                hasChanges = hasChanges || !StringsEqualInsensitive(row.renamedLeafName, item.fileName);
+                generatedLeafNames.push_back(row.renamedLeafName);
+            }
+            else
+            {
+                row.valid = false;
+                row.status = validationMessage.empty() ? L"Invalid pattern" : validationMessage;
+                hasErrors = true;
+                generatedLeafNames.push_back(std::wstring{});
+            }
+
+            state->previewRows.push_back(std::move(row));
+        }
+
+        if (!hasErrors)
+        {
+            std::unordered_map<std::wstring, std::size_t> firstIndexByName;
+            for (std::size_t index = 0; index < generatedLeafNames.size(); ++index)
+            {
+                const std::wstring normalizedLeafName = ToLowercaseCopy(generatedLeafNames[index]);
+                const auto [iterator, inserted] = firstIndexByName.emplace(normalizedLeafName, index);
+                if (inserted)
+                {
+                    continue;
+                }
+
+                state->previewRows[index].valid = false;
+                state->previewRows[index].status = L"Duplicate name";
+                state->previewRows[iterator->second].valid = false;
+                state->previewRows[iterator->second].status = L"Duplicate name";
+                hasErrors = true;
+            }
+        }
+
+        if (!hasErrors && hasChanges)
+        {
+            state->resultLeafNames = std::move(generatedLeafNames);
+            state->canAccept = true;
+        }
+
+        ListView_DeleteAllItems(state->previewListWindow);
+        for (std::size_t index = 0; index < state->previewRows.size(); ++index)
+        {
+            const BatchRenamePreviewRow& row = state->previewRows[index];
+            LVITEMW item{};
+            item.mask = LVIF_TEXT;
+            item.iItem = static_cast<int>(index);
+            item.pszText = const_cast<LPWSTR>(row.currentLeafName.c_str());
+            const int insertedIndex = ListView_InsertItem(state->previewListWindow, &item);
+            if (insertedIndex < 0)
+            {
+                continue;
+            }
+
+            ListView_SetItemText(state->previewListWindow,
+                                 insertedIndex,
+                                 1,
+                                 const_cast<LPWSTR>(row.renamedLeafName.c_str()));
+            ListView_SetItemText(state->previewListWindow,
+                                 insertedIndex,
+                                 2,
+                                 const_cast<LPWSTR>(row.status.c_str()));
+        }
+
+        if (state->okButton)
+        {
+            EnableWindow(state->okButton, state->canAccept ? TRUE : FALSE);
+        }
+    }
+
+    LRESULT CALLBACK BatchRenameDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<BatchRenameDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<BatchRenameDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+
+            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HWND instructionWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->instruction.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                40,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(1)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+
+            state->patternEditWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                state->initialPattern.c_str(),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                0,
+                0,
+                100,
+                kTextInputEditHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBatchRenamePatternEditControlId)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+
+            const HWND helpWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"Tokens: {name} original stem, {num} zero-padded sequence, {num:N} explicit width, {ext} original extension, {folder} parent folder.",
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                38,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(2)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+
+            state->previewListWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                WC_LISTVIEWW,
+                nullptr,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS,
+                0,
+                0,
+                100,
+                100,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBatchRenamePreviewListControlId)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+
+            state->okButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Rename",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                0,
+                0,
+                kTextInputButtonWidth,
+                kTextInputButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+
+            const HWND cancelButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Cancel",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                0,
+                0,
+                kTextInputButtonWidth,
+                kTextInputButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+
+            if (instructionWindow) SendMessageW(instructionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (state->patternEditWindow) SendMessageW(state->patternEditWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (helpWindow) SendMessageW(helpWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (state->okButton) SendMessageW(state->okButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (cancelButton) SendMessageW(cancelButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+
+            if (state->previewListWindow)
+            {
+                ListView_SetExtendedListViewStyle(state->previewListWindow,
+                                                  LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+
+                LVCOLUMNW column{};
+                column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+                column.pszText = const_cast<LPWSTR>(L"Current Name");
+                column.cx = 220;
+                ListView_InsertColumn(state->previewListWindow, 0, &column);
+
+                column.pszText = const_cast<LPWSTR>(L"New Name");
+                column.cx = 300;
+                column.iSubItem = 1;
+                ListView_InsertColumn(state->previewListWindow, 1, &column);
+
+                column.pszText = const_cast<LPWSTR>(L"Status");
+                column.cx = 140;
+                column.iSubItem = 2;
+                ListView_InsertColumn(state->previewListWindow, 2, &column);
+            }
+
+            LayoutBatchRenameDialogControls(hwnd, *state);
+            if (state->patternEditWindow)
+            {
+                SendMessageW(state->patternEditWindow,
+                             EM_SETSEL,
+                             0,
+                             static_cast<LPARAM>(state->initialPattern.size()));
+            }
+            RefreshBatchRenameDialogPreview(state);
+            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            return 0;
+        }
+        case WM_SIZE:
+            if (state)
+            {
+                LayoutBatchRenameDialogControls(hwnd, *state);
+            }
+            return 0;
+        case WM_SHOWWINDOW:
+            if (wParam != FALSE && state && state->patternEditWindow)
+            {
+                SetFocus(state->patternEditWindow);
+                return FALSE;
+            }
+            break;
+        case WM_COMMAND:
+            if (!state)
+            {
+                break;
+            }
+
+            if (LOWORD(wParam) == kBatchRenamePatternEditControlId && HIWORD(wParam) == EN_CHANGE)
+            {
+                RefreshBatchRenameDialogPreview(state);
+                return 0;
+            }
+
+            if (LOWORD(wParam) == IDOK)
+            {
+                if (state->canAccept)
+                {
+                    state->accepted = true;
+                    DestroyWindow(hwnd);
+                }
+                return 0;
+            }
+
+            if (LOWORD(wParam) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    bool PromptForBatchRenamePattern(HWND ownerWindow,
+                                     HINSTANCE instance,
+                                     std::wstring initialPattern,
+                                     std::vector<hyperbrowse::browser::BrowserItem> items,
+                                     std::vector<std::wstring>* resultLeafNames)
+    {
+        if (!resultLeafNames || items.size() < 2)
+        {
+            return false;
+        }
+
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance, kBatchRenameDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &BatchRenameDialogProc;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = kBatchRenameDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return false;
+            }
+        }
+
+        BatchRenameDialogState state;
+        state.ownerWindow = ownerWindow;
+        state.title = L"Batch Rename";
+        state.instruction = L"Enter a rename pattern. HyperBrowse previews every generated file name and preserves extensions unless you place {ext} yourself.";
+        state.initialPattern = std::move(initialPattern);
+        state.items = std::move(items);
+        state.numberWidth = std::max(3, CountDecimalDigits(state.items.size()));
+
+        RECT windowRect{0, 0, kBatchRenameDialogWidth, kBatchRenameDialogHeight};
+        AdjustWindowRectEx(&windowRect,
+                           WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+                           FALSE,
+                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, FALSE);
+        }
+
+        HWND dialogWindow = CreateWindowExW(
+            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+            kBatchRenameDialogClassName,
+            state.title.c_str(),
+            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            ownerWindow,
+            nullptr,
+            instance,
+            &state);
+
+        if (!dialogWindow)
+        {
+            if (ownerWindow)
+            {
+                EnableWindow(ownerWindow, TRUE);
+            }
+            return false;
+        }
+
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+
+        MSG message{};
+        while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            if (!IsDialogMessageW(dialogWindow, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, TRUE);
+            SetForegroundWindow(ownerWindow);
+            SetActiveWindow(ownerWindow);
+        }
+
+        if (!state.accepted)
+        {
+            return false;
+        }
+
+        *resultLeafNames = std::move(state.resultLeafNames);
+        return true;
     }
 
     void PaintAboutDialog(HDC hdc, const RECT& clientRect, const AboutDialogState& state)
@@ -2236,6 +2770,10 @@ namespace
             return hyperbrowse::browser::BrowserSortMode::FileType;
         case ID_VIEW_SORT_DATETAKEN:
             return hyperbrowse::browser::BrowserSortMode::DateTaken;
+        case ID_VIEW_SORT_RATING:
+            return hyperbrowse::browser::BrowserSortMode::Rating;
+        case ID_VIEW_SORT_TAGS:
+            return hyperbrowse::browser::BrowserSortMode::Tags;
         case ID_VIEW_SORT_RANDOM:
         default:
             return hyperbrowse::browser::BrowserSortMode::Random;
@@ -2258,6 +2796,10 @@ namespace
             return ID_VIEW_SORT_TYPE;
         case hyperbrowse::browser::BrowserSortMode::DateTaken:
             return ID_VIEW_SORT_DATETAKEN;
+        case hyperbrowse::browser::BrowserSortMode::Rating:
+            return ID_VIEW_SORT_RATING;
+        case hyperbrowse::browser::BrowserSortMode::Tags:
+            return ID_VIEW_SORT_TAGS;
         case hyperbrowse::browser::BrowserSortMode::Random:
         default:
             return ID_VIEW_SORT_RANDOM;
@@ -2495,6 +3037,15 @@ namespace
         return commandId >= firstCommandId && commandId <= lastCommandId;
     }
 
+    std::wstring ToLowercaseCopy(std::wstring value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(), [](wchar_t character)
+        {
+            return static_cast<wchar_t>(towlower(character));
+        });
+        return value;
+    }
+
     int RatingFromCommandId(UINT commandId)
     {
         if (commandId < ID_FILE_SET_RATING_0 || commandId > ID_FILE_SET_RATING_5)
@@ -2524,6 +3075,185 @@ namespace
         }
 
         return std::to_wstring(std::clamp(rating, 0, 5)) + L"/5";
+    }
+
+    std::wstring TrimWhitespaceCopy(std::wstring value)
+    {
+        const auto isSpace = [](wchar_t character)
+        {
+            return iswspace(character) != 0;
+        };
+
+        const auto first = std::find_if_not(value.begin(), value.end(), isSpace);
+        const auto last = std::find_if_not(value.rbegin(), value.rend(), isSpace).base();
+        if (first >= last)
+        {
+            return {};
+        }
+
+        return std::wstring(first, last);
+    }
+
+    int CountDecimalDigits(std::size_t value)
+    {
+        int digits = 1;
+        while (value >= 10)
+        {
+            value /= 10;
+            ++digits;
+        }
+
+        return digits;
+    }
+
+    std::wstring FormatZeroPaddedSequence(std::size_t ordinal, int width)
+    {
+        wchar_t numberBuffer[32]{};
+        swprintf_s(numberBuffer, L"%0*u", std::max(1, width), static_cast<unsigned int>(ordinal));
+        return numberBuffer;
+    }
+
+    std::wstring BuildBatchRenameLeafName(std::wstring_view baseName,
+                                          std::size_t ordinal,
+                                          int numberWidth,
+                                          std::wstring_view extension)
+    {
+        wchar_t numberBuffer[32]{};
+        swprintf_s(numberBuffer, L"%0*u", numberWidth, static_cast<unsigned int>(ordinal));
+
+        std::wstring leafName(baseName);
+        if (!leafName.empty())
+        {
+            leafName.push_back(L' ');
+        }
+        leafName.append(numberBuffer);
+        leafName.append(extension);
+        return leafName;
+    }
+
+    bool TryBuildBatchRenamePatternLeafName(std::wstring_view pattern,
+                                            const hyperbrowse::browser::BrowserItem& item,
+                                            std::size_t ordinal,
+                                            std::size_t selectionCount,
+                                            int defaultNumberWidth,
+                                            std::wstring* leafName,
+                                            std::wstring* errorMessage)
+    {
+        if (!leafName)
+        {
+            return false;
+        }
+
+        const std::wstring trimmedPattern = TrimWhitespaceCopy(std::wstring(pattern));
+        if (trimmedPattern.empty())
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"Enter a rename pattern.";
+            }
+            return false;
+        }
+
+        const std::wstring originalLeafName = item.fileName;
+        const std::wstring originalStem = fs::path(originalLeafName).stem().wstring();
+        const std::wstring originalExtension = fs::path(originalLeafName).extension().wstring();
+        const std::wstring folderName = fs::path(item.filePath).parent_path().filename().wstring();
+
+        std::wstring generatedLeafName;
+        generatedLeafName.reserve(trimmedPattern.size() + originalLeafName.size() + 16);
+        bool usedNumberToken = false;
+        bool usedExtensionToken = false;
+
+        for (std::size_t index = 0; index < trimmedPattern.size();)
+        {
+            if (trimmedPattern[index] != L'{')
+            {
+                generatedLeafName.push_back(trimmedPattern[index]);
+                ++index;
+                continue;
+            }
+
+            const std::size_t closeBrace = trimmedPattern.find(L'}', index + 1);
+            if (closeBrace == std::wstring::npos)
+            {
+                if (errorMessage)
+                {
+                    *errorMessage = L"Rename patterns must close every token with '}'.";
+                }
+                return false;
+            }
+
+            const std::wstring token = TrimWhitespaceCopy(trimmedPattern.substr(index + 1, closeBrace - index - 1));
+            const std::wstring normalizedToken = ToLowercaseCopy(token);
+            if (normalizedToken == L"name")
+            {
+                generatedLeafName.append(originalStem);
+            }
+            else if (normalizedToken == L"ext")
+            {
+                generatedLeafName.append(originalExtension);
+                usedExtensionToken = true;
+            }
+            else if (normalizedToken == L"folder")
+            {
+                generatedLeafName.append(folderName);
+            }
+            else if (normalizedToken == L"num" || normalizedToken.rfind(L"num:", 0) == 0)
+            {
+                int tokenWidth = defaultNumberWidth;
+                if (normalizedToken.size() > 4)
+                {
+                    const wchar_t* widthText = normalizedToken.c_str() + 4;
+                    wchar_t* widthEnd = nullptr;
+                    const long parsedWidth = wcstol(widthText, &widthEnd, 10);
+                    if (widthEnd == widthText || *widthEnd != L'\0' || parsedWidth <= 0 || parsedWidth > 9)
+                    {
+                        if (errorMessage)
+                        {
+                            *errorMessage = L"Use {num} or {num:N} with N between 1 and 9.";
+                        }
+                        return false;
+                    }
+                    tokenWidth = static_cast<int>(parsedWidth);
+                }
+
+                generatedLeafName.append(FormatZeroPaddedSequence(ordinal, tokenWidth));
+                usedNumberToken = true;
+            }
+            else
+            {
+                if (errorMessage)
+                {
+                    *errorMessage = L"Unknown token {" + token + L"}. Supported tokens: {name}, {num}, {num:N}, {ext}, {folder}.";
+                }
+                return false;
+            }
+
+            index = closeBrace + 1;
+        }
+
+        generatedLeafName = TrimWhitespaceCopy(std::move(generatedLeafName));
+        if (!usedNumberToken && selectionCount > 1)
+        {
+            generatedLeafName = BuildBatchRenameLeafName(generatedLeafName, ordinal, defaultNumberWidth, L"");
+        }
+        if (!usedExtensionToken)
+        {
+            generatedLeafName.append(originalExtension);
+        }
+
+        std::wstring validationError;
+        if (!IsValidRenameLeafName(generatedLeafName, &validationError))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = std::move(validationError);
+            }
+            return false;
+        }
+
+        *leafName = std::move(generatedLeafName);
+        return true;
     }
 
     bool IsJpegBrowserItem(const hyperbrowse::browser::BrowserItem& item)
@@ -2804,6 +3534,8 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...\tF2");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties\tAlt+Enter");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
@@ -2846,6 +3578,8 @@ namespace hyperbrowse::ui
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIMENSIONS, L"By &Dimensions");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_TYPE, L"By &Type");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DATETAKEN, L"By Date &Taken");
+        AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RATING, L"By &Rating");
+        AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_TAGS, L"By Ta&gs");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By &Random");
         AppendMenuW(sortMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"&Descending");
@@ -2938,7 +3672,7 @@ namespace hyperbrowse::ui
         {
             SendMessageW(filterEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
             SendMessageW(filterEdit_, EM_LIMITTEXT, 260, 0);
-            SendMessageW(filterEdit_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"Filter filenames"));
+            SendMessageW(filterEdit_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"Filter names, rating:>=3, tag:pick"));
         }
 
         tooltipControl_ = CreateWindowExW(
@@ -3046,6 +3780,8 @@ namespace hyperbrowse::ui
             util::LogError(L"Failed to create the browser pane control");
             return false;
         }
+
+        browserPaneController_->SetUserMetadataStore(userMetadataStore_.get());
 
         browserPane_ = browserPaneController_->Hwnd();
 
@@ -4932,10 +5668,12 @@ namespace hyperbrowse::ui
         const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
         const bool hasSingleSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 1;
+        const bool hasBatchRenameSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 1;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool allowMutatingFileCommands = hasSelection && !fileOperationActive_;
         const int commonSelectionRating = hasSelection ? CommonSelectionRating() : -1;
         const bool allowRenameSelected = hasSingleSelection && !fileOperationActive_;
+        const bool allowBatchRenameSelected = hasBatchRenameSelection && !fileOperationActive_;
         const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
 
         HMENU menu = CreatePopupMenu();
@@ -4971,6 +5709,7 @@ namespace hyperbrowse::ui
         AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
         AppendMenuW(menu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h");
         AppendMenuW(menu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...");
+        AppendMenuW(menu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
         AppendMenuW(menu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
@@ -5003,6 +5742,8 @@ namespace hyperbrowse::ui
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIMENSIONS, L"By &Dimensions");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_TYPE, L"By &Type");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DATETAKEN, L"By Date &Taken");
+        AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RATING, L"By &Rating");
+        AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_TAGS, L"By Ta&gs");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By &Random");
         AppendMenuW(sortMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"&Descending");
@@ -5021,6 +5762,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_RENAME_SELECTED, MF_BYCOMMAND | (allowRenameSelected ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, ID_FILE_BATCH_RENAME_SELECTION, MF_BYCOMMAND | (allowBatchRenameSelected ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, ID_FILE_EDIT_TAGS, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
         for (UINT ratingCommandId = ID_FILE_SET_RATING_0; ratingCommandId <= ID_FILE_SET_RATING_5; ++ratingCommandId)
@@ -5050,6 +5792,8 @@ namespace hyperbrowse::ui
         EnableMenuItem(sortMenu, ID_VIEW_SORT_TYPE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(sortMenu, ID_VIEW_SORT_RANDOM, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(sortMenu, ID_VIEW_SORT_DATETAKEN, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(sortMenu, ID_VIEW_SORT_RATING, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(sortMenu, ID_VIEW_SORT_TAGS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(batchConvertSelectionMenu, ID_FILE_BATCH_CONVERT_SELECTION_JPEG,
                        MF_BYCOMMAND | (hasSelection && !batchConvertActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(batchConvertSelectionMenu, ID_FILE_BATCH_CONVERT_SELECTION_PNG,
@@ -5073,7 +5817,7 @@ namespace hyperbrowse::ui
         CheckMenuRadioItem(
             sortMenu,
             ID_VIEW_SORT_FILENAME,
-            ID_VIEW_SORT_RANDOM,
+            ID_VIEW_SORT_TAGS,
             CommandIdFromSortMode(sortMode),
             MF_BYCOMMAND);
         CheckMenuItem(
@@ -5374,8 +6118,8 @@ namespace hyperbrowse::ui
         config.pszMainInstruction = item.fileName.c_str();
         config.pszContent = content.c_str();
         config.pszExpandedInformation = expanded.c_str();
-        config.pszCollapsedControlText = L"Show EXIF / IPTC details";
-        config.pszExpandedControlText = L"Hide EXIF / IPTC details";
+        config.pszCollapsedControlText = L"Show Metadata Details";
+        config.pszExpandedControlText = L"Hide Metadata Details";
 
         TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
     }
@@ -5440,6 +6184,66 @@ namespace hyperbrowse::ui
                            {},
                            services::FileConflictPolicy::PromptShell,
                            {renamedLeafName});
+    }
+
+    void MainWindow::StartBatchRenameSelection()
+    {
+        if (!browserModel_ || !browserPaneController_ || fileOperationActive_)
+        {
+            return;
+        }
+
+        const std::vector<int> selectedModelIndices = browserPaneController_->OrderedSelectedModelIndicesSnapshot();
+        if (selectedModelIndices.size() < 2)
+        {
+            MessageBoxW(hwnd_, L"Select two or more images to batch rename.", L"Batch Rename", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const auto& items = browserModel_->Items();
+        std::vector<browser::BrowserItem> selectedItems;
+        std::vector<std::wstring> sourcePaths;
+        selectedItems.reserve(selectedModelIndices.size());
+        sourcePaths.reserve(selectedModelIndices.size());
+        for (const int modelIndex : selectedModelIndices)
+        {
+            if (modelIndex < 0 || modelIndex >= static_cast<int>(items.size()))
+            {
+                continue;
+            }
+
+            const browser::BrowserItem& item = items[static_cast<std::size_t>(modelIndex)];
+            selectedItems.push_back(item);
+            sourcePaths.push_back(item.filePath);
+        }
+
+        if (sourcePaths.size() < 2)
+        {
+            MessageBoxW(hwnd_, L"Select two or more images to batch rename.", L"Batch Rename", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::wstring initialPattern = TrimWhitespaceCopy(fs::path(selectedItems.front().fileName).stem().wstring());
+        if (initialPattern.empty())
+        {
+            initialPattern = L"Image";
+        }
+
+        std::vector<std::wstring> targetLeafNames;
+        if (!PromptForBatchRenamePattern(hwnd_,
+                                         instance_,
+                                         std::move(initialPattern),
+                                         std::move(selectedItems),
+                                         &targetLeafNames))
+        {
+            return;
+        }
+
+        StartFileOperation(services::FileOperationType::Rename,
+                           std::move(sourcePaths),
+                           {},
+                           services::FileConflictPolicy::PromptShell,
+                           std::move(targetLeafNames));
     }
 
     void MainWindow::StartMoveSelection()
@@ -5704,7 +6508,7 @@ namespace hyperbrowse::ui
         }
 
         userMetadataStore_->SetRating(selectedPaths, rating);
-        UpdateDetailsPanel();
+        RefreshBrowserPane();
         UpdateMenuState();
     }
 
@@ -5757,7 +6561,7 @@ namespace hyperbrowse::ui
         }
 
         userMetadataStore_->SetTags(selectedPaths, editedTags);
-        UpdateDetailsPanel();
+        RefreshBrowserPane();
         UpdateMenuState();
     }
 
@@ -6420,6 +7224,8 @@ namespace hyperbrowse::ui
 
         const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
+        const bool hasSingleSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 1;
+        const bool hasBatchRenameSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 1;
         const bool hasCompareSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 2;
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
@@ -6440,6 +7246,8 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_RENAME_SELECTED, MF_BYCOMMAND | (hasSingleSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_BATCH_RENAME_SELECTION, MF_BYCOMMAND | (hasBatchRenameSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_EDIT_TAGS, MF_BYCOMMAND | (allowMetadataEdit ? MF_ENABLED : MF_GRAYED));
         for (UINT ratingCommandId = ID_FILE_SET_RATING_0; ratingCommandId <= ID_FILE_SET_RATING_5; ++ratingCommandId)
@@ -6564,7 +7372,7 @@ namespace hyperbrowse::ui
         CheckMenuRadioItem(
             menu_,
             ID_VIEW_SORT_FILENAME,
-            ID_VIEW_SORT_RANDOM,
+            ID_VIEW_SORT_TAGS,
             CommandIdFromSortMode(sortMode),
             MF_BYCOMMAND);
         CheckMenuItem(
@@ -6815,7 +7623,7 @@ namespace hyperbrowse::ui
                 favoriteDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kQuickAccessFolderLimit);
             }
 
-            if (TryReadDwordValue(key, kRegistryValueSortMode, &value) && value <= static_cast<DWORD>(browser::BrowserSortMode::DateTaken))
+            if (TryReadDwordValue(key, kRegistryValueSortMode, &value) && value <= static_cast<DWORD>(browser::BrowserSortMode::Tags))
             {
                 sortMode_ = static_cast<browser::BrowserSortMode>(value);
             }
@@ -7309,6 +8117,9 @@ namespace hyperbrowse::ui
         case ID_FILE_RENAME_SELECTED:
             StartRenameSelectedImage();
             return true;
+        case ID_FILE_BATCH_RENAME_SELECTION:
+            StartBatchRenameSelection();
+            return true;
         case ID_FILE_MOVE_SELECTION:
             StartMoveSelection();
             return true;
@@ -7471,6 +8282,8 @@ namespace hyperbrowse::ui
         case ID_VIEW_SORT_DIMENSIONS:
         case ID_VIEW_SORT_TYPE:
         case ID_VIEW_SORT_DATETAKEN:
+        case ID_VIEW_SORT_RATING:
+        case ID_VIEW_SORT_TAGS:
         case ID_VIEW_SORT_RANDOM:
             if (browserPaneController_)
             {
