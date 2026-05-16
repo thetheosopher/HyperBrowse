@@ -2813,6 +2813,7 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show File &Details Panel");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(viewMenu, MF_STRING, ID_FILE_COMPARE_SELECTED, L"Compare &Selected");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection\tCtrl+Shift+S");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder\tCtrl+Shift+F");
         AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CUT, L"&Cut");
@@ -5446,7 +5447,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        const std::vector<std::wstring> selectedPaths = SelectedFileOperationPathsSnapshot();
         if (selectedPaths.empty())
         {
             MessageBoxW(hwnd_, L"Select an image first.", L"Reveal in Explorer", MB_OK | MB_ICONINFORMATION);
@@ -5455,7 +5456,7 @@ namespace hyperbrowse::ui
 
         if (!RevealPathsInExplorer(selectedPaths))
         {
-            MessageBoxW(hwnd_, L"Failed to reveal the selected item in Explorer.", L"Reveal in Explorer", MB_OK | MB_ICONERROR);
+            MessageBoxW(hwnd_, L"Failed to reveal the selected items in Explorer.", L"Reveal in Explorer", MB_OK | MB_ICONERROR);
         }
     }
 
@@ -5496,7 +5497,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        const std::vector<std::wstring> selectedPaths = SelectedFileOperationPathsSnapshot();
         if (selectedPaths.empty())
         {
             MessageBoxW(hwnd_, L"Select one or more images first.", L"Copy Path", MB_OK | MB_ICONINFORMATION);
@@ -6313,6 +6314,7 @@ namespace hyperbrowse::ui
     void MainWindow::UpdateToolbarItemStates()
     {
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
+        const bool hasCompareSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 2;
         const bool selectionActionsEnabled = hasSelection && !fileOperationActive_;
         const bool sizeEnabled = browserMode_ == BrowserMode::Thumbnails;
 
@@ -6331,6 +6333,9 @@ namespace hyperbrowse::ui
                 break;
             case ID_ACTION_THUMBNAIL_SIZE_MENU:
                 item.enabled = sizeEnabled;
+                break;
+            case ID_FILE_COMPARE_SELECTED:
+                item.enabled = hasCompareSelection;
                 break;
             case ID_FILE_COPY_SELECTION:
             case ID_FILE_MOVE_SELECTION:
@@ -7360,6 +7365,7 @@ namespace hyperbrowse::ui
         addSeparator(ToolbarAlignment::Right);
 
         // Right group: Selection actions
+        addIcon(ID_FILE_COMPARE_SELECTED, "compare", L"Compare Selected", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
         addIcon(ID_FILE_COPY_SELECTION, "copy", L"Copy Selection", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
         addIcon(ID_FILE_MOVE_SELECTION, "move", L"Move Selection", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
         addIcon(ID_FILE_DELETE_SELECTION, "delete", L"Delete (Del)", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
