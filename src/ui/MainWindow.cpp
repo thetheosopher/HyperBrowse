@@ -37,6 +37,7 @@
 #include "util/Diagnostics.h"
 #include "util/Log.h"
 #include "util/ResourcePng.h"
+#include "util/ResourceSizing.h"
 #include "util/StringConvert.h"
 #include "util/Timing.h"
 #include "viewer/ViewerWindow.h"
@@ -70,6 +71,7 @@ namespace
     constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
     constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
     constexpr wchar_t kRegistryValuePersistentThumbnailCacheEnabled[] = L"PersistentThumbnailCacheEnabled";
+    constexpr wchar_t kRegistryValueResourceProfile[] = L"ResourceProfile";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -184,6 +186,9 @@ namespace
     constexpr UINT ID_HELP_ABOUT = 9001;
     constexpr UINT ID_HELP_DIAGNOSTICS_SNAPSHOT = 9002;
     constexpr UINT ID_HELP_DIAGNOSTICS_RESET = 9003;
+    constexpr UINT ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE = 9004;
+    constexpr UINT ID_HELP_PERFORMANCE_PROFILE_BALANCED = 9005;
+    constexpr UINT ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE = 9006;
     constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
     constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
 
@@ -3032,6 +3037,57 @@ namespace
             && commandId <= ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE;
     }
 
+    bool TryParseResourceProfile(DWORD value, hyperbrowse::util::ResourceProfile* resourceProfile)
+    {
+        if (!resourceProfile)
+        {
+            return false;
+        }
+
+        switch (value)
+        {
+        case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Conservative):
+            *resourceProfile = hyperbrowse::util::ResourceProfile::Conservative;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Balanced):
+            *resourceProfile = hyperbrowse::util::ResourceProfile::Balanced;
+            return true;
+        case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Performance):
+            *resourceProfile = hyperbrowse::util::ResourceProfile::Performance;
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    hyperbrowse::util::ResourceProfile ResourceProfileFromCommandId(UINT commandId)
+    {
+        switch (commandId)
+        {
+        case ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE:
+            return hyperbrowse::util::ResourceProfile::Conservative;
+        case ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE:
+            return hyperbrowse::util::ResourceProfile::Performance;
+        case ID_HELP_PERFORMANCE_PROFILE_BALANCED:
+        default:
+            return hyperbrowse::util::ResourceProfile::Balanced;
+        }
+    }
+
+    UINT CommandIdFromResourceProfile(hyperbrowse::util::ResourceProfile resourceProfile)
+    {
+        switch (resourceProfile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            return ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            return ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            return ID_HELP_PERFORMANCE_PROFILE_BALANCED;
+        }
+    }
+
     bool IsCommandInRange(UINT commandId, UINT firstCommandId, UINT lastCommandId)
     {
         return commandId >= firstCommandId && commandId <= lastCommandId;
@@ -3397,6 +3453,7 @@ namespace hyperbrowse::ui
         }
 
         LoadWindowState();
+        ApplyResourceProfileSetting();
         ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
 
@@ -3514,9 +3571,10 @@ namespace hyperbrowse::ui
         HMENU slideshowTransitionDurationMenu = CreatePopupMenu();
         HMENU viewerMouseWheelMenu = CreatePopupMenu();
         HMENU themeMenu = CreatePopupMenu();
+        HMENU performanceProfileMenu = CreatePopupMenu();
         HMENU helpMenu = CreatePopupMenu();
 
-        if (!menu_ || !fileMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMouseWheelMenu || !themeMenu || !helpMenu)
+        if (!menu_ || !fileMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !viewMenu || !sortMenu || !thumbnailSizeMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMouseWheelMenu || !themeMenu || !performanceProfileMenu || !helpMenu)
         {
             return false;
         }
@@ -3627,6 +3685,11 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
+        AppendMenuW(helpMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE, L"&Conservative");
+        AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_BALANCED, L"&Balanced");
+        AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE, L"&Performance");
+        AppendMenuW(helpMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceProfileMenu), L"Performance &Profile");
         AppendMenuW(helpMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"Diagnostics &Snapshot\tCtrl+Shift+D");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"Reset Diagnostics\tCtrl+Shift+X");
@@ -3769,7 +3832,7 @@ namespace hyperbrowse::ui
         SendMessageW(detailsPanelText_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
         RefreshDetailsPanelBodyPresentation();
 
-        detailsPanelThumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>();
+        detailsPanelThumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(0, 0, resourceProfile_);
         if (detailsPanelThumbnailScheduler_)
         {
             detailsPanelThumbnailScheduler_->BindTargetWindow(hwnd_);
@@ -4463,6 +4526,8 @@ namespace hyperbrowse::ui
                 selectionText.push_back(L')');
             }
         }
+        selectionText.append(L"  |  Profile: ");
+        selectionText.append(util::ResourceProfileToDisplayName(resourceProfile_));
 
         SendMessageW(statusBar_, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(folderText.c_str()));
         SendMessageW(statusBar_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(selectionText.c_str()));
@@ -7358,6 +7423,12 @@ namespace hyperbrowse::ui
             ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE,
             CommandIdFromViewerMouseWheelBehavior(viewerMouseWheelBehavior_),
             MF_BYCOMMAND);
+        CheckMenuRadioItem(
+            menu_,
+            ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE,
+            ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE,
+            CommandIdFromResourceProfile(resourceProfile_),
+            MF_BYCOMMAND);
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
@@ -7547,6 +7618,31 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ApplyResourceProfileSetting()
+    {
+        if (browserPaneController_)
+        {
+            browserPaneController_->SetResourceProfile(resourceProfile_);
+        }
+
+        if (detailsPanelThumbnailScheduler_)
+        {
+            ++detailsPanelThumbnailSessionId_;
+            ++detailsPanelThumbnailRequestEpoch_;
+
+            auto scheduler = std::make_unique<services::ThumbnailScheduler>(0, 0, resourceProfile_);
+            if (scheduler)
+            {
+                if (hwnd_)
+                {
+                    scheduler->BindTargetWindow(hwnd_);
+                }
+                scheduler->SetDiskCacheEnabled(persistentThumbnailCacheEnabled_);
+            }
+            detailsPanelThumbnailScheduler_ = std::move(scheduler);
+        }
+    }
+
     void MainWindow::ApplyPersistentThumbnailCacheSetting()
     {
         if (browserPaneController_)
@@ -7672,6 +7768,11 @@ namespace hyperbrowse::ui
                 persistentThumbnailCacheEnabled_ = value != 0;
             }
 
+            if (TryReadDwordValue(key, kRegistryValueResourceProfile, &value))
+            {
+                TryParseResourceProfile(value, &resourceProfile_);
+            }
+
             RegCloseKey(key);
         }
 
@@ -7714,6 +7815,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueViewerMouseWheelBehavior, static_cast<DWORD>(viewerMouseWheelBehavior_));
             WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, persistentThumbnailCacheEnabled_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueResourceProfile, static_cast<DWORD>(resourceProfile_));
             RegCloseKey(key);
         }
     }
@@ -8315,6 +8417,21 @@ namespace hyperbrowse::ui
         case ID_HELP_ABOUT:
             ShowAboutDialog();
             return true;
+        case ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE:
+        case ID_HELP_PERFORMANCE_PROFILE_BALANCED:
+        case ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE:
+        {
+            const util::ResourceProfile requestedProfile = ResourceProfileFromCommandId(commandId);
+            if (resourceProfile_ != requestedProfile)
+            {
+                resourceProfile_ = requestedProfile;
+                ApplyResourceProfileSetting();
+                UpdateDetailsPanel();
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+            return true;
+        }
         case ID_HELP_DIAGNOSTICS_SNAPSHOT:
             ShowDiagnosticsSnapshot();
             return true;

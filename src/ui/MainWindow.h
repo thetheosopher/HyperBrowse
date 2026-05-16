@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "browser/BrowserModel.h"
+#include "util/ResourceSizing.h"
 
 namespace hyperbrowse::browser
 {
@@ -169,6 +170,7 @@ namespace hyperbrowse::ui
         void UpdateWindowTitle() const;
         void ApplyViewerMouseWheelSetting();
         void ApplyViewerTransitionSettings();
+        void ApplyResourceProfileSetting();
         void ApplyPersistentThumbnailCacheSetting();
         void ApplyTheme();
         void LoadWindowState();
@@ -363,6 +365,7 @@ namespace hyperbrowse::ui
         bool viewerWindowActive_{};
         bool nvJpegEnabled_{};
         bool libRawOutOfProcessEnabled_{true};
+        util::ResourceProfile resourceProfile_{util::ResourceProfile::Balanced};
         browser::ThumbnailSizePreset thumbnailSizePreset_{static_cast<browser::ThumbnailSizePreset>(192)};
         browser::BrowserSortMode sortMode_{static_cast<browser::BrowserSortMode>(0)};
         bool sortAscending_{true};

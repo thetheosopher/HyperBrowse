@@ -12,6 +12,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "util/ResourceSizing.h"
+
 namespace hyperbrowse::browser
 {
     struct BrowserItem;
@@ -121,6 +123,7 @@ namespace hyperbrowse::browser
         bool IsCompactThumbnailLayoutEnabled() const noexcept;
         void SetThumbnailDetailsVisible(bool visible);
         bool AreThumbnailDetailsVisible() const noexcept;
+        void SetResourceProfile(hyperbrowse::util::ResourceProfile profile);
         void SetPersistentThumbnailCacheEnabled(bool enabled);
         bool IsPersistentThumbnailCacheEnabled() const noexcept;
         void SetDarkTheme(bool enabled);
@@ -209,6 +212,7 @@ namespace hyperbrowse::browser
         void ScheduleVisibleThumbnailWork();
         void ScheduleVisibleMetadataWork() const;
         void ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const;
+        void RecreateBackgroundServices();
         void CancelThumbnailWork();
         void InvalidateThumbnailCellForModelIndex(int modelIndex) const;
         void UpdateThumbnailTooltip(POINT point, WPARAM wParam, LPARAM lParam);
@@ -265,6 +269,8 @@ namespace hyperbrowse::browser
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
         hyperbrowse::services::UserMetadataStore* userMetadataStore_{};
+        hyperbrowse::util::ResourceProfile resourceProfile_{hyperbrowse::util::ResourceProfile::Balanced};
+        bool persistentThumbnailCacheEnabled_{true};
         bool darkTheme_{};
         bool syncingDetailsSelection_{};
         BrowserViewMode viewMode_{BrowserViewMode::Thumbnails};

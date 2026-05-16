@@ -534,9 +534,8 @@ namespace hyperbrowse::browser
     BrowserPane::BrowserPane(HINSTANCE instance)
         : instance_(instance)
         , colors_(MakeThemeColors(false))
-        , thumbnailScheduler_(std::make_unique<services::ThumbnailScheduler>())
-        , metadataService_(std::make_unique<services::ImageMetadataService>())
     {
+        RecreateBackgroundServices();
         placeholderArt_ = util::LoadPngResourceBitmap(instance_,
                                                       IDB_HYPERBROWSE_BRAND_PNG,
                                                       kPlaceholderBrandArtSize,
@@ -817,8 +816,28 @@ namespace hyperbrowse::browser
         return thumbnailDetailsVisible_;
     }
 
+    void BrowserPane::SetResourceProfile(hyperbrowse::util::ResourceProfile profile)
+    {
+        if (resourceProfile_ == profile)
+        {
+            return;
+        }
+
+        resourceProfile_ = profile;
+        ++thumbnailSessionId_;
+        ++metadataSessionId_;
+        ++thumbnailRequestEpoch_;
+        HideThumbnailTooltip();
+        RecreateBackgroundServices();
+        if (hwnd_)
+        {
+            RefreshFromModel();
+        }
+    }
+
     void BrowserPane::SetPersistentThumbnailCacheEnabled(bool enabled)
     {
+        persistentThumbnailCacheEnabled_ = enabled;
         if (thumbnailScheduler_)
         {
             thumbnailScheduler_->SetDiskCacheEnabled(enabled);
@@ -827,7 +846,7 @@ namespace hyperbrowse::browser
 
     bool BrowserPane::IsPersistentThumbnailCacheEnabled() const noexcept
     {
-        return thumbnailScheduler_ ? thumbnailScheduler_->IsDiskCacheEnabled() : false;
+        return persistentThumbnailCacheEnabled_;
     }
 
     void BrowserPane::SetDarkTheme(bool enabled)
@@ -842,6 +861,35 @@ namespace hyperbrowse::browser
         }
         ApplyThemeToDetailsList();
         InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    void BrowserPane::RecreateBackgroundServices()
+    {
+        if (thumbnailScheduler_)
+        {
+            thumbnailScheduler_->CancelOutstanding();
+        }
+        if (metadataService_)
+        {
+            metadataService_->CancelOutstanding();
+        }
+
+        thumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(0, 0, resourceProfile_);
+        metadataService_ = std::make_unique<services::ImageMetadataService>(0, 0, resourceProfile_);
+
+        if (thumbnailScheduler_)
+        {
+            thumbnailScheduler_->SetDiskCacheEnabled(persistentThumbnailCacheEnabled_);
+            if (hwnd_)
+            {
+                thumbnailScheduler_->BindTargetWindow(hwnd_);
+            }
+        }
+
+        if (metadataService_ && hwnd_)
+        {
+            metadataService_->BindTargetWindow(hwnd_);
+        }
     }
 
     void BrowserPane::ClearSelection()

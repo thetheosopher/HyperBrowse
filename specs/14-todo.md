@@ -70,6 +70,14 @@ asked**.
 **Goal:** A first-class, user-visible resource profile that drives every
 cache budget, worker count, and prefetch depth from a single decision.
 
+**Implementation status:** In progress. `2026-05-16` shipped the first code
+slice: a persisted `Conservative` / `Balanced` / `Performance` profile is now
+wired into automatic thumbnail-cache sizing, metadata-cache sizing, thumbnail
+worker counts, and metadata worker counts, with a menu surface under
+**Help ▸ Performance Profile**. Remaining for full completion: a dedicated
+Settings dialog, live cache-budget controls, `Custom` overrides, and viewer
+prefetch-radius integration.
+
 - Introduce a `ResourceProfile` enum: `Conservative`, `Balanced` (default),
   `Performance`, `Custom`.
 - Profile selection lives in a new **Help ▸ Settings… ▸ Performance** tab

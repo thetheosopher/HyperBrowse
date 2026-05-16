@@ -9,6 +9,27 @@
 
 namespace hyperbrowse::util
 {
+    enum class ResourceProfile : int
+    {
+        Conservative = 0,
+        Balanced = 1,
+        Performance = 2,
+    };
+
+    inline const wchar_t* ResourceProfileToDisplayName(ResourceProfile profile) noexcept
+    {
+        switch (profile)
+        {
+        case ResourceProfile::Conservative:
+            return L"Conservative";
+        case ResourceProfile::Performance:
+            return L"Performance";
+        case ResourceProfile::Balanced:
+        default:
+            return L"Balanced";
+        }
+    }
+
     struct MemorySnapshot
     {
         std::uint64_t totalPhysicalBytes{};

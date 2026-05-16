@@ -15,6 +15,7 @@
 
 #include "cache/DiskThumbnailCache.h"
 #include "cache/ThumbnailCache.h"
+#include "util/ResourceSizing.h"
 
 namespace hyperbrowse::decode
 {
@@ -48,7 +49,8 @@ namespace hyperbrowse::services
         static constexpr UINT kMessageId = WM_APP + 43;
 
         explicit ThumbnailScheduler(std::size_t cacheCapacityBytes = 0,
-                                    std::size_t workerCount = 0);
+                                    std::size_t workerCount = 0,
+                                    util::ResourceProfile resourceProfile = util::ResourceProfile::Balanced);
         ~ThumbnailScheduler();
 
         void BindTargetWindow(HWND targetWindow);

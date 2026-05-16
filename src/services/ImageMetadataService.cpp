@@ -31,10 +31,14 @@ namespace
     constexpr std::size_t kMinimumMetadataWorkerCount = 2;
     constexpr std::size_t kMaximumMetadataWorkerCount = 8;
     constexpr std::size_t kDefaultMetadataCacheCapacityEntries = 512;
+    constexpr std::size_t kConservativeMetadataCacheCapacityEntries = 2048;
+    constexpr std::size_t kPerformanceMetadataCacheCapacityEntries = 8192;
     constexpr std::uint64_t kMinimumMetadataCacheCapacityEntries = 2048;
+    constexpr std::uint64_t kConservativeMaximumMetadataCacheCapacityEntries = 8192;
     constexpr std::uint64_t kMaximumMetadataCacheCapacityEntries = 65536;
 
-    std::size_t ResolveMetadataWorkerCount(std::size_t requestedWorkerCount)
+    std::size_t ResolveMetadataWorkerCount(std::size_t requestedWorkerCount,
+                                           hyperbrowse::util::ResourceProfile resourceProfile)
     {
         if (requestedWorkerCount != 0)
         {
@@ -47,13 +51,26 @@ namespace
             return kDefaultMetadataWorkerCount;
         }
 
-        const std::size_t preferredWorkerCount = std::max<std::size_t>(
-            kMinimumMetadataWorkerCount,
-            static_cast<std::size_t>(hardwareConcurrency) / 4U);
-        return std::min(preferredWorkerCount, kMaximumMetadataWorkerCount);
+        const std::size_t normalized = static_cast<std::size_t>(hardwareConcurrency);
+        switch (resourceProfile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            return std::clamp<std::size_t>(normalized / 8U, 1U, 4U);
+        case hyperbrowse::util::ResourceProfile::Performance:
+            return std::clamp<std::size_t>(normalized / 2U, kMinimumMetadataWorkerCount, kMaximumMetadataWorkerCount);
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+        {
+            const std::size_t preferredWorkerCount = std::max<std::size_t>(
+                kMinimumMetadataWorkerCount,
+                normalized / 4U);
+            return std::min(preferredWorkerCount, kMaximumMetadataWorkerCount);
+        }
+        }
     }
 
-    std::size_t ResolveMetadataCacheCapacityEntries(std::size_t requestedCapacityEntries)
+    std::size_t ResolveMetadataCacheCapacityEntries(std::size_t requestedCapacityEntries,
+                                                    hyperbrowse::util::ResourceProfile resourceProfile)
     {
         if (requestedCapacityEntries != 0)
         {
@@ -63,13 +80,37 @@ namespace
         const auto memorySnapshot = hyperbrowse::util::QueryMemorySnapshot();
         if (!memorySnapshot.IsValid() || memorySnapshot.availablePhysicalBytes == 0)
         {
-            return kDefaultMetadataCacheCapacityEntries;
+            switch (resourceProfile)
+            {
+            case hyperbrowse::util::ResourceProfile::Conservative:
+                return kConservativeMetadataCacheCapacityEntries;
+            case hyperbrowse::util::ResourceProfile::Performance:
+                return kPerformanceMetadataCacheCapacityEntries;
+            case hyperbrowse::util::ResourceProfile::Balanced:
+            default:
+                return kDefaultMetadataCacheCapacityEntries;
+            }
         }
 
-        const std::uint64_t preferredEntryCount = memorySnapshot.availablePhysicalBytes / (256ULL * 1024ULL);
+        std::uint64_t preferredEntryCount = memorySnapshot.availablePhysicalBytes / (256ULL * 1024ULL);
+        std::uint64_t maximumEntryCount = kMaximumMetadataCacheCapacityEntries;
+        switch (resourceProfile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            preferredEntryCount = memorySnapshot.availablePhysicalBytes / (512ULL * 1024ULL);
+            maximumEntryCount = kConservativeMaximumMetadataCacheCapacityEntries;
+            break;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            preferredEntryCount = memorySnapshot.availablePhysicalBytes / (128ULL * 1024ULL);
+            break;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            break;
+        }
+
         const std::uint64_t clampedEntryCount = std::clamp(preferredEntryCount,
                                                            kMinimumMetadataCacheCapacityEntries,
-                                                           kMaximumMetadataCacheCapacityEntries);
+                                                           maximumEntryCount);
         return hyperbrowse::util::SaturatingCastToSizeT(clampedEntryCount);
     }
 
@@ -1350,11 +1391,12 @@ namespace hyperbrowse::services
 
     ImageMetadataService::ImageMetadataService(std::size_t workerCount,
                                                std::size_t cacheCapacityEntries,
+                                               util::ResourceProfile resourceProfile,
                                                MetadataExtractor extractor)
-        : cacheCapacityEntries_(ResolveMetadataCacheCapacityEntries(cacheCapacityEntries))
+        : cacheCapacityEntries_(ResolveMetadataCacheCapacityEntries(cacheCapacityEntries, resourceProfile))
         , extractor_(extractor ? std::move(extractor) : MetadataExtractor{ExtractImageMetadata})
     {
-        const std::size_t resolvedWorkerCount = ResolveMetadataWorkerCount(workerCount);
+        const std::size_t resolvedWorkerCount = ResolveMetadataWorkerCount(workerCount, resourceProfile);
         workers_.reserve(resolvedWorkerCount);
         for (std::size_t index = 0; index < resolvedWorkerCount; ++index)
         {

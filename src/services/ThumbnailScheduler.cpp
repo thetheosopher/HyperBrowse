@@ -16,14 +16,21 @@ namespace
 
     constexpr std::size_t kMinWorkerCount = 2;
     constexpr std::size_t kRawWorkerDivisor = 4;
+    constexpr std::size_t kConservativeRawWorkerDivisor = 6;
+    constexpr std::size_t kPerformanceRawWorkerDivisor = 2;
     constexpr std::size_t kMinNvJpegBatchSize = 4;
     constexpr std::size_t kMaxNvJpegBatchSize = 12;
     constexpr int kNvJpegBatchPriorityWindow = 1;
     constexpr std::uint64_t kDefaultThumbnailCacheCapacityBytes = 96ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kConservativeThumbnailCacheCapacityBytes = 128ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kPerformanceThumbnailCacheCapacityBytes = 256ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kMinimumThumbnailCacheCapacityBytes = 128ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kConservativeMaximumThumbnailCacheCapacityBytes = 256ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kMaximumThumbnailCacheCapacityBytes = 1024ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kPerformanceMaximumThumbnailCacheCapacityBytes = 4ULL * 1024ULL * 1024ULL * 1024ULL;
 
-    std::size_t ResolveThumbnailCacheCapacityBytes(std::size_t requestedCapacityBytes)
+    std::size_t ResolveThumbnailCacheCapacityBytes(std::size_t requestedCapacityBytes,
+                                                   hyperbrowse::util::ResourceProfile resourceProfile)
     {
         if (requestedCapacityBytes != 0)
         {
@@ -33,19 +40,47 @@ namespace
         const auto memorySnapshot = hyperbrowse::util::QueryMemorySnapshot();
         if (!memorySnapshot.IsValid() || memorySnapshot.availablePhysicalBytes == 0)
         {
-            return static_cast<std::size_t>(kDefaultThumbnailCacheCapacityBytes);
+            switch (resourceProfile)
+            {
+            case hyperbrowse::util::ResourceProfile::Conservative:
+                return static_cast<std::size_t>(kConservativeThumbnailCacheCapacityBytes);
+            case hyperbrowse::util::ResourceProfile::Performance:
+                return static_cast<std::size_t>(kPerformanceThumbnailCacheCapacityBytes);
+            case hyperbrowse::util::ResourceProfile::Balanced:
+            default:
+                return static_cast<std::size_t>(kDefaultThumbnailCacheCapacityBytes);
+            }
         }
 
-        const std::uint64_t availabilityBudget = memorySnapshot.availablePhysicalBytes / 5ULL;
-        const std::uint64_t totalBudget = memorySnapshot.totalPhysicalBytes / 8ULL;
+        std::uint64_t availabilityBudget = memorySnapshot.availablePhysicalBytes / 5ULL;
+        std::uint64_t totalBudget = memorySnapshot.totalPhysicalBytes / 8ULL;
+        std::uint64_t minimumBudget = kMinimumThumbnailCacheCapacityBytes;
+        std::uint64_t maximumBudget = kMaximumThumbnailCacheCapacityBytes;
+        switch (resourceProfile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            availabilityBudget = memorySnapshot.availablePhysicalBytes / 10ULL;
+            totalBudget = memorySnapshot.totalPhysicalBytes / 16ULL;
+            maximumBudget = kConservativeMaximumThumbnailCacheCapacityBytes;
+            break;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            availabilityBudget = memorySnapshot.availablePhysicalBytes / 3ULL;
+            totalBudget = memorySnapshot.totalPhysicalBytes / 4ULL;
+            minimumBudget = kPerformanceThumbnailCacheCapacityBytes;
+            maximumBudget = kPerformanceMaximumThumbnailCacheCapacityBytes;
+            break;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            break;
+        }
+
         const std::uint64_t preferredBudget = std::min(availabilityBudget, totalBudget);
-        const std::uint64_t clampedBudget = std::clamp(preferredBudget,
-                                                       kMinimumThumbnailCacheCapacityBytes,
-                                                       kMaximumThumbnailCacheCapacityBytes);
+        const std::uint64_t clampedBudget = std::clamp(preferredBudget, minimumBudget, maximumBudget);
         return hyperbrowse::util::SaturatingCastToSizeT(clampedBudget);
     }
 
-    std::size_t ResolveWorkerCount(std::size_t requestedWorkerCount)
+    std::size_t ResolveWorkerCount(std::size_t requestedWorkerCount,
+                                   hyperbrowse::util::ResourceProfile resourceProfile)
     {
         if (requestedWorkerCount != 0)
         {
@@ -54,23 +89,47 @@ namespace
 
         const unsigned int hardwareConcurrency = std::thread::hardware_concurrency();
         const std::size_t normalized = hardwareConcurrency == 0 ? kMinWorkerCount : hardwareConcurrency;
-        return std::max<std::size_t>(normalized, kMinWorkerCount);
+        switch (resourceProfile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            return std::max<std::size_t>(normalized / 4U, kMinWorkerCount);
+        case hyperbrowse::util::ResourceProfile::Performance:
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            return std::max<std::size_t>(normalized, kMinWorkerCount);
+        }
     }
 
-    std::size_t ResolveRawWorkerCount(std::size_t totalWorkerCount)
+    std::size_t ResolveRawWorkerCount(std::size_t totalWorkerCount,
+                                      hyperbrowse::util::ResourceProfile resourceProfile)
     {
         if (totalWorkerCount <= kMinWorkerCount)
         {
             return 1U;
         }
 
-        const std::size_t rawWorkerCount = std::max<std::size_t>(1U, totalWorkerCount / kRawWorkerDivisor);
+        std::size_t rawWorkerDivisor = kRawWorkerDivisor;
+        switch (resourceProfile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            rawWorkerDivisor = kConservativeRawWorkerDivisor;
+            break;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            rawWorkerDivisor = kPerformanceRawWorkerDivisor;
+            break;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            break;
+        }
+
+        const std::size_t rawWorkerCount = std::max<std::size_t>(1U, totalWorkerCount / rawWorkerDivisor);
         return std::min(rawWorkerCount, totalWorkerCount - 1U);
     }
 
-    std::size_t ResolveGeneralWorkerCount(std::size_t totalWorkerCount)
+    std::size_t ResolveGeneralWorkerCount(std::size_t totalWorkerCount,
+                                          hyperbrowse::util::ResourceProfile resourceProfile)
     {
-        return totalWorkerCount - ResolveRawWorkerCount(totalWorkerCount);
+        return totalWorkerCount - ResolveRawWorkerCount(totalWorkerCount, resourceProfile);
     }
 
     bool IsJpegCacheKey(const hyperbrowse::cache::ThumbnailCacheKey& cacheKey)
@@ -93,12 +152,14 @@ namespace
 
 namespace hyperbrowse::services
 {
-    ThumbnailScheduler::ThumbnailScheduler(std::size_t cacheCapacityBytes, std::size_t workerCount)
-        : cache_(ResolveThumbnailCacheCapacityBytes(cacheCapacityBytes))
+    ThumbnailScheduler::ThumbnailScheduler(std::size_t cacheCapacityBytes,
+                                           std::size_t workerCount,
+                                           util::ResourceProfile resourceProfile)
+        : cache_(ResolveThumbnailCacheCapacityBytes(cacheCapacityBytes, resourceProfile))
     {
-        const std::size_t totalWorkerCount = ResolveWorkerCount(workerCount);
-        const std::size_t rawWorkerCount = ResolveRawWorkerCount(totalWorkerCount);
-        const std::size_t generalWorkerCount = ResolveGeneralWorkerCount(totalWorkerCount);
+        const std::size_t totalWorkerCount = ResolveWorkerCount(workerCount, resourceProfile);
+        const std::size_t rawWorkerCount = ResolveRawWorkerCount(totalWorkerCount, resourceProfile);
+        const std::size_t generalWorkerCount = ResolveGeneralWorkerCount(totalWorkerCount, resourceProfile);
 
         generalWorkers_.reserve(generalWorkerCount);
         for (std::size_t index = 0; index < generalWorkerCount; ++index)

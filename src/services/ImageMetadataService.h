@@ -16,6 +16,7 @@
 
 #include "browser/BrowserModel.h"
 #include "util/PathUtils.h"
+#include "util/ResourceSizing.h"
 
 namespace hyperbrowse::services
 {
@@ -77,7 +78,8 @@ namespace hyperbrowse::services
         using MetadataExtractor = std::function<std::shared_ptr<const ImageMetadata>(const browser::BrowserItem&, std::wstring*)>;
 
         explicit ImageMetadataService(std::size_t workerCount = 0,
-                          std::size_t cacheCapacityEntries = 0,
+                                      std::size_t cacheCapacityEntries = 0,
+                                      util::ResourceProfile resourceProfile = util::ResourceProfile::Balanced,
                                       MetadataExtractor extractor = ExtractImageMetadata);
         ~ImageMetadataService();
 
