@@ -10,6 +10,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cwchar>
 #include <cwctype>
 #include <filesystem>
@@ -34,6 +35,7 @@
 #include "services/UserMetadataStore.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/ToolbarIconLibrary.h"
+#include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
 #include "util/ResourcePng.h"
@@ -72,6 +74,8 @@ namespace
     constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
     constexpr wchar_t kRegistryValuePersistentThumbnailCacheEnabled[] = L"PersistentThumbnailCacheEnabled";
     constexpr wchar_t kRegistryValueResourceProfile[] = L"ResourceProfile";
+    constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
+    constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -167,6 +171,7 @@ namespace
     constexpr UINT ID_VIEW_DETAILS_STRIP = 2211;
     constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM = 2212;
     constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE = 2213;
+    constexpr UINT ID_VIEW_VIEWER_DETAIL_OVERLAYS = 2214;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CUT = 2303;
@@ -189,8 +194,16 @@ namespace
     constexpr UINT ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE = 9004;
     constexpr UINT ID_HELP_PERFORMANCE_PROFILE_BALANCED = 9005;
     constexpr UINT ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE = 9006;
+    constexpr UINT ID_HELP_PERFORMANCE_SETTINGS = 9007;
     constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
     constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
+    constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
+    constexpr UINT_PTR kMemoryPressureTimerId = 9101;
+    constexpr UINT kMemoryPressureIntervalMs = 1500;
+    constexpr std::uint64_t kMemoryPressureAvailableBytesThreshold = 1024ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kMemoryPressureActivateUsedPercent = 85ULL;
+    constexpr std::uint64_t kMemoryPressureRecoverUsedPercent = 70ULL;
+    constexpr unsigned int kMemoryPressureRecoverySamplesRequired = 2;
 
     constexpr int kActionStripPaddingX = 8;
     constexpr int kActionStripPaddingY = 6;
@@ -225,6 +238,12 @@ namespace
     constexpr wchar_t kAboutDialogClassName[] = L"HyperBrowseAboutDialog";
     constexpr wchar_t kAboutDialogGitHubLabel[] = L"GitHub Project";
     constexpr wchar_t kAboutDialogSupportLabel[] = L"Buy Me A Coffee";
+
+    struct MemoryPressureSampleResult
+    {
+        bool pressureDetected{};
+        bool recoveryCandidate{};
+    };
     constexpr wchar_t kAboutDialogGitHubUrl[] = L"https://github.com/thetheosopher/HyperBrowse";
     constexpr wchar_t kAboutDialogSupportUrl[] = L"https://buymeacoffee.com/theosopher";
     constexpr int kAboutDialogWidth = 1180;
@@ -239,6 +258,23 @@ namespace
     constexpr int kAboutDialogSupportButtonWidth = 196;
     constexpr int kAboutDialogButtonGap = 12;
     constexpr int kAboutDialogBrandArtSize = 152;
+    constexpr wchar_t kPerformanceSettingsDialogClassName[] = L"HyperBrowsePerformanceSettingsDialog";
+    constexpr int kPerformanceSettingsDialogWidth = 540;
+    constexpr int kPerformanceSettingsDialogHeight = 320;
+    constexpr int kPerformanceSettingsDialogLabelWidth = 210;
+    constexpr int kPerformanceSettingsDialogEditWidth = 112;
+    constexpr int kPerformanceSettingsDialogCheckboxWidth = 110;
+    constexpr int kPerformanceSettingsDialogValueTopGap = 12;
+    constexpr int kPerformanceSettingsDialogControlGap = 10;
+    constexpr int kPerformanceSettingsInstructionControlId = 300;
+    constexpr int kPerformanceSettingsSummaryControlId = 301;
+    constexpr int kPerformanceSettingsThumbnailLabelControlId = 302;
+    constexpr int kPerformanceSettingsThumbnailEditControlId = 303;
+    constexpr int kPerformanceSettingsThumbnailAutoControlId = 304;
+    constexpr int kPerformanceSettingsMetadataLabelControlId = 305;
+    constexpr int kPerformanceSettingsMetadataEditControlId = 306;
+    constexpr int kPerformanceSettingsMetadataAutoControlId = 307;
+    constexpr int kPerformanceSettingsFootnoteControlId = 308;
 
     hyperbrowse::cache::ThumbnailCacheKey MakeThumbnailCacheKey(const hyperbrowse::browser::BrowserItem& item,
                                                                 int targetWidth,
@@ -329,6 +365,30 @@ namespace
         std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> brandArt;
     };
 
+    struct PerformanceSettingsDialogState
+    {
+        HWND ownerWindow{};
+        HWND instructionWindow{};
+        HWND summaryWindow{};
+        HWND thumbnailEditWindow{};
+        HWND thumbnailAutoCheckWindow{};
+        HWND metadataEditWindow{};
+        HWND metadataAutoCheckWindow{};
+        HWND okButton{};
+        std::wstring title;
+        std::wstring instruction;
+        std::wstring summary;
+        std::wstring footnote;
+        std::wstring thumbnailCacheText;
+        std::wstring metadataCacheText;
+        std::size_t thumbnailCacheCapacityOverrideBytes{};
+        std::size_t metadataCacheCapacityOverrideEntries{};
+        bool thumbnailCacheAutomatic{true};
+        bool metadataCacheAutomatic{true};
+        bool accepted{};
+        bool done{};
+    };
+
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
@@ -348,6 +408,24 @@ namespace
     void WriteDwordValue(HKEY key, const wchar_t* valueName, DWORD value)
     {
         RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+    }
+
+    bool TryReadQwordValue(HKEY key, const wchar_t* valueName, std::uint64_t* value)
+    {
+        if (!value)
+        {
+            return false;
+        }
+
+        DWORD size = sizeof(*value);
+        DWORD type = REG_QWORD;
+        return RegQueryValueExW(key, valueName, nullptr, &type, reinterpret_cast<LPBYTE>(value), &size) == ERROR_SUCCESS
+            && type == REG_QWORD;
+    }
+
+    void WriteQwordValue(HKEY key, const wchar_t* valueName, std::uint64_t value)
+    {
+        RegSetValueExW(key, valueName, 0, REG_QWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
     }
 
     std::wstring ReadWindowText(HWND hwnd)
@@ -1203,6 +1281,440 @@ namespace
         const int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - width) / 2;
         const int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - height) / 2;
         SetWindowPos(window, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    std::wstring TrimWhitespaceCopy(std::wstring value);
+
+    bool TryParsePositiveSizeValue(const std::wstring& text, std::size_t* value)
+    {
+        if (!value)
+        {
+            return false;
+        }
+
+        const std::wstring trimmed = TrimWhitespaceCopy(text);
+        if (trimmed.empty())
+        {
+            return false;
+        }
+
+        wchar_t* end = nullptr;
+        errno = 0;
+        const unsigned long long parsed = wcstoull(trimmed.c_str(), &end, 10);
+        if (errno != 0 || !end || *end != L'\0' || parsed == 0ULL)
+        {
+            return false;
+        }
+
+        *value = hyperbrowse::util::SaturatingCastToSizeT(parsed);
+        return true;
+    }
+
+    std::wstring FormatMegabytesFromBytes(std::size_t bytes)
+    {
+        return std::to_wstring(bytes / (1024ULL * 1024ULL));
+    }
+
+    void RefreshPerformanceSettingsDialogControls(const PerformanceSettingsDialogState& state)
+    {
+        const bool thumbnailAutomatic = state.thumbnailAutoCheckWindow
+            && SendMessageW(state.thumbnailAutoCheckWindow, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        const bool metadataAutomatic = state.metadataAutoCheckWindow
+            && SendMessageW(state.metadataAutoCheckWindow, BM_GETCHECK, 0, 0) == BST_CHECKED;
+
+        SetWindowEnabledIfDifferent(state.thumbnailEditWindow, !thumbnailAutomatic);
+        SetWindowEnabledIfDifferent(state.metadataEditWindow, !metadataAutomatic);
+    }
+
+    void LayoutPerformanceSettingsDialogControls(HWND hwnd, const PerformanceSettingsDialogState& state)
+    {
+        RECT clientRect{};
+        GetClientRect(hwnd, &clientRect);
+
+        const int clientWidth = clientRect.right - clientRect.left;
+        const int clientHeight = clientRect.bottom - clientRect.top;
+        const int contentLeft = kTextInputDialogMargin;
+        const int contentWidth = clientWidth - (kTextInputDialogMargin * 2);
+        const int buttonTop = clientHeight - kTextInputDialogMargin - kTextInputButtonHeight;
+        const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
+        const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
+        const int rowLabelLeft = contentLeft;
+        const int rowValueLeft = rowLabelLeft + kPerformanceSettingsDialogLabelWidth + kPerformanceSettingsDialogControlGap;
+        const int rowCheckboxLeft = rowValueLeft + kPerformanceSettingsDialogEditWidth + kPerformanceSettingsDialogControlGap;
+
+        const HWND instructionWindow = GetDlgItem(hwnd, kPerformanceSettingsInstructionControlId);
+        if (instructionWindow)
+        {
+            MoveWindow(instructionWindow, contentLeft, kTextInputDialogMargin, contentWidth, 38, TRUE);
+        }
+
+        const HWND summaryWindow = GetDlgItem(hwnd, kPerformanceSettingsSummaryControlId);
+        if (summaryWindow)
+        {
+            MoveWindow(summaryWindow, contentLeft, kTextInputDialogMargin + 42, contentWidth, 32, TRUE);
+        }
+
+        const int firstRowTop = kTextInputDialogMargin + 90;
+        const int secondRowTop = firstRowTop + kTextInputEditHeight + kPerformanceSettingsDialogValueTopGap + 18;
+
+        const HWND thumbnailLabel = GetDlgItem(hwnd, kPerformanceSettingsThumbnailLabelControlId);
+        if (thumbnailLabel)
+        {
+            MoveWindow(thumbnailLabel, rowLabelLeft, firstRowTop + 4, kPerformanceSettingsDialogLabelWidth, 20, TRUE);
+        }
+        if (state.thumbnailEditWindow)
+        {
+            MoveWindow(state.thumbnailEditWindow, rowValueLeft, firstRowTop, kPerformanceSettingsDialogEditWidth, kTextInputEditHeight, TRUE);
+        }
+        if (state.thumbnailAutoCheckWindow)
+        {
+            MoveWindow(state.thumbnailAutoCheckWindow, rowCheckboxLeft, firstRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
+        }
+
+        const HWND metadataLabel = GetDlgItem(hwnd, kPerformanceSettingsMetadataLabelControlId);
+        if (metadataLabel)
+        {
+            MoveWindow(metadataLabel, rowLabelLeft, secondRowTop + 4, kPerformanceSettingsDialogLabelWidth, 20, TRUE);
+        }
+        if (state.metadataEditWindow)
+        {
+            MoveWindow(state.metadataEditWindow, rowValueLeft, secondRowTop, kPerformanceSettingsDialogEditWidth, kTextInputEditHeight, TRUE);
+        }
+        if (state.metadataAutoCheckWindow)
+        {
+            MoveWindow(state.metadataAutoCheckWindow, rowCheckboxLeft, secondRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
+        }
+
+        const HWND footnoteWindow = GetDlgItem(hwnd, kPerformanceSettingsFootnoteControlId);
+        if (footnoteWindow)
+        {
+            MoveWindow(footnoteWindow,
+                       contentLeft,
+                       secondRowTop + kTextInputEditHeight + 18,
+                       contentWidth,
+                       std::max(42, buttonTop - (secondRowTop + kTextInputEditHeight + 24)),
+                       TRUE);
+        }
+
+        if (state.okButton)
+        {
+            MoveWindow(state.okButton, okLeft, buttonTop, kTextInputButtonWidth, kTextInputButtonHeight, TRUE);
+        }
+
+        const HWND cancelButton = GetDlgItem(hwnd, IDCANCEL);
+        if (cancelButton)
+        {
+            MoveWindow(cancelButton, cancelLeft, buttonTop, kTextInputButtonWidth, kTextInputButtonHeight, TRUE);
+        }
+    }
+
+    bool CollectPerformanceSettingsDialogResult(HWND hwnd, PerformanceSettingsDialogState* state)
+    {
+        if (!hwnd || !state)
+        {
+            return false;
+        }
+
+        const bool thumbnailAutomatic = state->thumbnailAutoCheckWindow
+            && SendMessageW(state->thumbnailAutoCheckWindow, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        const bool metadataAutomatic = state->metadataAutoCheckWindow
+            && SendMessageW(state->metadataAutoCheckWindow, BM_GETCHECK, 0, 0) == BST_CHECKED;
+
+        std::size_t thumbnailMegabytes = 0;
+        if (!thumbnailAutomatic && !TryParsePositiveSizeValue(ReadWindowText(state->thumbnailEditWindow), &thumbnailMegabytes))
+        {
+            MessageBoxW(hwnd,
+                        L"Enter a positive thumbnail cache size in megabytes, or keep Automatic enabled.",
+                        state->title.c_str(),
+                        MB_OK | MB_ICONWARNING);
+            if (state->thumbnailEditWindow)
+            {
+                SetFocus(state->thumbnailEditWindow);
+            }
+            return false;
+        }
+
+        std::size_t metadataEntries = 0;
+        if (!metadataAutomatic && !TryParsePositiveSizeValue(ReadWindowText(state->metadataEditWindow), &metadataEntries))
+        {
+            MessageBoxW(hwnd,
+                        L"Enter a positive metadata cache capacity in entries, or keep Automatic enabled.",
+                        state->title.c_str(),
+                        MB_OK | MB_ICONWARNING);
+            if (state->metadataEditWindow)
+            {
+                SetFocus(state->metadataEditWindow);
+            }
+            return false;
+        }
+
+        state->thumbnailCacheAutomatic = thumbnailAutomatic;
+        state->metadataCacheAutomatic = metadataAutomatic;
+        state->thumbnailCacheCapacityOverrideBytes = thumbnailAutomatic
+            ? 0
+            : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(thumbnailMegabytes) * 1024ULL * 1024ULL);
+        state->metadataCacheCapacityOverrideEntries = metadataAutomatic ? 0 : metadataEntries;
+        return true;
+    }
+
+    LRESULT CALLBACK PerformanceSettingsDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<PerformanceSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<PerformanceSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+
+            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+
+            state->instructionWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->instruction.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                32,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsInstructionControlId)),
+                hInstance,
+                nullptr);
+            state->summaryWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->summary.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                28,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsSummaryControlId)),
+                hInstance,
+                nullptr);
+            const HWND thumbnailLabel = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"Thumbnail memory cache (MB):",
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsThumbnailLabelControlId)),
+                hInstance,
+                nullptr);
+            state->thumbnailEditWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                state->thumbnailCacheText.c_str(),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
+                0,
+                0,
+                100,
+                kTextInputEditHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsThumbnailEditControlId)),
+                hInstance,
+                nullptr);
+            state->thumbnailAutoCheckWindow = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Automatic",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                0,
+                0,
+                100,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsThumbnailAutoControlId)),
+                hInstance,
+                nullptr);
+            const HWND metadataLabel = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"Metadata cache entries:",
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsMetadataLabelControlId)),
+                hInstance,
+                nullptr);
+            state->metadataEditWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                state->metadataCacheText.c_str(),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
+                0,
+                0,
+                100,
+                kTextInputEditHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsMetadataEditControlId)),
+                hInstance,
+                nullptr);
+            state->metadataAutoCheckWindow = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Automatic",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                0,
+                0,
+                100,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsMetadataAutoControlId)),
+                hInstance,
+                nullptr);
+            const HWND footnoteWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->footnote.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                42,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsFootnoteControlId)),
+                hInstance,
+                nullptr);
+            state->okButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Apply",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                0,
+                0,
+                kTextInputButtonWidth,
+                kTextInputButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
+                hInstance,
+                nullptr);
+            const HWND cancelButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Cancel",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                0,
+                0,
+                kTextInputButtonWidth,
+                kTextInputButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
+                hInstance,
+                nullptr);
+
+            const HWND windows[] = {
+                state->instructionWindow,
+                state->summaryWindow,
+                thumbnailLabel,
+                state->thumbnailEditWindow,
+                state->thumbnailAutoCheckWindow,
+                metadataLabel,
+                state->metadataEditWindow,
+                state->metadataAutoCheckWindow,
+                footnoteWindow,
+                state->okButton,
+                cancelButton,
+            };
+            for (HWND window : windows)
+            {
+                if (window)
+                {
+                    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                }
+            }
+
+            if (state->thumbnailAutoCheckWindow)
+            {
+                SendMessageW(state->thumbnailAutoCheckWindow, BM_SETCHECK, state->thumbnailCacheAutomatic ? BST_CHECKED : BST_UNCHECKED, 0);
+            }
+            if (state->metadataAutoCheckWindow)
+            {
+                SendMessageW(state->metadataAutoCheckWindow, BM_SETCHECK, state->metadataCacheAutomatic ? BST_CHECKED : BST_UNCHECKED, 0);
+            }
+
+            LayoutPerformanceSettingsDialogControls(hwnd, *state);
+            RefreshPerformanceSettingsDialogControls(*state);
+            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            return 0;
+        }
+        case WM_SIZE:
+            if (state)
+            {
+                LayoutPerformanceSettingsDialogControls(hwnd, *state);
+            }
+            return 0;
+        case WM_SHOWWINDOW:
+            if (wParam != FALSE && state)
+            {
+                SetFocus(state->thumbnailAutoCheckWindow ? state->thumbnailAutoCheckWindow : state->okButton);
+                return FALSE;
+            }
+            break;
+        case WM_COMMAND:
+            if (!state)
+            {
+                break;
+            }
+
+            if (LOWORD(wParam) == kPerformanceSettingsThumbnailAutoControlId
+                || LOWORD(wParam) == kPerformanceSettingsMetadataAutoControlId)
+            {
+                RefreshPerformanceSettingsDialogControls(*state);
+                return 0;
+            }
+
+            if (LOWORD(wParam) == IDOK)
+            {
+                if (CollectPerformanceSettingsDialogResult(hwnd, state))
+                {
+                    state->accepted = true;
+                    DestroyWindow(hwnd);
+                }
+                return 0;
+            }
+
+            if (LOWORD(wParam) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
     }
 
     LRESULT CALLBACK TextInputDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -2120,6 +2632,121 @@ namespace
         }
 
         return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    bool PromptForPerformanceSettings(HWND ownerWindow,
+                                      HINSTANCE instance,
+                                      hyperbrowse::util::ResourceProfile resourceProfile,
+                                      std::size_t currentThumbnailCacheCapacityBytes,
+                                      std::size_t currentMetadataCacheCapacityEntries,
+                                      std::size_t initialThumbnailCacheCapacityOverrideBytes,
+                                      std::size_t initialMetadataCacheCapacityOverrideEntries,
+                                      std::size_t* thumbnailCacheCapacityOverrideBytes,
+                                      std::size_t* metadataCacheCapacityOverrideEntries)
+    {
+        if (!thumbnailCacheCapacityOverrideBytes || !metadataCacheCapacityOverrideEntries)
+        {
+            return false;
+        }
+
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance, kPerformanceSettingsDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &PerformanceSettingsDialogProc;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = kPerformanceSettingsDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return false;
+            }
+        }
+
+        PerformanceSettingsDialogState state;
+        state.ownerWindow = ownerWindow;
+        state.title = L"Performance Settings";
+        state.instruction = L"Choose whether HyperBrowse should keep adaptive cache sizing or use explicit cache caps.";
+        state.summary = L"Current profile: ";
+        state.summary.append(hyperbrowse::util::ResourceProfileToDisplayName(resourceProfile));
+        state.summary.append(L"  |  Effective thumbnail cache: ");
+        state.summary.append(FormatMegabytesFromBytes(currentThumbnailCacheCapacityBytes));
+        state.summary.append(L" MB  |  Effective metadata cache: ");
+        state.summary.append(std::to_wstring(currentMetadataCacheCapacityEntries));
+        state.summary.append(L" entries");
+        state.footnote = L"Leave Automatic enabled to keep profile-adaptive sizing. Thumbnail values are entered in megabytes; metadata values are entry counts. Changes apply immediately to browser and details-panel caches.";
+        state.thumbnailCacheAutomatic = initialThumbnailCacheCapacityOverrideBytes == 0;
+        state.metadataCacheAutomatic = initialMetadataCacheCapacityOverrideEntries == 0;
+        state.thumbnailCacheText = state.thumbnailCacheAutomatic
+            ? FormatMegabytesFromBytes(currentThumbnailCacheCapacityBytes)
+            : FormatMegabytesFromBytes(initialThumbnailCacheCapacityOverrideBytes);
+        state.metadataCacheText = state.metadataCacheAutomatic
+            ? std::to_wstring(currentMetadataCacheCapacityEntries)
+            : std::to_wstring(initialMetadataCacheCapacityOverrideEntries);
+
+        RECT windowRect{0, 0, kPerformanceSettingsDialogWidth, kPerformanceSettingsDialogHeight};
+        AdjustWindowRectEx(&windowRect,
+                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                           FALSE,
+                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, FALSE);
+        }
+
+        HWND dialogWindow = CreateWindowExW(
+            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+            kPerformanceSettingsDialogClassName,
+            state.title.c_str(),
+            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            ownerWindow,
+            nullptr,
+            instance,
+            &state);
+
+        if (!dialogWindow)
+        {
+            if (ownerWindow)
+            {
+                EnableWindow(ownerWindow, TRUE);
+            }
+            return false;
+        }
+
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+
+        MSG message{};
+        while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            if (!IsDialogMessageW(dialogWindow, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, TRUE);
+            SetForegroundWindow(ownerWindow);
+            SetActiveWindow(ownerWindow);
+        }
+
+        if (!state.accepted)
+        {
+            return false;
+        }
+
+        *thumbnailCacheCapacityOverrideBytes = state.thumbnailCacheCapacityOverrideBytes;
+        *metadataCacheCapacityOverrideEntries = state.metadataCacheCapacityOverrideEntries;
+        return true;
     }
 
     bool PromptForSingleLineText(HWND ownerWindow,
@@ -3454,6 +4081,7 @@ namespace hyperbrowse::ui
 
         LoadWindowState();
         ApplyResourceProfileSetting();
+        ApplyCacheCapacityOverrideSettings();
         ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
 
@@ -3480,6 +4108,13 @@ namespace hyperbrowse::ui
         if (!CreateAccelerators() || !CreateMenuBar() || !CreateChildWindows())
         {
             return false;
+        }
+
+        memoryPressureExecutor_ = std::make_unique<util::BackgroundExecutor>(1);
+        if (memoryPressureExecutor_)
+        {
+            memoryPressureTimerId_ = SetTimer(hwnd_, kMemoryPressureTimerId, kMemoryPressureIntervalMs, nullptr);
+            QueueMemoryPressureSample();
         }
 
         ApplyPersistentThumbnailCacheSetting();
@@ -3676,6 +4311,7 @@ namespace hyperbrowse::ui
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM, L"&Zoom");
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE, L"&Next/Previous Image");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMouseWheelMenu), L"Viewer Mouse &Wheel");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Viewer Detail &Overlays");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
@@ -3690,6 +4326,7 @@ namespace hyperbrowse::ui
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_BALANCED, L"&Balanced");
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE, L"&Performance");
         AppendMenuW(helpMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceProfileMenu), L"Performance &Profile");
+        AppendMenuW(helpMenu, MF_STRING, ID_HELP_PERFORMANCE_SETTINGS, L"Performance &Settings...");
         AppendMenuW(helpMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"Diagnostics &Snapshot\tCtrl+Shift+D");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"Reset Diagnostics\tCtrl+Shift+X");
@@ -3832,7 +4469,10 @@ namespace hyperbrowse::ui
         SendMessageW(detailsPanelText_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
         RefreshDetailsPanelBodyPresentation();
 
-        detailsPanelThumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(0, 0, resourceProfile_);
+        detailsPanelThumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(
+            thumbnailCacheCapacityOverrideBytes_,
+            0,
+            resourceProfile_);
         if (detailsPanelThumbnailScheduler_)
         {
             detailsPanelThumbnailScheduler_->BindTargetWindow(hwnd_);
@@ -4528,6 +5168,10 @@ namespace hyperbrowse::ui
         }
         selectionText.append(L"  |  Profile: ");
         selectionText.append(util::ResourceProfileToDisplayName(resourceProfile_));
+        if (thumbnailCacheCapacityOverrideBytes_ != 0 || metadataCacheCapacityOverrideEntries_ != 0)
+        {
+            selectionText.append(L" (Custom cache caps)");
+        }
 
         SendMessageW(statusBar_, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(folderText.c_str()));
         SendMessageW(statusBar_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(selectionText.c_str()));
@@ -5372,6 +6016,7 @@ namespace hyperbrowse::ui
 
         ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
+        viewerWindow_->SetResourceProfile(resourceProfile_);
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
             if (startSlideshow)
@@ -7423,6 +8068,10 @@ namespace hyperbrowse::ui
             ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE,
             CommandIdFromViewerMouseWheelBehavior(viewerMouseWheelBehavior_),
             MF_BYCOMMAND);
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_VIEWER_DETAIL_OVERLAYS,
+            MF_BYCOMMAND | ((viewerWindow_ && viewerWindow_->AreInfoOverlaysVisible()) ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuRadioItem(
             menu_,
             ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE,
@@ -7618,6 +8267,23 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ApplyThumbnailMemoryPressureState()
+    {
+        if (browserPaneController_)
+        {
+            browserPaneController_->SetThumbnailMemoryPressureActive(thumbnailMemoryPressureActive_);
+        }
+
+        if (detailsPanelThumbnailScheduler_)
+        {
+            detailsPanelThumbnailScheduler_->SetPressureModeEnabled(thumbnailMemoryPressureActive_);
+            if (thumbnailMemoryPressureActive_)
+            {
+                detailsPanelThumbnailScheduler_->TrimCacheToBytes(std::max<std::size_t>(1, detailsPanelThumbnailScheduler_->CacheCapacityBytes() / 2));
+            }
+        }
+    }
+
     void MainWindow::ApplyResourceProfileSetting()
     {
         if (browserPaneController_)
@@ -7625,12 +8291,65 @@ namespace hyperbrowse::ui
             browserPaneController_->SetResourceProfile(resourceProfile_);
         }
 
+        if (viewerWindow_)
+        {
+            viewerWindow_->SetResourceProfile(resourceProfile_);
+        }
+
+        RecreateDetailsPanelThumbnailScheduler();
+    }
+
+    void MainWindow::QueueMemoryPressureSample()
+    {
+        if (!hwnd_ || !memoryPressureExecutor_ || memoryPressureSampleQueued_)
+        {
+            return;
+        }
+
+        memoryPressureSampleQueued_ = true;
+        const HWND targetWindow = hwnd_;
+        if (!memoryPressureExecutor_->Post([targetWindow]()
+            {
+                auto update = std::make_unique<MemoryPressureSampleResult>();
+                const util::MemorySnapshot memorySnapshot = util::QueryMemorySnapshot();
+                if (memorySnapshot.IsValid() && memorySnapshot.totalPhysicalBytes != 0)
+                {
+                    const std::uint64_t usedPercent = 100ULL
+                        - ((memorySnapshot.availablePhysicalBytes * 100ULL) / memorySnapshot.totalPhysicalBytes);
+                    update->pressureDetected = memorySnapshot.availablePhysicalBytes < kMemoryPressureAvailableBytesThreshold
+                        || usedPercent >= kMemoryPressureActivateUsedPercent;
+                    update->recoveryCandidate = memorySnapshot.availablePhysicalBytes >= kMemoryPressureAvailableBytesThreshold
+                        && usedPercent < kMemoryPressureRecoverUsedPercent;
+                }
+
+                if (!PostMessageW(targetWindow, kMemoryPressureSampledMessage, 0, reinterpret_cast<LPARAM>(update.get())))
+                {
+                    return;
+                }
+
+                update.release();
+            }))
+        {
+            memoryPressureSampleQueued_ = false;
+        }
+    }
+
+    void MainWindow::RecreateDetailsPanelThumbnailScheduler()
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
         if (detailsPanelThumbnailScheduler_)
         {
             ++detailsPanelThumbnailSessionId_;
             ++detailsPanelThumbnailRequestEpoch_;
 
-            auto scheduler = std::make_unique<services::ThumbnailScheduler>(0, 0, resourceProfile_);
+            auto scheduler = std::make_unique<services::ThumbnailScheduler>(
+                thumbnailCacheCapacityOverrideBytes_,
+                0,
+                resourceProfile_);
             if (scheduler)
             {
                 if (hwnd_)
@@ -7638,9 +8357,26 @@ namespace hyperbrowse::ui
                     scheduler->BindTargetWindow(hwnd_);
                 }
                 scheduler->SetDiskCacheEnabled(persistentThumbnailCacheEnabled_);
+                scheduler->SetPressureModeEnabled(thumbnailMemoryPressureActive_);
+                if (thumbnailMemoryPressureActive_)
+                {
+                    scheduler->TrimCacheToBytes(std::max<std::size_t>(1, scheduler->CacheCapacityBytes() / 2));
+                }
             }
             detailsPanelThumbnailScheduler_ = std::move(scheduler);
         }
+    }
+
+    void MainWindow::ApplyCacheCapacityOverrideSettings()
+    {
+        if (browserPaneController_)
+        {
+            browserPaneController_->SetCacheCapacityOverrides(
+                thumbnailCacheCapacityOverrideBytes_,
+                metadataCacheCapacityOverrideEntries_);
+        }
+
+        RecreateDetailsPanelThumbnailScheduler();
     }
 
     void MainWindow::ApplyPersistentThumbnailCacheSetting()
@@ -7654,6 +8390,42 @@ namespace hyperbrowse::ui
         {
             detailsPanelThumbnailScheduler_->SetDiskCacheEnabled(persistentThumbnailCacheEnabled_);
         }
+    }
+
+    void MainWindow::ShowPerformanceSettingsDialog()
+    {
+        const std::size_t currentThumbnailCacheCapacityBytes = browserPaneController_
+            ? browserPaneController_->ThumbnailCacheCapacityBytes()
+            : thumbnailCacheCapacityOverrideBytes_;
+        const std::size_t currentMetadataCacheCapacityEntries = browserPaneController_
+            ? browserPaneController_->MetadataCacheCapacityEntries()
+            : metadataCacheCapacityOverrideEntries_;
+
+        std::size_t thumbnailCacheCapacityOverrideBytes = thumbnailCacheCapacityOverrideBytes_;
+        std::size_t metadataCacheCapacityOverrideEntries = metadataCacheCapacityOverrideEntries_;
+        if (!PromptForPerformanceSettings(hwnd_,
+                                          instance_,
+                                          resourceProfile_,
+                                          currentThumbnailCacheCapacityBytes,
+                                          currentMetadataCacheCapacityEntries,
+                                          thumbnailCacheCapacityOverrideBytes_,
+                                          metadataCacheCapacityOverrideEntries_,
+                                          &thumbnailCacheCapacityOverrideBytes,
+                                          &metadataCacheCapacityOverrideEntries))
+        {
+            return;
+        }
+
+        if (thumbnailCacheCapacityOverrideBytes_ == thumbnailCacheCapacityOverrideBytes
+            && metadataCacheCapacityOverrideEntries_ == metadataCacheCapacityOverrideEntries)
+        {
+            return;
+        }
+
+        thumbnailCacheCapacityOverrideBytes_ = thumbnailCacheCapacityOverrideBytes;
+        metadataCacheCapacityOverrideEntries_ = metadataCacheCapacityOverrideEntries;
+        ApplyCacheCapacityOverrideSettings();
+        UpdateStatusText();
     }
 
     void MainWindow::LoadWindowState()
@@ -7768,6 +8540,17 @@ namespace hyperbrowse::ui
                 persistentThumbnailCacheEnabled_ = value != 0;
             }
 
+            std::uint64_t qwordValue = 0;
+            if (TryReadQwordValue(key, kRegistryValueThumbnailCacheCapacityOverrideBytes, &qwordValue))
+            {
+                thumbnailCacheCapacityOverrideBytes_ = util::SaturatingCastToSizeT(qwordValue);
+            }
+
+            if (TryReadQwordValue(key, kRegistryValueMetadataCacheCapacityOverrideEntries, &qwordValue))
+            {
+                metadataCacheCapacityOverrideEntries_ = util::SaturatingCastToSizeT(qwordValue);
+            }
+
             if (TryReadDwordValue(key, kRegistryValueResourceProfile, &value))
             {
                 TryParseResourceProfile(value, &resourceProfile_);
@@ -7816,6 +8599,8 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, persistentThumbnailCacheEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueResourceProfile, static_cast<DWORD>(resourceProfile_));
+            WriteQwordValue(key, kRegistryValueThumbnailCacheCapacityOverrideBytes, static_cast<std::uint64_t>(thumbnailCacheCapacityOverrideBytes_));
+            WriteQwordValue(key, kRegistryValueMetadataCacheCapacityOverrideEntries, static_cast<std::uint64_t>(metadataCacheCapacityOverrideEntries_));
             RegCloseKey(key);
         }
     }
@@ -8089,6 +8874,44 @@ namespace hyperbrowse::ui
         viewerWindowActive_ = false;
         viewerZoomPercent_ = 0;
         UpdateStatusText();
+        UpdateMenuState();
+        return 0;
+    }
+
+    LRESULT MainWindow::OnMemoryPressureSampleMessage(LPARAM lParam)
+    {
+        std::unique_ptr<MemoryPressureSampleResult> update(reinterpret_cast<MemoryPressureSampleResult*>(lParam));
+        memoryPressureSampleQueued_ = false;
+        if (!update)
+        {
+            return 0;
+        }
+
+        bool nextPressureActive = thumbnailMemoryPressureActive_;
+        if (update->pressureDetected)
+        {
+            nextPressureActive = true;
+            memoryPressureRecoveryClearSampleCount_ = 0;
+        }
+        else if (thumbnailMemoryPressureActive_ && update->recoveryCandidate)
+        {
+            ++memoryPressureRecoveryClearSampleCount_;
+            if (memoryPressureRecoveryClearSampleCount_ >= kMemoryPressureRecoverySamplesRequired)
+            {
+                nextPressureActive = false;
+                memoryPressureRecoveryClearSampleCount_ = 0;
+            }
+        }
+        else
+        {
+            memoryPressureRecoveryClearSampleCount_ = 0;
+        }
+
+        if (nextPressureActive != thumbnailMemoryPressureActive_)
+        {
+            thumbnailMemoryPressureActive_ = nextPressureActive;
+            ApplyThumbnailMemoryPressureState();
+        }
         return 0;
     }
 
@@ -8408,6 +9231,13 @@ namespace hyperbrowse::ui
         case ID_VIEW_THEME_DARK:
             SetThemeMode(ThemeMode::Dark);
             return true;
+        case ID_VIEW_VIEWER_DETAIL_OVERLAYS:
+            if (viewerWindow_)
+            {
+                viewerWindow_->SetInfoOverlaysVisible(!viewerWindow_->AreInfoOverlaysVisible());
+                UpdateMenuState();
+            }
+            return true;
         case ID_VIEW_SLIDESHOW_SELECTION:
             StartSlideshow(true);
             return true;
@@ -8416,6 +9246,9 @@ namespace hyperbrowse::ui
             return true;
         case ID_HELP_ABOUT:
             ShowAboutDialog();
+            return true;
+        case ID_HELP_PERFORMANCE_SETTINGS:
+            ShowPerformanceSettingsDialog();
             return true;
         case ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE:
         case ID_HELP_PERFORMANCE_PROFILE_BALANCED:
@@ -9171,7 +10004,16 @@ namespace hyperbrowse::ui
             return OnViewerActivityMessage(lParam);
         case viewer::ViewerWindow::kClosedMessage:
             return OnViewerClosedMessage();
+        case kMemoryPressureSampledMessage:
+            return OnMemoryPressureSampleMessage(lParam);
         case WM_DRAWITEM:
+            break;
+        case WM_TIMER:
+            if (wParam == kMemoryPressureTimerId && memoryPressureTimerId_ != 0)
+            {
+                QueueMemoryPressureSample();
+                return 0;
+            }
             break;
         case WM_MOUSELEAVE:
             toolbarMouseTracking_ = false;
@@ -9292,6 +10134,12 @@ namespace hyperbrowse::ui
             }
             return 0;
         case WM_DESTROY:
+            if (memoryPressureTimerId_ != 0)
+            {
+                KillTimer(hwnd_, kMemoryPressureTimerId);
+                memoryPressureTimerId_ = 0;
+            }
+            memoryPressureExecutor_.reset();
             if (folderEnumerationService_)
             {
                 folderEnumerationService_->Cancel();

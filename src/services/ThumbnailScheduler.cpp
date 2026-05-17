@@ -160,6 +160,7 @@ namespace hyperbrowse::services
         const std::size_t totalWorkerCount = ResolveWorkerCount(workerCount, resourceProfile);
         const std::size_t rawWorkerCount = ResolveRawWorkerCount(totalWorkerCount, resourceProfile);
         const std::size_t generalWorkerCount = ResolveGeneralWorkerCount(totalWorkerCount, resourceProfile);
+        activeDecodeLimit_ = std::max<std::size_t>(1, totalWorkerCount);
 
         generalWorkers_.reserve(generalWorkerCount);
         for (std::size_t index = 0; index < generalWorkerCount; ++index)
@@ -327,6 +328,24 @@ namespace hyperbrowse::services
         diskCacheEnabled_ = enabled;
     }
 
+    void ThumbnailScheduler::SetPressureModeEnabled(bool enabled)
+    {
+        {
+            std::scoped_lock lock(mutex_);
+            const std::size_t totalWorkerCount = generalWorkers_.size() + rawWorkers_.size();
+            activeDecodeLimit_ = enabled
+                ? std::max<std::size_t>(1, totalWorkerCount / 2)
+                : std::max<std::size_t>(1, totalWorkerCount);
+        }
+
+        workAvailable_.notify_all();
+    }
+
+    void ThumbnailScheduler::TrimCacheToBytes(std::size_t targetBytes)
+    {
+        cache_.TrimToBytes(targetBytes);
+    }
+
     bool ThumbnailScheduler::IsDiskCacheEnabled() const
     {
         std::scoped_lock lock(mutex_);
@@ -376,7 +395,7 @@ namespace hyperbrowse::services
     bool ThumbnailScheduler::HasDispatchableWorkLocked(WorkerKind kind) const
     {
         (void)kind;
-        return !pendingJobs_.empty();
+        return !pendingJobs_.empty() && activeWorkerCount_ < activeDecodeLimit_;
     }
 
     void ThumbnailScheduler::WorkerLoop(WorkerKind kind)
@@ -476,6 +495,8 @@ namespace hyperbrowse::services
                     continue;
                 }
 
+                ++activeWorkerCount_;
+
                 for (const PendingJob& job : jobs)
                 {
                     queuedKeys_.erase(job.workItem.cacheKey);
@@ -540,6 +561,11 @@ namespace hyperbrowse::services
                 std::scoped_lock lock(mutex_);
                 if (shuttingDown_)
                 {
+                    if (activeWorkerCount_ > 0)
+                    {
+                        --activeWorkerCount_;
+                    }
+                    workAvailable_.notify_all();
                     return;
                 }
                 for (const PendingJob& job : jobs)
@@ -653,6 +679,15 @@ namespace hyperbrowse::services
                               thumbnail != nullptr);
                 }
             }
+
+            {
+                std::scoped_lock lock(mutex_);
+                if (activeWorkerCount_ > 0)
+                {
+                    --activeWorkerCount_;
+                }
+            }
+            workAvailable_.notify_all();
         }
     }
 

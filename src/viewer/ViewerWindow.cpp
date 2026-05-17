@@ -25,6 +25,7 @@ namespace
     constexpr int kPlaceholderBrandArtSize = 256;
     constexpr bool kEnableFullImagePrefetch = false;
     constexpr std::size_t kViewerFullImageCacheBytes = 256ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kMemoryPressureAvailableBytesThreshold = 1024ULL * 1024ULL * 1024ULL;
 
     std::wstring FormatWindowHandle(HWND hwnd)
     {
@@ -262,6 +263,12 @@ namespace hyperbrowse::viewer
             ShowWindow(hwnd_, SW_RESTORE);
         }
 
+        if (hwnd_ && memoryPressureTimerId_ == 0)
+        {
+            memoryPressureTimerId_ = SetTimer(hwnd_, kMemoryPressureTimerId, kMemoryPressureIntervalMs, nullptr);
+        }
+        UpdateMemoryPressureState();
+
         SetFullScreen(true, targetMonitor);
         SetForegroundWindow(hwnd_);
         LoadCurrentImageAsync(LoadReason::Open);
@@ -397,6 +404,36 @@ namespace hyperbrowse::viewer
         if (transitionStyle_ == TransitionStyle::Cut)
         {
             StopTransition();
+        }
+    }
+
+    void ViewerWindow::SetInfoOverlaysVisible(bool visible)
+    {
+        if (infoOverlaysVisible_ == visible)
+        {
+            return;
+        }
+
+        infoOverlaysVisible_ = visible;
+        SaveViewerInfoOverlaysVisibleSetting(infoOverlaysVisible_);
+        if (hwnd_)
+        {
+            RequestRepaint();
+        }
+    }
+
+    void ViewerWindow::SetResourceProfile(util::ResourceProfile profile) noexcept
+    {
+        if (resourceProfile_ == profile)
+        {
+            return;
+        }
+
+        resourceProfile_ = profile;
+        if (hwnd_ && currentImage_ && !pendingLoadActive_)
+        {
+            const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+            ScheduleAdjacentPrefetch(navigationGeneration);
         }
     }
 
@@ -639,6 +676,61 @@ namespace hyperbrowse::viewer
         prefetchMissCount_.store(0, std::memory_order_release);
     }
 
+    int ViewerWindow::BasePrefetchRadius() const noexcept
+    {
+        switch (resourceProfile_)
+        {
+        case util::ResourceProfile::Conservative:
+            return 1;
+        case util::ResourceProfile::Performance:
+            return 3;
+        case util::ResourceProfile::Balanced:
+        default:
+            return 2;
+        }
+    }
+
+    int ViewerWindow::EffectivePrefetchRadius() const noexcept
+    {
+        return memoryPressureActive_ ? 1 : BasePrefetchRadius();
+    }
+
+    void ViewerWindow::UpdateMemoryPressureState()
+    {
+        const util::MemorySnapshot memorySnapshot = util::QueryMemorySnapshot();
+        bool nextMemoryPressureState = false;
+        if (memorySnapshot.IsValid())
+        {
+            if (memorySnapshot.availablePhysicalBytes < kMemoryPressureAvailableBytesThreshold)
+            {
+                nextMemoryPressureState = true;
+            }
+            else if (memorySnapshot.totalPhysicalBytes != 0)
+            {
+                const std::uint64_t usedPercent = 100ULL - ((memorySnapshot.availablePhysicalBytes * 100ULL) / memorySnapshot.totalPhysicalBytes);
+                nextMemoryPressureState = usedPercent >= 85ULL;
+            }
+        }
+
+        if (memoryPressureActive_ == nextMemoryPressureState)
+        {
+            return;
+        }
+
+        memoryPressureActive_ = nextMemoryPressureState;
+        util::LogInfo(L"ViewerWindow memory pressure "
+            + std::wstring(memoryPressureActive_ ? L"entered" : L"cleared")
+            + L"; prefetch radius=" + std::to_wstring(EffectivePrefetchRadius()));
+
+        slideshowNextPrefetchIndex_ = -1;
+        slideshowNextPrefetchGeneration_ = 0;
+        const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+        if (currentImage_ && !pendingLoadActive_)
+        {
+            ScheduleAdjacentPrefetch(navigationGeneration);
+        }
+    }
+
     void ViewerWindow::SetCurrentImageSlot(int index,
                                            std::shared_ptr<const cache::CachedThumbnail> image,
                                            bool prefetched)
@@ -829,9 +921,11 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ScheduleAdjacentPrefetch(std::uint64_t navigationGeneration)
     {
+        const int prefetchRadius = EffectivePrefetchRadius();
         const bool slideshowAheadPrefetch = slideshowActive_ && items_.size() > 1;
         const bool comparePrefetch = compareMode_ && items_.size() > 1;
-        if (!kEnableFullImagePrefetch && !slideshowAheadPrefetch && !comparePrefetch)
+        const bool genericAdjacentPrefetch = kEnableFullImagePrefetch || prefetchRadius > 0;
+        if (!genericAdjacentPrefetch && !slideshowAheadPrefetch && !comparePrefetch)
         {
             (void)navigationGeneration;
             return;
@@ -846,50 +940,71 @@ namespace hyperbrowse::viewer
 
         if (slideshowAheadPrefetch && !comparePrefetch)
         {
-            const int nextIndex = (currentIndex_ + 1) % static_cast<int>(items_.size());
+            const int itemCount = static_cast<int>(items_.size());
+            const int nextIndex = (currentIndex_ + 1) % itemCount;
             if (nextSlot_.index == nextIndex && nextSlot_.image)
             {
                 slideshowNextPrefetchIndex_ = -1;
                 slideshowNextPrefetchGeneration_ = 0;
-                return;
             }
 
-            if (slideshowNextPrefetchIndex_ == nextIndex
-                && slideshowNextPrefetchGeneration_ == navigationGeneration)
-            {
-                return;
-            }
-
-            nextSlot_ = {};
-            StartPrefetch(nextIndex, navigationGeneration);
-            return;
-        }
-
-        const int previousIndex = currentIndex_ - 1;
-        const int nextIndex = currentIndex_ + 1;
-
-        if (previousIndex >= 0)
-        {
-            if (previousSlot_.index != previousIndex || !previousSlot_.image)
-            {
-                previousSlot_ = {};
-                StartPrefetch(previousIndex, navigationGeneration);
-            }
-        }
-        else
-        {
-            previousSlot_ = {};
-        }
-
-        if (nextIndex < static_cast<int>(items_.size()))
-        {
-            if (nextSlot_.index != nextIndex || !nextSlot_.image)
+            if (slideshowNextPrefetchIndex_ != nextIndex
+                || slideshowNextPrefetchGeneration_ != navigationGeneration)
             {
                 nextSlot_ = {};
                 StartPrefetch(nextIndex, navigationGeneration);
             }
+
+            for (int offset = 2; offset <= prefetchRadius && offset < itemCount; ++offset)
+            {
+                const int extraIndex = (currentIndex_ + offset) % itemCount;
+                StartPrefetch(extraIndex, navigationGeneration);
+            }
+            return;
         }
-        else
+
+        for (int offset = 1; offset <= prefetchRadius; ++offset)
+        {
+            const int previousIndex = currentIndex_ - offset;
+            if (previousIndex >= 0)
+            {
+                if (offset == 1)
+                {
+                    if (previousSlot_.index != previousIndex || !previousSlot_.image)
+                    {
+                        previousSlot_ = {};
+                        StartPrefetch(previousIndex, navigationGeneration);
+                    }
+                }
+                else
+                {
+                    StartPrefetch(previousIndex, navigationGeneration);
+                }
+            }
+
+            const int nextIndex = currentIndex_ + offset;
+            if (nextIndex < static_cast<int>(items_.size()))
+            {
+                if (offset == 1)
+                {
+                    if (nextSlot_.index != nextIndex || !nextSlot_.image)
+                    {
+                        nextSlot_ = {};
+                        StartPrefetch(nextIndex, navigationGeneration);
+                    }
+                }
+                else
+                {
+                    StartPrefetch(nextIndex, navigationGeneration);
+                }
+            }
+        }
+
+        if (currentIndex_ - 1 < 0)
+        {
+            previousSlot_ = {};
+        }
+        if (currentIndex_ + 1 >= static_cast<int>(items_.size()))
         {
             nextSlot_ = {};
         }
@@ -1109,12 +1224,7 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ToggleInfoOverlays()
     {
-        infoOverlaysVisible_ = !infoOverlaysVisible_;
-        SaveViewerInfoOverlaysVisibleSetting(infoOverlaysVisible_);
-        if (hwnd_)
-        {
-            RequestRepaint();
-        }
+        SetInfoOverlaysVisible(!infoOverlaysVisible_);
     }
 
     HMONITOR ViewerWindow::ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept
@@ -1618,6 +1728,10 @@ namespace hyperbrowse::viewer
             ? ((currentIndex_ + 1) % static_cast<int>(items_.size()))
             : (currentIndex_ + 1);
 
+        ViewerFullImageCache().Insert(
+            MakeViewerFullImageCacheKey(items_[static_cast<std::size_t>(update->index)]),
+            update->image);
+
         if (update->index == currentIndex_ - 1)
         {
             previousSlot_.index = update->index;
@@ -1651,8 +1765,8 @@ namespace hyperbrowse::viewer
             return 0;
         }
 
-        prefetchCancelledCount_.fetch_add(1, std::memory_order_acq_rel);
-        util::IncrementCounter(L"viewer.prefetch.cancelled");
+        prefetchCompletedCount_.fetch_add(1, std::memory_order_acq_rel);
+        util::IncrementCounter(L"viewer.prefetch.completed");
         return 0;
     }
 
@@ -1859,6 +1973,11 @@ namespace hyperbrowse::viewer
                     customZoomScale_ = smoothZoomCurrent_;
                 }
                 RequestRepaint();
+                return 0;
+            }
+            if (wParam == kMemoryPressureTimerId && memoryPressureTimerId_)
+            {
+                UpdateMemoryPressureState();
                 return 0;
             }
             break;
@@ -2411,6 +2530,12 @@ namespace hyperbrowse::viewer
             util::LogInfo(L"ViewerWindow WM_DESTROY hwnd=" + FormatWindowHandle(hwnd));
             StopSlideshow();
             StopTransition();
+            if (memoryPressureTimerId_ != 0)
+            {
+                KillTimer(hwnd_, kMemoryPressureTimerId);
+                memoryPressureTimerId_ = 0;
+            }
+            memoryPressureActive_ = false;
             if (GetCapture() == hwnd_)
             {
                 ReleaseCapture();

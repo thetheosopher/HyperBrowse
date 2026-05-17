@@ -124,8 +124,13 @@ namespace hyperbrowse::browser
         void SetThumbnailDetailsVisible(bool visible);
         bool AreThumbnailDetailsVisible() const noexcept;
         void SetResourceProfile(hyperbrowse::util::ResourceProfile profile);
+        void SetThumbnailMemoryPressureActive(bool active);
+        void SetCacheCapacityOverrides(std::size_t thumbnailCacheCapacityBytes,
+                           std::size_t metadataCacheCapacityEntries);
         void SetPersistentThumbnailCacheEnabled(bool enabled);
         bool IsPersistentThumbnailCacheEnabled() const noexcept;
+        std::size_t ThumbnailCacheCapacityBytes() const noexcept;
+        std::size_t MetadataCacheCapacityEntries() const noexcept;
         void SetDarkTheme(bool enabled);
 
         void ClearSelection();
@@ -270,6 +275,9 @@ namespace hyperbrowse::browser
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
         hyperbrowse::services::UserMetadataStore* userMetadataStore_{};
         hyperbrowse::util::ResourceProfile resourceProfile_{hyperbrowse::util::ResourceProfile::Balanced};
+        bool thumbnailMemoryPressureActive_{};
+        std::size_t thumbnailCacheCapacityOverrideBytes_{};
+        std::size_t metadataCacheCapacityOverrideEntries_{};
         bool persistentThumbnailCacheEnabled_{true};
         bool darkTheme_{};
         bool syncingDetailsSelection_{};

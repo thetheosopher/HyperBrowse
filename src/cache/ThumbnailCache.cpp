@@ -147,6 +147,12 @@ namespace hyperbrowse::cache
         }
     }
 
+    void ThumbnailCache::TrimToBytes(std::size_t targetBytes)
+    {
+        std::scoped_lock lock(mutex_);
+        EvictToBytes(targetBytes);
+    }
+
     void ThumbnailCache::Clear()
     {
         std::scoped_lock lock(mutex_);
@@ -168,7 +174,12 @@ namespace hyperbrowse::cache
 
     void ThumbnailCache::EvictIfNeeded()
     {
-        while (currentBytes_ > capacityBytes_ && !lruOrder_.empty())
+        EvictToBytes(capacityBytes_);
+    }
+
+    void ThumbnailCache::EvictToBytes(std::size_t targetBytes)
+    {
+        while (currentBytes_ > targetBytes && !lruOrder_.empty())
         {
             const ThumbnailCacheKey key = lruOrder_.back();
             const auto iterator = entries_.find(key);

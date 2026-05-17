@@ -58,6 +58,8 @@ namespace hyperbrowse::services
         void CancelOutstanding();
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
         void SetDiskCacheEnabled(bool enabled);
+        void SetPressureModeEnabled(bool enabled);
+        void TrimCacheToBytes(std::size_t targetBytes);
         bool IsDiskCacheEnabled() const;
 
         std::shared_ptr<const cache::CachedThumbnail> FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const;
@@ -129,6 +131,8 @@ namespace hyperbrowse::services
         std::unordered_map<cache::ThumbnailCacheKey, std::vector<InflightDecode>, cache::ThumbnailCacheKeyHasher> inflightJobs_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> requestedKeys_;
         std::unordered_map<cache::ThumbnailCacheKey, decode::ThumbnailDecodeFailureKind, cache::ThumbnailCacheKeyHasher> failedKeys_;
+        std::size_t activeWorkerCount_{};
+        std::size_t activeDecodeLimit_{1};
         std::vector<std::thread> generalWorkers_;
         std::vector<std::thread> rawWorkers_;
         cache::ThumbnailCache cache_;

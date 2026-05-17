@@ -74,6 +74,7 @@ namespace hyperbrowse::cache
         std::shared_ptr<const CachedThumbnail> Find(const ThumbnailCacheKey& key) const;
         void Insert(ThumbnailCacheKey key, std::shared_ptr<const CachedThumbnail> thumbnail);
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
+        void TrimToBytes(std::size_t targetBytes);
         void Clear();
         std::size_t CurrentBytes() const;
         std::size_t CapacityBytes() const noexcept;
@@ -87,6 +88,7 @@ namespace hyperbrowse::cache
         };
 
         void EvictIfNeeded();
+        void EvictToBytes(std::size_t targetBytes);
 
         const std::size_t capacityBytes_{};
         mutable std::mutex mutex_;

@@ -835,6 +835,46 @@ namespace hyperbrowse::browser
         }
     }
 
+    void BrowserPane::SetThumbnailMemoryPressureActive(bool active)
+    {
+        if (thumbnailMemoryPressureActive_ == active)
+        {
+            return;
+        }
+
+        thumbnailMemoryPressureActive_ = active;
+        if (thumbnailScheduler_)
+        {
+            thumbnailScheduler_->SetPressureModeEnabled(active);
+            if (active)
+            {
+                thumbnailScheduler_->TrimCacheToBytes(std::max<std::size_t>(1, thumbnailScheduler_->CacheCapacityBytes() / 2));
+            }
+        }
+    }
+
+    void BrowserPane::SetCacheCapacityOverrides(std::size_t thumbnailCacheCapacityBytes,
+                                                std::size_t metadataCacheCapacityEntries)
+    {
+        if (thumbnailCacheCapacityOverrideBytes_ == thumbnailCacheCapacityBytes
+            && metadataCacheCapacityOverrideEntries_ == metadataCacheCapacityEntries)
+        {
+            return;
+        }
+
+        thumbnailCacheCapacityOverrideBytes_ = thumbnailCacheCapacityBytes;
+        metadataCacheCapacityOverrideEntries_ = metadataCacheCapacityEntries;
+        ++thumbnailSessionId_;
+        ++metadataSessionId_;
+        ++thumbnailRequestEpoch_;
+        HideThumbnailTooltip();
+        RecreateBackgroundServices();
+        if (hwnd_)
+        {
+            RefreshFromModel();
+        }
+    }
+
     void BrowserPane::SetPersistentThumbnailCacheEnabled(bool enabled)
     {
         persistentThumbnailCacheEnabled_ = enabled;
@@ -847,6 +887,16 @@ namespace hyperbrowse::browser
     bool BrowserPane::IsPersistentThumbnailCacheEnabled() const noexcept
     {
         return persistentThumbnailCacheEnabled_;
+    }
+
+    std::size_t BrowserPane::ThumbnailCacheCapacityBytes() const noexcept
+    {
+        return thumbnailScheduler_ ? thumbnailScheduler_->CacheCapacityBytes() : 0;
+    }
+
+    std::size_t BrowserPane::MetadataCacheCapacityEntries() const noexcept
+    {
+        return metadataService_ ? metadataService_->CacheCapacityEntries() : 0;
     }
 
     void BrowserPane::SetDarkTheme(bool enabled)
@@ -874,8 +924,14 @@ namespace hyperbrowse::browser
             metadataService_->CancelOutstanding();
         }
 
-        thumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(0, 0, resourceProfile_);
-        metadataService_ = std::make_unique<services::ImageMetadataService>(0, 0, resourceProfile_);
+        thumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(
+            thumbnailCacheCapacityOverrideBytes_,
+            0,
+            resourceProfile_);
+        metadataService_ = std::make_unique<services::ImageMetadataService>(
+            0,
+            metadataCacheCapacityOverrideEntries_,
+            resourceProfile_);
 
         if (thumbnailScheduler_)
         {
@@ -883,6 +939,11 @@ namespace hyperbrowse::browser
             if (hwnd_)
             {
                 thumbnailScheduler_->BindTargetWindow(hwnd_);
+            }
+            thumbnailScheduler_->SetPressureModeEnabled(thumbnailMemoryPressureActive_);
+            if (thumbnailMemoryPressureActive_)
+            {
+                thumbnailScheduler_->TrimCacheToBytes(std::max<std::size_t>(1, thumbnailScheduler_->CacheCapacityBytes() / 2));
             }
         }
 

@@ -14,6 +14,7 @@
 #include "browser/BrowserModel.h"
 #include "cache/ThumbnailCache.h"
 #include "util/BackgroundExecutor.h"
+#include "util/ResourceSizing.h"
 
 namespace hyperbrowse::viewer
 {
@@ -67,6 +68,8 @@ namespace hyperbrowse::viewer
         bool IsCompareModeEnabled() const noexcept;
         void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
+        void SetInfoOverlaysVisible(bool visible);
+        void SetResourceProfile(util::ResourceProfile profile) noexcept;
         void SetDarkTheme(bool enabled);
 
     private:
@@ -108,8 +111,11 @@ namespace hyperbrowse::viewer
         void PrepareForImageChange(bool keepDisplayedImage = false);
         void ResetCachedImageSlots();
         void ResetPrefetchStatistics();
+        int BasePrefetchRadius() const noexcept;
+        int EffectivePrefetchRadius() const noexcept;
         void ScheduleAdjacentPrefetch(std::uint64_t navigationGeneration);
         void StartPrefetch(int index, std::uint64_t navigationGeneration);
+        void UpdateMemoryPressureState();
         void SetCurrentImageSlot(int index,
                                  std::shared_ptr<const cache::CachedThumbnail> image,
                                  bool prefetched);
@@ -166,6 +172,8 @@ namespace hyperbrowse::viewer
         bool darkTheme_{};
         bool loading_{};
         std::wstring errorMessage_;
+        util::ResourceProfile resourceProfile_{util::ResourceProfile::Balanced};
+        bool memoryPressureActive_{};
         std::shared_ptr<const cache::CachedThumbnail> currentImage_;
         CachedImageSlot currentSlot_;
         CachedImageSlot previousSlot_;
@@ -236,9 +244,12 @@ namespace hyperbrowse::viewer
         double smoothZoomTarget_{1.0};
         double smoothZoomCurrent_{1.0};
         UINT_PTR smoothZoomTimerId_{};
+        UINT_PTR memoryPressureTimerId_{};
         static constexpr UINT_PTR kSmoothZoomTimerId = 9002;
         static constexpr UINT kSmoothZoomIntervalMs = 16;
         static constexpr UINT_PTR kTransitionTimerId = 9003;
         static constexpr UINT kTransitionIntervalMs = 16;
+        static constexpr UINT_PTR kMemoryPressureTimerId = 9004;
+        static constexpr UINT kMemoryPressureIntervalMs = 1500;
     };
 }

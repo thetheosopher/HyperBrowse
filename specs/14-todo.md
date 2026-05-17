@@ -74,9 +74,11 @@ cache budget, worker count, and prefetch depth from a single decision.
 slice: a persisted `Conservative` / `Balanced` / `Performance` profile is now
 wired into automatic thumbnail-cache sizing, metadata-cache sizing, thumbnail
 worker counts, and metadata worker counts, with a menu surface under
-**Help ▸ Performance Profile**. Remaining for full completion: a dedicated
-Settings dialog, live cache-budget controls, `Custom` overrides, and viewer
-prefetch-radius integration.
+**Help ▸ Performance Profile**. A follow-up slice on `2026-05-16` also wired
+the profile into viewer prefetch radius and added explicit cache-cap override
+controls through a minimal performance settings dialog. Remaining for full
+completion: live cache-budget feedback, `Custom` profile behavior beyond the
+two cache overrides, and the broader memory-pressure actions listed in `A4`.
 
 - Introduce a `ResourceProfile` enum: `Conservative`, `Balanced` (default),
   `Performance`, `Custom`.
@@ -104,6 +106,14 @@ prefetch-radius integration.
 ### `A2` Cache Sizing UI With Live Feedback (P0)
 
 **Goal:** A compact controller users can trust, with no math.
+
+**Implementation status:** In progress. `2026-05-16` shipped the first usable
+surface: **Help ▸ Performance Settings** now exposes explicit thumbnail-cache
+and metadata-cache overrides, supports reverting each control to adaptive
+automatic sizing, persists both values under `Software\HyperBrowse`, and
+applies changes immediately by recreating the browser/details-panel services.
+Remaining for full completion: slider-based controls, live usage/hit-rate
+feedback, recommended ranges, and persistent-cache budget management.
 
 - Sliders in the Performance tab show:
   - Thumbnail cache budget (MB), bounded by detected RAM, with live readouts
@@ -135,6 +145,18 @@ The first persistence pass shipped; now harden it.
   and one-click purge.
 
 ### `A4` Memory-Pressure Response & Adaptive Prefetch (P1)
+
+**Implementation status:** In progress. `2026-05-16` shipped two code slices.
+The first wired `ResourceProfile` into viewer prefetch radius, retained
+farther-ahead prefetched images in the viewer full-image cache, and reduced
+viewer prefetch back to one image when physical memory is tight. The second
+added a background-sampled memory-pressure monitor with recovery hysteresis in
+the main shell, caps thumbnail decode concurrency to half the configured
+workers while pressure is active, and trims in-memory thumbnail caches toward
+half of their configured capacity for both the browser pane and details strip.
+Remaining for full completion: consolidate viewer-side sampling onto the same
+background-driven pressure path, surface state in the performance HUD, and
+extend the response to other resource-heavy subsystems as needed.
 
 - Sample `GlobalMemoryStatusEx` on a low-frequency timer (1–2 Hz) on a
   background thread, never the UI thread.

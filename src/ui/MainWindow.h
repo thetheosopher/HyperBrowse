@@ -50,6 +50,12 @@ namespace hyperbrowse::viewer
     enum class TransitionStyle : int;
     class ViewerWindow;
 }
+
+namespace hyperbrowse::util
+{
+    class BackgroundExecutor;
+}
+
 namespace hyperbrowse::ui
 {
     class DiagnosticsWindow;
@@ -170,9 +176,11 @@ namespace hyperbrowse::ui
         void UpdateWindowTitle() const;
         void ApplyViewerMouseWheelSetting();
         void ApplyViewerTransitionSettings();
+        void ApplyThumbnailMemoryPressureState();
         void ApplyResourceProfileSetting();
         void ApplyPersistentThumbnailCacheSetting();
         void ApplyTheme();
+        void QueueMemoryPressureSample();
         void LoadWindowState();
         void SaveWindowState() const;
         bool HandleCommand(UINT commandId);
@@ -191,6 +199,7 @@ namespace hyperbrowse::ui
         void ShowBrowserContextMenu(POINT screenPoint);
         void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
         void ShowAboutDialog() const;
+        void ShowPerformanceSettingsDialog();
         void ShowDiagnosticsSnapshot();
         void ResetDiagnosticsState();
         void ShowImageInformation();
@@ -236,6 +245,7 @@ namespace hyperbrowse::ui
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
         LRESULT OnViewerClosedMessage();
+        LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
 
         void SetBrowserMode(BrowserMode mode);
         void ToggleRecursiveBrowsing();
@@ -251,6 +261,8 @@ namespace hyperbrowse::ui
         void UpdateDetailsPanel();
         void ApplyDetailsPanelText(std::wstring title, std::wstring summary, std::wstring body);
         void RefreshDetailsPanelBodyPresentation();
+        void RecreateDetailsPanelThumbnailScheduler();
+        void ApplyCacheCapacityOverrideSettings();
         void ResetDetailsPanelHistogram();
         void RequestDetailsPanelHistogram(const browser::BrowserItem& item, int modelIndex);
         void ApplyDetailsPanelHistogram(const cache::CachedThumbnail& thumbnail);
@@ -327,6 +339,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
+        std::unique_ptr<util::BackgroundExecutor> memoryPressureExecutor_;
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::wstring pendingTreeSelectionPath_;
         RECT detailsPanelRect_{};
@@ -365,7 +378,12 @@ namespace hyperbrowse::ui
         bool viewerWindowActive_{};
         bool nvJpegEnabled_{};
         bool libRawOutOfProcessEnabled_{true};
+        bool thumbnailMemoryPressureActive_{};
+        bool memoryPressureSampleQueued_{};
+        unsigned int memoryPressureRecoveryClearSampleCount_{};
         util::ResourceProfile resourceProfile_{util::ResourceProfile::Balanced};
+        std::size_t thumbnailCacheCapacityOverrideBytes_{};
+        std::size_t metadataCacheCapacityOverrideEntries_{};
         browser::ThumbnailSizePreset thumbnailSizePreset_{static_cast<browser::ThumbnailSizePreset>(192)};
         browser::BrowserSortMode sortMode_{static_cast<browser::BrowserSortMode>(0)};
         bool sortAscending_{true};
@@ -376,5 +394,6 @@ namespace hyperbrowse::ui
         UINT slideshowTransitionDurationMs_{350};
         bool detailsStripVisible_{true};
         viewer::MouseWheelBehavior viewerMouseWheelBehavior_{};
+        UINT_PTR memoryPressureTimerId_{};
     };
 }
