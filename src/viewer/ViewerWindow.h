@@ -69,6 +69,7 @@ namespace hyperbrowse::viewer
         void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
         void SetInfoOverlaysVisible(bool visible);
+        void SetMemoryPressureActive(bool active);
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
         void SetDarkTheme(bool enabled);
 
@@ -115,7 +116,6 @@ namespace hyperbrowse::viewer
         int EffectivePrefetchRadius() const noexcept;
         void ScheduleAdjacentPrefetch(std::uint64_t navigationGeneration);
         void StartPrefetch(int index, std::uint64_t navigationGeneration);
-        void UpdateMemoryPressureState();
         void SetCurrentImageSlot(int index,
                                  std::shared_ptr<const cache::CachedThumbnail> image,
                                  bool prefetched);
@@ -244,12 +244,9 @@ namespace hyperbrowse::viewer
         double smoothZoomTarget_{1.0};
         double smoothZoomCurrent_{1.0};
         UINT_PTR smoothZoomTimerId_{};
-        UINT_PTR memoryPressureTimerId_{};
         static constexpr UINT_PTR kSmoothZoomTimerId = 9002;
         static constexpr UINT kSmoothZoomIntervalMs = 16;
         static constexpr UINT_PTR kTransitionTimerId = 9003;
         static constexpr UINT kTransitionIntervalMs = 16;
-        static constexpr UINT_PTR kMemoryPressureTimerId = 9004;
-        static constexpr UINT kMemoryPressureIntervalMs = 1500;
     };
 }

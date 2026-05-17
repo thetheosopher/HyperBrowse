@@ -138,5 +138,6 @@ namespace hyperbrowse::services
         cache::ThumbnailCache cache_;
         cache::DiskThumbnailCache diskCache_;
         bool diskCacheEnabled_{true};
+        bool pressureModeEnabled_{};
     };
 }

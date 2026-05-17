@@ -1397,6 +1397,7 @@ namespace hyperbrowse::services
         , extractor_(extractor ? std::move(extractor) : MetadataExtractor{ExtractImageMetadata})
     {
         const std::size_t resolvedWorkerCount = ResolveMetadataWorkerCount(workerCount, resourceProfile);
+        activeWorkerLimit_ = std::max<std::size_t>(1, resolvedWorkerCount);
         workers_.reserve(resolvedWorkerCount);
         for (std::size_t index = 0; index < resolvedWorkerCount; ++index)
         {
@@ -1503,6 +1504,25 @@ namespace hyperbrowse::services
         queuedKeys_.clear();
     }
 
+    void ImageMetadataService::SetPressureModeEnabled(bool enabled)
+    {
+        {
+            std::scoped_lock lock(mutex_);
+            pressureModeEnabled_ = enabled;
+            activeWorkerLimit_ = enabled
+                ? std::max<std::size_t>(1, workers_.size() / 2)
+                : std::max<std::size_t>(1, workers_.size());
+        }
+
+        workAvailable_.notify_all();
+    }
+
+    void ImageMetadataService::TrimCacheToEntries(std::size_t targetEntries)
+    {
+        std::scoped_lock lock(mutex_);
+        TrimCacheToEntriesLocked(targetEntries);
+    }
+
     std::shared_ptr<const ImageMetadata> ImageMetadataService::FindCachedMetadata(const browser::BrowserItem& item) const
     {
         MetadataCacheKey key{item.filePath, item.modifiedTimestampUtc};
@@ -1581,6 +1601,16 @@ namespace hyperbrowse::services
         return cacheCapacityEntries_;
     }
 
+    std::size_t ImageMetadataService::WorkerCount() const
+    {
+        return workers_.size();
+    }
+
+    bool ImageMetadataService::HasDispatchableWorkLocked() const
+    {
+        return !pendingJobs_.empty() && activeWorkerCount_ < activeWorkerLimit_;
+    }
+
     void ImageMetadataService::WorkerLoop()
     {
         while (true)
@@ -1590,7 +1620,7 @@ namespace hyperbrowse::services
                 std::unique_lock lock(mutex_);
                 workAvailable_.wait(lock, [this]()
                 {
-                    return shuttingDown_ || !pendingJobs_.empty();
+                    return shuttingDown_ || HasDispatchableWorkLocked();
                 });
 
                 if (shuttingDown_)
@@ -1608,6 +1638,7 @@ namespace hyperbrowse::services
                 });
 
                 job = *jobIterator;
+                ++activeWorkerCount_;
                 queuedKeys_.erase(job.cacheKey);
                 inflightKeys_.insert(job.cacheKey);
                 pendingJobs_.erase(jobIterator);
@@ -1634,12 +1665,29 @@ namespace hyperbrowse::services
                     && targetWindow_ != nullptr
                     && isCurrentSession
                     && isCurrentPathGeneration;
+
+                if (activeWorkerCount_ > 0)
+                {
+                    --activeWorkerCount_;
+                }
             }
+
+            workAvailable_.notify_all();
 
             if (shouldNotify)
             {
                 PostReady(job.sessionId, job.workItem.modelIndex, job.workItem.item, metadata != nullptr);
             }
+        }
+    }
+
+    void ImageMetadataService::TrimCacheToEntriesLocked(std::size_t targetEntries)
+    {
+        while (cache_.size() > targetEntries && !cacheLruOrder_.empty())
+        {
+            const MetadataCacheKey keyToEvict = cacheLruOrder_.back();
+            cacheLruOrder_.pop_back();
+            cache_.erase(keyToEvict);
         }
     }
 
@@ -1660,12 +1708,7 @@ namespace hyperbrowse::services
         cacheLruOrder_.push_front(key);
         cache_.emplace(cacheLruOrder_.front(), CacheEntry{std::move(metadata), cacheLruOrder_.begin()});
 
-        while (cache_.size() > cacheCapacityEntries_ && !cacheLruOrder_.empty())
-        {
-            const MetadataCacheKey keyToEvict = cacheLruOrder_.back();
-            cacheLruOrder_.pop_back();
-            cache_.erase(keyToEvict);
-        }
+        TrimCacheToEntriesLocked(cacheCapacityEntries_);
     }
 
     void ImageMetadataService::PostReady(std::uint64_t sessionId, int modelIndex, const browser::BrowserItem& item, bool success) const

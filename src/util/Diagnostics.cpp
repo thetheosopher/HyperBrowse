@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <map>
 #include <mutex>
 #include <sstream>
+#include <string>
 
 namespace
 {
@@ -25,6 +28,13 @@ namespace
         std::mutex mutex;
         std::map<std::wstring, TimingStats, std::less<>> timings;
         std::map<std::wstring, std::uint64_t, std::less<>> counters;
+        bool startupBenchmarkEnabled{};
+        bool startupWindowVisibleRecorded{};
+        bool startupThumbnailPaintedRecorded{};
+        double startupFirstWindowVisibleMs{};
+        double startupFirstThumbnailPaintedMs{};
+        std::wstring startupBenchmarkOutputPath;
+        hyperbrowse::util::Stopwatch startupBenchmarkStopwatch;
     };
 
     DiagnosticsStore& GetStore()
@@ -38,6 +48,125 @@ namespace
         std::wostringstream stream;
         stream << std::fixed << std::setprecision(2) << milliseconds;
         return stream.str();
+    }
+
+    std::wstring DefaultStartupBenchmarkOutputPath()
+    {
+        namespace fs = std::filesystem;
+
+        std::error_code error;
+        fs::path path = fs::temp_directory_path(error);
+        if (error)
+        {
+            error.clear();
+            path = fs::current_path(error);
+        }
+        if (error)
+        {
+            return L"HyperBrowse-startup-benchmark.json";
+        }
+
+        path /= L"HyperBrowse-startup-benchmark.json";
+        return path.wstring();
+    }
+
+    std::string WideToUtf8(std::wstring_view value)
+    {
+        if (value.empty())
+        {
+            return {};
+        }
+
+        const int requiredBytes = WideCharToMultiByte(CP_UTF8,
+                                                      0,
+                                                      value.data(),
+                                                      static_cast<int>(value.size()),
+                                                      nullptr,
+                                                      0,
+                                                      nullptr,
+                                                      nullptr);
+        if (requiredBytes <= 0)
+        {
+            return {};
+        }
+
+        std::string utf8(static_cast<std::size_t>(requiredBytes), '\0');
+        WideCharToMultiByte(CP_UTF8,
+                            0,
+                            value.data(),
+                            static_cast<int>(value.size()),
+                            utf8.data(),
+                            requiredBytes,
+                            nullptr,
+                            nullptr);
+        return utf8;
+    }
+
+    void AppendEscapedJsonString(std::string* output, std::wstring_view value)
+    {
+        if (!output)
+        {
+            return;
+        }
+
+        output->push_back('"');
+        for (unsigned char character : WideToUtf8(value))
+        {
+            switch (character)
+            {
+            case '\\':
+                output->append("\\\\");
+                break;
+            case '"':
+                output->append("\\\"");
+                break;
+            case '\b':
+                output->append("\\b");
+                break;
+            case '\f':
+                output->append("\\f");
+                break;
+            case '\n':
+                output->append("\\n");
+                break;
+            case '\r':
+                output->append("\\r");
+                break;
+            case '\t':
+                output->append("\\t");
+                break;
+            default:
+                if (character < 0x20)
+                {
+                    std::ostringstream escape;
+                    escape << "\\u"
+                           << std::hex
+                           << std::uppercase
+                           << std::setw(4)
+                           << std::setfill('0')
+                           << static_cast<int>(character);
+                    output->append(escape.str());
+                }
+                else
+                {
+                    output->push_back(static_cast<char>(character));
+                }
+                break;
+            }
+        }
+        output->push_back('"');
+    }
+
+    void AppendJsonNumber(std::string* output, double value)
+    {
+        if (!output)
+        {
+            return;
+        }
+
+        std::ostringstream stream;
+        stream << std::fixed << std::setprecision(2) << value;
+        output->append(stream.str());
     }
 }
 
@@ -103,6 +232,232 @@ namespace hyperbrowse::util
         DiagnosticsStore& store = GetStore();
         std::scoped_lock lock(store.mutex);
         store.counters[std::wstring(counterName)] += delta;
+    }
+
+    void EnableStartupBenchmark(std::wstring outputPath)
+    {
+        DiagnosticsStore& store = GetStore();
+        std::scoped_lock lock(store.mutex);
+        store.startupBenchmarkEnabled = true;
+        store.startupWindowVisibleRecorded = false;
+        store.startupThumbnailPaintedRecorded = false;
+        store.startupFirstWindowVisibleMs = 0.0;
+        store.startupFirstThumbnailPaintedMs = 0.0;
+        store.startupBenchmarkOutputPath = outputPath.empty()
+            ? DefaultStartupBenchmarkOutputPath()
+            : std::move(outputPath);
+        store.startupBenchmarkStopwatch = Stopwatch{};
+    }
+
+    bool IsStartupBenchmarkEnabled()
+    {
+        DiagnosticsStore& store = GetStore();
+        std::scoped_lock lock(store.mutex);
+        return store.startupBenchmarkEnabled;
+    }
+
+    void MarkStartupWindowVisible()
+    {
+        double elapsedMs = 0.0;
+        bool shouldRecord = false;
+
+        DiagnosticsStore& store = GetStore();
+        {
+            std::scoped_lock lock(store.mutex);
+            if (!store.startupBenchmarkEnabled || store.startupWindowVisibleRecorded)
+            {
+                return;
+            }
+
+            elapsedMs = store.startupBenchmarkStopwatch.ElapsedMilliseconds();
+            store.startupFirstWindowVisibleMs = elapsedMs;
+            store.startupWindowVisibleRecorded = true;
+            shouldRecord = true;
+        }
+
+        if (shouldRecord)
+        {
+            RecordTiming(L"startup.process_to_first_window_visible", elapsedMs);
+        }
+    }
+
+    void MarkStartupFirstThumbnailPainted()
+    {
+        double elapsedSinceWindowVisibleMs = 0.0;
+        double elapsedSinceProcessStartMs = 0.0;
+        bool shouldRecord = false;
+
+        DiagnosticsStore& store = GetStore();
+        {
+            std::scoped_lock lock(store.mutex);
+            if (!store.startupBenchmarkEnabled
+                || !store.startupWindowVisibleRecorded
+                || store.startupThumbnailPaintedRecorded)
+            {
+                return;
+            }
+
+            elapsedSinceProcessStartMs = store.startupBenchmarkStopwatch.ElapsedMilliseconds();
+            elapsedSinceWindowVisibleMs = std::max(0.0, elapsedSinceProcessStartMs - store.startupFirstWindowVisibleMs);
+            store.startupFirstThumbnailPaintedMs = elapsedSinceWindowVisibleMs;
+            store.startupThumbnailPaintedRecorded = true;
+            shouldRecord = true;
+        }
+
+        if (shouldRecord)
+        {
+            RecordTiming(L"startup.first_window_visible_to_first_thumbnail_painted", elapsedSinceWindowVisibleMs);
+            RecordTiming(L"startup.process_to_first_thumbnail_painted", elapsedSinceProcessStartMs);
+        }
+    }
+
+    bool WriteStartupBenchmarkSnapshot(std::wstring* outputPath)
+    {
+        DiagnosticsSnapshot snapshot = CaptureDiagnosticsSnapshot();
+
+        bool enabled = false;
+        bool windowVisibleRecorded = false;
+        bool thumbnailPaintedRecorded = false;
+        double firstWindowVisibleMs = 0.0;
+        double firstThumbnailPaintedMs = 0.0;
+        std::wstring snapshotPath;
+
+        DiagnosticsStore& store = GetStore();
+        {
+            std::scoped_lock lock(store.mutex);
+            enabled = store.startupBenchmarkEnabled;
+            windowVisibleRecorded = store.startupWindowVisibleRecorded;
+            thumbnailPaintedRecorded = store.startupThumbnailPaintedRecorded;
+            firstWindowVisibleMs = store.startupFirstWindowVisibleMs;
+            firstThumbnailPaintedMs = store.startupFirstThumbnailPaintedMs;
+            snapshotPath = store.startupBenchmarkOutputPath;
+        }
+
+        if (!enabled)
+        {
+            return false;
+        }
+
+        namespace fs = std::filesystem;
+        fs::path path(snapshotPath.empty() ? DefaultStartupBenchmarkOutputPath() : snapshotPath);
+        std::error_code error;
+        if (path.has_parent_path())
+        {
+            fs::create_directories(path.parent_path(), error);
+            if (error)
+            {
+                return false;
+            }
+        }
+
+        std::string json;
+        json.reserve(4096);
+        json.append("{\n  \"startup\": {\n    \"windowVisibleCaptured\": ");
+        json.append(windowVisibleRecorded ? "true" : "false");
+        json.append(",\n    \"firstThumbnailPaintedCaptured\": ");
+        json.append(thumbnailPaintedRecorded ? "true" : "false");
+        json.append(",\n    \"processToFirstWindowVisibleMs\": ");
+        if (windowVisibleRecorded)
+        {
+            AppendJsonNumber(&json, firstWindowVisibleMs);
+        }
+        else
+        {
+            json.append("null");
+        }
+        json.append(",\n    \"firstWindowVisibleToFirstThumbnailPaintedMs\": ");
+        if (thumbnailPaintedRecorded)
+        {
+            AppendJsonNumber(&json, firstThumbnailPaintedMs);
+        }
+        else
+        {
+            json.append("null");
+        }
+        json.append(",\n    \"processToFirstThumbnailPaintedMs\": ");
+        if (windowVisibleRecorded && thumbnailPaintedRecorded)
+        {
+            AppendJsonNumber(&json, firstWindowVisibleMs + firstThumbnailPaintedMs);
+        }
+        else
+        {
+            json.append("null");
+        }
+        json.append("\n  },\n  \"timings\": [");
+
+        for (std::size_t index = 0; index < snapshot.timings.size(); ++index)
+        {
+            const DiagnosticTimingRow& row = snapshot.timings[index];
+            if (index != 0)
+            {
+                json.append(",");
+            }
+            json.append("\n    {\"name\": ");
+            AppendEscapedJsonString(&json, row.name);
+            json.append(", \"count\": ");
+            json.append(std::to_string(row.count));
+            json.append(", \"averageMs\": ");
+            AppendJsonNumber(&json, row.averageMs);
+            json.append(", \"lastMs\": ");
+            AppendJsonNumber(&json, row.lastMs);
+            json.append(", \"minMs\": ");
+            AppendJsonNumber(&json, row.minMs);
+            json.append(", \"maxMs\": ");
+            AppendJsonNumber(&json, row.maxMs);
+            json.append("}");
+        }
+        json.append(snapshot.timings.empty() ? "]" : "\n  ]");
+
+        json.append(",\n  \"counters\": [");
+        for (std::size_t index = 0; index < snapshot.counters.size(); ++index)
+        {
+            const DiagnosticCounterRow& row = snapshot.counters[index];
+            if (index != 0)
+            {
+                json.append(",");
+            }
+            json.append("\n    {\"name\": ");
+            AppendEscapedJsonString(&json, row.name);
+            json.append(", \"value\": ");
+            json.append(std::to_string(row.value));
+            json.append("}");
+        }
+        json.append(snapshot.counters.empty() ? "]" : "\n  ]");
+
+        json.append(",\n  \"derived\": [");
+        for (std::size_t index = 0; index < snapshot.derived.size(); ++index)
+        {
+            const DiagnosticValueRow& row = snapshot.derived[index];
+            if (index != 0)
+            {
+                json.append(",");
+            }
+            json.append("\n    {\"name\": ");
+            AppendEscapedJsonString(&json, row.name);
+            json.append(", \"value\": ");
+            AppendEscapedJsonString(&json, row.value);
+            json.append("}");
+        }
+        json.append(snapshot.derived.empty() ? "]" : "\n  ]");
+        json.append("\n}\n");
+
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        if (!stream)
+        {
+            return false;
+        }
+
+        stream.write(json.data(), static_cast<std::streamsize>(json.size()));
+        if (!stream)
+        {
+            return false;
+        }
+
+        if (outputPath)
+        {
+            *outputPath = path.wstring();
+        }
+        return true;
     }
 
     void ResetDiagnostics()

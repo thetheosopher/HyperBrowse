@@ -25,7 +25,6 @@ namespace
     constexpr int kPlaceholderBrandArtSize = 256;
     constexpr bool kEnableFullImagePrefetch = false;
     constexpr std::size_t kViewerFullImageCacheBytes = 256ULL * 1024ULL * 1024ULL;
-    constexpr std::uint64_t kMemoryPressureAvailableBytesThreshold = 1024ULL * 1024ULL * 1024ULL;
 
     std::wstring FormatWindowHandle(HWND hwnd)
     {
@@ -263,12 +262,6 @@ namespace hyperbrowse::viewer
             ShowWindow(hwnd_, SW_RESTORE);
         }
 
-        if (hwnd_ && memoryPressureTimerId_ == 0)
-        {
-            memoryPressureTimerId_ = SetTimer(hwnd_, kMemoryPressureTimerId, kMemoryPressureIntervalMs, nullptr);
-        }
-        UpdateMemoryPressureState();
-
         SetFullScreen(true, targetMonitor);
         SetForegroundWindow(hwnd_);
         LoadCurrentImageAsync(LoadReason::Open);
@@ -419,6 +412,32 @@ namespace hyperbrowse::viewer
         if (hwnd_)
         {
             RequestRepaint();
+        }
+    }
+
+    void ViewerWindow::SetMemoryPressureActive(bool active)
+    {
+        if (memoryPressureActive_ == active)
+        {
+            return;
+        }
+
+        memoryPressureActive_ = active;
+        util::LogInfo(L"ViewerWindow memory pressure "
+            + std::wstring(memoryPressureActive_ ? L"entered" : L"cleared")
+            + L"; prefetch radius=" + std::to_wstring(EffectivePrefetchRadius()));
+
+        if (memoryPressureActive_)
+        {
+            ViewerFullImageCache().TrimToBytes(std::max<std::size_t>(1, kViewerFullImageCacheBytes / 2));
+        }
+
+        slideshowNextPrefetchIndex_ = -1;
+        slideshowNextPrefetchGeneration_ = 0;
+        if (hwnd_ && currentImage_ && !pendingLoadActive_)
+        {
+            const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+            ScheduleAdjacentPrefetch(navigationGeneration);
         }
     }
 
@@ -693,42 +712,6 @@ namespace hyperbrowse::viewer
     int ViewerWindow::EffectivePrefetchRadius() const noexcept
     {
         return memoryPressureActive_ ? 1 : BasePrefetchRadius();
-    }
-
-    void ViewerWindow::UpdateMemoryPressureState()
-    {
-        const util::MemorySnapshot memorySnapshot = util::QueryMemorySnapshot();
-        bool nextMemoryPressureState = false;
-        if (memorySnapshot.IsValid())
-        {
-            if (memorySnapshot.availablePhysicalBytes < kMemoryPressureAvailableBytesThreshold)
-            {
-                nextMemoryPressureState = true;
-            }
-            else if (memorySnapshot.totalPhysicalBytes != 0)
-            {
-                const std::uint64_t usedPercent = 100ULL - ((memorySnapshot.availablePhysicalBytes * 100ULL) / memorySnapshot.totalPhysicalBytes);
-                nextMemoryPressureState = usedPercent >= 85ULL;
-            }
-        }
-
-        if (memoryPressureActive_ == nextMemoryPressureState)
-        {
-            return;
-        }
-
-        memoryPressureActive_ = nextMemoryPressureState;
-        util::LogInfo(L"ViewerWindow memory pressure "
-            + std::wstring(memoryPressureActive_ ? L"entered" : L"cleared")
-            + L"; prefetch radius=" + std::to_wstring(EffectivePrefetchRadius()));
-
-        slideshowNextPrefetchIndex_ = -1;
-        slideshowNextPrefetchGeneration_ = 0;
-        const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
-        if (currentImage_ && !pendingLoadActive_)
-        {
-            ScheduleAdjacentPrefetch(navigationGeneration);
-        }
     }
 
     void ViewerWindow::SetCurrentImageSlot(int index,
@@ -1975,11 +1958,6 @@ namespace hyperbrowse::viewer
                 RequestRepaint();
                 return 0;
             }
-            if (wParam == kMemoryPressureTimerId && memoryPressureTimerId_)
-            {
-                UpdateMemoryPressureState();
-                return 0;
-            }
             break;
         case kDecodedImageMessage:
             return HandleDecodedImageMessage(lParam);
@@ -2530,11 +2508,6 @@ namespace hyperbrowse::viewer
             util::LogInfo(L"ViewerWindow WM_DESTROY hwnd=" + FormatWindowHandle(hwnd));
             StopSlideshow();
             StopTransition();
-            if (memoryPressureTimerId_ != 0)
-            {
-                KillTimer(hwnd_, kMemoryPressureTimerId);
-                memoryPressureTimerId_ = 0;
-            }
             memoryPressureActive_ = false;
             if (GetCapture() == hwnd_)
             {

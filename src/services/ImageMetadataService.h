@@ -87,10 +87,13 @@ namespace hyperbrowse::services
         void Schedule(std::uint64_t sessionId, MetadataWorkItem workItem);
         void Schedule(std::uint64_t sessionId, std::vector<MetadataWorkItem> workItems);
         void CancelOutstanding();
+        void SetPressureModeEnabled(bool enabled);
+        void TrimCacheToEntries(std::size_t targetEntries);
         std::shared_ptr<const ImageMetadata> FindCachedMetadata(const browser::BrowserItem& item) const;
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
         std::size_t CacheEntryCount() const;
         std::size_t CacheCapacityEntries() const noexcept;
+        std::size_t WorkerCount() const;
 
     private:
         struct MetadataCacheKey
@@ -125,6 +128,8 @@ namespace hyperbrowse::services
             std::list<MetadataCacheKey>::iterator lruIterator;
         };
 
+        bool HasDispatchableWorkLocked() const;
+        void TrimCacheToEntriesLocked(std::size_t targetEntries);
         void WorkerLoop();
         void PostReady(std::uint64_t sessionId, int modelIndex, const browser::BrowserItem& item, bool success) const;
         void InsertCacheEntryLocked(MetadataCacheKey key, std::shared_ptr<const ImageMetadata> metadata);
@@ -134,7 +139,10 @@ namespace hyperbrowse::services
         bool shuttingDown_{};
         std::uint64_t activeSessionId_{};
         int nextSequence_{};
+        std::size_t activeWorkerCount_{};
+        std::size_t activeWorkerLimit_{1};
         const std::size_t cacheCapacityEntries_{};
+        bool pressureModeEnabled_{};
         MetadataExtractor extractor_;
         std::vector<PendingJob> pendingJobs_;
         std::unordered_set<MetadataCacheKey, MetadataCacheKeyHasher> queuedKeys_;

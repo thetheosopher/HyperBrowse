@@ -332,6 +332,7 @@ namespace hyperbrowse::services
     {
         {
             std::scoped_lock lock(mutex_);
+            pressureModeEnabled_ = enabled;
             const std::size_t totalWorkerCount = generalWorkers_.size() + rawWorkers_.size();
             activeDecodeLimit_ = enabled
                 ? std::max<std::size_t>(1, totalWorkerCount / 2)
@@ -532,6 +533,11 @@ namespace hyperbrowse::services
             std::vector<decode::ThumbnailDecodeFailureKind> failureKinds(jobs.size(), decode::ThumbnailDecodeFailureKind::None);
             std::vector<bool> cancelled(jobs.size(), false);
             const bool useDiskCache = IsDiskCacheEnabled();
+            bool allowDiskCacheStore = false;
+            {
+                std::scoped_lock lock(mutex_);
+                allowDiskCacheStore = useDiskCache && !pressureModeEnabled_;
+            }
             missingIndices.reserve(jobs.size());
             missingKeys.reserve(jobs.size());
             for (std::size_t index = 0; index < jobs.size(); ++index)
@@ -617,7 +623,7 @@ namespace hyperbrowse::services
                 if (thumbnail)
                 {
                     cache_.Insert(jobs[index].workItem.cacheKey, thumbnail);
-                    if (useDiskCache)
+                    if (allowDiskCacheStore)
                     {
                         diskCache_.Store(jobs[index].workItem.cacheKey, thumbnail);
                     }

@@ -66,6 +66,11 @@ namespace hyperbrowse::util
 
     void RecordTiming(std::wstring_view metricName, double milliseconds);
     void IncrementCounter(std::wstring_view counterName, std::uint64_t delta = 1);
+    void EnableStartupBenchmark(std::wstring outputPath = {});
+    bool IsStartupBenchmarkEnabled();
+    void MarkStartupWindowVisible();
+    void MarkStartupFirstThumbnailPainted();
+    bool WriteStartupBenchmarkSnapshot(std::wstring* outputPath = nullptr);
     void ResetDiagnostics();
     DiagnosticsSnapshot CaptureDiagnosticsSnapshot();
     std::wstring BuildDiagnosticsReport();

@@ -76,6 +76,7 @@ namespace
     constexpr wchar_t kRegistryValueResourceProfile[] = L"ResourceProfile";
     constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
+    constexpr wchar_t kRegistryValueShowPressureStateInStatusBar[] = L"ShowPressureStateInStatusBar";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -172,6 +173,7 @@ namespace
     constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM = 2212;
     constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE = 2213;
     constexpr UINT ID_VIEW_VIEWER_DETAIL_OVERLAYS = 2214;
+    constexpr UINT ID_VIEW_PRESSURE_STATE_STATUS = 2215;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CUT = 2303;
@@ -260,7 +262,7 @@ namespace
     constexpr int kAboutDialogBrandArtSize = 152;
     constexpr wchar_t kPerformanceSettingsDialogClassName[] = L"HyperBrowsePerformanceSettingsDialog";
     constexpr int kPerformanceSettingsDialogWidth = 540;
-    constexpr int kPerformanceSettingsDialogHeight = 320;
+    constexpr int kPerformanceSettingsDialogHeight = 348;
     constexpr int kPerformanceSettingsDialogLabelWidth = 210;
     constexpr int kPerformanceSettingsDialogEditWidth = 112;
     constexpr int kPerformanceSettingsDialogCheckboxWidth = 110;
@@ -275,6 +277,7 @@ namespace
     constexpr int kPerformanceSettingsMetadataEditControlId = 306;
     constexpr int kPerformanceSettingsMetadataAutoControlId = 307;
     constexpr int kPerformanceSettingsFootnoteControlId = 308;
+    constexpr int kPerformanceSettingsPressureStatusControlId = 309;
 
     hyperbrowse::cache::ThumbnailCacheKey MakeThumbnailCacheKey(const hyperbrowse::browser::BrowserItem& item,
                                                                 int targetWidth,
@@ -374,6 +377,7 @@ namespace
         HWND thumbnailAutoCheckWindow{};
         HWND metadataEditWindow{};
         HWND metadataAutoCheckWindow{};
+        HWND pressureStatusCheckWindow{};
         HWND okButton{};
         std::wstring title;
         std::wstring instruction;
@@ -385,6 +389,7 @@ namespace
         std::size_t metadataCacheCapacityOverrideEntries{};
         bool thumbnailCacheAutomatic{true};
         bool metadataCacheAutomatic{true};
+        bool showPressureStateInStatusBar{};
         bool accepted{};
         bool done{};
     };
@@ -1356,6 +1361,7 @@ namespace
 
         const int firstRowTop = kTextInputDialogMargin + 90;
         const int secondRowTop = firstRowTop + kTextInputEditHeight + kPerformanceSettingsDialogValueTopGap + 18;
+        const int pressureStatusTop = secondRowTop + kTextInputEditHeight + 18;
 
         const HWND thumbnailLabel = GetDlgItem(hwnd, kPerformanceSettingsThumbnailLabelControlId);
         if (thumbnailLabel)
@@ -1385,14 +1391,19 @@ namespace
             MoveWindow(state.metadataAutoCheckWindow, rowCheckboxLeft, secondRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
         }
 
+        if (state.pressureStatusCheckWindow)
+        {
+            MoveWindow(state.pressureStatusCheckWindow, contentLeft, pressureStatusTop, contentWidth, 22, TRUE);
+        }
+
         const HWND footnoteWindow = GetDlgItem(hwnd, kPerformanceSettingsFootnoteControlId);
         if (footnoteWindow)
         {
             MoveWindow(footnoteWindow,
                        contentLeft,
-                       secondRowTop + kTextInputEditHeight + 18,
+                       pressureStatusTop + 28,
                        contentWidth,
-                       std::max(42, buttonTop - (secondRowTop + kTextInputEditHeight + 24)),
+                       std::max(42, buttonTop - (pressureStatusTop + 34)),
                        TRUE);
         }
 
@@ -1454,6 +1465,8 @@ namespace
             ? 0
             : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(thumbnailMegabytes) * 1024ULL * 1024ULL);
         state->metadataCacheCapacityOverrideEntries = metadataAutomatic ? 0 : metadataEntries;
+        state->showPressureStateInStatusBar = state->pressureStatusCheckWindow
+            && SendMessageW(state->pressureStatusCheckWindow, BM_GETCHECK, 0, 0) == BST_CHECKED;
         return true;
     }
 
@@ -1584,6 +1597,19 @@ namespace
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsMetadataAutoControlId)),
                 hInstance,
                 nullptr);
+            state->pressureStatusCheckWindow = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Show memory pressure state in the status bar",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                0,
+                0,
+                100,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsPressureStatusControlId)),
+                hInstance,
+                nullptr);
             const HWND footnoteWindow = CreateWindowExW(
                 0,
                 L"STATIC",
@@ -1633,6 +1659,7 @@ namespace
                 metadataLabel,
                 state->metadataEditWindow,
                 state->metadataAutoCheckWindow,
+                state->pressureStatusCheckWindow,
                 footnoteWindow,
                 state->okButton,
                 cancelButton,
@@ -1652,6 +1679,10 @@ namespace
             if (state->metadataAutoCheckWindow)
             {
                 SendMessageW(state->metadataAutoCheckWindow, BM_SETCHECK, state->metadataCacheAutomatic ? BST_CHECKED : BST_UNCHECKED, 0);
+            }
+            if (state->pressureStatusCheckWindow)
+            {
+                SendMessageW(state->pressureStatusCheckWindow, BM_SETCHECK, state->showPressureStateInStatusBar ? BST_CHECKED : BST_UNCHECKED, 0);
             }
 
             LayoutPerformanceSettingsDialogControls(hwnd, *state);
@@ -2641,10 +2672,12 @@ namespace
                                       std::size_t currentMetadataCacheCapacityEntries,
                                       std::size_t initialThumbnailCacheCapacityOverrideBytes,
                                       std::size_t initialMetadataCacheCapacityOverrideEntries,
+                                      bool initialShowPressureStateInStatusBar,
                                       std::size_t* thumbnailCacheCapacityOverrideBytes,
-                                      std::size_t* metadataCacheCapacityOverrideEntries)
+                                      std::size_t* metadataCacheCapacityOverrideEntries,
+                                      bool* showPressureStateInStatusBar)
     {
-        if (!thumbnailCacheCapacityOverrideBytes || !metadataCacheCapacityOverrideEntries)
+        if (!thumbnailCacheCapacityOverrideBytes || !metadataCacheCapacityOverrideEntries || !showPressureStateInStatusBar)
         {
             return false;
         }
@@ -2675,9 +2708,10 @@ namespace
         state.summary.append(L" MB  |  Effective metadata cache: ");
         state.summary.append(std::to_wstring(currentMetadataCacheCapacityEntries));
         state.summary.append(L" entries");
-        state.footnote = L"Leave Automatic enabled to keep profile-adaptive sizing. Thumbnail values are entered in megabytes; metadata values are entry counts. Changes apply immediately to browser and details-panel caches.";
+        state.footnote = L"Leave Automatic enabled to keep profile-adaptive sizing. Thumbnail values are entered in megabytes; metadata values are entry counts. Changes apply immediately to browser/details-panel services, and the pressure indicator can stay hidden if you prefer a quieter shell.";
         state.thumbnailCacheAutomatic = initialThumbnailCacheCapacityOverrideBytes == 0;
         state.metadataCacheAutomatic = initialMetadataCacheCapacityOverrideEntries == 0;
+        state.showPressureStateInStatusBar = initialShowPressureStateInStatusBar;
         state.thumbnailCacheText = state.thumbnailCacheAutomatic
             ? FormatMegabytesFromBytes(currentThumbnailCacheCapacityBytes)
             : FormatMegabytesFromBytes(initialThumbnailCacheCapacityOverrideBytes);
@@ -2746,6 +2780,7 @@ namespace
 
         *thumbnailCacheCapacityOverrideBytes = state.thumbnailCacheCapacityOverrideBytes;
         *metadataCacheCapacityOverrideEntries = state.metadataCacheCapacityOverrideEntries;
+        *showPressureStateInStatusBar = state.showPressureStateInStatusBar;
         return true;
     }
 
@@ -4312,6 +4347,7 @@ namespace hyperbrowse::ui
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE, L"&Next/Previous Image");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMouseWheelMenu), L"Viewer Mouse &Wheel");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Viewer Detail &Overlays");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PRESSURE_STATE_STATUS, L"Show Memory Pressure &Status");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
@@ -5172,6 +5208,11 @@ namespace hyperbrowse::ui
         {
             selectionText.append(L" (Custom cache caps)");
         }
+        if (showPressureStateInStatusBar_)
+        {
+            selectionText.append(L"  |  Pressure: ");
+            selectionText.append(thumbnailMemoryPressureActive_ ? L"Adaptive throttling active" : L"Normal");
+        }
 
         SendMessageW(statusBar_, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(folderText.c_str()));
         SendMessageW(statusBar_, SB_SETTEXTW, 1, reinterpret_cast<LPARAM>(selectionText.c_str()));
@@ -6017,6 +6058,7 @@ namespace hyperbrowse::ui
         ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
         viewerWindow_->SetResourceProfile(resourceProfile_);
+        viewerWindow_->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
             if (startSlideshow)
@@ -8072,6 +8114,10 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_VIEWER_DETAIL_OVERLAYS,
             MF_BYCOMMAND | ((viewerWindow_ && viewerWindow_->AreInfoOverlaysVisible()) ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_PRESSURE_STATE_STATUS,
+            MF_BYCOMMAND | (showPressureStateInStatusBar_ ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuRadioItem(
             menu_,
             ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE,
@@ -8274,6 +8320,11 @@ namespace hyperbrowse::ui
             browserPaneController_->SetThumbnailMemoryPressureActive(thumbnailMemoryPressureActive_);
         }
 
+        if (viewerWindow_)
+        {
+            viewerWindow_->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
+        }
+
         if (detailsPanelThumbnailScheduler_)
         {
             detailsPanelThumbnailScheduler_->SetPressureModeEnabled(thumbnailMemoryPressureActive_);
@@ -8282,6 +8333,8 @@ namespace hyperbrowse::ui
                 detailsPanelThumbnailScheduler_->TrimCacheToBytes(std::max<std::size_t>(1, detailsPanelThumbnailScheduler_->CacheCapacityBytes() / 2));
             }
         }
+
+        UpdateStatusText();
     }
 
     void MainWindow::ApplyResourceProfileSetting()
@@ -8403,6 +8456,7 @@ namespace hyperbrowse::ui
 
         std::size_t thumbnailCacheCapacityOverrideBytes = thumbnailCacheCapacityOverrideBytes_;
         std::size_t metadataCacheCapacityOverrideEntries = metadataCacheCapacityOverrideEntries_;
+        bool showPressureStateInStatusBar = showPressureStateInStatusBar_;
         if (!PromptForPerformanceSettings(hwnd_,
                                           instance_,
                                           resourceProfile_,
@@ -8410,20 +8464,24 @@ namespace hyperbrowse::ui
                                           currentMetadataCacheCapacityEntries,
                                           thumbnailCacheCapacityOverrideBytes_,
                                           metadataCacheCapacityOverrideEntries_,
+                                          showPressureStateInStatusBar_,
                                           &thumbnailCacheCapacityOverrideBytes,
-                                          &metadataCacheCapacityOverrideEntries))
+                                          &metadataCacheCapacityOverrideEntries,
+                                          &showPressureStateInStatusBar))
         {
             return;
         }
 
         if (thumbnailCacheCapacityOverrideBytes_ == thumbnailCacheCapacityOverrideBytes
-            && metadataCacheCapacityOverrideEntries_ == metadataCacheCapacityOverrideEntries)
+            && metadataCacheCapacityOverrideEntries_ == metadataCacheCapacityOverrideEntries
+            && showPressureStateInStatusBar_ == showPressureStateInStatusBar)
         {
             return;
         }
 
         thumbnailCacheCapacityOverrideBytes_ = thumbnailCacheCapacityOverrideBytes;
         metadataCacheCapacityOverrideEntries_ = metadataCacheCapacityOverrideEntries;
+        showPressureStateInStatusBar_ = showPressureStateInStatusBar;
         ApplyCacheCapacityOverrideSettings();
         UpdateStatusText();
     }
@@ -8556,6 +8614,11 @@ namespace hyperbrowse::ui
                 TryParseResourceProfile(value, &resourceProfile_);
             }
 
+            if (TryReadDwordValue(key, kRegistryValueShowPressureStateInStatusBar, &value))
+            {
+                showPressureStateInStatusBar_ = value != 0;
+            }
+
             RegCloseKey(key);
         }
 
@@ -8599,6 +8662,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, persistentThumbnailCacheEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueResourceProfile, static_cast<DWORD>(resourceProfile_));
+            WriteDwordValue(key, kRegistryValueShowPressureStateInStatusBar, showPressureStateInStatusBar_ ? 1UL : 0UL);
             WriteQwordValue(key, kRegistryValueThumbnailCacheCapacityOverrideBytes, static_cast<std::uint64_t>(thumbnailCacheCapacityOverrideBytes_));
             WriteQwordValue(key, kRegistryValueMetadataCacheCapacityOverrideEntries, static_cast<std::uint64_t>(metadataCacheCapacityOverrideEntries_));
             RegCloseKey(key);
@@ -9237,6 +9301,11 @@ namespace hyperbrowse::ui
                 viewerWindow_->SetInfoOverlaysVisible(!viewerWindow_->AreInfoOverlaysVisible());
                 UpdateMenuState();
             }
+            return true;
+        case ID_VIEW_PRESSURE_STATE_STATUS:
+            showPressureStateInStatusBar_ = !showPressureStateInStatusBar_;
+            UpdateStatusText();
+            UpdateMenuState();
             return true;
         case ID_VIEW_SLIDESHOW_SELECTION:
             StartSlideshow(true);

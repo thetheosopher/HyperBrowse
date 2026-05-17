@@ -154,9 +154,16 @@ added a background-sampled memory-pressure monitor with recovery hysteresis in
 the main shell, caps thumbnail decode concurrency to half the configured
 workers while pressure is active, and trims in-memory thumbnail caches toward
 half of their configured capacity for both the browser pane and details strip.
-Remaining for full completion: consolidate viewer-side sampling onto the same
-background-driven pressure path, surface state in the performance HUD, and
-extend the response to other resource-heavy subsystems as needed.
+A follow-up slice then unified the viewer onto that same shell-owned pressure
+path, added an optional status-bar indicator for the current pressure state,
+and trims the viewer full-image cache alongside the thumbnail caches when
+pressure is active. A later slice exposed that pressure-state indicator in the
+Performance Settings dialog, throttles metadata extraction workers under the
+same shell-owned pressure state, trims the metadata cache alongside the
+thumbnail caches, and skips opportunistic disk-thumbnail writes while pressure
+is active. Remaining for full completion: add a richer dedicated performance
+HUD or inspector surface if needed, and extend the response to other
+resource-heavy subsystems as needed.
 
 - Sample `GlobalMemoryStatusEx` on a low-frequency timer (1–2 Hz) on a
   background thread, never the UI thread.
@@ -169,6 +176,10 @@ extend the response to other resource-heavy subsystems as needed.
 - Expose current state in the Performance HUD (C3).
 
 ### `A5` Decode/Scale Buffer Pools (P1)
+
+**Implementation status:** Planned-but-gated. No scratch buffer pool has been
+introduced yet; this stays intentionally blocked on benchmark evidence from D2
+so we do not add allocator complexity without measured decode-path pressure.
 
 - Add a small `ScratchBufferPool` (per-size class, max N buffers) consumed
   by WIC scale, nvJPEG output, and LibRaw embedded-preview decode paths.
@@ -189,6 +200,12 @@ extend the response to other resource-heavy subsystems as needed.
 
 ### `A7` Folder Warm-Up Window (P1)
 
+**Implementation status:** Shipped. Browser refresh already schedules
+low-priority top-of-folder warm-up thumbnail and metadata work after
+enumeration, request epochs cancel stale warm-up batches on scroll, and the
+warm-up window now scales with `ResourceProfile` instead of using only fixed
+prefetch multipliers.
+
 - After enumeration completes, schedule a small batch of "top-of-folder
   warm-up" thumbnail jobs at low priority so the first scroll feels instant
   even before the user clicks the grid.
@@ -196,6 +213,12 @@ extend the response to other resource-heavy subsystems as needed.
   estimate; cancellable on scroll.
 
 ### `A8` Startup Latency Budget Gate (P1)
+
+**Implementation status:** In progress. Startup diagnostics now capture
+`process-start → first-window-visible` and
+`first-window-visible → first-thumbnail-painted`, and `--bench-startup`
+emits a structured JSON snapshot on shutdown. Remaining: wire those snapshots
+into a repeatable CI regression gate with configurable thresholds.
 
 - Capture `process-start → first-window-visible` and
   `first-window-visible → first-thumbnail-painted` spans through the

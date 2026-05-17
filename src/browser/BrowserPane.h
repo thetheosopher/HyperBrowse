@@ -214,6 +214,7 @@ namespace hyperbrowse::browser
         void RequestOpenItemForViewIndex(int viewIndex) const;
         POINT ContextMenuAnchorScreenPoint() const;
         void ShowContextMenu(POINT screenPoint) const;
+        bool HasVisibleCachedThumbnail() const;
         void ScheduleVisibleThumbnailWork();
         void ScheduleVisibleMetadataWork() const;
         void ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const;

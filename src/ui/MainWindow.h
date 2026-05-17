@@ -379,6 +379,7 @@ namespace hyperbrowse::ui
         bool nvJpegEnabled_{};
         bool libRawOutOfProcessEnabled_{true};
         bool thumbnailMemoryPressureActive_{};
+        bool showPressureStateInStatusBar_{};
         bool memoryPressureSampleQueued_{};
         unsigned int memoryPressureRecoveryClearSampleCount_{};
         util::ResourceProfile resourceProfile_{util::ResourceProfile::Balanced};

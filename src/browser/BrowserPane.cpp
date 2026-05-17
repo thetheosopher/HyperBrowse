@@ -20,6 +20,7 @@
 #include "services/ImageMetadataService.h"
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
+#include "util/Diagnostics.h"
 #include "util/ResourcePng.h"
 
 namespace
@@ -51,6 +52,62 @@ namespace
     constexpr int kUnavailableThumbnailIconSize = 48;
     constexpr int kPlaceholderTitlePointSize = 18;
     constexpr int kPlaceholderBodyPointSize = 13;
+
+    int TopOfFolderThumbnailWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
+    {
+        switch (profile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            return 3;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            return 7;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            return 5;
+        }
+    }
+
+    int LookAheadThumbnailWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
+    {
+        switch (profile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            return 1;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            return 3;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            return 2;
+        }
+    }
+
+    int TopOfFolderMetadataWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
+    {
+        switch (profile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            return 4;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            return 8;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            return 6;
+        }
+    }
+
+    int LookAheadMetadataWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
+    {
+        switch (profile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            return 2;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            return 4;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            return 3;
+        }
+    }
 
     const wchar_t* UnavailableThumbnailMessage(hyperbrowse::decode::ThumbnailDecodeFailureKind failureKind)
     {
@@ -851,6 +908,14 @@ namespace hyperbrowse::browser
                 thumbnailScheduler_->TrimCacheToBytes(std::max<std::size_t>(1, thumbnailScheduler_->CacheCapacityBytes() / 2));
             }
         }
+        if (metadataService_)
+        {
+            metadataService_->SetPressureModeEnabled(active);
+            if (active)
+            {
+                metadataService_->TrimCacheToEntries(std::max<std::size_t>(1, metadataService_->CacheCapacityEntries() / 2));
+            }
+        }
     }
 
     void BrowserPane::SetCacheCapacityOverrides(std::size_t thumbnailCacheCapacityBytes,
@@ -950,6 +1015,14 @@ namespace hyperbrowse::browser
         if (metadataService_ && hwnd_)
         {
             metadataService_->BindTargetWindow(hwnd_);
+        }
+        if (metadataService_)
+        {
+            metadataService_->SetPressureModeEnabled(thumbnailMemoryPressureActive_);
+            if (thumbnailMemoryPressureActive_)
+            {
+                metadataService_->TrimCacheToEntries(std::max<std::size_t>(1, metadataService_->CacheCapacityEntries() / 2));
+            }
         }
     }
 
@@ -2330,10 +2403,10 @@ namespace hyperbrowse::browser
             const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
             const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
             const int proactivePrefetchRows = scrollOffsetY_ == 0
-                ? std::clamp(visibleRowCount * 6,
+                ? std::clamp(visibleRowCount * TopOfFolderMetadataWarmUpMultiplier(resourceProfile_),
                              kMetadataMinimumTopOfFolderPrefetchRows,
                              kMetadataMaximumTopOfFolderPrefetchRows)
-                : std::clamp(visibleRowCount * 3,
+                : std::clamp(visibleRowCount * LookAheadMetadataWarmUpMultiplier(resourceProfile_),
                              kMetadataMinimumLookAheadPrefetchRows,
                              kMetadataMaximumLookAheadPrefetchRows);
             const int requestStartRow = std::max(0, firstVisibleRow - kMetadataNearVisiblePrefetchRows);
@@ -2377,10 +2450,10 @@ namespace hyperbrowse::browser
             const int visibleCount = std::max(1, ListView_GetCountPerPage(detailsList_));
             const int nearVisibleCount = std::max(visibleCount, kMinimumDetailsMetadataNearVisibleItems);
             const int proactivePrefetchCount = topIndex == 0
-                ? std::clamp(visibleCount * 6,
+                ? std::clamp(visibleCount * TopOfFolderMetadataWarmUpMultiplier(resourceProfile_),
                              kMinimumDetailsMetadataTopOfFolderItems,
                              kMaximumDetailsMetadataTopOfFolderItems)
-                : std::clamp(visibleCount * 3,
+                : std::clamp(visibleCount * LookAheadMetadataWarmUpMultiplier(resourceProfile_),
                              kMinimumDetailsMetadataLookAheadItems,
                              kMaximumDetailsMetadataLookAheadItems);
             const int firstIndex = std::max(0, topIndex - nearVisibleCount);
@@ -2449,10 +2522,10 @@ namespace hyperbrowse::browser
         const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
         const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
         const int proactivePrefetchRows = scrollOffsetY_ == 0
-            ? std::clamp(visibleRowCount * 5,
+            ? std::clamp(visibleRowCount * TopOfFolderThumbnailWarmUpMultiplier(resourceProfile_),
                          kThumbnailMinimumTopOfFolderPrefetchRows,
                          kThumbnailMaximumTopOfFolderPrefetchRows)
-            : std::clamp(visibleRowCount * 2,
+            : std::clamp(visibleRowCount * LookAheadThumbnailWarmUpMultiplier(resourceProfile_),
                          kThumbnailMinimumLookAheadPrefetchRows,
                          kThumbnailMaximumLookAheadPrefetchRows);
         const int requestStartRow = std::max(0, firstVisibleRow - kThumbnailNearVisiblePrefetchRows);
@@ -2502,6 +2575,45 @@ namespace hyperbrowse::browser
 
         ++thumbnailRequestEpoch_;
         thumbnailScheduler_->Schedule(thumbnailSessionId_, thumbnailRequestEpoch_, std::move(workItems));
+    }
+
+    bool BrowserPane::HasVisibleCachedThumbnail() const
+    {
+        if (!thumbnailScheduler_
+            || !hwnd_
+            || viewMode_ != BrowserViewMode::Thumbnails
+            || orderedModelIndices_.empty())
+        {
+            return false;
+        }
+
+        RECT clientRect{};
+        GetClientRect(hwnd_, &clientRect);
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        const int clientHeight = clientRect.bottom - clientRect.top;
+        const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
+        const int verticalStride = layout.itemHeight + layout.cellPadding;
+        const int firstVisibleRow = std::max(0, scrollOffsetY_ / verticalStride);
+        const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
+        const int firstIndex = firstVisibleRow * columns;
+        const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (lastVisibleRow + 1) * columns);
+
+        for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
+        {
+            const BrowserItem* item = ItemFromViewIndex(viewIndex);
+            if (!item || !decode::CanDecodeThumbnail(*item))
+            {
+                continue;
+            }
+
+            const auto cacheKey = MakeThumbnailCacheKey(*item, layout.previewWidth, layout.previewHeight);
+            if (thumbnailScheduler_->FindCachedThumbnail(cacheKey))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     void BrowserPane::CancelThumbnailWork()
@@ -4195,6 +4307,11 @@ namespace hyperbrowse::browser
                     ReleaseD2DResources();
                 }
 
+                if (util::IsStartupBenchmarkEnabled() && HasVisibleCachedThumbnail())
+                {
+                    util::MarkStartupFirstThumbnailPainted();
+                }
+
                 EndPaint(hwnd_, &paintStruct);
                 return 0;
             }
@@ -4226,6 +4343,10 @@ namespace hyperbrowse::browser
             DeleteObject(bitmap);
             DeleteDC(memoryDc);
             EndPaint(hwnd_, &paintStruct);
+            if (util::IsStartupBenchmarkEnabled() && HasVisibleCachedThumbnail())
+            {
+                util::MarkStartupFirstThumbnailPainted();
+            }
             return 0;
         }
         default:
