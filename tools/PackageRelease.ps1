@@ -75,6 +75,74 @@ function Resolve-InnoSetupCompiler {
     throw 'Failed to locate ISCC.exe. Install Inno Setup 6 or pass -InnoSetupCompiler with the full path to ISCC.exe.'
 }
 
+function Resolve-CMakeTool {
+    param([string]$ToolName)
+
+    $toolExecutable = if ($ToolName.EndsWith('.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $ToolName
+    } else {
+        "$ToolName.exe"
+    }
+
+    foreach ($candidate in @($toolExecutable, $ToolName)) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($command) {
+            return $command.Source
+        }
+    }
+
+    $cmakeCommand = Get-Command 'cmake.exe' -ErrorAction SilentlyContinue
+    if (-not $cmakeCommand) {
+        $cmakeCommand = Get-Command 'cmake' -ErrorAction SilentlyContinue
+    }
+
+    if ($cmakeCommand) {
+        $siblingTool = Join-Path (Split-Path -Parent $cmakeCommand.Source) $toolExecutable
+        if (Test-Path $siblingTool) {
+            return (Resolve-Path $siblingTool).Path
+        }
+    }
+
+    $candidates = @(
+        $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "CMake\bin\$toolExecutable" }),
+        $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "CMake\bin\$toolExecutable" }),
+        $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Programs\CMake\bin\$toolExecutable" })
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    throw "Failed to locate $toolExecutable. Install CMake or add it to PATH."
+}
+
+function Remove-PathWithRetry {
+    param(
+        [string]$Path,
+        [int]$MaxAttempts = 20,
+        [int]$RetryDelayMilliseconds = 500
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            if (-not (Test-Path $Path)) {
+                return
+            }
+
+            Remove-Item -Path $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            if (($attempt -eq $MaxAttempts) -or (-not (Test-Path $Path))) {
+                throw
+            }
+
+            [System.Threading.Thread]::Sleep($RetryDelayMilliseconds)
+        }
+    }
+}
+
 $projectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $buildDir = [System.IO.Path]::GetFullPath($BuildDir)
 $cmakeListsPath = Join-Path $projectRoot 'CMakeLists.txt'
@@ -89,6 +157,8 @@ if (-not (Test-Path $buildDir)) {
 
 $projectRoot = (Resolve-Path $projectRoot).Path
 $buildDir = (Resolve-Path $buildDir).Path
+$cmakeExecutable = Resolve-CMakeTool -ToolName 'cmake'
+$ctestExecutable = if ($SkipTests) { $null } else { Resolve-CMakeTool -ToolName 'ctest' }
 $innoSetupCompiler = Resolve-InnoSetupCompiler -RequestedPath $InnoSetupCompiler
 $version = Get-ProjectVersion -CMakeListsPath (Join-Path $projectRoot 'CMakeLists.txt')
 $installerScript = Join-Path $buildDir 'HyperBrowseInstaller.iss'
@@ -107,26 +177,26 @@ Write-Host "Packaging HyperBrowse $version from $projectRoot" -ForegroundColor G
 
 foreach ($path in @($portableDir, $runtimeDir)) {
     if (Test-Path $path) {
-        Remove-Item -Path $path -Recurse -Force
+        Remove-PathWithRetry -Path $path
     }
 }
 
 foreach ($file in @($portableZip, $installerExe)) {
     if (Test-Path $file) {
-        Remove-Item -Path $file -Force
+        Remove-PathWithRetry -Path $file
     }
 }
 
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 
 if (-not $SkipBuild) {
-    Invoke-External -Description "Build $Configuration application" -FilePath 'cmake' -ArgumentList @(
+    Invoke-External -Description "Build $Configuration application" -FilePath $cmakeExecutable -ArgumentList @(
         '--build', $buildDir,
         '--config', $Configuration,
         '--target', 'HyperBrowse')
 
     if (-not $SkipTests) {
-        Invoke-External -Description "Build $Configuration smoke tests" -FilePath 'cmake' -ArgumentList @(
+        Invoke-External -Description "Build $Configuration smoke tests" -FilePath $cmakeExecutable -ArgumentList @(
             '--build', $buildDir,
             '--config', $Configuration,
             '--target', 'HyperBrowseTests')
@@ -134,19 +204,19 @@ if (-not $SkipBuild) {
 }
 
 if (-not $SkipTests) {
-    Invoke-External -Description "Run $Configuration smoke tests" -FilePath 'ctest' -ArgumentList @(
+    Invoke-External -Description "Run $Configuration smoke tests" -FilePath $ctestExecutable -ArgumentList @(
         '--test-dir', $buildDir,
         '-C', $Configuration,
         '--output-on-failure')
 }
 
-Invoke-External -Description 'Stage portable release layout' -FilePath 'cmake' -ArgumentList @(
+Invoke-External -Description 'Stage portable release layout' -FilePath $cmakeExecutable -ArgumentList @(
     '--install', $buildDir,
     '--config', $Configuration,
     '--component', 'Portable',
     '--prefix', $portableDir)
 
-Invoke-External -Description 'Stage installer release layout' -FilePath 'cmake' -ArgumentList @(
+Invoke-External -Description 'Stage installer release layout' -FilePath $cmakeExecutable -ArgumentList @(
     '--install', $buildDir,
     '--config', $Configuration,
     '--component', 'Runtime',

@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/Version-1.0.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
-![CMake](https://img.shields.io/badge/CMake-3.25%2B-064F8C)
+![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Status](https://img.shields.io/badge/Status-Release-2EA043)
 
@@ -55,7 +55,7 @@ The current implementation combines a Win32 shell with Direct2D and DirectWrite 
 
 - Windows 10 or Windows 11, x64.
 - Visual Studio 2022 with Desktop development for C++.
-- CMake 3.25 or newer.
+- CMake 3.23 or newer.
 - PowerShell and Inno Setup 6 for release packaging.
 - Optional internet access when `HYPERBROWSE_BUNDLE_CUDA_REDIST=ON`, because CMake downloads NVIDIA redistributables for packaging.
 

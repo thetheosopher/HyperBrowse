@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.23)
 
 set(HYPERBROWSE_LIBRAW_SOURCES
     src/libraw_c_api.cpp

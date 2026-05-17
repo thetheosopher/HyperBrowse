@@ -553,10 +553,21 @@ namespace hyperbrowse::viewer
             *preferredFocusPath = items_[static_cast<std::size_t>(preferredIndex)].filePath;
         }
 
+        const bool preserveCompareMode = compareMode_;
+        const CompareDirection preservedCompareDirection = compareDirection_;
         items_.erase(items_.begin() + currentIndex_);
         currentIndex_ = std::clamp(currentIndex_, 0, static_cast<int>(items_.size()) - 1);
-        compareMode_ = false;
-        compareDirection_ = CompareDirection::Next;
+        compareDirection_ = preservedCompareDirection;
+        compareMode_ = preserveCompareMode && items_.size() > 1;
+        if (compareMode_)
+        {
+            compareDirection_ = ResolveCompareDirection(compareDirection_);
+            compareMode_ = ActiveCompareIndex() >= 0;
+        }
+        else
+        {
+            compareDirection_ = CompareDirection::Next;
+        }
         d2dCompareImageBitmap_.Reset();
         d2dCompareImageIndex_ = -1;
         if (slideshowActive_ && items_.size() < 2)
@@ -1880,7 +1891,10 @@ namespace hyperbrowse::viewer
             case VK_DELETE:
                 if (owner_ && IsWindow(owner_))
                 {
-                    SendMessageW(owner_, kDeleteRequestedMessage, 0, 0);
+                    const WPARAM deleteRequestFlags = (GetKeyState(VK_SHIFT) & 0x8000) != 0
+                        ? kDeleteRequestPermanent
+                        : 0;
+                    SendMessageW(owner_, kDeleteRequestedMessage, deleteRequestFlags, 0);
                 }
                 return 0;
             case VK_RIGHT:

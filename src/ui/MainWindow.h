@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <shellapi.h>
 
 #include <array>
 #include <cstddef>
@@ -104,7 +105,8 @@ namespace hyperbrowse::ui
         enum class DragMode
         {
             None,
-            Splitter
+            LeftSplitter,
+            DetailsSplitter
         };
 
         struct ThemePalette
@@ -154,6 +156,7 @@ namespace hyperbrowse::ui
         {
             std::wstring destinationPath;
             std::wstring displayLabel;
+            std::wstring metadataLabel;
             RECT rowRect{};
             RECT copyRect{};
             RECT moveRect{};
@@ -204,6 +207,7 @@ namespace hyperbrowse::ui
         bool SyncViewerToBrowserModel(std::wstring_view preferredPath = {});
         void RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top);
         bool CanUseQuickAccessDestinationActions() const;
+        int HitTestQuickAccessDestinationRow(int x, int y) const;
         int HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type = nullptr) const;
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
         std::vector<std::wstring> SelectedFileOperationPathsSnapshot(std::size_t* pairedCompanionCount = nullptr) const;
@@ -249,6 +253,7 @@ namespace hyperbrowse::ui
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeRightClick();
+        LRESULT OnDropFiles(HDROP dropHandle);
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
@@ -257,7 +262,7 @@ namespace hyperbrowse::ui
         LRESULT OnDetailsPanelThumbnailMessage(LPARAM lParam);
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
-        LRESULT OnViewerDeleteRequested();
+        LRESULT OnViewerDeleteRequested(WPARAM wParam);
         LRESULT OnViewerClosedMessage();
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
 
@@ -300,7 +305,8 @@ namespace hyperbrowse::ui
         void OnLButtonUp();
         void OnLButtonDoubleClick(int x, int y);
         void OnMouseMove(int x, int y);
-        bool IsOverSplitter(int x) const;
+        bool IsOverSplitter(int x, int y) const;
+        bool IsOverDetailsPanelSplitter(int x, int y) const;
 
         HINSTANCE instance_{};
         HWND hwnd_{};
@@ -319,6 +325,7 @@ namespace hyperbrowse::ui
         HMENU moveSelectionToMenu_{};
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
+        int detailsPanelWidth_{340};
         int toolbarHotIndex_{-1};
         int toolbarPressedIndex_{-1};
         bool toolbarMouseTracking_{};
@@ -370,6 +377,7 @@ namespace hyperbrowse::ui
         int detailsPanelHistogramModelIndex_{-1};
         bool detailsPanelHistogramVisible_{};
         bool detailsPanelHistogramLoading_{};
+        int quickAccessHotRowIndex_{-1};
         int quickAccessHotButtonIndex_{-1};
         int quickAccessPressedButtonIndex_{-1};
         std::array<std::uint32_t, 64> detailsPanelHistogramRed_{};

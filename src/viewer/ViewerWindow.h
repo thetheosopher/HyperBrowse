@@ -45,6 +45,7 @@ namespace hyperbrowse::viewer
         static constexpr UINT kActivityChangedMessage = WM_APP + 61;
         static constexpr UINT kClosedMessage = WM_APP + 62;
         static constexpr UINT kDeleteRequestedMessage = WM_APP + 65;
+        static constexpr WPARAM kDeleteRequestPermanent = 0x1;
 
         explicit ViewerWindow(HINSTANCE instance);
         ~ViewerWindow();

@@ -1,6 +1,6 @@
 # HyperBrowse Enhancement Plan
 
-Last reviewed: 2026-05-16
+Last reviewed: 2026-05-17
 
 This document tracks the **forward-looking** HyperBrowse backlog. Completed
 items have been archived (see [Appendix A](#appendix-a--recently-completed-archive))
@@ -246,9 +246,11 @@ painted, with the second span at roughly `364.83 ms`.
 Each item targets a specific gap versus FastStone, XnView MP, ImageGlass, or
 qView while staying inside HyperBrowse's identity.
 
-**Implementation note:** The viewer now supports quick culling with `Delete`:
-the active image moves to the Recycle Bin without an extra confirmation prompt
-and the viewer advances to the next image, restoring focus if the delete fails.
+**Implementation note:** The viewer now supports quick culling with `Delete`
+and `Shift+Delete`: the active image can be sent to the Recycle Bin or
+deleted permanently without an extra confirmation prompt, the viewer advances
+to the next image, compare mode is preserved when a valid neighbor remains,
+and browser focus is restored if the delete fails.
 
 ### `B1` Drag-and-Drop File Operations (P0)
 
@@ -272,9 +274,12 @@ and the viewer advances to the next image, restoring focus if the delete fails.
 ### `B3` Quick-Pick Destination Panel (P1)
 
 **Implementation status:** In progress. The existing details rail now exposes a
-first quick-send panel that lists favorite and recent destinations with one-click
-`Copy` and `Move` actions for the current selection. Remaining: add richer
-per-row hover metadata and true drop-target handling.
+quick-send panel that lists favorite and recent destinations with one-click
+`Copy` and `Move` actions for the current selection, visible per-row metadata,
+and direct shell file drops onto destination rows. Dropping files onto a row
+now copies by default and switches to move while `Shift` is held. Remaining:
+decide whether the panel still needs richer hover-only affordances or a deeper
+in-app drag source beyond the new row drop targets.
 
 - Optional right-rail strip listing favorite + recent destinations as drop
   targets and one-click "Send Selection To" actions.

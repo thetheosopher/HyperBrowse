@@ -67,6 +67,7 @@ namespace
     constexpr wchar_t kRegistryValueSlideshowTransitionStyle[] = L"SlideshowTransitionStyle";
     constexpr wchar_t kRegistryValueSlideshowTransitionDuration[] = L"SlideshowTransitionDurationMs";
     constexpr wchar_t kRegistryValueDetailsStripVisible[] = L"DetailsStripVisible";
+    constexpr wchar_t kRegistryValueDetailsPanelWidth[] = L"DetailsPanelWidth";
     constexpr wchar_t kRegistryValueViewerMouseWheelBehavior[] = L"ViewerMouseWheelBehavior";
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
@@ -217,6 +218,7 @@ namespace
     constexpr int kFilterEditMinWidth = 160;
     constexpr int kDetailsStripHeight = 22;
     constexpr int kDetailsPanelPreferredWidth = 340;
+    constexpr int kDetailsPanelMinWidth = 260;
     constexpr int kDetailsPanelMargin = 14;
     constexpr int kDetailsPanelHistogramHeight = 88;
     constexpr int kDetailsPanelSectionGap = 12;
@@ -224,10 +226,15 @@ namespace
     constexpr int kDetailsPanelHistogramBins = 64;
     constexpr int kQuickAccessPanelHeaderHeight = 18;
     constexpr int kQuickAccessPanelTopGap = 12;
-    constexpr int kQuickAccessPanelRowHeight = 28;
+    constexpr int kQuickAccessPanelRowHeight = 40;
     constexpr int kQuickAccessPanelRowGap = 6;
     constexpr int kQuickAccessPanelButtonWidth = 56;
     constexpr int kQuickAccessPanelButtonGap = 8;
+    constexpr int kQuickAccessPanelHeaderVerticalPadding = 4;
+    constexpr int kQuickAccessPanelRowTextTopInset = 5;
+    constexpr int kQuickAccessPanelRowTextGap = 4;
+    constexpr int kQuickAccessPanelRowBottomInset = 6;
+    constexpr int kQuickAccessPanelButtonVerticalInset = 6;
     constexpr int kQuickAccessPanelMaxRows = 4;
     constexpr std::size_t kIncrementalFolderWatchEventLimit = 64;
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
@@ -268,23 +275,31 @@ namespace
     constexpr int kAboutDialogButtonGap = 12;
     constexpr int kAboutDialogBrandArtSize = 152;
     constexpr wchar_t kPerformanceSettingsDialogClassName[] = L"HyperBrowsePerformanceSettingsDialog";
-    constexpr int kPerformanceSettingsDialogWidth = 540;
-    constexpr int kPerformanceSettingsDialogHeight = 348;
+    constexpr int kPerformanceSettingsDialogWidth = 640;
+    constexpr int kPerformanceSettingsDialogHeight = 432;
     constexpr int kPerformanceSettingsDialogLabelWidth = 210;
-    constexpr int kPerformanceSettingsDialogEditWidth = 112;
-    constexpr int kPerformanceSettingsDialogCheckboxWidth = 110;
-    constexpr int kPerformanceSettingsDialogValueTopGap = 12;
+    constexpr int kPerformanceSettingsDialogEditWidth = 118;
+    constexpr int kPerformanceSettingsDialogUnitWidth = 72;
+    constexpr int kPerformanceSettingsDialogCheckboxWidth = 124;
+    constexpr int kPerformanceSettingsDialogValueTopGap = 14;
     constexpr int kPerformanceSettingsDialogControlGap = 10;
-    constexpr int kPerformanceSettingsInstructionControlId = 300;
-    constexpr int kPerformanceSettingsSummaryControlId = 301;
-    constexpr int kPerformanceSettingsThumbnailLabelControlId = 302;
-    constexpr int kPerformanceSettingsThumbnailEditControlId = 303;
-    constexpr int kPerformanceSettingsThumbnailAutoControlId = 304;
-    constexpr int kPerformanceSettingsMetadataLabelControlId = 305;
-    constexpr int kPerformanceSettingsMetadataEditControlId = 306;
-    constexpr int kPerformanceSettingsMetadataAutoControlId = 307;
-    constexpr int kPerformanceSettingsFootnoteControlId = 308;
-    constexpr int kPerformanceSettingsPressureStatusControlId = 309;
+    constexpr int kPerformanceSettingsDialogSectionInset = 14;
+    constexpr int kPerformanceSettingsDialogTitleControlId = 300;
+    constexpr int kPerformanceSettingsInstructionControlId = 301;
+    constexpr int kPerformanceSettingsSummaryGroupControlId = 302;
+    constexpr int kPerformanceSettingsSummaryControlId = 303;
+    constexpr int kPerformanceSettingsCacheGroupControlId = 304;
+    constexpr int kPerformanceSettingsThumbnailLabelControlId = 305;
+    constexpr int kPerformanceSettingsThumbnailEditControlId = 306;
+    constexpr int kPerformanceSettingsThumbnailUnitControlId = 307;
+    constexpr int kPerformanceSettingsThumbnailAutoControlId = 308;
+    constexpr int kPerformanceSettingsMetadataLabelControlId = 309;
+    constexpr int kPerformanceSettingsMetadataEditControlId = 310;
+    constexpr int kPerformanceSettingsMetadataUnitControlId = 311;
+    constexpr int kPerformanceSettingsMetadataAutoControlId = 312;
+    constexpr int kPerformanceSettingsPressureStatusControlId = 313;
+    constexpr int kPerformanceSettingsFootnoteControlId = 314;
+    constexpr int kPerformanceSettingsDividerControlId = 315;
 
     hyperbrowse::cache::ThumbnailCacheKey MakeThumbnailCacheKey(const hyperbrowse::browser::BrowserItem& item,
                                                                 int targetWidth,
@@ -296,6 +311,100 @@ namespace
         key.targetWidth = targetWidth;
         key.targetHeight = targetHeight;
         return key;
+    }
+
+    std::wstring FormatQuickAccessImageCount(std::uintmax_t imageCount)
+    {
+        return std::to_wstring(imageCount) + (imageCount == 1 ? L" image" : L" images");
+    }
+
+    bool TryCountSupportedImagesInFolder(std::wstring_view folderPath, std::uintmax_t* imageCount)
+    {
+        if (!imageCount)
+        {
+            return false;
+        }
+
+        *imageCount = 0;
+
+        std::error_code error;
+        const fs::path directoryPath(folderPath);
+        if (!fs::is_directory(directoryPath, error) || error)
+        {
+            return false;
+        }
+
+        for (fs::directory_iterator iterator(directoryPath, fs::directory_options::skip_permission_denied, error), end;
+             iterator != end;
+             iterator.increment(error))
+        {
+            if (error)
+            {
+                return false;
+            }
+
+            std::error_code statusError;
+            if (!iterator->is_regular_file(statusError) || statusError)
+            {
+                continue;
+            }
+
+            if (hyperbrowse::browser::IsSupportedImageExtension(iterator->path().extension().wstring()))
+            {
+                ++(*imageCount);
+            }
+        }
+
+        return true;
+    }
+
+    std::wstring BuildQuickAccessDestinationMetadata(std::wstring_view folderPath, bool favorite)
+    {
+        std::wstring metadata = favorite ? L"Favorite destination" : L"Recent destination";
+
+        std::uintmax_t imageCount = 0;
+        metadata.append(L" | ");
+        if (TryCountSupportedImagesInFolder(folderPath, &imageCount))
+        {
+            metadata.append(FormatQuickAccessImageCount(imageCount));
+        }
+        else
+        {
+            metadata.append(L"folder unavailable");
+        }
+
+        metadata.append(L" | Drop here");
+        return metadata;
+    }
+
+    std::vector<std::wstring> CollectShellDropPaths(HDROP dropHandle)
+    {
+        std::vector<std::wstring> paths;
+        if (!dropHandle)
+        {
+            return paths;
+        }
+
+        const UINT pathCount = DragQueryFileW(dropHandle, 0xFFFFFFFFu, nullptr, 0);
+        paths.reserve(pathCount);
+        for (UINT index = 0; index < pathCount; ++index)
+        {
+            const UINT pathLength = DragQueryFileW(dropHandle, index, nullptr, 0);
+            if (pathLength == 0)
+            {
+                continue;
+            }
+
+            std::wstring path(pathLength + 1, L'\0');
+            const UINT copiedLength = DragQueryFileW(dropHandle, index, path.data(), pathLength + 1);
+            path.resize(copiedLength);
+            if (!path.empty())
+            {
+                paths.push_back(std::move(path));
+            }
+        }
+
+        return paths;
     }
 
     struct TextInputDialogState
@@ -378,6 +487,8 @@ namespace
     struct PerformanceSettingsDialogState
     {
         HWND ownerWindow{};
+        HFONT titleFont{};
+        HFONT bodyFont{};
         HWND instructionWindow{};
         HWND summaryWindow{};
         HWND thumbnailEditWindow{};
@@ -399,6 +510,32 @@ namespace
         bool showPressureStateInStatusBar{};
         bool accepted{};
         bool done{};
+    };
+
+    struct PerformanceSettingsDialogLayoutMetrics
+    {
+        int contentLeft{};
+        int contentWidth{};
+        int titleTop{};
+        int titleHeight{};
+        int instructionTop{};
+        int instructionHeight{};
+        int summaryGroupTop{};
+        int summaryInnerWidth{};
+        int summaryHeight{};
+        int summaryGroupHeight{};
+        int cacheGroupTop{};
+        int cacheGroupHeight{};
+        int rowLabelLeft{};
+        int rowValueLeft{};
+        int rowUnitLeft{};
+        int rowCheckboxLeft{};
+        int firstRowTop{};
+        int secondRowTop{};
+        int pressureStatusTop{};
+        int footnoteTop{};
+        int minimumFootnoteHeight{};
+        int minimumClientHeight{};
     };
 
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
@@ -688,6 +825,48 @@ namespace
         ReleaseDC(nullptr, screenDc);
         const int measuredHeight = static_cast<int>(bounds.bottom - bounds.top);
         return std::max(minimumHeight, measuredHeight);
+    }
+
+    struct QuickAccessPanelMetrics
+    {
+        int headerHeight{kQuickAccessPanelHeaderHeight};
+        int rowHeight{kQuickAccessPanelRowHeight};
+        int labelTopInset{kQuickAccessPanelRowTextTopInset};
+        int labelHeight{15};
+        int metadataTopInset{21};
+        int metadataBottomInset{kQuickAccessPanelRowBottomInset};
+        int buttonHeight{kTextInputButtonHeight};
+        int buttonTopInset{kQuickAccessPanelButtonVerticalInset};
+    };
+
+    int MeasureSingleLineTextHeight(HFONT font, int minimumHeight)
+    {
+        return MeasureTextBlockHeight(font,
+                                      L"Ag",
+                                      4096,
+                                      DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE,
+                                      minimumHeight);
+    }
+
+    QuickAccessPanelMetrics BuildQuickAccessPanelMetrics(HFONT summaryFont, HFONT bodyFont)
+    {
+        const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const HFONT effectiveSummaryFont = summaryFont ? summaryFont : defaultGuiFont;
+        const HFONT effectiveBodyFont = bodyFont ? bodyFont : defaultGuiFont;
+
+        QuickAccessPanelMetrics metrics;
+        metrics.headerHeight = std::max(kQuickAccessPanelHeaderHeight,
+                                        MeasureSingleLineTextHeight(effectiveSummaryFont, kQuickAccessPanelHeaderHeight)
+                                            + kQuickAccessPanelHeaderVerticalPadding);
+        metrics.labelHeight = MeasureSingleLineTextHeight(effectiveSummaryFont, metrics.labelHeight);
+        const int metadataHeight = MeasureSingleLineTextHeight(effectiveBodyFont, 14);
+        metrics.metadataTopInset = metrics.labelTopInset + metrics.labelHeight + kQuickAccessPanelRowTextGap;
+        metrics.rowHeight = std::max(kQuickAccessPanelRowHeight,
+                                     metrics.metadataTopInset + metadataHeight + metrics.metadataBottomInset);
+        metrics.buttonHeight = std::min(kTextInputButtonHeight,
+                                        std::max(0, metrics.rowHeight - (kQuickAccessPanelButtonVerticalInset * 2)));
+        metrics.buttonTopInset = std::max(0, (metrics.rowHeight - metrics.buttonHeight) / 2);
+        return metrics;
     }
 
     int MeasureTextWidth(HFONT font, std::wstring_view text)
@@ -1338,6 +1517,61 @@ namespace
         SetWindowEnabledIfDifferent(state.metadataEditWindow, !metadataAutomatic);
     }
 
+    PerformanceSettingsDialogLayoutMetrics BuildPerformanceSettingsDialogLayoutMetrics(int clientWidth,
+                                                                                      const PerformanceSettingsDialogState& state)
+    {
+        PerformanceSettingsDialogLayoutMetrics metrics;
+        metrics.contentLeft = kTextInputDialogMargin + 2;
+        metrics.contentWidth = std::max(0, clientWidth - (metrics.contentLeft * 2));
+
+        const HFONT titleFont = state.titleFont ? state.titleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const HFONT bodyFont = state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+        metrics.titleTop = kTextInputDialogMargin + 4;
+        metrics.titleHeight = MeasureTextBlockHeight(titleFont,
+                                                     state.title,
+                                                     metrics.contentWidth,
+                                                     DT_LEFT | DT_NOPREFIX | DT_SINGLELINE,
+                                                     28);
+        metrics.instructionTop = metrics.titleTop + metrics.titleHeight + 6;
+        metrics.instructionHeight = MeasureTextBlockHeight(bodyFont,
+                                                           state.instruction,
+                                                           metrics.contentWidth,
+                                                           DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                                           42);
+        metrics.summaryGroupTop = metrics.instructionTop + metrics.instructionHeight + 14;
+        metrics.summaryInnerWidth = std::max(0, metrics.contentWidth - (kPerformanceSettingsDialogSectionInset * 2));
+        metrics.summaryHeight = MeasureTextBlockHeight(bodyFont,
+                                                       state.summary,
+                                                       metrics.summaryInnerWidth,
+                                                       DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                                       52);
+        metrics.summaryGroupHeight = std::max(78, metrics.summaryHeight + 30);
+        metrics.cacheGroupTop = metrics.summaryGroupTop + metrics.summaryGroupHeight + 12;
+        metrics.rowLabelLeft = metrics.contentLeft + kPerformanceSettingsDialogSectionInset;
+        metrics.rowValueLeft = metrics.rowLabelLeft + kPerformanceSettingsDialogLabelWidth + kPerformanceSettingsDialogControlGap;
+        metrics.rowUnitLeft = metrics.rowValueLeft + kPerformanceSettingsDialogEditWidth + 8;
+        metrics.rowCheckboxLeft = metrics.contentLeft + metrics.contentWidth - kPerformanceSettingsDialogSectionInset - kPerformanceSettingsDialogCheckboxWidth;
+        metrics.firstRowTop = metrics.cacheGroupTop + 30;
+        metrics.secondRowTop = metrics.firstRowTop + kTextInputEditHeight + kPerformanceSettingsDialogValueTopGap + 12;
+        metrics.pressureStatusTop = metrics.secondRowTop + kTextInputEditHeight + 18;
+        const int pressureStatusBottom = metrics.pressureStatusTop + 22;
+        metrics.cacheGroupHeight = std::max(136, pressureStatusBottom - metrics.cacheGroupTop + 12);
+        metrics.footnoteTop = metrics.cacheGroupTop + metrics.cacheGroupHeight + 12;
+        metrics.minimumFootnoteHeight = MeasureTextBlockHeight(bodyFont,
+                                                               state.footnote,
+                                                               metrics.contentWidth,
+                                                               DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                                               42);
+        metrics.minimumClientHeight = metrics.footnoteTop
+            + metrics.minimumFootnoteHeight
+            + 8
+            + 16
+            + kTextInputButtonHeight
+            + kTextInputDialogMargin;
+        return metrics;
+    }
+
     void LayoutPerformanceSettingsDialogControls(HWND hwnd, const PerformanceSettingsDialogState& state)
     {
         RECT clientRect{};
@@ -1345,73 +1579,110 @@ namespace
 
         const int clientWidth = clientRect.right - clientRect.left;
         const int clientHeight = clientRect.bottom - clientRect.top;
-        const int contentLeft = kTextInputDialogMargin;
-        const int contentWidth = clientWidth - (kTextInputDialogMargin * 2);
+        const PerformanceSettingsDialogLayoutMetrics metrics = BuildPerformanceSettingsDialogLayoutMetrics(clientWidth, state);
         const int buttonTop = clientHeight - kTextInputDialogMargin - kTextInputButtonHeight;
+        const int dividerTop = buttonTop - 16;
         const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
         const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
-        const int rowLabelLeft = contentLeft;
-        const int rowValueLeft = rowLabelLeft + kPerformanceSettingsDialogLabelWidth + kPerformanceSettingsDialogControlGap;
-        const int rowCheckboxLeft = rowValueLeft + kPerformanceSettingsDialogEditWidth + kPerformanceSettingsDialogControlGap;
+
+        const HWND titleWindow = GetDlgItem(hwnd, kPerformanceSettingsDialogTitleControlId);
+        if (titleWindow)
+        {
+            MoveWindow(titleWindow, metrics.contentLeft, metrics.titleTop, metrics.contentWidth, metrics.titleHeight, TRUE);
+        }
 
         const HWND instructionWindow = GetDlgItem(hwnd, kPerformanceSettingsInstructionControlId);
         if (instructionWindow)
         {
-            MoveWindow(instructionWindow, contentLeft, kTextInputDialogMargin, contentWidth, 38, TRUE);
+            MoveWindow(instructionWindow, metrics.contentLeft, metrics.instructionTop, metrics.contentWidth, metrics.instructionHeight, TRUE);
+        }
+
+        const HWND summaryGroupWindow = GetDlgItem(hwnd, kPerformanceSettingsSummaryGroupControlId);
+        if (summaryGroupWindow)
+        {
+            MoveWindow(summaryGroupWindow, metrics.contentLeft, metrics.summaryGroupTop, metrics.contentWidth, metrics.summaryGroupHeight, TRUE);
         }
 
         const HWND summaryWindow = GetDlgItem(hwnd, kPerformanceSettingsSummaryControlId);
         if (summaryWindow)
         {
-            MoveWindow(summaryWindow, contentLeft, kTextInputDialogMargin + 42, contentWidth, 32, TRUE);
+            MoveWindow(summaryWindow,
+                       metrics.contentLeft + kPerformanceSettingsDialogSectionInset,
+                       metrics.summaryGroupTop + 22,
+                       metrics.summaryInnerWidth,
+                       metrics.summaryHeight,
+                       TRUE);
         }
 
-        const int firstRowTop = kTextInputDialogMargin + 90;
-        const int secondRowTop = firstRowTop + kTextInputEditHeight + kPerformanceSettingsDialogValueTopGap + 18;
-        const int pressureStatusTop = secondRowTop + kTextInputEditHeight + 18;
+        const HWND cacheGroupWindow = GetDlgItem(hwnd, kPerformanceSettingsCacheGroupControlId);
+        if (cacheGroupWindow)
+        {
+            MoveWindow(cacheGroupWindow, metrics.contentLeft, metrics.cacheGroupTop, metrics.contentWidth, metrics.cacheGroupHeight, TRUE);
+        }
 
         const HWND thumbnailLabel = GetDlgItem(hwnd, kPerformanceSettingsThumbnailLabelControlId);
         if (thumbnailLabel)
         {
-            MoveWindow(thumbnailLabel, rowLabelLeft, firstRowTop + 4, kPerformanceSettingsDialogLabelWidth, 20, TRUE);
+            MoveWindow(thumbnailLabel, metrics.rowLabelLeft, metrics.firstRowTop + 4, kPerformanceSettingsDialogLabelWidth, 20, TRUE);
         }
         if (state.thumbnailEditWindow)
         {
-            MoveWindow(state.thumbnailEditWindow, rowValueLeft, firstRowTop, kPerformanceSettingsDialogEditWidth, kTextInputEditHeight, TRUE);
+            MoveWindow(state.thumbnailEditWindow, metrics.rowValueLeft, metrics.firstRowTop, kPerformanceSettingsDialogEditWidth, kTextInputEditHeight, TRUE);
+        }
+        const HWND thumbnailUnit = GetDlgItem(hwnd, kPerformanceSettingsThumbnailUnitControlId);
+        if (thumbnailUnit)
+        {
+            MoveWindow(thumbnailUnit, metrics.rowUnitLeft, metrics.firstRowTop + 4, kPerformanceSettingsDialogUnitWidth, 20, TRUE);
         }
         if (state.thumbnailAutoCheckWindow)
         {
-            MoveWindow(state.thumbnailAutoCheckWindow, rowCheckboxLeft, firstRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
+            MoveWindow(state.thumbnailAutoCheckWindow, metrics.rowCheckboxLeft, metrics.firstRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
         }
 
         const HWND metadataLabel = GetDlgItem(hwnd, kPerformanceSettingsMetadataLabelControlId);
         if (metadataLabel)
         {
-            MoveWindow(metadataLabel, rowLabelLeft, secondRowTop + 4, kPerformanceSettingsDialogLabelWidth, 20, TRUE);
+            MoveWindow(metadataLabel, metrics.rowLabelLeft, metrics.secondRowTop + 4, kPerformanceSettingsDialogLabelWidth, 20, TRUE);
         }
         if (state.metadataEditWindow)
         {
-            MoveWindow(state.metadataEditWindow, rowValueLeft, secondRowTop, kPerformanceSettingsDialogEditWidth, kTextInputEditHeight, TRUE);
+            MoveWindow(state.metadataEditWindow, metrics.rowValueLeft, metrics.secondRowTop, kPerformanceSettingsDialogEditWidth, kTextInputEditHeight, TRUE);
+        }
+        const HWND metadataUnit = GetDlgItem(hwnd, kPerformanceSettingsMetadataUnitControlId);
+        if (metadataUnit)
+        {
+            MoveWindow(metadataUnit, metrics.rowUnitLeft, metrics.secondRowTop + 4, kPerformanceSettingsDialogUnitWidth, 20, TRUE);
         }
         if (state.metadataAutoCheckWindow)
         {
-            MoveWindow(state.metadataAutoCheckWindow, rowCheckboxLeft, secondRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
+            MoveWindow(state.metadataAutoCheckWindow, metrics.rowCheckboxLeft, metrics.secondRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
         }
 
         if (state.pressureStatusCheckWindow)
         {
-            MoveWindow(state.pressureStatusCheckWindow, contentLeft, pressureStatusTop, contentWidth, 22, TRUE);
+            MoveWindow(state.pressureStatusCheckWindow,
+                       metrics.rowLabelLeft,
+                       metrics.pressureStatusTop,
+                       metrics.contentWidth - (kPerformanceSettingsDialogSectionInset * 2),
+                       22,
+                       TRUE);
         }
 
         const HWND footnoteWindow = GetDlgItem(hwnd, kPerformanceSettingsFootnoteControlId);
         if (footnoteWindow)
         {
             MoveWindow(footnoteWindow,
-                       contentLeft,
-                       pressureStatusTop + 28,
-                       contentWidth,
-                       std::max(42, buttonTop - (pressureStatusTop + 34)),
+                       metrics.contentLeft,
+                       metrics.footnoteTop,
+                       metrics.contentWidth,
+                       std::max(metrics.minimumFootnoteHeight, dividerTop - metrics.footnoteTop - 8),
                        TRUE);
+        }
+
+        const HWND dividerWindow = GetDlgItem(hwnd, kPerformanceSettingsDividerControlId);
+        if (dividerWindow)
+        {
+            MoveWindow(dividerWindow, metrics.contentLeft, dividerTop, metrics.contentWidth, 2, TRUE);
         }
 
         if (state.okButton)
@@ -1442,7 +1713,7 @@ namespace
         if (!thumbnailAutomatic && !TryParsePositiveSizeValue(ReadWindowText(state->thumbnailEditWindow), &thumbnailMegabytes))
         {
             MessageBoxW(hwnd,
-                        L"Enter a positive thumbnail cache size in megabytes, or keep Automatic enabled.",
+                        L"Enter a positive thumbnail cache size in megabytes, or keep Follow profile enabled.",
                         state->title.c_str(),
                         MB_OK | MB_ICONWARNING);
             if (state->thumbnailEditWindow)
@@ -1456,7 +1727,7 @@ namespace
         if (!metadataAutomatic && !TryParsePositiveSizeValue(ReadWindowText(state->metadataEditWindow), &metadataEntries))
         {
             MessageBoxW(hwnd,
-                        L"Enter a positive metadata cache capacity in entries, or keep Automatic enabled.",
+                        L"Enter a positive metadata cache capacity in entries, or keep Follow profile enabled.",
                         state->title.c_str(),
                         MB_OK | MB_ICONWARNING);
             if (state->metadataEditWindow)
@@ -1500,6 +1771,19 @@ namespace
             const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
 
+            const HWND titleWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->title.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                24,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsDialogTitleControlId)),
+                hInstance,
+                nullptr);
             state->instructionWindow = CreateWindowExW(
                 0,
                 L"STATIC",
@@ -1508,9 +1792,22 @@ namespace
                 0,
                 0,
                 100,
-                32,
+                42,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsInstructionControlId)),
+                hInstance,
+                nullptr);
+            const HWND summaryGroupWindow = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Current profile",
+                WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+                0,
+                0,
+                100,
+                70,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsSummaryGroupControlId)),
                 hInstance,
                 nullptr);
             state->summaryWindow = CreateWindowExW(
@@ -1521,15 +1818,28 @@ namespace
                 0,
                 0,
                 100,
-                28,
+                46,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsSummaryControlId)),
+                hInstance,
+                nullptr);
+            const HWND cacheGroupWindow = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Cache limits",
+                WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+                0,
+                0,
+                100,
+                120,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsCacheGroupControlId)),
                 hInstance,
                 nullptr);
             const HWND thumbnailLabel = CreateWindowExW(
                 0,
                 L"STATIC",
-                L"Thumbnail memory cache (MB):",
+                L"Thumbnail memory cache:",
                 WS_CHILD | WS_VISIBLE,
                 0,
                 0,
@@ -1552,10 +1862,23 @@ namespace
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsThumbnailEditControlId)),
                 hInstance,
                 nullptr);
+            const HWND thumbnailUnitLabel = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"MB",
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                48,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsThumbnailUnitControlId)),
+                hInstance,
+                nullptr);
             state->thumbnailAutoCheckWindow = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Automatic",
+                L"Follow profile",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
                 0,
                 0,
@@ -1568,7 +1891,7 @@ namespace
             const HWND metadataLabel = CreateWindowExW(
                 0,
                 L"STATIC",
-                L"Metadata cache entries:",
+                L"Metadata cache:",
                 WS_CHILD | WS_VISIBLE,
                 0,
                 0,
@@ -1591,10 +1914,23 @@ namespace
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsMetadataEditControlId)),
                 hInstance,
                 nullptr);
+            const HWND metadataUnitLabel = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"entries",
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                60,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsMetadataUnitControlId)),
+                hInstance,
+                nullptr);
             state->metadataAutoCheckWindow = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Automatic",
+                L"Follow profile",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
                 0,
                 0,
@@ -1630,6 +1966,19 @@ namespace
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsFootnoteControlId)),
                 hInstance,
                 nullptr);
+            const HWND dividerWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                nullptr,
+                WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
+                0,
+                0,
+                100,
+                2,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kPerformanceSettingsDividerControlId)),
+                hInstance,
+                nullptr);
             state->okButton = CreateWindowExW(
                 0,
                 L"BUTTON",
@@ -1658,16 +2007,22 @@ namespace
                 nullptr);
 
             const HWND windows[] = {
+                titleWindow,
                 state->instructionWindow,
+                summaryGroupWindow,
                 state->summaryWindow,
+                cacheGroupWindow,
                 thumbnailLabel,
                 state->thumbnailEditWindow,
+                thumbnailUnitLabel,
                 state->thumbnailAutoCheckWindow,
                 metadataLabel,
                 state->metadataEditWindow,
+                metadataUnitLabel,
                 state->metadataAutoCheckWindow,
                 state->pressureStatusCheckWindow,
                 footnoteWindow,
+                dividerWindow,
                 state->okButton,
                 cancelButton,
             };
@@ -1677,6 +2032,22 @@ namespace
                 {
                     SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 }
+            }
+            if (titleWindow && state->titleFont)
+            {
+                SendMessageW(titleWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->titleFont), TRUE);
+            }
+            if (state->instructionWindow && state->bodyFont)
+            {
+                SendMessageW(state->instructionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->bodyFont), TRUE);
+            }
+            if (state->summaryWindow && state->bodyFont)
+            {
+                SendMessageW(state->summaryWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->bodyFont), TRUE);
+            }
+            if (footnoteWindow && state->bodyFont)
+            {
+                SendMessageW(footnoteWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->bodyFont), TRUE);
             }
 
             if (state->thumbnailAutoCheckWindow)
@@ -1710,6 +2081,18 @@ namespace
                 return FALSE;
             }
             break;
+        case WM_CTLCOLORDLG:
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_CTLCOLORSTATIC:
+            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
+            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_CTLCOLORBTN:
+            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
+            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
         case WM_COMMAND:
             if (!state)
             {
@@ -2706,16 +3089,18 @@ namespace
 
         PerformanceSettingsDialogState state;
         state.ownerWindow = ownerWindow;
+        state.titleFont = CreateDialogUiFont(16, FW_BOLD);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL);
         state.title = L"Performance Settings";
-        state.instruction = L"Choose whether HyperBrowse should keep adaptive cache sizing or use explicit cache caps.";
-        state.summary = L"Current profile: ";
+        state.instruction = L"Choose whether HyperBrowse should follow adaptive cache sizing or use explicit cache caps for the active profile.";
+        state.summary = L"Profile: ";
         state.summary.append(hyperbrowse::util::ResourceProfileToDisplayName(resourceProfile));
-        state.summary.append(L"  |  Effective thumbnail cache: ");
+        state.summary.append(L"\r\nEffective thumbnail cache: ");
         state.summary.append(FormatMegabytesFromBytes(currentThumbnailCacheCapacityBytes));
-        state.summary.append(L" MB  |  Effective metadata cache: ");
+        state.summary.append(L" MB\r\nEffective metadata cache: ");
         state.summary.append(std::to_wstring(currentMetadataCacheCapacityEntries));
         state.summary.append(L" entries");
-        state.footnote = L"Leave Automatic enabled to keep profile-adaptive sizing. Thumbnail values are entered in megabytes; metadata values are entry counts. Changes apply immediately to browser/details-panel services, and the pressure indicator can stay hidden if you prefer a quieter shell.";
+        state.footnote = L"Changes apply immediately to browser and file-details services. Thumbnail values are entered in megabytes; metadata values are entry counts.";
         state.thumbnailCacheAutomatic = initialThumbnailCacheCapacityOverrideBytes == 0;
         state.metadataCacheAutomatic = initialMetadataCacheCapacityOverrideEntries == 0;
         state.showPressureStateInStatusBar = initialShowPressureStateInStatusBar;
@@ -2726,7 +3111,8 @@ namespace
             ? std::to_wstring(currentMetadataCacheCapacityEntries)
             : std::to_wstring(initialMetadataCacheCapacityOverrideEntries);
 
-        RECT windowRect{0, 0, kPerformanceSettingsDialogWidth, kPerformanceSettingsDialogHeight};
+        const PerformanceSettingsDialogLayoutMetrics layoutMetrics = BuildPerformanceSettingsDialogLayoutMetrics(kPerformanceSettingsDialogWidth, state);
+        RECT windowRect{0, 0, kPerformanceSettingsDialogWidth, std::max(kPerformanceSettingsDialogHeight, layoutMetrics.minimumClientHeight)};
         AdjustWindowRectEx(&windowRect,
                            WS_CAPTION | WS_SYSMENU | WS_POPUP,
                            FALSE,
@@ -2757,6 +3143,8 @@ namespace
             {
                 EnableWindow(ownerWindow, TRUE);
             }
+            DeleteFontIfOwned(state.titleFont);
+            DeleteFontIfOwned(state.bodyFont);
             return false;
         }
 
@@ -2779,6 +3167,9 @@ namespace
             SetForegroundWindow(ownerWindow);
             SetActiveWindow(ownerWindow);
         }
+
+        DeleteFontIfOwned(state.titleFont);
+        DeleteFontIfOwned(state.bodyFont);
 
         if (!state.accepted)
         {
@@ -4152,6 +4543,8 @@ namespace hyperbrowse::ui
             return false;
         }
 
+        DragAcceptFiles(hwnd_, TRUE);
+
         memoryPressureExecutor_ = std::make_unique<util::BackgroundExecutor>(1);
         if (memoryPressureExecutor_)
         {
@@ -5082,32 +5475,43 @@ namespace hyperbrowse::ui
         const int statusHeight = statusRect.bottom - statusRect.top;
 
         const int clientWidth = client.right - client.left;
-        const int desiredDetailsPanelWidth = detailsStripVisible_
-            ? std::min(kDetailsPanelPreferredWidth,
-                       std::max(0, clientWidth - kMinLeftPaneWidth - kMinRightPaneWidth - kSplitterWidth))
+        const int detailsSplitterWidth = detailsStripVisible_ ? kSplitterWidth : 0;
+        const int maxDetailsPanelWidth = detailsStripVisible_
+            ? std::max(0, clientWidth - kMinLeftPaneWidth - kMinRightPaneWidth - kSplitterWidth - detailsSplitterWidth)
             : 0;
+        const int minDetailsPanelWidth = detailsStripVisible_ ? std::min(kDetailsPanelMinWidth, maxDetailsPanelWidth) : 0;
+        const int desiredDetailsPanelWidth = detailsStripVisible_
+            ? std::clamp(detailsPanelWidth_, minDetailsPanelWidth, maxDetailsPanelWidth)
+            : 0;
+        if (detailsStripVisible_)
+        {
+            detailsPanelWidth_ = desiredDetailsPanelWidth;
+        }
         const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top) - statusHeight - kActionStripHeight);
         const int contentTop = kActionStripHeight;
 
         const int maxLeft = std::max(kMinLeftPaneWidth,
-                                     clientWidth - desiredDetailsPanelWidth - kMinRightPaneWidth - kSplitterWidth);
+                                     clientWidth - desiredDetailsPanelWidth - kMinRightPaneWidth - kSplitterWidth - detailsSplitterWidth);
         leftPaneWidth_ = std::clamp(leftPaneWidth_, kMinLeftPaneWidth, maxLeft);
 
         const int browserWidth = std::max(kMinRightPaneWidth,
-                                          clientWidth - leftPaneWidth_ - kSplitterWidth - desiredDetailsPanelWidth);
-        const int detailsPanelWidth = std::max(0, clientWidth - leftPaneWidth_ - kSplitterWidth - browserWidth);
+                                          clientWidth - leftPaneWidth_ - kSplitterWidth - detailsSplitterWidth - desiredDetailsPanelWidth);
+        const int detailsPanelWidth = detailsStripVisible_
+            ? std::max(0, clientWidth - leftPaneWidth_ - kSplitterWidth - browserWidth - detailsSplitterWidth)
+            : 0;
 
         MoveWindow(treePane_, 0, contentTop, leftPaneWidth_, clientHeight, TRUE);
         MoveWindow(browserPane_, leftPaneWidth_ + kSplitterWidth, contentTop,
                    browserWidth, clientHeight, TRUE);
 
-        detailsPanelRect_ = RECT{leftPaneWidth_ + kSplitterWidth + browserWidth,
+        detailsPanelRect_ = RECT{leftPaneWidth_ + kSplitterWidth + browserWidth + detailsSplitterWidth,
                                  contentTop,
                                  clientWidth,
                                  contentTop + clientHeight};
         detailsPanelHistogramRect_ = RECT{};
         quickAccessDestinationPanelRect_ = RECT{};
         quickAccessDestinationRows_.clear();
+        quickAccessHotRowIndex_ = -1;
         quickAccessHotButtonIndex_ = -1;
         quickAccessPressedButtonIndex_ = -1;
 
@@ -5175,7 +5579,15 @@ namespace hyperbrowse::ui
         InvalidateRect(hwnd_, &splitterRect, FALSE);
         if (detailsStripVisible_)
         {
-            InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+            if (!IsRectEmpty(&detailsPanelRect_))
+            {
+                RECT detailsSplitterRect{detailsPanelRect_.left - kSplitterWidth,
+                                         kActionStripHeight,
+                                         detailsPanelRect_.left,
+                                         client.bottom};
+                InvalidateRect(hwnd_, &detailsSplitterRect, FALSE);
+                InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+            }
         }
 
         UpdateStatusText();
@@ -5992,11 +6404,12 @@ namespace hyperbrowse::ui
 
         if (!quickAccessDestinationRows_.empty() && !IsRectEmpty(&quickAccessDestinationPanelRect_))
         {
+            const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
             const bool actionsEnabled = CanUseQuickAccessDestinationActions();
             RECT headerRect{quickAccessDestinationPanelRect_.left,
                             quickAccessDestinationPanelRect_.top,
                             quickAccessDestinationPanelRect_.right,
-                            quickAccessDestinationPanelRect_.top + kQuickAccessPanelHeaderHeight};
+                            quickAccessDestinationPanelRect_.top + metrics.headerHeight};
             SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
             SetTextColor(hdc, palette.mutedText);
             DrawTextW(hdc, L"Quick Send", -1, &headerRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
@@ -6034,8 +6447,12 @@ namespace hyperbrowse::ui
             for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
             {
                 const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
-                HBRUSH rowBrush = CreateSolidBrush(rowBackground);
-                HPEN rowPen = CreatePen(PS_SOLID, 1, rowBorder);
+                const bool rowHot = static_cast<int>(rowIndex) == quickAccessHotRowIndex_;
+                const COLORREF currentRowBackground = rowHot
+                    ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 20 : 12)
+                    : rowBackground;
+                HBRUSH rowBrush = CreateSolidBrush(currentRowBackground);
+                HPEN rowPen = CreatePen(PS_SOLID, 1, rowHot ? palette.accent : rowBorder);
                 const HGDIOBJ oldBrush = SelectObject(hdc, rowBrush);
                 const HGDIOBJ oldRowPen = SelectObject(hdc, rowPen);
                 RoundRect(hdc, row.rowRect.left, row.rowRect.top, row.rowRect.right, row.rowRect.bottom, 12, 12);
@@ -6046,10 +6463,21 @@ namespace hyperbrowse::ui
 
                 RECT labelRect = row.rowRect;
                 labelRect.left += 10;
+                labelRect.top += metrics.labelTopInset;
                 labelRect.right = row.copyRect.left - 10;
+                labelRect.bottom = labelRect.top + metrics.labelHeight;
                 SetTextColor(hdc, palette.text);
                 SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-                DrawTextW(hdc, row.displayLabel.c_str(), -1, &labelRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                DrawTextW(hdc, row.displayLabel.c_str(), -1, &labelRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+                RECT metadataRect = row.rowRect;
+                metadataRect.left += 10;
+                metadataRect.top += metrics.metadataTopInset;
+                metadataRect.right = row.copyRect.left - 10;
+                metadataRect.bottom -= metrics.metadataBottomInset;
+                SetTextColor(hdc, palette.mutedText);
+                SelectObject(hdc, detailsPanelBodyFont_ ? detailsPanelBodyFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+                DrawTextW(hdc, row.metadataLabel.c_str(), -1, &metadataRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
                 drawActionButton(row.copyRect, L"Copy", static_cast<int>(rowIndex * 2));
                 drawActionButton(row.moveRect, L"Move", static_cast<int>(rowIndex * 2 + 1));
@@ -6253,6 +6681,7 @@ namespace hyperbrowse::ui
     {
         quickAccessDestinationRows_.clear();
         quickAccessDestinationPanelRect_ = RECT{};
+        quickAccessHotRowIndex_ = -1;
         quickAccessHotButtonIndex_ = -1;
         quickAccessPressedButtonIndex_ = -1;
 
@@ -6288,29 +6717,46 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const int panelHeight = kQuickAccessPanelHeaderHeight
-            + static_cast<int>(destinations.size()) * kQuickAccessPanelRowHeight
+        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+        const int panelHeight = metrics.headerHeight
+            + static_cast<int>(destinations.size()) * metrics.rowHeight
             + static_cast<int>((destinations.size() - 1) * kQuickAccessPanelRowGap);
         quickAccessDestinationPanelRect_ = RECT{innerLeft, top, innerRight, top + panelHeight};
 
-        int rowTop = top + kQuickAccessPanelHeaderHeight;
+        int rowTop = top + metrics.headerHeight;
         for (const auto& [path, favorite] : destinations)
         {
             QuickAccessDestinationRow row;
             row.destinationPath = path;
-            row.displayLabel = std::wstring(favorite ? L"Favorite: " : L"Recent: ") + FormatFolderShortcutMenuLabel(path);
-            row.rowRect = RECT{innerLeft, rowTop, innerRight, rowTop + kQuickAccessPanelRowHeight};
+            row.displayLabel = FormatFolderShortcutMenuLabel(path);
+            row.metadataLabel = BuildQuickAccessDestinationMetadata(path, favorite);
+            row.rowRect = RECT{innerLeft, rowTop, innerRight, rowTop + metrics.rowHeight};
+            const int buttonTop = rowTop + metrics.buttonTopInset;
             row.moveRect = RECT{innerRight - kQuickAccessPanelButtonWidth,
-                                rowTop + 3,
+                                buttonTop,
                                 innerRight,
-                                rowTop + kQuickAccessPanelRowHeight - 3};
+                                buttonTop + metrics.buttonHeight};
             row.copyRect = RECT{row.moveRect.left - kQuickAccessPanelButtonGap - kQuickAccessPanelButtonWidth,
                                 row.moveRect.top,
                                 row.moveRect.left - kQuickAccessPanelButtonGap,
                                 row.moveRect.bottom};
             quickAccessDestinationRows_.push_back(std::move(row));
-            rowTop += kQuickAccessPanelRowHeight + kQuickAccessPanelRowGap;
+            rowTop += metrics.rowHeight + kQuickAccessPanelRowGap;
         }
+    }
+
+    int MainWindow::HitTestQuickAccessDestinationRow(int x, int y) const
+    {
+        const POINT point{x, y};
+        for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
+        {
+            if (PtInRect(&quickAccessDestinationRows_[rowIndex].rowRect, point) != FALSE)
+            {
+                return static_cast<int>(rowIndex);
+            }
+        }
+
+        return -1;
     }
 
     bool MainWindow::CanUseQuickAccessDestinationActions() const
@@ -8899,6 +9345,11 @@ namespace hyperbrowse::ui
                 detailsStripVisible_ = value != 0;
             }
 
+            if (TryReadDwordValue(key, kRegistryValueDetailsPanelWidth, &value))
+            {
+                detailsPanelWidth_ = static_cast<int>(value);
+            }
+
             if (TryReadDwordValue(key, kRegistryValueViewerMouseWheelBehavior, &value)
                 && value <= static_cast<DWORD>(viewer::MouseWheelBehavior::Navigate))
             {
@@ -8940,6 +9391,7 @@ namespace hyperbrowse::ui
         }
 
         leftPaneWidth_ = std::max(leftPaneWidth_, kMinLeftPaneWidth);
+        detailsPanelWidth_ = std::max(detailsPanelWidth_, kDetailsPanelMinWidth);
         startupFolderPath_ = NormalizeFolderPath(std::move(startupFolderPath_));
     }
 
@@ -8975,6 +9427,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueSlideshowTransitionStyle, static_cast<DWORD>(slideshowTransitionStyle_));
             WriteDwordValue(key, kRegistryValueSlideshowTransitionDuration, static_cast<DWORD>(slideshowTransitionDurationMs_));
             WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueDetailsPanelWidth, static_cast<DWORD>(detailsPanelWidth_));
             WriteDwordValue(key, kRegistryValueViewerMouseWheelBehavior, static_cast<DWORD>(viewerMouseWheelBehavior_));
             WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, persistentThumbnailCacheEnabled_ ? 1UL : 0UL);
@@ -9250,7 +9703,7 @@ namespace hyperbrowse::ui
         return 0;
     }
 
-    LRESULT MainWindow::OnViewerDeleteRequested()
+    LRESULT MainWindow::OnViewerDeleteRequested(WPARAM wParam)
     {
         if (!viewerWindow_ || !viewerWindow_->IsOpen() || fileOperationActive_)
         {
@@ -9266,7 +9719,8 @@ namespace hyperbrowse::ui
 
         pendingViewerDeleteSourcePath_ = sourcePath;
         pendingViewerDeletePreferredFocusPath_ = preferredFocusPath;
-        StartFileOperation(services::FileOperationType::DeleteRecycleBin,
+    const bool permanentDelete = (wParam & viewer::ViewerWindow::kDeleteRequestPermanent) != 0;
+    StartFileOperation(permanentDelete ? services::FileOperationType::DeletePermanent : services::FileOperationType::DeleteRecycleBin,
                            {sourcePath},
                            {},
                            services::FileConflictPolicy::PromptShell,
@@ -9598,6 +10052,10 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_DETAILS_STRIP:
             detailsStripVisible_ = !detailsStripVisible_;
+            if (detailsStripVisible_)
+            {
+                detailsPanelWidth_ = std::max(detailsPanelWidth_, kDetailsPanelMinWidth);
+            }
             if (detailsPanelText_)
             {
                 ShowWindow(detailsPanelText_, detailsStripVisible_ ? SW_SHOW : SW_HIDE);
@@ -10221,9 +10679,32 @@ namespace hyperbrowse::ui
         minMaxInfo->ptMinTrackSize.y = kMinWindowHeight;
     }
 
-    bool MainWindow::IsOverSplitter(int x) const
+    bool MainWindow::IsOverSplitter(int x, int y) const
     {
-        return x >= leftPaneWidth_ && x < leftPaneWidth_ + kSplitterWidth;
+        if (y < kActionStripHeight)
+        {
+            return false;
+        }
+
+        if (x >= leftPaneWidth_ && x < leftPaneWidth_ + kSplitterWidth)
+        {
+            return true;
+        }
+
+        return IsOverDetailsPanelSplitter(x, y);
+    }
+
+    bool MainWindow::IsOverDetailsPanelSplitter(int x, int y) const
+    {
+        if (!detailsStripVisible_ || IsRectEmpty(&detailsPanelRect_))
+        {
+            return false;
+        }
+
+        return y >= detailsPanelRect_.top
+            && y < detailsPanelRect_.bottom
+            && x >= detailsPanelRect_.left - kSplitterWidth
+            && x < detailsPanelRect_.left;
     }
 
     void MainWindow::OnLButtonDown(int x, int y)
@@ -10253,17 +10734,31 @@ namespace hyperbrowse::ui
             return;
         }
 
-        if (IsOverSplitter(x))
+        if (IsOverDetailsPanelSplitter(x, y))
         {
-            dragMode_ = DragMode::Splitter;
+            dragMode_ = DragMode::DetailsSplitter;
+            SetCapture(hwnd_);
+            return;
+        }
+
+        if (IsOverSplitter(x, y))
+        {
+            dragMode_ = DragMode::LeftSplitter;
             SetCapture(hwnd_);
         }
     }
 
     void MainWindow::OnLButtonDoubleClick(int x, int y)
     {
-        (void)y;
-        if (IsOverSplitter(x))
+        if (IsOverDetailsPanelSplitter(x, y))
+        {
+            detailsPanelWidth_ = kDetailsPanelPreferredWidth;
+            util::LogInfo(L"Reset file details panel to default width");
+            LayoutChildren();
+            return;
+        }
+
+        if (IsOverSplitter(x, y))
         {
             leftPaneWidth_ = kDefaultLeftPaneWidth;
             util::LogInfo(L"Reset splitter to default width");
@@ -10326,6 +10821,14 @@ namespace hyperbrowse::ui
 
     void MainWindow::OnMouseMove(int x, int y)
     {
+        auto invalidateQuickAccessPanel = [&]()
+        {
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
+        };
+
         // Track mouse leave for toolbar hover reset
         if (!toolbarMouseTracking_)
         {
@@ -10340,6 +10843,22 @@ namespace hyperbrowse::ui
         // Toolbar hover
         if (y < kActionStripHeight && dragMode_ == DragMode::None)
         {
+            bool quickAccessChanged = false;
+            if (quickAccessHotRowIndex_ >= 0)
+            {
+                quickAccessHotRowIndex_ = -1;
+                quickAccessChanged = true;
+            }
+            if (quickAccessHotButtonIndex_ >= 0)
+            {
+                quickAccessHotButtonIndex_ = -1;
+                quickAccessChanged = true;
+            }
+            if (quickAccessChanged)
+            {
+                invalidateQuickAccessPanel();
+            }
+
             const int hit = ToolbarHitTest(x, y);
             if (hit != toolbarHotIndex_)
             {
@@ -10366,28 +10885,87 @@ namespace hyperbrowse::ui
             InvalidateToolbarStrip();
         }
 
+        const int quickAccessRowHit = HitTestQuickAccessDestinationRow(x, y);
         const int quickAccessHit = HitTestQuickAccessDestinationButton(x, y);
-        if (quickAccessHit != quickAccessHotButtonIndex_)
+        if (quickAccessRowHit != quickAccessHotRowIndex_ || quickAccessHit != quickAccessHotButtonIndex_)
         {
+            quickAccessHotRowIndex_ = quickAccessRowHit;
             quickAccessHotButtonIndex_ = quickAccessHit;
-            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
-            {
-                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
-            }
+            invalidateQuickAccessPanel();
         }
 
-        if (dragMode_ == DragMode::Splitter)
+        if (dragMode_ == DragMode::LeftSplitter)
         {
             RECT client{};
             GetClientRect(hwnd_, &client);
-            const int maxLeft = std::max(kMinLeftPaneWidth, static_cast<int>(client.right) - kMinRightPaneWidth - kSplitterWidth);
+            const int detailsSplitterWidth = detailsStripVisible_ ? kSplitterWidth : 0;
+            const int visibleDetailsPanelWidth = detailsStripVisible_ ? detailsPanelWidth_ : 0;
+            const int maxLeft = std::max(kMinLeftPaneWidth,
+                                         static_cast<int>(client.right) - visibleDetailsPanelWidth - kMinRightPaneWidth - kSplitterWidth - detailsSplitterWidth);
             leftPaneWidth_ = std::clamp(x, kMinLeftPaneWidth, maxLeft);
+            LayoutChildren();
+        }
+        else if (dragMode_ == DragMode::DetailsSplitter)
+        {
+            RECT client{};
+            GetClientRect(hwnd_, &client);
+            const int maxDetailsPanelWidth = std::max(0,
+                                                      static_cast<int>(client.right) - leftPaneWidth_ - kMinRightPaneWidth - (kSplitterWidth * 2));
+            const int minDetailsPanelWidth = std::min(kDetailsPanelMinWidth, maxDetailsPanelWidth);
+            detailsPanelWidth_ = std::clamp(static_cast<int>(client.right) - x - kSplitterWidth,
+                                            minDetailsPanelWidth,
+                                            maxDetailsPanelWidth);
             LayoutChildren();
         }
         else
         {
-            SetCursor(LoadCursorW(nullptr, IsOverSplitter(x) ? IDC_SIZEWE : IDC_ARROW));
+            SetCursor(LoadCursorW(nullptr,
+                                  IsOverSplitter(x, y)
+                                      ? IDC_SIZEWE
+                                      : (quickAccessRowHit >= 0 ? IDC_HAND : IDC_ARROW)));
         }
+    }
+
+    LRESULT MainWindow::OnDropFiles(HDROP dropHandle)
+    {
+        if (!dropHandle)
+        {
+            return 0;
+        }
+
+        POINT dropPoint{};
+        DragQueryPoint(dropHandle, &dropPoint);
+        const int rowIndex = HitTestQuickAccessDestinationRow(dropPoint.x, dropPoint.y);
+        std::vector<std::wstring> sourcePaths = CollectShellDropPaths(dropHandle);
+        DragFinish(dropHandle);
+
+        if (rowIndex < 0
+            || rowIndex >= static_cast<int>(quickAccessDestinationRows_.size())
+            || sourcePaths.empty()
+            || fileOperationActive_)
+        {
+            return 0;
+        }
+
+        std::wstring destinationFolder = NormalizeFolderPath(quickAccessDestinationRows_[static_cast<std::size_t>(rowIndex)].destinationPath);
+        if (!IsExistingDirectory(destinationFolder))
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected destination folder is no longer available.",
+                        L"Quick Send",
+                        MB_OK | MB_ICONINFORMATION);
+            return 0;
+        }
+
+        const services::FileOperationType type = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
+            ? services::FileOperationType::Move
+            : services::FileOperationType::Copy;
+        StartFileOperation(type,
+                           std::move(sourcePaths),
+                           std::move(destinationFolder),
+                           services::FileConflictPolicy::PromptShell,
+                           {});
+        return 0;
     }
 
     LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
@@ -10426,14 +11004,21 @@ namespace hyperbrowse::ui
         case WM_MOUSEMOVE:
             OnMouseMove(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             return 0;
+        case WM_DROPFILES:
+            return OnDropFiles(reinterpret_cast<HDROP>(wParam));
         case WM_SETCURSOR:
         {
             POINT point{};
             GetCursorPos(&point);
             ScreenToClient(hwnd_, &point);
-            if (dragMode_ == DragMode::Splitter || IsOverSplitter(point.x))
+            if (dragMode_ == DragMode::LeftSplitter || dragMode_ == DragMode::DetailsSplitter || IsOverSplitter(point.x, point.y))
             {
                 SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+                return TRUE;
+            }
+            if (HitTestQuickAccessDestinationRow(point.x, point.y) >= 0)
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
                 return TRUE;
             }
             break;
@@ -10461,7 +11046,7 @@ namespace hyperbrowse::ui
         case viewer::ViewerWindow::kActivityChangedMessage:
             return OnViewerActivityMessage(lParam);
         case viewer::ViewerWindow::kDeleteRequestedMessage:
-            return OnViewerDeleteRequested();
+            return OnViewerDeleteRequested(wParam);
         case viewer::ViewerWindow::kClosedMessage:
             return OnViewerClosedMessage();
         case kMemoryPressureSampledMessage:
@@ -10482,8 +11067,9 @@ namespace hyperbrowse::ui
                 toolbarHotIndex_ = -1;
                 InvalidateToolbarStrip();
             }
-            if (quickAccessHotButtonIndex_ >= 0)
+            if (quickAccessHotRowIndex_ >= 0 || quickAccessHotButtonIndex_ >= 0)
             {
+                quickAccessHotRowIndex_ = -1;
                 quickAccessHotButtonIndex_ = -1;
                 if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
                 {
@@ -10577,11 +11163,34 @@ namespace hyperbrowse::ui
             DeleteObject(memBmp);
             DeleteDC(memDC);
 
-            // Splitter
+            const ThemePalette palette = GetThemePalette();
+            auto paintSplitter = [&](const RECT& splitterRect)
+            {
+                const HBRUSH splitterBrush = CreateSolidBrush(palette.splitter);
+                FillRect(hdc, &splitterRect, splitterBrush);
+                DeleteObject(splitterBrush);
+
+                const HPEN gripPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
+                const HGDIOBJ oldPen = SelectObject(hdc, gripPen);
+                const int gripX = (splitterRect.left + splitterRect.right) / 2;
+                const int gripTop = splitterRect.top + 20;
+                const int gripBottom = std::max(gripTop + 12, static_cast<int>(splitterRect.bottom) - 20);
+                MoveToEx(hdc, gripX, gripTop, nullptr);
+                LineTo(hdc, gripX, gripBottom);
+                SelectObject(hdc, oldPen);
+                DeleteObject(gripPen);
+            };
+
             RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
-            const HBRUSH splitterBrush = CreateSolidBrush(GetThemePalette().splitter);
-            FillRect(hdc, &splitterRect, splitterBrush);
-            DeleteObject(splitterBrush);
+            paintSplitter(splitterRect);
+            if (detailsStripVisible_ && !IsRectEmpty(&detailsPanelRect_))
+            {
+                RECT detailsSplitterRect{detailsPanelRect_.left - kSplitterWidth,
+                                         kActionStripHeight,
+                                         detailsPanelRect_.left,
+                                         client.bottom};
+                paintSplitter(detailsSplitterRect);
+            }
 
             PaintDetailsPanel(hdc, client);
 

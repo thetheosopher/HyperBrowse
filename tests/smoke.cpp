@@ -1165,6 +1165,7 @@ namespace
             hyperbrowse::services::ImageMetadataService service(
                 1,
                 2,
+                hyperbrowse::util::ResourceProfile::Balanced,
                 [](const hyperbrowse::browser::BrowserItem& item, std::wstring*)
                 {
                     return MakeMetadata(item.fileName);
@@ -1212,6 +1213,7 @@ namespace
             hyperbrowse::services::ImageMetadataService service(
                 1,
                 4,
+                hyperbrowse::util::ResourceProfile::Balanced,
                 [&](const hyperbrowse::browser::BrowserItem& item, std::wstring*)
                 {
                     if (item.modifiedTimestampUtc == cancelledItem.modifiedTimestampUtc)
@@ -1269,6 +1271,7 @@ namespace
             hyperbrowse::services::ImageMetadataService service(
                 1,
                 4,
+                hyperbrowse::util::ResourceProfile::Balanced,
                 [&](const hyperbrowse::browser::BrowserItem& item, std::wstring*)
                 {
                     if (item.modifiedTimestampUtc == staleItem.modifiedTimestampUtc)
