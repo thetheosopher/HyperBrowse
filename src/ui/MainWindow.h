@@ -113,7 +113,8 @@ namespace hyperbrowse::ui
         {
             None,
             LeftSplitter,
-            DetailsSplitter
+            DetailsSplitter,
+            QuickAccessInternal
         };
 
         struct ThemePalette
@@ -216,7 +217,9 @@ namespace hyperbrowse::ui
                        bool preferSecondaryMonitor = false);
         bool SyncViewerToBrowserModel(std::wstring_view preferredPath = {});
         void RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top);
-        bool CanUseQuickAccessDestinationActions() const;
+        bool IsQuickAccessDestinationCurrentFolder(std::wstring_view folderPath) const;
+        bool CanNavigateToQuickAccessDestination(std::wstring_view folderPath) const;
+        bool CanUseQuickAccessDestinationActions(std::wstring_view folderPath) const;
         int HitTestQuickAccessDestinationRow(int x, int y) const;
         int HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type = nullptr) const;
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
@@ -267,6 +270,7 @@ namespace hyperbrowse::ui
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
+        LRESULT OnBrowserPaneQuickSendDragMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBatchConvertMessage(LPARAM lParam);
         LRESULT OnFileOperationMessage(LPARAM lParam);
         LRESULT OnDetailsPanelThumbnailMessage(LPARAM lParam);
@@ -400,6 +404,7 @@ namespace hyperbrowse::ui
         bool detailsPanelHistogramLoading_{};
         int quickAccessHotRowIndex_{-1};
         int quickAccessHotButtonIndex_{-1};
+        int quickAccessPressedRowIndex_{-1};
         int quickAccessPressedButtonIndex_{-1};
         std::array<std::uint32_t, 64> detailsPanelHistogramRed_{};
         std::array<std::uint32_t, 64> detailsPanelHistogramGreen_{};

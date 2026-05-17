@@ -370,7 +370,7 @@ namespace
         return true;
     }
 
-    std::wstring BuildQuickAccessDestinationMetadata(std::wstring_view folderPath, bool favorite)
+    std::wstring BuildQuickAccessDestinationMetadata(std::wstring_view folderPath, bool favorite, bool currentFolder)
     {
         std::wstring metadata = favorite ? L"Favorite destination" : L"Recent destination";
 
@@ -385,7 +385,7 @@ namespace
             metadata.append(L"folder unavailable");
         }
 
-        metadata.append(L" | Drop here");
+        metadata.append(currentFolder ? L" | Current folder" : L" | Drop here");
         return metadata;
     }
 
@@ -6585,7 +6585,6 @@ namespace hyperbrowse::ui
         if (activeRightPaneTab_ == RightPaneTab::QuickSend && !quickAccessDestinationRows_.empty() && !IsRectEmpty(&quickAccessDestinationPanelRect_))
         {
             const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
-            const bool actionsEnabled = CanUseQuickAccessDestinationActions();
             RECT headerRect{quickAccessDestinationPanelRect_.left,
                             quickAccessDestinationPanelRect_.top,
                             quickAccessDestinationPanelRect_.right,
@@ -6633,10 +6632,15 @@ namespace hyperbrowse::ui
             for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
             {
                 const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
-                const bool rowHot = static_cast<int>(rowIndex) == quickAccessHotRowIndex_;
-                const COLORREF currentRowBackground = rowHot
-                    ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 20 : 12)
-                    : rowBackground;
+                const bool rowEnabled = CanNavigateToQuickAccessDestination(row.destinationPath);
+                const bool actionsEnabled = CanUseQuickAccessDestinationActions(row.destinationPath);
+                const bool rowHot = rowEnabled && static_cast<int>(rowIndex) == quickAccessHotRowIndex_;
+                const bool rowPressed = rowEnabled && static_cast<int>(rowIndex) == quickAccessPressedRowIndex_;
+                const COLORREF currentRowBackground = rowPressed
+                    ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 28 : 18)
+                    : (rowHot
+                        ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 20 : 12)
+                        : rowBackground);
                 HBRUSH rowBrush = CreateSolidBrush(currentRowBackground);
                 HPEN rowPen = CreatePen(PS_SOLID, 1, rowHot ? palette.accent : rowBorder);
                 const HGDIOBJ oldBrush = SelectObject(hdc, rowBrush);
@@ -6652,7 +6656,7 @@ namespace hyperbrowse::ui
                 labelRect.top += metrics.labelTopInset;
                 labelRect.right = row.copyRect.left - 10;
                 labelRect.bottom = labelRect.top + metrics.labelHeight;
-                SetTextColor(hdc, palette.text);
+                SetTextColor(hdc, rowEnabled ? palette.text : palette.mutedText);
                 SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
                 DrawTextW(hdc, row.displayLabel.c_str(), -1, &labelRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
@@ -6899,6 +6903,7 @@ namespace hyperbrowse::ui
         quickAccessDestinationPanelRect_ = RECT{};
         quickAccessHotRowIndex_ = -1;
         quickAccessHotButtonIndex_ = -1;
+        quickAccessPressedRowIndex_ = -1;
         quickAccessPressedButtonIndex_ = -1;
 
         if (!detailsStripVisible_ || innerRight <= innerLeft)
@@ -6945,7 +6950,7 @@ namespace hyperbrowse::ui
             QuickAccessDestinationRow row;
             row.destinationPath = path;
             row.displayLabel = FormatFolderShortcutMenuLabel(path);
-            row.metadataLabel = BuildQuickAccessDestinationMetadata(path, favorite);
+            row.metadataLabel = BuildQuickAccessDestinationMetadata(path, favorite, IsQuickAccessDestinationCurrentFolder(path));
             row.favorite = favorite;
             row.rowRect = RECT{innerLeft, rowTop, innerRight, rowTop + metrics.rowHeight};
             const int buttonTop = rowTop + metrics.buttonTopInset;
@@ -6968,12 +6973,29 @@ namespace hyperbrowse::ui
         }
     }
 
+    bool MainWindow::IsQuickAccessDestinationCurrentFolder(std::wstring_view folderPath) const
+    {
+        return browserModel_
+            && !browserModel_->FolderPath().empty()
+            && !folderPath.empty()
+            && FolderPathsEqual(browserModel_->FolderPath(), folderPath);
+    }
+
+    bool MainWindow::CanNavigateToQuickAccessDestination(std::wstring_view folderPath) const
+    {
+        return !folderPath.empty()
+            && !IsQuickAccessDestinationCurrentFolder(folderPath)
+            && IsExistingDirectory(folderPath);
+    }
+
     int MainWindow::HitTestQuickAccessDestinationRow(int x, int y) const
     {
         const POINT point{x, y};
         for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
         {
-            if (PtInRect(&quickAccessDestinationRows_[rowIndex].rowRect, point) != FALSE)
+            const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
+            if (CanNavigateToQuickAccessDestination(row.destinationPath)
+                && PtInRect(&row.rowRect, point) != FALSE)
             {
                 return static_cast<int>(rowIndex);
             }
@@ -6982,18 +7004,21 @@ namespace hyperbrowse::ui
         return -1;
     }
 
-    bool MainWindow::CanUseQuickAccessDestinationActions() const
+    bool MainWindow::CanUseQuickAccessDestinationActions(std::wstring_view folderPath) const
     {
-        return browserPaneController_ && browserPaneController_->SelectedCount() > 0 && !fileOperationActive_;
+        return browserPaneController_
+            && browserPaneController_->SelectedCount() > 0
+            && !fileOperationActive_
+            && CanNavigateToQuickAccessDestination(folderPath);
     }
 
     int MainWindow::HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type) const
     {
         const POINT point{x, y};
-        const bool actionsEnabled = CanUseQuickAccessDestinationActions();
         for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
         {
             const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
+            const bool actionsEnabled = CanUseQuickAccessDestinationActions(row.destinationPath);
             if (actionsEnabled && PtInRect(&row.copyRect, point) != FALSE)
             {
                 if (type)
@@ -7411,6 +7436,15 @@ namespace hyperbrowse::ui
         {
             MessageBoxW(hwnd_,
                         L"The selected destination folder is no longer available.",
+                        type == services::FileOperationType::Move ? L"Move Selection" : L"Copy Selection",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (IsQuickAccessDestinationCurrentFolder(destinationFolder))
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected destination is already the current folder.",
                         type == services::FileOperationType::Move ? L"Move Selection" : L"Copy Selection",
                         MB_OK | MB_ICONINFORMATION);
             return;
@@ -9857,7 +9891,10 @@ namespace hyperbrowse::ui
         case services::FolderEnumerationUpdateKind::Completed:
             browserModel_->Complete();
             util::LogInfo(L"Completed folder enumeration for " + update->folderPath);
-            RecordRecentFolder(update->folderPath);
+            if (update->totalCount > 0)
+            {
+                RecordRecentFolder(update->folderPath);
+            }
             if (folderWatchService_)
             {
                 activeFolderWatchRequestId_ = folderWatchService_->StartWatching(hwnd_, update->folderPath, browserModel_->IsRecursive());
@@ -9992,6 +10029,52 @@ namespace hyperbrowse::ui
         const POINT screenPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
         ShowBrowserContextMenu(screenPoint);
         return 0;
+    }
+
+    LRESULT MainWindow::OnBrowserPaneQuickSendDragMessage(WPARAM wParam, LPARAM lParam)
+    {
+        (void)lParam;
+
+        if (reinterpret_cast<HWND>(wParam) != browserPane_
+            || dragMode_ != DragMode::None
+            || !detailsStripVisible_
+            || activeRightPaneTab_ != RightPaneTab::QuickSend
+            || !browserPaneController_
+            || browserPaneController_->SelectedCount() == 0
+            || fileOperationActive_)
+        {
+            return 0;
+        }
+
+        const bool hasQuickAccessTarget = std::any_of(quickAccessDestinationRows_.begin(),
+                                                      quickAccessDestinationRows_.end(),
+                                                      [&](const QuickAccessDestinationRow& row)
+        {
+            return CanNavigateToQuickAccessDestination(row.destinationPath);
+        });
+        if (!hasQuickAccessTarget)
+        {
+            return 0;
+        }
+
+        dragMode_ = DragMode::QuickAccessInternal;
+        quickAccessPressedRowIndex_ = -1;
+        quickAccessPressedButtonIndex_ = -1;
+
+        POINT point{};
+        GetCursorPos(&point);
+        ScreenToClient(hwnd_, &point);
+        quickAccessHotRowIndex_ = HitTestQuickAccessDestinationRow(point.x, point.y);
+        quickAccessHotButtonIndex_ = -1;
+        SetCapture(hwnd_);
+
+        if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+        {
+            InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+        }
+
+        SetCursor(LoadCursorW(nullptr, quickAccessHotRowIndex_ >= 0 ? IDC_HAND : IDC_NO));
+        return TRUE;
     }
 
     LRESULT MainWindow::OnBatchConvertMessage(LPARAM lParam)
@@ -11158,6 +11241,18 @@ namespace hyperbrowse::ui
             return;
         }
 
+        const int quickAccessRow = HitTestQuickAccessDestinationRow(x, y);
+        if (quickAccessRow >= 0)
+        {
+            quickAccessPressedRowIndex_ = quickAccessRow;
+            SetCapture(hwnd_);
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
+            return;
+        }
+
         if (IsOverDetailsPanelSplitter(x, y))
         {
             dragMode_ = DragMode::DetailsSplitter;
@@ -11252,6 +11347,61 @@ namespace hyperbrowse::ui
             return;
         }
 
+        if (quickAccessPressedRowIndex_ >= 0)
+        {
+            const int pressedRow = quickAccessPressedRowIndex_;
+            quickAccessPressedRowIndex_ = -1;
+            ReleaseCapture();
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
+
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(hwnd_, &point);
+            const int hitRow = HitTestQuickAccessDestinationRow(point.x, point.y);
+            if (hitRow == pressedRow)
+            {
+                const std::size_t rowIndex = static_cast<std::size_t>(pressedRow);
+                if (rowIndex < quickAccessDestinationRows_.size())
+                {
+                    LoadFolderAsync(quickAccessDestinationRows_[rowIndex].destinationPath);
+                }
+            }
+            return;
+        }
+
+        if (dragMode_ == DragMode::QuickAccessInternal)
+        {
+            dragMode_ = DragMode::None;
+            if (GetCapture() == hwnd_)
+            {
+                ReleaseCapture();
+            }
+
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(hwnd_, &point);
+            const int hitRow = HitTestQuickAccessDestinationRow(point.x, point.y);
+            quickAccessHotRowIndex_ = hitRow;
+            quickAccessHotButtonIndex_ = -1;
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
+
+            if (hitRow >= 0 && hitRow < static_cast<int>(quickAccessDestinationRows_.size()))
+            {
+                const services::FileOperationType type = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
+                    ? services::FileOperationType::Move
+                    : services::FileOperationType::Copy;
+                StartSelectionFileOperationToDestination(type,
+                                                         quickAccessDestinationRows_[static_cast<std::size_t>(hitRow)].destinationPath);
+            }
+            return;
+        }
+
         if (dragMode_ != DragMode::None)
         {
             dragMode_ = DragMode::None;
@@ -11326,7 +11476,9 @@ namespace hyperbrowse::ui
         }
 
         const int quickAccessRowHit = HitTestQuickAccessDestinationRow(x, y);
-        const int quickAccessHit = HitTestQuickAccessDestinationButton(x, y);
+        const int quickAccessHit = dragMode_ == DragMode::QuickAccessInternal
+            ? -1
+            : HitTestQuickAccessDestinationButton(x, y);
         if (quickAccessRowHit != quickAccessHotRowIndex_ || quickAccessHit != quickAccessHotButtonIndex_)
         {
             quickAccessHotRowIndex_ = quickAccessRowHit;
@@ -11357,12 +11509,16 @@ namespace hyperbrowse::ui
                                             maxDetailsPanelWidth);
             LayoutChildren();
         }
+        else if (dragMode_ == DragMode::QuickAccessInternal)
+        {
+            SetCursor(LoadCursorW(nullptr, quickAccessRowHit >= 0 ? IDC_HAND : IDC_NO));
+        }
         else
         {
             SetCursor(LoadCursorW(nullptr,
                                   IsOverSplitter(x, y)
                                       ? IDC_SIZEWE
-                                      : (quickAccessRowHit >= 0 ? IDC_HAND : IDC_ARROW)));
+                                      : ((quickAccessRowHit >= 0 || quickAccessHit >= 0) ? IDC_HAND : IDC_ARROW)));
         }
     }
 
@@ -11451,12 +11607,23 @@ namespace hyperbrowse::ui
             POINT point{};
             GetCursorPos(&point);
             ScreenToClient(hwnd_, &point);
+            if (dragMode_ == DragMode::QuickAccessInternal)
+            {
+                SetCursor(LoadCursorW(nullptr,
+                                      HitTestQuickAccessDestinationRow(point.x, point.y) >= 0 ? IDC_HAND : IDC_NO));
+                return TRUE;
+            }
             if (dragMode_ == DragMode::LeftSplitter || dragMode_ == DragMode::DetailsSplitter || IsOverSplitter(point.x, point.y))
             {
                 SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
                 return TRUE;
             }
             if (HitTestQuickAccessDestinationRow(point.x, point.y) >= 0)
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
+            if (HitTestQuickAccessDestinationButton(point.x, point.y) >= 0)
             {
                 SetCursor(LoadCursorW(nullptr, IDC_HAND));
                 return TRUE;
@@ -11475,6 +11642,8 @@ namespace hyperbrowse::ui
             return OnBrowserPaneOpenItemMessage(wParam, lParam);
         case browser::BrowserPane::kContextMenuMessage:
             return OnBrowserPaneContextMenuMessage(wParam, lParam);
+        case browser::BrowserPane::kQuickSendDragMessage:
+            return OnBrowserPaneQuickSendDragMessage(wParam, lParam);
         case services::BatchConvertService::kMessageId:
             return OnBatchConvertMessage(lParam);
         case services::FileOperationService::kMessageId:

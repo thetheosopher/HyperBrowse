@@ -2149,6 +2149,22 @@ namespace hyperbrowse::browser
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
+    void BrowserPane::FocusSelectedViewIndex(int viewIndex)
+    {
+        const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+        if (modelIndex < 0)
+        {
+            return;
+        }
+
+        anchorModelIndex_ = modelIndex;
+        focusedModelIndex_ = modelIndex;
+        UpdateSelectionBytes();
+        SyncDetailsListSelectionFromModel();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
     void BrowserPane::SelectSingleViewIndex(int viewIndex)
     {
         const int modelIndex = ModelIndexFromViewIndex(viewIndex);
@@ -2232,8 +2248,45 @@ namespace hyperbrowse::browser
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
+    void BrowserPane::ArmQuickSendDrag(POINT point)
+    {
+        quickSendDragArmed_ = true;
+        quickSendDragStartPoint_ = point;
+        SetCapture(hwnd_);
+    }
+
+    void BrowserPane::ClearQuickSendDragState()
+    {
+        quickSendDragArmed_ = false;
+        quickSendDragStartPoint_ = {};
+        if (!rubberBandActive_ && GetCapture() == hwnd_)
+        {
+            ReleaseCapture();
+        }
+    }
+
+    bool BrowserPane::ShouldBeginQuickSendDrag(POINT point) const
+    {
+        if (!quickSendDragArmed_ || selectedModelIndices_.empty())
+        {
+            return false;
+        }
+
+        const int dragThresholdX = std::max(1, GetSystemMetrics(SM_CXDRAG));
+        const int dragThresholdY = std::max(1, GetSystemMetrics(SM_CYDRAG));
+        return std::abs(point.x - quickSendDragStartPoint_.x) >= dragThresholdX
+            || std::abs(point.y - quickSendDragStartPoint_.y) >= dragThresholdY;
+    }
+
+    bool BrowserPane::RequestQuickSendDrag() const
+    {
+        return parent_
+            && SendMessageW(parent_, kQuickSendDragMessage, reinterpret_cast<WPARAM>(hwnd_), 0) != 0;
+    }
+
     void BrowserPane::BeginRubberBandSelection(POINT point, bool additive)
     {
+        ClearQuickSendDragState();
         rubberBandActive_ = true;
         rubberBandStart_ = point;
         rubberBandRect_ = {point.x, point.y, point.x, point.y};
@@ -3975,21 +4028,32 @@ namespace hyperbrowse::browser
 
                 if (viewIndex >= 0)
                 {
+                    const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+                    const bool alreadySelected = modelIndex >= 0 && selectedModelIndices_.contains(modelIndex);
                     if (shiftPressed)
                     {
+                        ClearQuickSendDragState();
                         ExtendSelectionToViewIndex(viewIndex);
                     }
                     else if (controlPressed)
                     {
+                        ClearQuickSendDragState();
                         ToggleViewIndexSelection(viewIndex);
+                    }
+                    else if (alreadySelected && selectedModelIndices_.size() > 1)
+                    {
+                        FocusSelectedViewIndex(viewIndex);
+                        ArmQuickSendDrag(point);
                     }
                     else
                     {
                         SelectSingleViewIndex(viewIndex);
+                        ArmQuickSendDrag(point);
                     }
                 }
                 else
                 {
+                    ClearQuickSendDragState();
                     BeginRubberBandSelection(point, controlPressed);
                 }
                 return 0;
@@ -3998,6 +4062,7 @@ namespace hyperbrowse::browser
         case WM_LBUTTONDBLCLK:
             if (viewMode_ == BrowserViewMode::Thumbnails)
             {
+                ClearQuickSendDragState();
                 const int viewIndex = HitTestThumbnailItem(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)});
                 if (viewIndex >= 0)
                 {
@@ -4010,14 +4075,30 @@ namespace hyperbrowse::browser
         case WM_MOUSEMOVE:
             if (viewMode_ == BrowserViewMode::Thumbnails)
             {
+                const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if ((wParam & MK_LBUTTON) == 0)
+                {
+                    ClearQuickSendDragState();
+                }
+                else if (!rubberBandActive_ && ShouldBeginQuickSendDrag(point))
+                {
+                    HideThumbnailTooltip();
+                    const bool dragStarted = RequestQuickSendDrag();
+                    ClearQuickSendDragState();
+                    if (dragStarted)
+                    {
+                        return 0;
+                    }
+                }
+
                 if (rubberBandActive_)
                 {
                     HideThumbnailTooltip();
-                    UpdateRubberBandSelection(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)});
+                    UpdateRubberBandSelection(point);
                 }
                 else
                 {
-                    UpdateThumbnailTooltip(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)}, wParam, lParam);
+                    UpdateThumbnailTooltip(point, wParam, lParam);
                 }
                 return 0;
             }
@@ -4026,6 +4107,7 @@ namespace hyperbrowse::browser
             HideThumbnailTooltip();
             return 0;
         case WM_LBUTTONUP:
+            ClearQuickSendDragState();
             if (rubberBandActive_)
             {
                 EndRubberBandSelection();
@@ -4034,6 +4116,7 @@ namespace hyperbrowse::browser
             break;
         case WM_CAPTURECHANGED:
             HideThumbnailTooltip();
+            ClearQuickSendDragState();
             EndRubberBandSelection();
             return 0;
         case WM_CONTEXTMENU:
@@ -4186,6 +4269,28 @@ namespace hyperbrowse::browser
                 case LVN_ITEMCHANGED:
                     RebuildSelectionFromDetailsList();
                     return 0;
+                case LVN_BEGINDRAG:
+                {
+                    const auto* dragInfo = reinterpret_cast<const NMLISTVIEW*>(lParam);
+                    if (dragInfo->iItem >= 0)
+                    {
+                        const int modelIndex = ModelIndexFromViewIndex(dragInfo->iItem);
+                        if (modelIndex >= 0)
+                        {
+                            if (selectedModelIndices_.contains(modelIndex))
+                            {
+                                FocusSelectedViewIndex(dragInfo->iItem);
+                            }
+                            else
+                            {
+                                SelectSingleViewIndex(dragInfo->iItem);
+                            }
+                        }
+                    }
+
+                    RequestQuickSendDrag();
+                    return 0;
+                }
                 case NM_CUSTOMDRAW:
                     return HandleDetailsListCustomDraw(lParam);
                 case LVN_KEYDOWN:

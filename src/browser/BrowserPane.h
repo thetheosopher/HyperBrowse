@@ -80,6 +80,7 @@ namespace hyperbrowse::browser
         static constexpr UINT kStateChangedMessage = WM_APP + 42;
         static constexpr UINT kOpenItemMessage = WM_APP + 44;
         static constexpr UINT kContextMenuMessage = WM_APP + 45;
+        static constexpr UINT kQuickSendDragMessage = WM_APP + 50;
 
         struct ThemeColors
         {
@@ -204,9 +205,14 @@ namespace hyperbrowse::browser
         void SyncDetailsListSelectionFromModel();
         void UpdateSelectionBytes();
         void SelectAll();
+        void FocusSelectedViewIndex(int viewIndex);
         void SelectSingleViewIndex(int viewIndex);
         void ToggleViewIndexSelection(int viewIndex);
         void ExtendSelectionToViewIndex(int viewIndex);
+        void ArmQuickSendDrag(POINT point);
+        void ClearQuickSendDragState();
+        bool ShouldBeginQuickSendDrag(POINT point) const;
+        bool RequestQuickSendDrag() const;
         void BeginRubberBandSelection(POINT point, bool additive);
         void UpdateRubberBandSelection(POINT point);
         void EndRubberBandSelection();
@@ -299,7 +305,9 @@ namespace hyperbrowse::browser
         int anchorModelIndex_{-1};
         int focusedModelIndex_{-1};
         bool rubberBandActive_{};
+        bool quickSendDragArmed_{};
         bool trackingMouseLeave_{};
+        POINT quickSendDragStartPoint_{};
         POINT rubberBandStart_{};
         RECT rubberBandRect_{};
         int hoveredTooltipViewIndex_{-1};
