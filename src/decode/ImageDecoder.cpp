@@ -11,6 +11,10 @@
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <limits>
+#include <mutex>
+#include <span>
+#include <unordered_map>
 #include <vector>
 
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
@@ -35,6 +39,180 @@ namespace
     std::atomic_bool g_libRawOutOfProcessEnabled{true};
     constexpr DWORD kRawHelperThumbnailTimeoutMs = 8000;
     constexpr DWORD kRawHelperFullImageTimeoutMs = 30000;
+
+    class ScratchByteBufferPool
+    {
+    public:
+        class Lease
+        {
+        public:
+            Lease() = default;
+
+            Lease(ScratchByteBufferPool* owner,
+                  std::size_t classBytes,
+                  std::vector<unsigned char>&& buffer) noexcept
+                : owner_(owner)
+                , classBytes_(classBytes)
+                , buffer_(std::move(buffer))
+            {
+            }
+
+            Lease(const Lease&) = delete;
+            Lease& operator=(const Lease&) = delete;
+
+            Lease(Lease&& other) noexcept
+                : owner_(other.owner_)
+                , classBytes_(other.classBytes_)
+                , buffer_(std::move(other.buffer_))
+            {
+                other.owner_ = nullptr;
+                other.classBytes_ = 0;
+            }
+
+            Lease& operator=(Lease&& other) noexcept
+            {
+                if (this == &other)
+                {
+                    return *this;
+                }
+
+                Release();
+                owner_ = other.owner_;
+                classBytes_ = other.classBytes_;
+                buffer_ = std::move(other.buffer_);
+                other.owner_ = nullptr;
+                other.classBytes_ = 0;
+                return *this;
+            }
+
+            ~Lease()
+            {
+                Release();
+            }
+
+            std::span<unsigned char> span() noexcept
+            {
+                return std::span<unsigned char>(buffer_.data(), buffer_.size());
+            }
+
+            std::span<const unsigned char> view() const noexcept
+            {
+                return std::span<const unsigned char>(buffer_.data(), buffer_.size());
+            }
+
+        private:
+            friend class ScratchByteBufferPool;
+
+            void Release() noexcept
+            {
+                if (!owner_)
+                {
+                    return;
+                }
+
+                owner_->Release(classBytes_, std::move(buffer_));
+                owner_ = nullptr;
+                classBytes_ = 0;
+            }
+
+            ScratchByteBufferPool* owner_{};
+            std::size_t classBytes_{};
+            std::vector<unsigned char> buffer_;
+        };
+
+        Lease Acquire(std::size_t byteCount)
+        {
+            const std::size_t classBytes = ClassBytesFor(byteCount);
+            std::vector<unsigned char> buffer;
+
+            {
+                std::scoped_lock lock(mutex_);
+                auto iterator = freeBuffers_.find(classBytes);
+                if (iterator != freeBuffers_.end() && !iterator->second.empty())
+                {
+                    buffer = std::move(iterator->second.back());
+                    iterator->second.pop_back();
+                    hyperbrowse::util::IncrementCounter(L"thumbnail.decode.raw.scratch_pool.hit");
+                }
+            }
+
+            if (buffer.capacity() < classBytes)
+            {
+                buffer.reserve(classBytes);
+                hyperbrowse::util::IncrementCounter(L"thumbnail.decode.raw.scratch_pool.miss");
+            }
+            else if (buffer.empty())
+            {
+                hyperbrowse::util::IncrementCounter(L"thumbnail.decode.raw.scratch_pool.reused");
+            }
+
+            buffer.resize(byteCount);
+            return Lease(this, classBytes, std::move(buffer));
+        }
+
+    private:
+        static constexpr std::size_t kMinimumClassBytes = 256 * 1024;
+        static constexpr std::size_t kMaximumBuffersPerClass = 4;
+
+        static std::size_t ClassBytesFor(std::size_t byteCount) noexcept
+        {
+            std::size_t classBytes = kMinimumClassBytes;
+            while (classBytes < byteCount && classBytes <= (std::numeric_limits<std::size_t>::max() / 2))
+            {
+                classBytes *= 2;
+            }
+
+            return std::max(classBytes, byteCount);
+        }
+
+        void Release(std::size_t classBytes, std::vector<unsigned char>&& buffer) noexcept
+        {
+            if (classBytes == 0)
+            {
+                return;
+            }
+
+            buffer.clear();
+
+            std::scoped_lock lock(mutex_);
+            std::vector<std::vector<unsigned char>>& bucket = freeBuffers_[classBytes];
+            if (bucket.size() >= kMaximumBuffersPerClass)
+            {
+                hyperbrowse::util::IncrementCounter(L"thumbnail.decode.raw.scratch_pool.discarded");
+                return;
+            }
+
+            bucket.push_back(std::move(buffer));
+        }
+
+        std::mutex mutex_;
+        std::unordered_map<std::size_t, std::vector<std::vector<unsigned char>>> freeBuffers_;
+    };
+
+    ScratchByteBufferPool& RawScratchByteBufferPool()
+    {
+        static ScratchByteBufferPool pool;
+        return pool;
+    }
+
+    bool ComputeBgraByteCount(int width, int height, std::size_t* byteCount)
+    {
+        if (!byteCount || width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        const unsigned long long pixelCount = static_cast<unsigned long long>(width)
+            * static_cast<unsigned long long>(height);
+        const unsigned long long candidate = pixelCount * 4ULL;
+        if (candidate > static_cast<unsigned long long>(std::numeric_limits<std::size_t>::max()))
+        {
+            return false;
+        }
+
+        *byteCount = static_cast<std::size_t>(candidate);
+        return true;
+    }
 
     hyperbrowse::decode::ThumbnailDecodeFailureKind ClassifyThumbnailFailureKindFromMessage(std::wstring_view errorMessage)
     {
@@ -453,18 +631,23 @@ namespace
         return DecodeWicFile(item, &ignoredError);
     }
 
-    std::vector<unsigned char> ScaleBgra(const std::vector<unsigned char>& sourcePixels,
-                                         int sourceWidth,
-                                         int sourceHeight,
-                                         int destinationWidth,
-                                         int destinationHeight)
+    bool ScaleBgra(std::span<const unsigned char> sourcePixels,
+                   int sourceWidth,
+                   int sourceHeight,
+                   int destinationWidth,
+                   int destinationHeight,
+                   std::span<unsigned char> destinationPixels)
     {
-        if (sourceWidth == destinationWidth && sourceHeight == destinationHeight)
+        std::size_t sourceByteCount = 0;
+        std::size_t destinationByteCount = 0;
+        if (!ComputeBgraByteCount(sourceWidth, sourceHeight, &sourceByteCount)
+            || !ComputeBgraByteCount(destinationWidth, destinationHeight, &destinationByteCount)
+            || sourcePixels.size() < sourceByteCount
+            || destinationPixels.size() < destinationByteCount)
         {
-            return sourcePixels;
+            return false;
         }
 
-        std::vector<unsigned char> scaled(static_cast<std::size_t>(destinationWidth) * static_cast<std::size_t>(destinationHeight) * 4U);
         for (int y = 0; y < destinationHeight; ++y)
         {
             const int sourceY = std::clamp((y * sourceHeight) / std::max(1, destinationHeight), 0, sourceHeight - 1);
@@ -473,17 +656,17 @@ namespace
                 const int sourceX = std::clamp((x * sourceWidth) / std::max(1, destinationWidth), 0, sourceWidth - 1);
                 const std::size_t sourceOffset = (static_cast<std::size_t>(sourceY) * static_cast<std::size_t>(sourceWidth) + static_cast<std::size_t>(sourceX)) * 4U;
                 const std::size_t destinationOffset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(destinationWidth) + static_cast<std::size_t>(x)) * 4U;
-                scaled[destinationOffset + 0] = sourcePixels[sourceOffset + 0];
-                scaled[destinationOffset + 1] = sourcePixels[sourceOffset + 1];
-                scaled[destinationOffset + 2] = sourcePixels[sourceOffset + 2];
-                scaled[destinationOffset + 3] = sourcePixels[sourceOffset + 3];
+                destinationPixels[destinationOffset + 0] = sourcePixels[sourceOffset + 0];
+                destinationPixels[destinationOffset + 1] = sourcePixels[sourceOffset + 1];
+                destinationPixels[destinationOffset + 2] = sourcePixels[sourceOffset + 2];
+                destinationPixels[destinationOffset + 3] = sourcePixels[sourceOffset + 3];
             }
         }
 
-        return scaled;
+        return true;
     }
 
-    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> BuildCachedThumbnailFromBgra(std::vector<unsigned char> bgraPixels,
+    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> BuildCachedThumbnailFromBgra(std::span<const unsigned char> bgraPixels,
                                                                                               int sourceBitmapWidth,
                                                                                               int sourceBitmapHeight,
                                                                                               int targetWidth,
@@ -492,8 +675,21 @@ namespace
                                                                                               int sourceHeightMetadata,
                                                                                               std::wstring* errorMessage)
     {
+        std::size_t sourceByteCount = 0;
+        if (!ComputeBgraByteCount(sourceBitmapWidth, sourceBitmapHeight, &sourceByteCount)
+            || bgraPixels.size() < sourceByteCount)
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"The decoded BGRA buffer was invalid or truncated.";
+            }
+            return {};
+        }
+
         int destinationWidth = sourceBitmapWidth;
         int destinationHeight = sourceBitmapHeight;
+        ScratchByteBufferPool::Lease scaledPixelsLease;
+        std::span<const unsigned char> outputPixels = bgraPixels;
         if (targetWidth > 0 && targetHeight > 0)
         {
             UINT scaledWidth = 0;
@@ -506,7 +702,35 @@ namespace
                                    &scaledHeight);
             destinationWidth = static_cast<int>(scaledWidth);
             destinationHeight = static_cast<int>(scaledHeight);
-            bgraPixels = ScaleBgra(bgraPixels, sourceBitmapWidth, sourceBitmapHeight, destinationWidth, destinationHeight);
+            if (destinationWidth != sourceBitmapWidth || destinationHeight != sourceBitmapHeight)
+            {
+                std::size_t scaledByteCount = 0;
+                if (!ComputeBgraByteCount(destinationWidth, destinationHeight, &scaledByteCount))
+                {
+                    if (errorMessage)
+                    {
+                        *errorMessage = L"The requested thumbnail size overflowed the BGRA scratch buffer.";
+                    }
+                    return {};
+                }
+
+                scaledPixelsLease = RawScratchByteBufferPool().Acquire(scaledByteCount);
+                if (!ScaleBgra(bgraPixels,
+                               sourceBitmapWidth,
+                               sourceBitmapHeight,
+                               destinationWidth,
+                               destinationHeight,
+                               scaledPixelsLease.span()))
+                {
+                    if (errorMessage)
+                    {
+                        *errorMessage = L"Failed to scale the BGRA thumbnail buffer.";
+                    }
+                    return {};
+                }
+
+                outputPixels = scaledPixelsLease.view();
+            }
         }
 
         void* bits = nullptr;
@@ -524,8 +748,8 @@ namespace
             return {};
         }
 
-        const std::size_t byteCount = static_cast<std::size_t>(destinationWidth) * static_cast<std::size_t>(destinationHeight) * 4U;
-        std::memcpy(bits, bgraPixels.data(), byteCount);
+        const std::size_t byteCount = outputPixels.size();
+        std::memcpy(bits, outputPixels.data(), byteCount);
         return std::make_shared<hyperbrowse::cache::CachedThumbnail>(bitmap,
                                                                       destinationWidth,
                                                                       destinationHeight,
@@ -731,7 +955,18 @@ namespace
             return {};
         }
 
-        std::vector<unsigned char> bgraPixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U, 255U);
+        std::size_t bgraByteCount = 0;
+        if (!ComputeBgraByteCount(width, height, &bgraByteCount))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"LibRaw returned image dimensions that overflow the BGRA scratch buffer.";
+            }
+            return {};
+        }
+
+        ScratchByteBufferPool::Lease bgraPixels = RawScratchByteBufferPool().Acquire(bgraByteCount);
+        std::span<unsigned char> bgraSpan = bgraPixels.span();
         if (bits > 8)
         {
             const auto* samples = reinterpret_cast<const std::uint16_t*>(image->data);
@@ -742,9 +977,10 @@ namespace
                 const unsigned char red = static_cast<unsigned char>(samples[sampleOffset + 0] >> 8);
                 const unsigned char green = static_cast<unsigned char>((colors > 1 ? samples[sampleOffset + 1] : samples[sampleOffset + 0]) >> 8);
                 const unsigned char blue = static_cast<unsigned char>((colors > 2 ? samples[sampleOffset + 2] : samples[sampleOffset + 0]) >> 8);
-                bgraPixels[pixelOffset + 0] = blue;
-                bgraPixels[pixelOffset + 1] = green;
-                bgraPixels[pixelOffset + 2] = red;
+                bgraSpan[pixelOffset + 0] = blue;
+                bgraSpan[pixelOffset + 1] = green;
+                bgraSpan[pixelOffset + 2] = red;
+                bgraSpan[pixelOffset + 3] = 255U;
             }
         }
         else
@@ -757,13 +993,14 @@ namespace
                 const unsigned char red = samples[sampleOffset + 0];
                 const unsigned char green = colors > 1 ? samples[sampleOffset + 1] : samples[sampleOffset + 0];
                 const unsigned char blue = colors > 2 ? samples[sampleOffset + 2] : samples[sampleOffset + 0];
-                bgraPixels[pixelOffset + 0] = blue;
-                bgraPixels[pixelOffset + 1] = green;
-                bgraPixels[pixelOffset + 2] = red;
+                bgraSpan[pixelOffset + 0] = blue;
+                bgraSpan[pixelOffset + 1] = green;
+                bgraSpan[pixelOffset + 2] = red;
+                bgraSpan[pixelOffset + 3] = 255U;
             }
         }
 
-        return BuildCachedThumbnailFromBgra(std::move(bgraPixels),
+        return BuildCachedThumbnailFromBgra(bgraPixels.view(),
                                             width,
                                             height,
                                             targetWidth,
@@ -1031,7 +1268,7 @@ namespace
         }
 
         hyperbrowse::util::IncrementCounter(L"thumbnail.decode.raw.helper.successes");
-        return BuildCachedThumbnailFromBgra(std::move(payload.bgraPixels),
+        return BuildCachedThumbnailFromBgra(std::span<const unsigned char>(payload.bgraPixels.data(), payload.bgraPixels.size()),
                                             payload.bitmapWidth,
                                             payload.bitmapHeight,
                                             0,
@@ -1068,7 +1305,7 @@ namespace
         }
 
         hyperbrowse::util::IncrementCounter(L"viewer.decode.raw.helper.successes");
-        return BuildCachedThumbnailFromBgra(std::move(payload.bgraPixels),
+        return BuildCachedThumbnailFromBgra(std::span<const unsigned char>(payload.bgraPixels.data(), payload.bgraPixels.size()),
                                             payload.bitmapWidth,
                                             payload.bitmapHeight,
                                             0,

@@ -166,7 +166,7 @@ namespace hyperbrowse::ui
         success = LoadIconAsset(L"view-list", IDR_TOOLBAR_ICON_VIEW_LIST, L"view-list.svg") && success;
         success = LoadIconAsset(L"sort", IDR_TOOLBAR_ICON_SORT, L"sort.svg") && success;
         success = LoadIconAsset(L"thumbnail-size", IDR_TOOLBAR_ICON_THUMBNAIL_SIZE, L"thumbnail-size.svg") && success;
-        success = LoadIconAsset(L"compare", 0, L"compare.svg") && success;
+        success = LoadIconAsset(L"compare", IDR_TOOLBAR_ICON_COMPARE, L"compare.svg") && success;
         success = LoadIconAsset(L"copy", IDR_TOOLBAR_ICON_COPY, L"copy.svg") && success;
         success = LoadIconAsset(L"move", IDR_TOOLBAR_ICON_MOVE, L"move.svg") && success;
         success = LoadIconAsset(L"delete", IDR_TOOLBAR_ICON_DELETE, L"delete.svg") && success;

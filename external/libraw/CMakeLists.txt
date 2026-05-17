@@ -101,7 +101,7 @@ target_compile_definitions(HyperBrowseLibRaw
 )
 
 if(MSVC)
-    target_compile_options(HyperBrowseLibRaw PRIVATE /W0)
+    target_compile_options(HyperBrowseLibRaw PRIVATE /W0 /FS)
     target_compile_definitions(HyperBrowseLibRaw PRIVATE _CRT_SECURE_NO_WARNINGS)
 else()
     target_compile_options(HyperBrowseLibRaw PRIVATE -w)

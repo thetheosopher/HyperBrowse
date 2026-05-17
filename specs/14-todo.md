@@ -177,9 +177,14 @@ resource-heavy subsystems as needed.
 
 ### `A5` Decode/Scale Buffer Pools (P1)
 
-**Implementation status:** Planned-but-gated. No scratch buffer pool has been
-introduced yet; this stays intentionally blocked on benchmark evidence from D2
-so we do not add allocator complexity without measured decode-path pressure.
+**Implementation status:** In progress. An initial low-risk slice now pools the
+transient host-side nvJPEG decode buffers used to copy BGR pixels back from the
+CUDA device before thumbnail construction, with reuse counters recorded through
+diagnostics. The RAW decode helpers now also reuse pooled BGRA conversion and
+scale scratch buffers when building thumbnails from LibRaw and raw-helper
+payloads. Remaining work: extend the same idea to any WIC-controlled scale
+intermediates if benchmark evidence still justifies the added allocator
+complexity.
 
 - Add a small `ScratchBufferPool` (per-size class, max N buffers) consumed
   by WIC scale, nvJPEG output, and LibRaw embedded-preview decode paths.
@@ -217,8 +222,14 @@ prefetch multipliers.
 **Implementation status:** In progress. Startup diagnostics now capture
 `process-start → first-window-visible` and
 `first-window-visible → first-thumbnail-painted`, and `--bench-startup`
-emits a structured JSON snapshot on shutdown. Remaining: wire those snapshots
-into a repeatable CI regression gate with configurable thresholds.
+emits a structured JSON snapshot on shutdown. GitHub Actions now runs a tracked
+PowerShell benchmark gate with configurable thresholds against Release builds,
+so regressions can fail CI without depending on ad hoc local scripts. Remaining:
+tune the initial budgets against runner variability and decide whether to retain
+historical benchmark artifacts. A local
+debug run against the repo `assets` folder currently produced roughly
+`900.60 ms` to first window visible and `1265.43 ms` to first thumbnail
+painted, with the second span at roughly `364.83 ms`.
 
 - Capture `process-start → first-window-visible` and
   `first-window-visible → first-thumbnail-painted` spans through the

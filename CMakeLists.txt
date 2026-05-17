@@ -72,7 +72,7 @@ configure_file(cmake/RuntimeDependencies.txt.in "${HYPERBROWSE_RUNTIME_DEPENDENC
 configure_file(cmake/HyperBrowseInstaller.iss.in "${HYPERBROWSE_INNO_SETUP_SCRIPT}" @ONLY)
 
 if(MSVC)
-    add_compile_options(/permissive- /Zc:__cplusplus /W4 /EHsc /utf-8 /DUNICODE /D_UNICODE /DNOMINMAX /DWIN32_LEAN_AND_MEAN)
+    add_compile_options(/permissive- /Zc:__cplusplus /W4 /EHsc /utf-8 /FS /DUNICODE /D_UNICODE /DNOMINMAX /DWIN32_LEAN_AND_MEAN)
     if(HYPERBROWSE_WARNINGS_AS_ERRORS)
         add_compile_options(/WX)
     endif()

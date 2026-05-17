@@ -10,6 +10,7 @@ IDR_TOOLBAR_ICON_VIEW_GRID  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-i
 IDR_TOOLBAR_ICON_VIEW_LIST  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/view-list.svg"
 IDR_TOOLBAR_ICON_SORT  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/sort.svg"
 IDR_TOOLBAR_ICON_THUMBNAIL_SIZE  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/thumbnail-size.svg"
+IDR_TOOLBAR_ICON_COMPARE  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/compare.svg"
 IDR_TOOLBAR_ICON_COPY  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/copy.svg"
 IDR_TOOLBAR_ICON_MOVE  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/move.svg"
 IDR_TOOLBAR_ICON_DELETE  RCDATA  "@CMAKE_CURRENT_SOURCE_DIR@/assets/toolbar-icons/delete.svg"

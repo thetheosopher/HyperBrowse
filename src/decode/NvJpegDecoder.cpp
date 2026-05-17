@@ -13,9 +13,12 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <memory>
+#include <span>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "decode/WicDecodeHelpers.h"
@@ -131,6 +134,161 @@ namespace
         UINT scaledHeight{};
         std::size_t sourceBufferSize{};
     };
+
+    class ScratchByteBufferPool
+    {
+    public:
+        class Lease
+        {
+        public:
+            Lease() = default;
+
+            Lease(ScratchByteBufferPool* owner,
+                  std::size_t classBytes,
+                  std::vector<std::uint8_t>&& buffer) noexcept
+                : owner_(owner)
+                , classBytes_(classBytes)
+                , buffer_(std::move(buffer))
+            {
+            }
+
+            Lease(const Lease&) = delete;
+            Lease& operator=(const Lease&) = delete;
+
+            Lease(Lease&& other) noexcept
+                : owner_(other.owner_)
+                , classBytes_(other.classBytes_)
+                , buffer_(std::move(other.buffer_))
+            {
+                other.owner_ = nullptr;
+                other.classBytes_ = 0;
+            }
+
+            Lease& operator=(Lease&& other) noexcept
+            {
+                if (this == &other)
+                {
+                    return *this;
+                }
+
+                Release();
+                owner_ = other.owner_;
+                classBytes_ = other.classBytes_;
+                buffer_ = std::move(other.buffer_);
+                other.owner_ = nullptr;
+                other.classBytes_ = 0;
+                return *this;
+            }
+
+            ~Lease()
+            {
+                Release();
+            }
+
+            std::uint8_t* data() noexcept
+            {
+                return buffer_.data();
+            }
+
+            std::span<const std::uint8_t> view() const noexcept
+            {
+                return std::span<const std::uint8_t>(buffer_.data(), buffer_.size());
+            }
+
+        private:
+            friend class ScratchByteBufferPool;
+
+            void Release() noexcept
+            {
+                if (!owner_)
+                {
+                    return;
+                }
+
+                owner_->Release(classBytes_, std::move(buffer_));
+                owner_ = nullptr;
+                classBytes_ = 0;
+            }
+
+            ScratchByteBufferPool* owner_{};
+            std::size_t classBytes_{};
+            std::vector<std::uint8_t> buffer_;
+        };
+
+        Lease Acquire(std::size_t byteCount)
+        {
+            const std::size_t classBytes = ClassBytesFor(byteCount);
+            std::vector<std::uint8_t> buffer;
+
+            {
+                std::scoped_lock lock(mutex_);
+                auto iterator = freeBuffers_.find(classBytes);
+                if (iterator != freeBuffers_.end() && !iterator->second.empty())
+                {
+                    buffer = std::move(iterator->second.back());
+                    iterator->second.pop_back();
+                    hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.scratch_pool.hit");
+                }
+            }
+
+            if (buffer.capacity() < classBytes)
+            {
+                buffer.reserve(classBytes);
+                hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.scratch_pool.miss");
+            }
+            else if (buffer.empty())
+            {
+                hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.scratch_pool.reused");
+            }
+
+            buffer.resize(byteCount);
+            return Lease(this, classBytes, std::move(buffer));
+        }
+
+    private:
+        static constexpr std::size_t kMinimumClassBytes = 256 * 1024;
+        static constexpr std::size_t kMaximumBuffersPerClass = 4;
+
+        static std::size_t ClassBytesFor(std::size_t byteCount) noexcept
+        {
+            std::size_t classBytes = kMinimumClassBytes;
+            while (classBytes < byteCount && classBytes <= (std::numeric_limits<std::size_t>::max() / 2))
+            {
+                classBytes *= 2;
+            }
+
+            return std::max(classBytes, byteCount);
+        }
+
+        void Release(std::size_t classBytes, std::vector<std::uint8_t>&& buffer) noexcept
+        {
+            if (classBytes == 0)
+            {
+                return;
+            }
+
+            buffer.clear();
+
+            std::scoped_lock lock(mutex_);
+            std::vector<std::vector<std::uint8_t>>& bucket = freeBuffers_[classBytes];
+            if (bucket.size() >= kMaximumBuffersPerClass)
+            {
+                hyperbrowse::util::IncrementCounter(L"thumbnail.decode.nvjpeg.scratch_pool.discarded");
+                return;
+            }
+
+            bucket.push_back(std::move(buffer));
+        }
+
+        std::mutex mutex_;
+        std::unordered_map<std::size_t, std::vector<std::vector<std::uint8_t>>> freeBuffers_;
+    };
+
+    ScratchByteBufferPool& NvJpegScratchByteBufferPool()
+    {
+        static ScratchByteBufferPool pool;
+        return pool;
+    }
 
     HMODULE LoadFirstAvailableModule(const wchar_t* const* candidateNames,
                                      std::size_t candidateCount,
@@ -523,7 +681,7 @@ namespace
         return samples;
     }
 
-    void CopyBgrToBgra(const std::vector<std::uint8_t>& sourcePixels,
+    void CopyBgrToBgra(std::span<const std::uint8_t> sourcePixels,
                       int width,
                       int height,
                       std::uint8_t* destinationPixels)
@@ -544,7 +702,7 @@ namespace
         }
     }
 
-    void ResampleOrientedBgrToBgra(const std::vector<std::uint8_t>& sourcePixels,
+    void ResampleOrientedBgrToBgra(std::span<const std::uint8_t> sourcePixels,
                                    int sourceWidth,
                                    int sourceHeight,
                                    std::uint16_t orientation,
@@ -936,7 +1094,7 @@ namespace
     }
 
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> BuildCachedThumbnailFromBgrPixels(
-        const std::vector<std::uint8_t>& sourcePixels,
+        std::span<const std::uint8_t> sourcePixels,
         int sourceWidth,
         int sourceHeight,
         std::uint16_t orientation,
@@ -1189,7 +1347,7 @@ namespace hyperbrowse::decode
             return {};
         }
 
-        std::vector<std::uint8_t> sourcePixels(request.sourceBufferSize);
+        auto sourcePixels = NvJpegScratchByteBufferPool().Acquire(request.sourceBufferSize);
         if (runtime.cudaMemcpy_(sourcePixels.data(),
                                 deviceBuffer.Get(),
                                 request.sourceBufferSize,
@@ -1202,7 +1360,7 @@ namespace hyperbrowse::decode
             return {};
         }
 
-        return BuildCachedThumbnailFromBgrPixels(sourcePixels,
+        return BuildCachedThumbnailFromBgrPixels(sourcePixels.view(),
                                                  request.sourceWidth,
                                                  request.sourceHeight,
                                                  request.orientation,
@@ -1332,10 +1490,12 @@ namespace hyperbrowse::decode
             return thumbnails;
         }
 
+        std::vector<ScratchByteBufferPool::Lease> sourcePixelBuffers;
+        sourcePixelBuffers.reserve(keys.size());
         for (std::size_t index = 0; index < keys.size(); ++index)
         {
-            std::vector<std::uint8_t> sourcePixels(requests[index].sourceBufferSize);
-            if (runtime.cudaMemcpy_(sourcePixels.data(),
+            sourcePixelBuffers.push_back(NvJpegScratchByteBufferPool().Acquire(requests[index].sourceBufferSize));
+            if (runtime.cudaMemcpy_(sourcePixelBuffers.back().data(),
                                     deviceBuffers[index]->Get(),
                                     requests[index].sourceBufferSize,
                                     cudaMemcpyDeviceToHost) != kCudaSuccess)
@@ -1347,7 +1507,7 @@ namespace hyperbrowse::decode
                 continue;
             }
 
-            thumbnails[index] = BuildCachedThumbnailFromBgrPixels(sourcePixels,
+            thumbnails[index] = BuildCachedThumbnailFromBgrPixels(sourcePixelBuffers.back().view(),
                                                                   requests[index].sourceWidth,
                                                                   requests[index].sourceHeight,
                                                                   requests[index].orientation,

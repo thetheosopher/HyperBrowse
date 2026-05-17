@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
-    branches: [main]
+    branches: [master, main]
 
 jobs:
   build-and-test:
@@ -39,3 +39,15 @@ jobs:
 
       - name: Build (Release)
         run: cmake --build build --preset release --target HyperBrowse -- /m /v:minimal
+
+      - name: Startup benchmark gate
+        shell: pwsh
+        run: >-
+          .\tools\TestStartupBenchmark.ps1
+          -ProjectRoot $PWD
+          -BuildDir (Join-Path $PWD 'build')
+          -Configuration Release
+          -OutputPath (Join-Path $env:RUNNER_TEMP 'startup-benchmark.json')
+          -ProcessToFirstWindowVisibleBudgetMs 5000
+          -FirstWindowVisibleToFirstThumbnailPaintedBudgetMs 5000
+          -ProcessToFirstThumbnailPaintedBudgetMs 8000
