@@ -247,8 +247,9 @@ namespace
             return S_OK;
         }
 
-        HRESULT STDMETHODCALLTYPE PreDeleteItem(DWORD, IShellItem*) override
+        HRESULT STDMETHODCALLTYPE PreDeleteItem(DWORD, IShellItem* item) override
         {
+            pendingDeleteSourcePaths_.push_back(PathFromShellItem(item));
             return S_OK;
         }
 
@@ -257,7 +258,10 @@ namespace
                                                  HRESULT result,
                                                  IShellItem* newlyCreated) override
         {
-            RecordResult(item, result, newlyCreated);
+            const std::wstring fallbackSourcePath = nextPendingDeleteSourcePathIndex_ < pendingDeleteSourcePaths_.size()
+                ? pendingDeleteSourcePaths_[nextPendingDeleteSourcePathIndex_++]
+                : std::wstring{};
+            RecordResult(item, result, newlyCreated, fallbackSourcePath);
             return S_OK;
         }
 
@@ -298,11 +302,18 @@ namespace
         }
 
     private:
-        void RecordResult(IShellItem* sourceItem, HRESULT result, IShellItem* newlyCreated)
+        void RecordResult(IShellItem* sourceItem,
+                          HRESULT result,
+                          IShellItem* newlyCreated,
+                          std::wstring_view fallbackSourcePath = {})
         {
             if (SUCCEEDED(result))
             {
-                const std::wstring sourcePath = PathFromShellItem(sourceItem);
+                std::wstring sourcePath = PathFromShellItem(sourceItem);
+                if (sourcePath.empty() && !fallbackSourcePath.empty())
+                {
+                    sourcePath.assign(fallbackSourcePath);
+                }
                 if (!sourcePath.empty())
                 {
                     succeededSourcePaths_.push_back(sourcePath);
@@ -322,6 +333,8 @@ namespace
         volatile long refCount_{1};
         std::vector<std::wstring> succeededSourcePaths_;
         std::vector<std::wstring> createdPaths_;
+        std::vector<std::wstring> pendingDeleteSourcePaths_;
+        std::size_t nextPendingDeleteSourcePathIndex_{};
         std::size_t failedCount_{};
     };
 

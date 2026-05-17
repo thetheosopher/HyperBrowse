@@ -18,9 +18,15 @@ namespace
         std::wstring outputPath;
     };
 
-    StartupBenchmarkOptions ParseStartupBenchmarkOptions()
+    struct StartupOptions
     {
-        StartupBenchmarkOptions options;
+        StartupBenchmarkOptions benchmark;
+        std::wstring launchPath;
+    };
+
+    StartupOptions ParseStartupOptions()
+    {
+        StartupOptions options;
 
         int argumentCount = 0;
         LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
@@ -34,25 +40,30 @@ namespace
             const std::wstring_view argument(arguments[index]);
             if (argument == L"--bench-startup")
             {
-                options.enabled = true;
+                options.benchmark.enabled = true;
                 if (index + 1 < argumentCount)
                 {
                     const std::wstring_view nextArgument(arguments[index + 1]);
                     if (!nextArgument.empty() && nextArgument[0] != L'-')
                     {
-                        options.outputPath.assign(nextArgument);
+                        options.benchmark.outputPath.assign(nextArgument);
                         ++index;
                     }
                 }
-                break;
+                continue;
             }
 
             constexpr std::wstring_view kBenchStartupPrefix = L"--bench-startup=";
             if (argument.rfind(kBenchStartupPrefix, 0) == 0)
             {
-                options.enabled = true;
-                options.outputPath.assign(argument.substr(kBenchStartupPrefix.size()));
-                break;
+                options.benchmark.enabled = true;
+                options.benchmark.outputPath.assign(argument.substr(kBenchStartupPrefix.size()));
+                continue;
+            }
+
+            if (options.launchPath.empty() && !argument.empty())
+            {
+                options.launchPath.assign(argument);
             }
         }
 
@@ -76,10 +87,10 @@ namespace hyperbrowse::app
         util::Stopwatch startupStopwatch;
         util::LogInfo(L"Starting HyperBrowse application shell");
 
-        const StartupBenchmarkOptions startupBenchmarkOptions = ParseStartupBenchmarkOptions();
-        if (startupBenchmarkOptions.enabled)
+        const StartupOptions startupOptions = ParseStartupOptions();
+        if (startupOptions.benchmark.enabled)
         {
-            util::EnableStartupBenchmark(startupBenchmarkOptions.outputPath);
+            util::EnableStartupBenchmark(startupOptions.benchmark.outputPath);
             util::LogInfo(L"Startup benchmark capture enabled.");
         }
 
@@ -92,6 +103,10 @@ namespace hyperbrowse::app
         }
 
         mainWindow_ = std::make_unique<ui::MainWindow>(instance_);
+        if (!startupOptions.launchPath.empty())
+        {
+            mainWindow_->SetStartupLaunchPath(startupOptions.launchPath);
+        }
         if (!mainWindow_->Create())
         {
             util::LogError(L"Failed to create main window");
@@ -119,7 +134,7 @@ namespace hyperbrowse::app
         }
 
         util::LogInfo(L"Shutting down HyperBrowse");
-        if (startupBenchmarkOptions.enabled)
+        if (startupOptions.benchmark.enabled)
         {
             std::wstring outputPath;
             if (util::WriteStartupBenchmarkSnapshot(&outputPath))

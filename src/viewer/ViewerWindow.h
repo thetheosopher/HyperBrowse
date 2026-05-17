@@ -76,7 +76,8 @@ namespace hyperbrowse::viewer
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
         void SetDarkTheme(bool enabled);
         bool ReplaceItems(std::vector<browser::BrowserItem> items, int selectedIndex);
-        bool PrepareDeleteCurrent(std::wstring* sourcePath, std::wstring* preferredFocusPath);
+        bool GetDeleteCurrentPaths(std::wstring* sourcePath, std::wstring* preferredFocusPath) const;
+        bool AdvanceAfterDeleteCurrent();
 
     private:
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseViewerWindow";

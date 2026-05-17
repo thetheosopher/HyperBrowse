@@ -513,7 +513,7 @@ namespace hyperbrowse::viewer
         return true;
     }
 
-    bool ViewerWindow::PrepareDeleteCurrent(std::wstring* sourcePath, std::wstring* preferredFocusPath)
+    bool ViewerWindow::GetDeleteCurrentPaths(std::wstring* sourcePath, std::wstring* preferredFocusPath) const
     {
         if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
         {
@@ -529,22 +529,6 @@ namespace hyperbrowse::viewer
             preferredFocusPath->clear();
         }
 
-        if (items_.size() == 1)
-        {
-            StopSlideshow();
-            StopTransition();
-            ResetCachedImageSlots();
-            items_.clear();
-            currentIndex_ = -1;
-            currentImage_.reset();
-            errorMessage_.clear();
-            if (hwnd_ && IsWindow(hwnd_) != FALSE)
-            {
-                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
-            }
-            return true;
-        }
-
         const int preferredIndex = (currentIndex_ + 1 < static_cast<int>(items_.size()))
             ? currentIndex_ + 1
             : currentIndex_ - 1;
@@ -552,24 +536,36 @@ namespace hyperbrowse::viewer
         {
             *preferredFocusPath = items_[static_cast<std::size_t>(preferredIndex)].filePath;
         }
+        return true;
+    }
 
-        const bool preserveCompareMode = compareMode_;
-        const CompareDirection preservedCompareDirection = compareDirection_;
+    bool ViewerWindow::AdvanceAfterDeleteCurrent()
+    {
+        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        {
+            return false;
+        }
+
         items_.erase(items_.begin() + currentIndex_);
-        currentIndex_ = std::clamp(currentIndex_, 0, static_cast<int>(items_.size()) - 1);
-        compareDirection_ = preservedCompareDirection;
-        compareMode_ = preserveCompareMode && items_.size() > 1;
+        if (items_.empty())
+        {
+            const HWND viewerHwnd = hwnd_;
+            if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
+            {
+                PostMessageW(viewerHwnd, WM_CLOSE, 0, 0);
+            }
+            return true;
+        }
+
+        if (currentIndex_ >= static_cast<int>(items_.size()))
+        {
+            currentIndex_ = static_cast<int>(items_.size()) - 1;
+        }
         if (compareMode_)
         {
             compareDirection_ = ResolveCompareDirection(compareDirection_);
             compareMode_ = ActiveCompareIndex() >= 0;
         }
-        else
-        {
-            compareDirection_ = CompareDirection::Next;
-        }
-        d2dCompareImageBitmap_.Reset();
-        d2dCompareImageIndex_ = -1;
         if (slideshowActive_ && items_.size() < 2)
         {
             StopSlideshow();
@@ -1960,11 +1956,6 @@ namespace hyperbrowse::viewer
                 ToggleFullScreen();
                 return 0;
             case VK_ESCAPE:
-                if (fullScreen_)
-                {
-                    ToggleFullScreen();
-                    return 0;
-                }
                 PostMessageW(hwnd_, WM_CLOSE, 0, 0);
                 return 0;
             default:

@@ -68,6 +68,7 @@ namespace hyperbrowse::ui
         explicit MainWindow(HINSTANCE instance);
         ~MainWindow();
 
+        void SetStartupLaunchPath(std::wstring path);
         bool Create();
         void Show(int nCmdShow) const;
         bool TranslateAcceleratorMessage(MSG* message) const;
@@ -94,6 +95,12 @@ namespace hyperbrowse::ui
         {
             Thumbnails = 0,
             Details = 1
+        };
+
+        enum class RightPaneTab
+        {
+            FileDetails = 0,
+            QuickSend = 1,
         };
 
         enum class ThemeMode
@@ -196,6 +203,7 @@ namespace hyperbrowse::ui
         void ApplyTheme();
         void QueueMemoryPressureSample();
         void LoadWindowState();
+        void ApplyStartupLaunchPathOverride();
         void SaveWindowState() const;
         bool HandleCommand(UINT commandId);
         void OpenFolder();
@@ -267,6 +275,7 @@ namespace hyperbrowse::ui
         LRESULT OnViewerDeleteRequested(WPARAM wParam);
         LRESULT OnViewerClosedMessage();
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
+        void TryOpenPendingStartupViewerPath(bool clearIfNotFound);
 
         void SetBrowserMode(BrowserMode mode);
         void ToggleRecursiveBrowsing();
@@ -321,6 +330,7 @@ namespace hyperbrowse::ui
         HWND treePane_{};
         HWND browserPane_{};
         HWND statusBar_{};
+        HWND detailsPanelTabs_{};
         HWND detailsPanelText_{};
         HWND tooltipControl_{};
         HMODULE detailsPanelRichEditModule_{};
@@ -339,6 +349,7 @@ namespace hyperbrowse::ui
         std::vector<ToolbarItem> toolbarItems_;
         std::unique_ptr<ToolbarIconLibrary> toolbarIconLibrary_;
         BrowserMode browserMode_{BrowserMode::Thumbnails};
+        RightPaneTab activeRightPaneTab_{RightPaneTab::FileDetails};
         ThemeMode themeMode_{ThemeMode::Light};
         bool recursiveBrowsingEnabled_{false};
         bool rawJpegPairedOperationsEnabled_{false};
@@ -351,7 +362,9 @@ namespace hyperbrowse::ui
         HFONT detailsPanelTitleFont_{};
         HFONT detailsPanelSummaryFont_{};
         HFONT detailsPanelBodyFont_{};
+        std::wstring startupLaunchPathOverride_;
         std::wstring startupFolderPath_;
+        std::wstring pendingStartupViewerPath_;
         std::vector<std::wstring> recentFolders_;
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
@@ -371,6 +384,7 @@ namespace hyperbrowse::ui
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::wstring pendingTreeSelectionPath_;
         RECT detailsPanelRect_{};
+        RECT detailsPanelContentRect_{};
         RECT detailsPanelHistogramRect_{};
         RECT quickAccessDestinationPanelRect_{};
         std::wstring detailsPanelTitleText_;

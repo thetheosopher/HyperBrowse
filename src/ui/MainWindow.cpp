@@ -224,6 +224,8 @@ namespace
     constexpr int kDetailsPanelPreferredWidth = 340;
     constexpr int kDetailsPanelMinWidth = 260;
     constexpr int kDetailsPanelMargin = 14;
+    constexpr int kDetailsPanelTabHeight = 30;
+    constexpr int kDetailsPanelTabGap = 10;
     constexpr int kDetailsPanelHistogramHeight = 88;
     constexpr int kDetailsPanelSectionGap = 12;
     constexpr int kDetailsPanelTextTopGap = 14;
@@ -3433,6 +3435,23 @@ namespace
         return fs::is_directory(fs::path(folderPath), error) && !error;
     }
 
+    std::wstring ResolveStartupPath(std::wstring_view path)
+    {
+        if (path.empty())
+        {
+            return {};
+        }
+
+        std::error_code error;
+        fs::path resolvedPath = fs::absolute(fs::path(path), error);
+        if (error)
+        {
+            resolvedPath = fs::path(path);
+        }
+
+        return NormalizeFolderPath(resolvedPath.lexically_normal().wstring());
+    }
+
     bool InsertFolderPath(std::vector<std::wstring>* paths,
                           std::wstring folderPath,
                           std::size_t maxCount,
@@ -3615,6 +3634,11 @@ namespace
                                        permanent ? L"Permanent Delete Folder" : L"Delete Folder",
                                        MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2);
         return result == IDOK;
+    }
+
+    bool ShouldConfirmDeletion(bool permanent)
+    {
+        return permanent && (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0;
     }
 
     std::wstring FindExistingFolderAncestor(fs::path candidate)
@@ -4571,6 +4595,7 @@ namespace hyperbrowse::ui
         }
 
         LoadWindowState();
+        ApplyStartupLaunchPathOverride();
         ApplyResourceProfileSetting();
         ApplyCacheCapacityOverrideSettings();
         ApplyViewerMouseWheelSetting();
@@ -4625,9 +4650,33 @@ namespace hyperbrowse::ui
         UpdateWindow(hwnd_);
     }
 
+    void MainWindow::SetStartupLaunchPath(std::wstring path)
+    {
+        startupLaunchPathOverride_ = std::move(path);
+    }
+
     bool MainWindow::TranslateAcceleratorMessage(MSG* message) const
     {
-        return hwnd_ && accelerators_ && message && TranslateAcceleratorW(hwnd_, accelerators_, message) != 0;
+        if (!hwnd_ || !accelerators_ || !message)
+        {
+            return false;
+        }
+
+        // Do not translate accelerators when the message is destined for the viewer
+        // window or one of its descendants. The viewer has its own keyboard handling
+        // (notably for VK_DELETE) and must not be pre-empted by the main window's
+        // browser-pane accelerators.
+        if (viewerWindow_ && viewerWindow_->IsOpen())
+        {
+            const HWND viewerHwnd = viewerWindow_->Hwnd();
+            if (viewerHwnd && message->hwnd
+                && (message->hwnd == viewerHwnd || IsChild(viewerHwnd, message->hwnd)))
+            {
+                return false;
+            }
+        }
+
+        return TranslateAcceleratorW(hwnd_, accelerators_, message) != 0;
     }
 
     bool MainWindow::RegisterWindowClass() const
@@ -4659,6 +4708,7 @@ namespace hyperbrowse::ui
 
         ACCEL accelerators[] = {
             {FVIRTKEY | FCONTROL, static_cast<WORD>('O'), ID_FILE_OPEN_FOLDER},
+            {FVIRTKEY, VK_ESCAPE, ID_FILE_EXIT},
             {FVIRTKEY, VK_F5, ID_FILE_REFRESH_TREE},
             {FVIRTKEY, VK_F2, ID_FILE_RENAME_SELECTED},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('I'), ID_FILE_IMAGE_INFORMATION},
@@ -4784,7 +4834,7 @@ namespace hyperbrowse::ui
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"6&40 px");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show File &Details Panel");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show Details && Quick &Send Panel");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_FILE_COMPARE_SELECTED, L"Compare &Selected");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection\tCtrl+Shift+S");
@@ -4926,6 +4976,18 @@ namespace hyperbrowse::ui
             detailsPanelRichEditModule_ = LoadLibraryW(L"Msftedit.dll");
         }
 
+        const DWORD detailsPanelTabStyle = WS_CHILD | (detailsStripVisible_ ? WS_VISIBLE : 0) | WS_CLIPSIBLINGS | TCS_SINGLELINE | TCS_FOCUSNEVER;
+        detailsPanelTabs_ = CreateWindowExW(
+            0,
+            WC_TABCONTROLW,
+            L"",
+            detailsPanelTabStyle,
+            0, 0, 100, kDetailsPanelTabHeight,
+            hwnd_,
+            nullptr,
+            instance_,
+            nullptr);
+
         const DWORD detailsPanelTextStyle = WS_CHILD | (detailsStripVisible_ ? WS_VISIBLE : 0) | WS_VSCROLL
             | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_NOHIDESEL;
         detailsPanelText_ = CreateWindowExW(
@@ -4955,11 +5017,31 @@ namespace hyperbrowse::ui
                 nullptr);
         }
 
-        if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsPanelText_)
+        if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsPanelTabs_ || !detailsPanelText_)
         {
             util::LogLastError(L"CreateChildWindows");
             return false;
         }
+
+        SendMessageW(detailsPanelTabs_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
+        TCITEMW tabItem{};
+        tabItem.mask = TCIF_TEXT;
+        wchar_t fileDetailsTabLabel[] = L"File Details";
+        tabItem.pszText = fileDetailsTabLabel;
+        if (TabCtrl_InsertItem(detailsPanelTabs_, 0, &tabItem) < 0)
+        {
+            util::LogError(L"Failed to create the file details tab");
+            return false;
+        }
+
+        wchar_t quickSendTabLabel[] = L"Quick Send";
+        tabItem.pszText = quickSendTabLabel;
+        if (TabCtrl_InsertItem(detailsPanelTabs_, 1, &tabItem) < 0)
+        {
+            util::LogError(L"Failed to create the Quick Send tab");
+            return false;
+        }
+        TabCtrl_SetCurSel(detailsPanelTabs_, static_cast<int>(activeRightPaneTab_));
 
         SendMessageW(detailsPanelText_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
         RefreshDetailsPanelBodyPresentation();
@@ -5567,6 +5649,7 @@ namespace hyperbrowse::ui
                                  contentTop,
                                  clientWidth,
                                  contentTop + clientHeight};
+        detailsPanelContentRect_ = RECT{};
         detailsPanelHistogramRect_ = RECT{};
         quickAccessDestinationPanelRect_ = RECT{};
         quickAccessDestinationRows_.clear();
@@ -5574,59 +5657,88 @@ namespace hyperbrowse::ui
         quickAccessHotButtonIndex_ = -1;
         quickAccessPressedButtonIndex_ = -1;
 
-        if (detailsPanelText_)
+        if (detailsPanelText_ && detailsPanelTabs_)
         {
             if (detailsStripVisible_ && detailsPanelWidth > 0)
             {
                 const int innerLeft = detailsPanelRect_.left + kDetailsPanelMargin;
                 const int innerRight = detailsPanelRect_.right - kDetailsPanelMargin;
                 const int innerWidth = std::max(0, innerRight - innerLeft);
-                const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
-                const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
-                                                               title,
-                                                               innerWidth,
-                                                               DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                               22);
-                const int summaryHeight = detailsPanelSummaryText_.empty()
-                    ? 0
-                    : MeasureTextBlockHeight(detailsPanelSummaryFont_,
-                                             detailsPanelSummaryText_,
-                                             innerWidth,
-                                             DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                             18);
+                const int tabTop = detailsPanelRect_.top + kDetailsPanelMargin;
+                const int tabHeight = std::min(
+                    kDetailsPanelTabHeight,
+                    std::max(0, static_cast<int>(detailsPanelRect_.bottom - tabTop - kDetailsPanelMargin)));
 
-                int top = detailsPanelRect_.top + kDetailsPanelMargin + titleHeight + 6;
-                if (summaryHeight > 0)
+                MoveWindow(detailsPanelTabs_, innerLeft, tabTop, innerWidth, tabHeight, TRUE);
+                ShowWindow(detailsPanelTabs_, SW_SHOW);
+
+                detailsPanelContentRect_ = RECT{
+                    innerLeft,
+                    tabTop + tabHeight + kDetailsPanelTabGap,
+                    innerRight,
+                    detailsPanelRect_.bottom - kDetailsPanelMargin,
+                };
+
+                if (detailsPanelContentRect_.right > detailsPanelContentRect_.left
+                    && detailsPanelContentRect_.bottom > detailsPanelContentRect_.top)
                 {
-                    top += summaryHeight + 8;
-                }
+                    if (activeRightPaneTab_ == RightPaneTab::FileDetails)
+                    {
+                        const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
+                        const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
+                                                                       title,
+                                                                       innerWidth,
+                                                                       DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                                       22);
+                        const int summaryHeight = detailsPanelSummaryText_.empty()
+                            ? 0
+                            : MeasureTextBlockHeight(detailsPanelSummaryFont_,
+                                                     detailsPanelSummaryText_,
+                                                     innerWidth,
+                                                     DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                     18);
 
-                if (detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_)
+                        int top = detailsPanelContentRect_.top + titleHeight + 6;
+                        if (summaryHeight > 0)
+                        {
+                            top += summaryHeight + 8;
+                        }
+
+                        if (detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_)
+                        {
+                            detailsPanelHistogramRect_ = RECT{
+                                detailsPanelContentRect_.left,
+                                top,
+                                detailsPanelContentRect_.right,
+                                top + kDetailsPanelHistogramHeight,
+                            };
+                            top = detailsPanelHistogramRect_.bottom + kDetailsPanelTextTopGap;
+                        }
+
+                        const int availableTextHeight = std::max(0, static_cast<int>(detailsPanelContentRect_.bottom) - top);
+                        MoveWindow(detailsPanelText_, detailsPanelContentRect_.left, top, innerWidth, availableTextHeight, TRUE);
+                        ShowWindow(detailsPanelText_, SW_SHOW);
+                    }
+                    else
+                    {
+                        RebuildQuickAccessDestinationRows(detailsPanelContentRect_.left,
+                                                         detailsPanelContentRect_.right,
+                                                         detailsPanelContentRect_.top);
+                        ShowWindow(detailsPanelText_, SW_HIDE);
+                    }
+                }
+                else
                 {
-                    detailsPanelHistogramRect_ = RECT{
-                        innerLeft,
-                        top,
-                        innerRight,
-                        top + kDetailsPanelHistogramHeight,
-                    };
-                    top = detailsPanelHistogramRect_.bottom + kDetailsPanelTextTopGap;
+                    detailsPanelContentRect_ = RECT{};
+                    ShowWindow(detailsPanelText_, SW_HIDE);
                 }
-
-                RebuildQuickAccessDestinationRows(innerLeft, innerRight, top);
-                if (!quickAccessDestinationRows_.empty())
-                {
-                    top = quickAccessDestinationPanelRect_.bottom + kQuickAccessPanelTopGap;
-                }
-
-                const int availableTextHeight = static_cast<int>(detailsPanelRect_.bottom - kDetailsPanelMargin - top);
-                const int textHeight = std::max(0, availableTextHeight);
-                MoveWindow(detailsPanelText_, innerLeft, top, innerWidth, textHeight, TRUE);
-                ShowWindow(detailsPanelText_, SW_SHOW);
             }
             else
             {
                 ShowWindow(detailsPanelText_, SW_HIDE);
+                ShowWindow(detailsPanelTabs_, SW_HIDE);
                 detailsPanelRect_ = RECT{};
+                detailsPanelContentRect_ = RECT{};
                 quickAccessDestinationPanelRect_ = RECT{};
                 quickAccessDestinationRows_.clear();
             }
@@ -6366,108 +6478,111 @@ namespace hyperbrowse::ui
         SelectObject(hdc, oldPen);
         DeleteObject(borderPen);
 
-        const int innerLeft = detailsPanelRect_.left + kDetailsPanelMargin;
-        const int innerRight = detailsPanelRect_.right - kDetailsPanelMargin;
-        const int innerWidth = std::max(0, innerRight - innerLeft);
-
-        const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
-        const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
-                                                       title,
-                                                       innerWidth,
-                                                       DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                       22);
-        RECT titleRect{innerLeft, detailsPanelRect_.top + kDetailsPanelMargin, innerRight, detailsPanelRect_.top + kDetailsPanelMargin + titleHeight};
-
         SetBkMode(hdc, TRANSPARENT);
         HGDIOBJ oldFont = SelectObject(hdc, detailsPanelTitleFont_ ? detailsPanelTitleFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-        SetTextColor(hdc, palette.text);
-        DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
-
-        int summaryTop = titleRect.bottom + 6;
-        if (!detailsPanelSummaryText_.empty())
+        if (activeRightPaneTab_ == RightPaneTab::FileDetails && !IsRectEmpty(&detailsPanelContentRect_))
         {
-            const int summaryHeight = MeasureTextBlockHeight(detailsPanelSummaryFont_,
-                                                             detailsPanelSummaryText_,
-                                                             innerWidth,
-                                                             DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                             18);
-            RECT summaryRect{innerLeft, summaryTop, innerRight, summaryTop + summaryHeight};
-            SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-            SetTextColor(hdc, palette.mutedText);
-            DrawTextW(hdc, detailsPanelSummaryText_.c_str(), -1, &summaryRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
-        }
+            const int innerLeft = detailsPanelContentRect_.left;
+            const int innerRight = detailsPanelContentRect_.right;
+            const int innerWidth = std::max(0, innerRight - innerLeft);
 
-        if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_) && !IsRectEmpty(&detailsPanelHistogramRect_))
-        {
-            const COLORREF histogramBackground = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 24 : 12);
-            HBRUSH histogramBrush = CreateSolidBrush(histogramBackground);
-            FillRect(hdc, &detailsPanelHistogramRect_, histogramBrush);
-            DeleteObject(histogramBrush);
+            const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
+            const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
+                                                           title,
+                                                           innerWidth,
+                                                           DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                           22);
+            RECT titleRect{innerLeft, detailsPanelContentRect_.top, innerRight, detailsPanelContentRect_.top + titleHeight};
 
-            HPEN histogramBorderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
-            oldPen = SelectObject(hdc, histogramBorderPen);
-            MoveToEx(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.top, nullptr);
-            LineTo(hdc, detailsPanelHistogramRect_.right, detailsPanelHistogramRect_.top);
-            LineTo(hdc, detailsPanelHistogramRect_.right, detailsPanelHistogramRect_.bottom);
-            LineTo(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.bottom);
-            LineTo(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.top);
-            SelectObject(hdc, oldPen);
-            DeleteObject(histogramBorderPen);
+            SetTextColor(hdc, palette.text);
+            DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
 
-            RECT histogramTextRect = detailsPanelHistogramRect_;
-            InflateRect(&histogramTextRect, -8, -8);
-            SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-
-            if (detailsPanelHistogramLoading_)
+            const int summaryTop = titleRect.bottom + 6;
+            if (!detailsPanelSummaryText_.empty())
             {
+                const int summaryHeight = MeasureTextBlockHeight(detailsPanelSummaryFont_,
+                                                                 detailsPanelSummaryText_,
+                                                                 innerWidth,
+                                                                 DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                                 18);
+                RECT summaryRect{innerLeft, summaryTop, innerRight, summaryTop + summaryHeight};
+                SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
                 SetTextColor(hdc, palette.mutedText);
-                DrawTextW(hdc, L"Loading histogram...", -1, &histogramTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                DrawTextW(hdc, detailsPanelSummaryText_.c_str(), -1, &summaryRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
             }
-            else if (!detailsPanelHistogramVisible_ || detailsPanelHistogramPeak_ == 0)
-            {
-                SetTextColor(hdc, palette.mutedText);
-                DrawTextW(hdc, L"Histogram unavailable", -1, &histogramTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            }
-            else
-            {
-                const int chartLeft = detailsPanelHistogramRect_.left + 6;
-                const int chartTop = detailsPanelHistogramRect_.top + 6;
-                const int chartRight = detailsPanelHistogramRect_.right - 6;
-                const int chartBottom = detailsPanelHistogramRect_.bottom - 6;
-                const int chartWidth = std::max(1, chartRight - chartLeft);
-                const int chartHeight = std::max(1, chartBottom - chartTop);
 
-                auto drawChannel = [&](const std::array<std::uint32_t, 64>& values, COLORREF color)
+            if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_) && !IsRectEmpty(&detailsPanelHistogramRect_))
+            {
+                const COLORREF histogramBackground = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 24 : 12);
+                HBRUSH histogramBrush = CreateSolidBrush(histogramBackground);
+                FillRect(hdc, &detailsPanelHistogramRect_, histogramBrush);
+                DeleteObject(histogramBrush);
+
+                HPEN histogramBorderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
+                oldPen = SelectObject(hdc, histogramBorderPen);
+                MoveToEx(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.top, nullptr);
+                LineTo(hdc, detailsPanelHistogramRect_.right, detailsPanelHistogramRect_.top);
+                LineTo(hdc, detailsPanelHistogramRect_.right, detailsPanelHistogramRect_.bottom);
+                LineTo(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.bottom);
+                LineTo(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.top);
+                SelectObject(hdc, oldPen);
+                DeleteObject(histogramBorderPen);
+
+                RECT histogramTextRect = detailsPanelHistogramRect_;
+                InflateRect(&histogramTextRect, -8, -8);
+                SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+
+                if (detailsPanelHistogramLoading_)
                 {
-                    HPEN channelPen = CreatePen(PS_SOLID, 1, color);
-                    HGDIOBJ oldChannelPen = SelectObject(hdc, channelPen);
-                    for (int index = 0; index < kDetailsPanelHistogramBins; ++index)
-                    {
-                        const int x = chartLeft + MulDiv(index, chartWidth - 1, kDetailsPanelHistogramBins - 1);
-                        const int valueHeight = detailsPanelHistogramPeak_ > 0
-                            ? MulDiv(static_cast<int>(values[static_cast<std::size_t>(index)]), chartHeight - 1, static_cast<int>(detailsPanelHistogramPeak_))
-                            : 0;
-                        const int y = chartBottom - valueHeight;
-                        if (index == 0)
-                        {
-                            MoveToEx(hdc, x, y, nullptr);
-                        }
-                        else
-                        {
-                            LineTo(hdc, x, y);
-                        }
-                    }
-                    SelectObject(hdc, oldChannelPen);
-                    DeleteObject(channelPen);
-                };
+                    SetTextColor(hdc, palette.mutedText);
+                    DrawTextW(hdc, L"Loading histogram...", -1, &histogramTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                }
+                else if (!detailsPanelHistogramVisible_ || detailsPanelHistogramPeak_ == 0)
+                {
+                    SetTextColor(hdc, palette.mutedText);
+                    DrawTextW(hdc, L"Histogram unavailable", -1, &histogramTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                }
+                else
+                {
+                    const int chartLeft = detailsPanelHistogramRect_.left + 6;
+                    const int chartTop = detailsPanelHistogramRect_.top + 6;
+                    const int chartRight = detailsPanelHistogramRect_.right - 6;
+                    const int chartBottom = detailsPanelHistogramRect_.bottom - 6;
+                    const int chartWidth = std::max(1, chartRight - chartLeft);
+                    const int chartHeight = std::max(1, chartBottom - chartTop);
 
-                drawChannel(detailsPanelHistogramRed_, RGB(224, 98, 92));
-                drawChannel(detailsPanelHistogramGreen_, RGB(112, 188, 102));
-                drawChannel(detailsPanelHistogramBlue_, RGB(92, 150, 232));
+                    auto drawChannel = [&](const std::array<std::uint32_t, 64>& values, COLORREF color)
+                    {
+                        HPEN channelPen = CreatePen(PS_SOLID, 1, color);
+                        HGDIOBJ oldChannelPen = SelectObject(hdc, channelPen);
+                        for (int index = 0; index < kDetailsPanelHistogramBins; ++index)
+                        {
+                            const int x = chartLeft + MulDiv(index, chartWidth - 1, kDetailsPanelHistogramBins - 1);
+                            const int valueHeight = detailsPanelHistogramPeak_ > 0
+                                ? MulDiv(static_cast<int>(values[static_cast<std::size_t>(index)]), chartHeight - 1, static_cast<int>(detailsPanelHistogramPeak_))
+                                : 0;
+                            const int y = chartBottom - valueHeight;
+                            if (index == 0)
+                            {
+                                MoveToEx(hdc, x, y, nullptr);
+                            }
+                            else
+                            {
+                                LineTo(hdc, x, y);
+                            }
+                        }
+                        SelectObject(hdc, oldChannelPen);
+                        DeleteObject(channelPen);
+                    };
+
+                    drawChannel(detailsPanelHistogramRed_, RGB(224, 98, 92));
+                    drawChannel(detailsPanelHistogramGreen_, RGB(112, 188, 102));
+                    drawChannel(detailsPanelHistogramBlue_, RGB(92, 150, 232));
+                }
             }
         }
 
-        if (!quickAccessDestinationRows_.empty() && !IsRectEmpty(&quickAccessDestinationPanelRect_))
+        if (activeRightPaneTab_ == RightPaneTab::QuickSend && !quickAccessDestinationRows_.empty() && !IsRectEmpty(&quickAccessDestinationPanelRect_))
         {
             const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
             const bool actionsEnabled = CanUseQuickAccessDestinationActions();
@@ -6572,6 +6687,17 @@ namespace hyperbrowse::ui
                                  palette.mutedText,
                                  rowBorder);
             }
+        }
+        else if (activeRightPaneTab_ == RightPaneTab::QuickSend && !IsRectEmpty(&detailsPanelContentRect_))
+        {
+            RECT emptyStateRect = detailsPanelContentRect_;
+            SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+            SetTextColor(hdc, palette.mutedText);
+            DrawTextW(hdc,
+                      L"Quick Send favorites and recent destinations will appear here.",
+                      -1,
+                      &emptyStateRect,
+                      DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
         }
 
         SelectObject(hdc, oldFont);
@@ -7941,8 +8067,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const bool bypassConfirmation = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-        if (!bypassConfirmation && !ConfirmFileDeletion(hwnd_, sourcePaths.size(), permanent))
+        if (ShouldConfirmDeletion(permanent) && !ConfirmFileDeletion(hwnd_, sourcePaths.size(), permanent))
         {
             return;
         }
@@ -8011,8 +8136,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const bool bypassConfirmation = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-        if (!bypassConfirmation && !ConfirmFolderDeletion(hwnd_, folderPath, permanent))
+        if (ShouldConfirmDeletion(permanent) && !ConfirmFolderDeletion(hwnd_, folderPath, permanent))
         {
             return;
         }
@@ -8649,6 +8773,61 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (!viewerDeleteSourcePath.empty()
+            && (update.type == services::FileOperationType::DeleteRecycleBin
+                || update.type == services::FileOperationType::DeletePermanent))
+        {
+            const bool deleteSucceeded = std::any_of(
+                update.succeededSourcePaths.begin(),
+                update.succeededSourcePaths.end(),
+                [&](const std::wstring& sourcePath)
+                {
+                    return browser::FilePathsEqual(sourcePath, viewerDeleteSourcePath);
+                });
+            const bool deleteSourceStillExists = [&]()
+            {
+                std::error_code error;
+                const bool exists = fs::exists(fs::path(viewerDeleteSourcePath), error);
+                return exists || error;
+            }();
+            const bool viewerDeleteSucceeded = deleteSucceeded || (!update.aborted && !deleteSourceStillExists);
+
+            if (viewerDeleteSucceeded
+                && browserModel_
+                && browserModel_->RemoveItemByPath(viewerDeleteSourcePath))
+            {
+                RefreshBrowserPane();
+                UpdateWindowTitle();
+            }
+
+            if (viewerWindow_ && viewerWindow_->IsOpen())
+            {
+                if (viewerDeleteSucceeded && viewerDeletePreferredFocusPath.empty())
+                {
+                    const HWND viewerHwnd = viewerWindow_->Hwnd();
+                    if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
+                    {
+                        PostMessageW(viewerHwnd, WM_CLOSE, 0, 0);
+                    }
+                }
+                else
+                {
+                    const std::wstring preferredViewerPath = viewerDeleteSucceeded
+                        ? viewerDeletePreferredFocusPath
+                        : viewerDeleteSourcePath;
+                    SyncViewerToBrowserModel(preferredViewerPath);
+                }
+            }
+            else if (!viewerDeleteSucceeded && browserModel_)
+            {
+                const int modelIndex = browserModel_->FindItemIndexByPath(viewerDeleteSourcePath);
+                if (modelIndex >= 0)
+                {
+                    OpenItemInViewer(modelIndex);
+                }
+            }
+        }
+
         if (refreshFolderTree || deferredFolderWatchTreeRefresh)
         {
             RefreshFolderTree();
@@ -8673,36 +8852,6 @@ namespace hyperbrowse::ui
         if (!update.message.empty() && update.failedCount > 0)
         {
             MessageBoxW(hwnd_, update.message.c_str(), L"File Operation", MB_OK | MB_ICONWARNING);
-        }
-
-        if (!viewerDeleteSourcePath.empty()
-            && (update.type == services::FileOperationType::DeleteRecycleBin
-                || update.type == services::FileOperationType::DeletePermanent))
-        {
-            const bool deleteSucceeded = std::any_of(
-                update.succeededSourcePaths.begin(),
-                update.succeededSourcePaths.end(),
-                [&](const std::wstring& sourcePath)
-                {
-                    return browser::FilePathsEqual(sourcePath, viewerDeleteSourcePath);
-                });
-
-            const std::wstring preferredViewerPath = deleteSucceeded
-                ? viewerDeletePreferredFocusPath
-                : viewerDeleteSourcePath;
-
-            if (viewerWindow_ && viewerWindow_->IsOpen())
-            {
-                SyncViewerToBrowserModel(preferredViewerPath);
-            }
-            else if (!deleteSucceeded && browserModel_)
-            {
-                const int modelIndex = browserModel_->FindItemIndexByPath(viewerDeleteSourcePath);
-                if (modelIndex >= 0)
-                {
-                    OpenItemInViewer(modelIndex);
-                }
-            }
         }
     }
 
@@ -9576,6 +9725,50 @@ namespace hyperbrowse::ui
         startupFolderPath_ = NormalizeFolderPath(std::move(startupFolderPath_));
     }
 
+    void MainWindow::ApplyStartupLaunchPathOverride()
+    {
+        pendingStartupViewerPath_.clear();
+        if (startupLaunchPathOverride_.empty())
+        {
+            return;
+        }
+
+        const std::wstring launchPath = ResolveStartupPath(startupLaunchPathOverride_);
+        startupLaunchPathOverride_.clear();
+        if (launchPath.empty())
+        {
+            return;
+        }
+
+        std::error_code error;
+        const fs::path resolvedPath(launchPath);
+        if (fs::is_directory(resolvedPath, error) && !error)
+        {
+            startupFolderPath_ = NormalizeFolderPath(resolvedPath.wstring());
+            return;
+        }
+
+        error.clear();
+        if (!fs::is_regular_file(resolvedPath, error) || error)
+        {
+            return;
+        }
+
+        if (!browser::IsSupportedImageExtension(resolvedPath.extension().wstring()))
+        {
+            return;
+        }
+
+        const fs::path containingFolder = resolvedPath.parent_path();
+        if (containingFolder.empty())
+        {
+            return;
+        }
+
+        startupFolderPath_ = NormalizeFolderPath(containingFolder.wstring());
+        pendingStartupViewerPath_ = NormalizeFolderPath(resolvedPath.wstring());
+    }
+
     void MainWindow::SaveWindowState() const
     {
         HKEY key{};
@@ -9679,9 +9872,34 @@ namespace hyperbrowse::ui
         }
 
         RefreshBrowserPane();
+        TryOpenPendingStartupViewerPath(update->kind != services::FolderEnumerationUpdateKind::Batch);
         UpdateStatusText();
         UpdateWindowTitle();
         return 0;
+    }
+
+    void MainWindow::TryOpenPendingStartupViewerPath(bool clearIfNotFound)
+    {
+        if (pendingStartupViewerPath_.empty() || !browserModel_ || !browserPaneController_)
+        {
+            return;
+        }
+
+        const int modelIndex = browserModel_->FindItemIndexByPath(pendingStartupViewerPath_);
+        if (modelIndex < 0)
+        {
+            if (clearIfNotFound)
+            {
+                util::LogInfo(L"Startup launch image was not found in the enumerated folder: " + pendingStartupViewerPath_);
+                pendingStartupViewerPath_.clear();
+            }
+            return;
+        }
+
+        const std::wstring startupViewerPath = pendingStartupViewerPath_;
+        pendingStartupViewerPath_.clear();
+        browserPaneController_->RestoreSelectionByFilePaths({startupViewerPath}, startupViewerPath);
+        OpenItemInViewer(modelIndex);
     }
 
     LRESULT MainWindow::OnFolderTreeEnumerationMessage(LPARAM lParam)
@@ -9886,26 +10104,37 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnViewerDeleteRequested(WPARAM wParam)
     {
-        if (!viewerWindow_ || !viewerWindow_->IsOpen() || fileOperationActive_)
+        if (!viewerWindow_ || !viewerWindow_->IsOpen() || !fileOperationService_ || fileOperationActive_)
         {
             return 0;
         }
 
         std::wstring sourcePath;
         std::wstring preferredFocusPath;
-        if (!viewerWindow_->PrepareDeleteCurrent(&sourcePath, &preferredFocusPath) || sourcePath.empty())
+        if (!viewerWindow_->GetDeleteCurrentPaths(&sourcePath, &preferredFocusPath) || sourcePath.empty())
         {
             return 0;
         }
 
         pendingViewerDeleteSourcePath_ = sourcePath;
         pendingViewerDeletePreferredFocusPath_ = preferredFocusPath;
-    const bool permanentDelete = (wParam & viewer::ViewerWindow::kDeleteRequestPermanent) != 0;
-    StartFileOperation(permanentDelete ? services::FileOperationType::DeletePermanent : services::FileOperationType::DeleteRecycleBin,
+        const bool permanentDelete = (wParam & viewer::ViewerWindow::kDeleteRequestPermanent) != 0;
+        if (ShouldConfirmDeletion(permanentDelete) && !ConfirmFileDeletion(hwnd_, 1, permanentDelete))
+        {
+            pendingViewerDeleteSourcePath_.clear();
+            pendingViewerDeletePreferredFocusPath_.clear();
+            return 0;
+        }
+
+        StartFileOperation(permanentDelete ? services::FileOperationType::DeletePermanent : services::FileOperationType::DeleteRecycleBin,
                            {sourcePath},
                            {},
                            services::FileConflictPolicy::PromptShell,
                            {});
+        if (fileOperationActive_)
+        {
+            viewerWindow_->AdvanceAfterDeleteCurrent();
+        }
         return 0;
     }
 
@@ -10246,9 +10475,13 @@ namespace hyperbrowse::ui
             {
                 detailsPanelWidth_ = std::max(detailsPanelWidth_, kDetailsPanelMinWidth);
             }
+            if (detailsPanelTabs_)
+            {
+                ShowWindow(detailsPanelTabs_, detailsStripVisible_ ? SW_SHOW : SW_HIDE);
+            }
             if (detailsPanelText_)
             {
-                ShowWindow(detailsPanelText_, detailsStripVisible_ ? SW_SHOW : SW_HIDE);
+                ShowWindow(detailsPanelText_, detailsStripVisible_ && activeRightPaneTab_ == RightPaneTab::FileDetails ? SW_SHOW : SW_HIDE);
             }
             LayoutChildren();
             UpdateDetailsPanel();
@@ -10944,7 +11177,7 @@ namespace hyperbrowse::ui
         if (IsOverDetailsPanelSplitter(x, y))
         {
             detailsPanelWidth_ = kDetailsPanelPreferredWidth;
-            util::LogInfo(L"Reset file details panel to default width");
+            util::LogInfo(L"Reset details and Quick Send panel to default width");
             LayoutChildren();
             return;
         }
@@ -11294,6 +11527,19 @@ namespace hyperbrowse::ui
                 if (idx < toolbarItems_.size() && !toolbarItems_[idx].tooltip.empty())
                 {
                     di->lpszText = const_cast<wchar_t*>(toolbarItems_[idx].tooltip.c_str());
+                }
+                return 0;
+            }
+            if (nmh->hwndFrom == detailsPanelTabs_ && nmh->code == TCN_SELCHANGE)
+            {
+                const int selection = TabCtrl_GetCurSel(detailsPanelTabs_);
+                activeRightPaneTab_ = selection == static_cast<int>(RightPaneTab::QuickSend)
+                    ? RightPaneTab::QuickSend
+                    : RightPaneTab::FileDetails;
+                LayoutChildren();
+                if (!IsRectEmpty(&detailsPanelRect_))
+                {
+                    InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
                 }
                 return 0;
             }
