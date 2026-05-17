@@ -44,6 +44,7 @@ namespace hyperbrowse::viewer
         static constexpr UINT kZoomChangedMessage = WM_APP + 60;
         static constexpr UINT kActivityChangedMessage = WM_APP + 61;
         static constexpr UINT kClosedMessage = WM_APP + 62;
+        static constexpr UINT kDeleteRequestedMessage = WM_APP + 65;
 
         explicit ViewerWindow(HINSTANCE instance);
         ~ViewerWindow();
@@ -57,6 +58,7 @@ namespace hyperbrowse::viewer
         bool IsOpen() const noexcept;
         bool IsFullScreen() const noexcept;
         int CurrentIndex() const noexcept;
+        std::wstring CurrentFilePath() const;
         int CurrentZoomPercent() const noexcept;
         int RotationQuarterTurns() const noexcept;
         POINT PanOffset() const noexcept;
@@ -72,6 +74,8 @@ namespace hyperbrowse::viewer
         void SetMemoryPressureActive(bool active);
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
         void SetDarkTheme(bool enabled);
+        bool ReplaceItems(std::vector<browser::BrowserItem> items, int selectedIndex);
+        bool PrepareDeleteCurrent(std::wstring* sourcePath, std::wstring* preferredFocusPath);
 
     private:
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseViewerWindow";

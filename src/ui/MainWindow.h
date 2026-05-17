@@ -150,6 +150,15 @@ namespace hyperbrowse::ui
             RECT rect{};
         };
 
+        struct QuickAccessDestinationRow
+        {
+            std::wstring destinationPath;
+            std::wstring displayLabel;
+            RECT rowRect{};
+            RECT copyRect{};
+            RECT moveRect{};
+        };
+
         bool RegisterWindowClass() const;
         bool CreateAccelerators();
         bool CreateMenuBar();
@@ -192,6 +201,10 @@ namespace hyperbrowse::ui
                        int selectedIndex,
                        bool startSlideshow,
                        bool preferSecondaryMonitor = false);
+        bool SyncViewerToBrowserModel(std::wstring_view preferredPath = {});
+        void RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top);
+        bool CanUseQuickAccessDestinationActions() const;
+        int HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type = nullptr) const;
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
         std::vector<std::wstring> SelectedFileOperationPathsSnapshot(std::size_t* pairedCompanionCount = nullptr) const;
         bool ChooseFolder(std::wstring* folderPath) const;
@@ -244,6 +257,7 @@ namespace hyperbrowse::ui
         LRESULT OnDetailsPanelThumbnailMessage(LPARAM lParam);
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
+        LRESULT OnViewerDeleteRequested();
         LRESULT OnViewerClosedMessage();
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
 
@@ -344,16 +358,20 @@ namespace hyperbrowse::ui
         std::wstring pendingTreeSelectionPath_;
         RECT detailsPanelRect_{};
         RECT detailsPanelHistogramRect_{};
+        RECT quickAccessDestinationPanelRect_{};
         std::wstring detailsPanelTitleText_;
         std::wstring detailsPanelSummaryText_;
         std::wstring detailsPanelBodyText_;
         std::wstring detailsPanelHistogramPath_;
+        std::vector<QuickAccessDestinationRow> quickAccessDestinationRows_;
         std::uint64_t detailsPanelHistogramModifiedTimestampUtc_{};
         std::uint64_t detailsPanelThumbnailSessionId_{1};
         std::uint64_t detailsPanelThumbnailRequestEpoch_{};
         int detailsPanelHistogramModelIndex_{-1};
         bool detailsPanelHistogramVisible_{};
         bool detailsPanelHistogramLoading_{};
+        int quickAccessHotButtonIndex_{-1};
+        int quickAccessPressedButtonIndex_{-1};
         std::array<std::uint32_t, 64> detailsPanelHistogramRed_{};
         std::array<std::uint32_t, 64> detailsPanelHistogramGreen_{};
         std::array<std::uint32_t, 64> detailsPanelHistogramBlue_{};
@@ -371,6 +389,8 @@ namespace hyperbrowse::ui
         std::wstring batchConvertCurrentFile_;
         std::wstring activeTreeFolderOperationPath_;
         std::wstring activeTreeFolderRenamePath_;
+        std::wstring pendingViewerDeleteSourcePath_;
+        std::wstring pendingViewerDeletePreferredFocusPath_;
         std::wstring pendingFolderWatchReloadPath_;
         bool pendingFolderWatchTreeRefresh_{};
         std::wstring activeFileOperationLabel_;

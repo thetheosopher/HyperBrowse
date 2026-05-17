@@ -288,6 +288,16 @@ namespace hyperbrowse::viewer
         return currentIndex_;
     }
 
+    std::wstring ViewerWindow::CurrentFilePath() const
+    {
+        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        {
+            return {};
+        }
+
+        return items_[static_cast<std::size_t>(currentIndex_)].filePath;
+    }
+
     int ViewerWindow::CurrentZoomPercent() const noexcept
     {
         return currentZoomPercent_;
@@ -473,6 +483,94 @@ namespace hyperbrowse::viewer
         {
             RequestRepaint();
         }
+    }
+
+    bool ViewerWindow::ReplaceItems(std::vector<browser::BrowserItem> items, int selectedIndex)
+    {
+        if (items.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(items.size()))
+        {
+            return false;
+        }
+
+        items_ = std::move(items);
+        currentIndex_ = selectedIndex;
+        if (compareMode_)
+        {
+            compareDirection_ = ResolveCompareDirection(compareDirection_);
+            compareMode_ = ActiveCompareIndex() >= 0;
+        }
+        if (slideshowActive_ && items_.size() < 2)
+        {
+            StopSlideshow();
+        }
+
+        StopTransition();
+        ResetCachedImageSlots();
+        ResetPrefetchStatistics();
+        ReapCompletedBackgroundTasks();
+        UpdateWindowTitle();
+        LoadCurrentImageAsync(LoadReason::Navigation);
+        return true;
+    }
+
+    bool ViewerWindow::PrepareDeleteCurrent(std::wstring* sourcePath, std::wstring* preferredFocusPath)
+    {
+        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        {
+            return false;
+        }
+
+        if (sourcePath)
+        {
+            *sourcePath = items_[static_cast<std::size_t>(currentIndex_)].filePath;
+        }
+        if (preferredFocusPath)
+        {
+            preferredFocusPath->clear();
+        }
+
+        if (items_.size() == 1)
+        {
+            StopSlideshow();
+            StopTransition();
+            ResetCachedImageSlots();
+            items_.clear();
+            currentIndex_ = -1;
+            currentImage_.reset();
+            errorMessage_.clear();
+            if (hwnd_ && IsWindow(hwnd_) != FALSE)
+            {
+                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+            }
+            return true;
+        }
+
+        const int preferredIndex = (currentIndex_ + 1 < static_cast<int>(items_.size()))
+            ? currentIndex_ + 1
+            : currentIndex_ - 1;
+        if (preferredFocusPath && preferredIndex >= 0 && preferredIndex < static_cast<int>(items_.size()))
+        {
+            *preferredFocusPath = items_[static_cast<std::size_t>(preferredIndex)].filePath;
+        }
+
+        items_.erase(items_.begin() + currentIndex_);
+        currentIndex_ = std::clamp(currentIndex_, 0, static_cast<int>(items_.size()) - 1);
+        compareMode_ = false;
+        compareDirection_ = CompareDirection::Next;
+        d2dCompareImageBitmap_.Reset();
+        d2dCompareImageIndex_ = -1;
+        if (slideshowActive_ && items_.size() < 2)
+        {
+            StopSlideshow();
+        }
+
+        StopTransition();
+        ResetCachedImageSlots();
+        ResetPrefetchStatistics();
+        ReapCompletedBackgroundTasks();
+        UpdateWindowTitle();
+        LoadCurrentImageAsync(LoadReason::Navigation);
+        return true;
     }
 
     void ViewerWindow::EnsureD2DRenderTarget()
@@ -1779,6 +1877,12 @@ namespace hyperbrowse::viewer
         case WM_KEYDOWN:
             switch (wParam)
             {
+            case VK_DELETE:
+                if (owner_ && IsWindow(owner_))
+                {
+                    SendMessageW(owner_, kDeleteRequestedMessage, 0, 0);
+                }
+                return 0;
             case VK_RIGHT:
                 if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
                 {

@@ -246,6 +246,10 @@ painted, with the second span at roughly `364.83 ms`.
 Each item targets a specific gap versus FastStone, XnView MP, ImageGlass, or
 qView while staying inside HyperBrowse's identity.
 
+**Implementation note:** The viewer now supports quick culling with `Delete`:
+the active image moves to the Recycle Bin without an extra confirmation prompt
+and the viewer advances to the next image, restoring focus if the delete fails.
+
 ### `B1` Drag-and-Drop File Operations (P0)
 
 - **Drag out:** thumbnails as `CFSTR_FILECONTENTS` / `CF_HDROP` so users
@@ -266,6 +270,11 @@ qView while staying inside HyperBrowse's identity.
   `,` / `.` rotates the candidate set.
 
 ### `B3` Quick-Pick Destination Panel (P1)
+
+**Implementation status:** In progress. The existing details rail now exposes a
+first quick-send panel that lists favorite and recent destinations with one-click
+`Copy` and `Move` actions for the current selection. Remaining: add richer
+per-row hover metadata and true drop-target handling.
 
 - Optional right-rail strip listing favorite + recent destinations as drop
   targets and one-click "Send Selection To" actions.

@@ -222,6 +222,13 @@ namespace
     constexpr int kDetailsPanelSectionGap = 12;
     constexpr int kDetailsPanelTextTopGap = 14;
     constexpr int kDetailsPanelHistogramBins = 64;
+    constexpr int kQuickAccessPanelHeaderHeight = 18;
+    constexpr int kQuickAccessPanelTopGap = 12;
+    constexpr int kQuickAccessPanelRowHeight = 28;
+    constexpr int kQuickAccessPanelRowGap = 6;
+    constexpr int kQuickAccessPanelButtonWidth = 56;
+    constexpr int kQuickAccessPanelButtonGap = 8;
+    constexpr int kQuickAccessPanelMaxRows = 4;
     constexpr std::size_t kIncrementalFolderWatchEventLimit = 64;
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
     constexpr wchar_t kTextInputDialogClassName[] = L"HyperBrowseTextInputDialog";
@@ -5099,6 +5106,10 @@ namespace hyperbrowse::ui
                                  clientWidth,
                                  contentTop + clientHeight};
         detailsPanelHistogramRect_ = RECT{};
+        quickAccessDestinationPanelRect_ = RECT{};
+        quickAccessDestinationRows_.clear();
+        quickAccessHotButtonIndex_ = -1;
+        quickAccessPressedButtonIndex_ = -1;
 
         if (detailsPanelText_)
         {
@@ -5138,6 +5149,12 @@ namespace hyperbrowse::ui
                     top = detailsPanelHistogramRect_.bottom + kDetailsPanelTextTopGap;
                 }
 
+                RebuildQuickAccessDestinationRows(innerLeft, innerRight, top);
+                if (!quickAccessDestinationRows_.empty())
+                {
+                    top = quickAccessDestinationPanelRect_.bottom + kQuickAccessPanelTopGap;
+                }
+
                 const int availableTextHeight = static_cast<int>(detailsPanelRect_.bottom - kDetailsPanelMargin - top);
                 const int textHeight = std::max(0, availableTextHeight);
                 MoveWindow(detailsPanelText_, innerLeft, top, innerWidth, textHeight, TRUE);
@@ -5147,6 +5164,8 @@ namespace hyperbrowse::ui
             {
                 ShowWindow(detailsPanelText_, SW_HIDE);
                 detailsPanelRect_ = RECT{};
+                quickAccessDestinationPanelRect_ = RECT{};
+                quickAccessDestinationRows_.clear();
             }
         }
 
@@ -5231,6 +5250,10 @@ namespace hyperbrowse::ui
         if (InsertFolderPath(&recentDestinationFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
         {
             UpdateMenuState();
+            if (hwnd_ && detailsStripVisible_)
+            {
+                LayoutChildren();
+            }
         }
     }
 
@@ -5967,6 +5990,72 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (!quickAccessDestinationRows_.empty() && !IsRectEmpty(&quickAccessDestinationPanelRect_))
+        {
+            const bool actionsEnabled = CanUseQuickAccessDestinationActions();
+            RECT headerRect{quickAccessDestinationPanelRect_.left,
+                            quickAccessDestinationPanelRect_.top,
+                            quickAccessDestinationPanelRect_.right,
+                            quickAccessDestinationPanelRect_.top + kQuickAccessPanelHeaderHeight};
+            SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+            SetTextColor(hdc, palette.mutedText);
+            DrawTextW(hdc, L"Quick Send", -1, &headerRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
+
+            const COLORREF rowBackground = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 24 : 12);
+            const COLORREF rowBorder = palette.actionStripBorder;
+            const COLORREF enabledButtonFill = palette.accentFill;
+            const COLORREF enabledButtonText = palette.accentText;
+            const COLORREF disabledButtonFill = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 10 : 20);
+
+            auto drawActionButton = [&](const RECT& rect, const wchar_t* label, int buttonIndex)
+            {
+                const bool hot = buttonIndex == quickAccessHotButtonIndex_;
+                const bool pressed = buttonIndex == quickAccessPressedButtonIndex_;
+                const COLORREF fillColor = actionsEnabled
+                    ? (pressed ? palette.accent : (hot ? BlendColor(enabledButtonFill, palette.accent, 48) : enabledButtonFill))
+                    : disabledButtonFill;
+                const COLORREF textColor = actionsEnabled ? enabledButtonText : palette.mutedText;
+
+                HBRUSH buttonBrush = CreateSolidBrush(fillColor);
+                HPEN buttonPen = CreatePen(PS_SOLID, 1, actionsEnabled ? palette.accent : rowBorder);
+                const HGDIOBJ oldBrush = SelectObject(hdc, buttonBrush);
+                const HGDIOBJ oldButtonPen = SelectObject(hdc, buttonPen);
+                RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, 10, 10);
+                SelectObject(hdc, oldButtonPen);
+                SelectObject(hdc, oldBrush);
+                DeleteObject(buttonPen);
+                DeleteObject(buttonBrush);
+
+                SetTextColor(hdc, textColor);
+                RECT textRect = rect;
+                DrawTextW(hdc, label, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            };
+
+            for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
+            {
+                const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
+                HBRUSH rowBrush = CreateSolidBrush(rowBackground);
+                HPEN rowPen = CreatePen(PS_SOLID, 1, rowBorder);
+                const HGDIOBJ oldBrush = SelectObject(hdc, rowBrush);
+                const HGDIOBJ oldRowPen = SelectObject(hdc, rowPen);
+                RoundRect(hdc, row.rowRect.left, row.rowRect.top, row.rowRect.right, row.rowRect.bottom, 12, 12);
+                SelectObject(hdc, oldRowPen);
+                SelectObject(hdc, oldBrush);
+                DeleteObject(rowPen);
+                DeleteObject(rowBrush);
+
+                RECT labelRect = row.rowRect;
+                labelRect.left += 10;
+                labelRect.right = row.copyRect.left - 10;
+                SetTextColor(hdc, palette.text);
+                SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+                DrawTextW(hdc, row.displayLabel.c_str(), -1, &labelRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+
+                drawActionButton(row.copyRect, L"Copy", static_cast<int>(rowIndex * 2));
+                drawActionButton(row.moveRect, L"Move", static_cast<int>(rowIndex * 2 + 1));
+            }
+        }
+
         SelectObject(hdc, oldFont);
     }
 
@@ -6071,6 +6160,195 @@ namespace hyperbrowse::ui
         }
 
         return false;
+    }
+
+    bool MainWindow::SyncViewerToBrowserModel(std::wstring_view preferredPath)
+    {
+        if (!viewerWindow_ || !viewerWindow_->IsOpen() || !browserModel_)
+        {
+            return false;
+        }
+
+        const auto& modelItems = browserModel_->Items();
+        if (modelItems.empty())
+        {
+            const HWND viewerHwnd = viewerWindow_->Hwnd();
+            if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
+            {
+                PostMessageW(viewerHwnd, WM_CLOSE, 0, 0);
+            }
+            return false;
+        }
+
+        std::vector<int> orderedModelIndices = browserPaneController_
+            ? browserPaneController_->OrderedModelIndicesSnapshot()
+            : std::vector<int>{};
+        if (orderedModelIndices.empty())
+        {
+            orderedModelIndices.reserve(modelItems.size());
+            for (std::size_t index = 0; index < modelItems.size(); ++index)
+            {
+                orderedModelIndices.push_back(static_cast<int>(index));
+            }
+        }
+
+        const std::wstring currentViewerPath = viewerWindow_->CurrentFilePath();
+        const int currentViewerIndex = viewerWindow_->CurrentIndex();
+        std::vector<browser::BrowserItem> viewerItems;
+        viewerItems.reserve(orderedModelIndices.size());
+        int selectedViewerIndex = -1;
+        int currentPathIndex = -1;
+
+        for (int orderedModelIndex : orderedModelIndices)
+        {
+            if (orderedModelIndex < 0 || orderedModelIndex >= static_cast<int>(modelItems.size()))
+            {
+                continue;
+            }
+
+            viewerItems.push_back(modelItems[static_cast<std::size_t>(orderedModelIndex)]);
+            const int viewerIndex = static_cast<int>(viewerItems.size()) - 1;
+            const std::wstring& path = viewerItems.back().filePath;
+            if (selectedViewerIndex < 0
+                && !preferredPath.empty()
+                && browser::FilePathsEqual(path, preferredPath))
+            {
+                selectedViewerIndex = viewerIndex;
+            }
+            if (currentPathIndex < 0
+                && !currentViewerPath.empty()
+                && browser::FilePathsEqual(path, currentViewerPath))
+            {
+                currentPathIndex = viewerIndex;
+            }
+        }
+
+        if (viewerItems.empty())
+        {
+            const HWND viewerHwnd = viewerWindow_->Hwnd();
+            if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
+            {
+                PostMessageW(viewerHwnd, WM_CLOSE, 0, 0);
+            }
+            return false;
+        }
+
+        if (selectedViewerIndex < 0)
+        {
+            selectedViewerIndex = currentPathIndex;
+        }
+        if (selectedViewerIndex < 0 && currentViewerIndex >= 0 && currentViewerIndex < static_cast<int>(viewerItems.size()))
+        {
+            selectedViewerIndex = currentViewerIndex;
+        }
+        if (selectedViewerIndex < 0)
+        {
+            selectedViewerIndex = 0;
+        }
+
+        return viewerWindow_->ReplaceItems(std::move(viewerItems), selectedViewerIndex);
+    }
+
+    void MainWindow::RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top)
+    {
+        quickAccessDestinationRows_.clear();
+        quickAccessDestinationPanelRect_ = RECT{};
+        quickAccessHotButtonIndex_ = -1;
+        quickAccessPressedButtonIndex_ = -1;
+
+        if (!detailsStripVisible_ || innerRight <= innerLeft)
+        {
+            return;
+        }
+
+        std::vector<std::pair<std::wstring, bool>> destinations;
+        destinations.reserve(kQuickAccessPanelMaxRows);
+        for (const std::wstring& favoritePath : favoriteDestinationFolders_)
+        {
+            if (destinations.size() >= kQuickAccessPanelMaxRows)
+            {
+                break;
+            }
+
+            destinations.emplace_back(favoritePath, true);
+        }
+
+        for (const std::wstring& recentPath : RecentDestinationShortcutPaths())
+        {
+            if (destinations.size() >= kQuickAccessPanelMaxRows)
+            {
+                break;
+            }
+
+            destinations.emplace_back(recentPath, false);
+        }
+
+        if (destinations.empty())
+        {
+            return;
+        }
+
+        const int panelHeight = kQuickAccessPanelHeaderHeight
+            + static_cast<int>(destinations.size()) * kQuickAccessPanelRowHeight
+            + static_cast<int>((destinations.size() - 1) * kQuickAccessPanelRowGap);
+        quickAccessDestinationPanelRect_ = RECT{innerLeft, top, innerRight, top + panelHeight};
+
+        int rowTop = top + kQuickAccessPanelHeaderHeight;
+        for (const auto& [path, favorite] : destinations)
+        {
+            QuickAccessDestinationRow row;
+            row.destinationPath = path;
+            row.displayLabel = std::wstring(favorite ? L"Favorite: " : L"Recent: ") + FormatFolderShortcutMenuLabel(path);
+            row.rowRect = RECT{innerLeft, rowTop, innerRight, rowTop + kQuickAccessPanelRowHeight};
+            row.moveRect = RECT{innerRight - kQuickAccessPanelButtonWidth,
+                                rowTop + 3,
+                                innerRight,
+                                rowTop + kQuickAccessPanelRowHeight - 3};
+            row.copyRect = RECT{row.moveRect.left - kQuickAccessPanelButtonGap - kQuickAccessPanelButtonWidth,
+                                row.moveRect.top,
+                                row.moveRect.left - kQuickAccessPanelButtonGap,
+                                row.moveRect.bottom};
+            quickAccessDestinationRows_.push_back(std::move(row));
+            rowTop += kQuickAccessPanelRowHeight + kQuickAccessPanelRowGap;
+        }
+    }
+
+    bool MainWindow::CanUseQuickAccessDestinationActions() const
+    {
+        return browserPaneController_ && browserPaneController_->SelectedCount() > 0 && !fileOperationActive_;
+    }
+
+    int MainWindow::HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type) const
+    {
+        if (!CanUseQuickAccessDestinationActions())
+        {
+            return -1;
+        }
+
+        const POINT point{x, y};
+        for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
+        {
+            const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
+            if (PtInRect(&row.copyRect, point) != FALSE)
+            {
+                if (type)
+                {
+                    *type = services::FileOperationType::Copy;
+                }
+                return static_cast<int>(rowIndex * 2);
+            }
+
+            if (PtInRect(&row.moveRect, point) != FALSE)
+            {
+                if (type)
+                {
+                    *type = services::FileOperationType::Move;
+                }
+                return static_cast<int>(rowIndex * 2 + 1);
+            }
+        }
+
+        return -1;
     }
 
     std::vector<browser::BrowserItem> MainWindow::CollectItemsForScope(bool selectionScope) const
@@ -6354,6 +6632,10 @@ namespace hyperbrowse::ui
         }
 
         UpdateMenuState();
+        if (hwnd_ && detailsStripVisible_)
+        {
+            LayoutChildren();
+        }
     }
 
     void MainWindow::StartSelectionFileOperationToDestination(services::FileOperationType type, std::wstring destinationFolder)
@@ -7514,6 +7796,11 @@ namespace hyperbrowse::ui
         fileOperationActive_ = false;
         activeFileOperationLabel_.clear();
 
+        const std::wstring viewerDeleteSourcePath = pendingViewerDeleteSourcePath_;
+        const std::wstring viewerDeletePreferredFocusPath = pendingViewerDeletePreferredFocusPath_;
+        pendingViewerDeleteSourcePath_.clear();
+        pendingViewerDeletePreferredFocusPath_.clear();
+
         const std::wstring deferredFolderWatchReloadPath = pendingFolderWatchReloadPath_;
         const bool deferredFolderWatchTreeRefresh = pendingFolderWatchTreeRefresh_;
         pendingFolderWatchReloadPath_.clear();
@@ -7761,6 +8048,36 @@ namespace hyperbrowse::ui
         if (!update.message.empty() && update.failedCount > 0)
         {
             MessageBoxW(hwnd_, update.message.c_str(), L"File Operation", MB_OK | MB_ICONWARNING);
+        }
+
+        if (!viewerDeleteSourcePath.empty()
+            && (update.type == services::FileOperationType::DeleteRecycleBin
+                || update.type == services::FileOperationType::DeletePermanent))
+        {
+            const bool deleteSucceeded = std::any_of(
+                update.succeededSourcePaths.begin(),
+                update.succeededSourcePaths.end(),
+                [&](const std::wstring& sourcePath)
+                {
+                    return browser::FilePathsEqual(sourcePath, viewerDeleteSourcePath);
+                });
+
+            const std::wstring preferredViewerPath = deleteSucceeded
+                ? viewerDeletePreferredFocusPath
+                : viewerDeleteSourcePath;
+
+            if (viewerWindow_ && viewerWindow_->IsOpen())
+            {
+                SyncViewerToBrowserModel(preferredViewerPath);
+            }
+            else if (!deleteSucceeded && browserModel_)
+            {
+                const int modelIndex = browserModel_->FindItemIndexByPath(viewerDeleteSourcePath);
+                if (modelIndex >= 0)
+                {
+                    OpenItemInViewer(modelIndex);
+                }
+            }
         }
     }
 
@@ -8933,6 +9250,30 @@ namespace hyperbrowse::ui
         return 0;
     }
 
+    LRESULT MainWindow::OnViewerDeleteRequested()
+    {
+        if (!viewerWindow_ || !viewerWindow_->IsOpen() || fileOperationActive_)
+        {
+            return 0;
+        }
+
+        std::wstring sourcePath;
+        std::wstring preferredFocusPath;
+        if (!viewerWindow_->PrepareDeleteCurrent(&sourcePath, &preferredFocusPath) || sourcePath.empty())
+        {
+            return 0;
+        }
+
+        pendingViewerDeleteSourcePath_ = sourcePath;
+        pendingViewerDeletePreferredFocusPath_ = preferredFocusPath;
+        StartFileOperation(services::FileOperationType::DeleteRecycleBin,
+                           {sourcePath},
+                           {},
+                           services::FileConflictPolicy::PromptShell,
+                           {});
+        return 0;
+    }
+
     LRESULT MainWindow::OnViewerClosedMessage()
     {
         viewerWindowActive_ = false;
@@ -9900,6 +10241,18 @@ namespace hyperbrowse::ui
             }
         }
 
+        const int quickAccessButton = HitTestQuickAccessDestinationButton(x, y);
+        if (quickAccessButton >= 0)
+        {
+            quickAccessPressedButtonIndex_ = quickAccessButton;
+            SetCapture(hwnd_);
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
+            return;
+        }
+
         if (IsOverSplitter(x))
         {
             dragMode_ = DragMode::Splitter;
@@ -9934,6 +10287,32 @@ namespace hyperbrowse::ui
             if (ToolbarHitTest(pt.x, pt.y) == pressedIdx)
             {
                 ToolbarHandleClick(pressedIdx);
+            }
+            return;
+        }
+
+        if (quickAccessPressedButtonIndex_ >= 0)
+        {
+            const int pressedButton = quickAccessPressedButtonIndex_;
+            quickAccessPressedButtonIndex_ = -1;
+            ReleaseCapture();
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
+
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(hwnd_, &point);
+            services::FileOperationType type = services::FileOperationType::Copy;
+            const int hitButton = HitTestQuickAccessDestinationButton(point.x, point.y, &type);
+            if (hitButton == pressedButton)
+            {
+                const std::size_t rowIndex = static_cast<std::size_t>(pressedButton / 2);
+                if (rowIndex < quickAccessDestinationRows_.size())
+                {
+                    StartSelectionFileOperationToDestination(type, quickAccessDestinationRows_[rowIndex].destinationPath);
+                }
             }
             return;
         }
@@ -9985,6 +10364,16 @@ namespace hyperbrowse::ui
         {
             toolbarHotIndex_ = -1;
             InvalidateToolbarStrip();
+        }
+
+        const int quickAccessHit = HitTestQuickAccessDestinationButton(x, y);
+        if (quickAccessHit != quickAccessHotButtonIndex_)
+        {
+            quickAccessHotButtonIndex_ = quickAccessHit;
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
         }
 
         if (dragMode_ == DragMode::Splitter)
@@ -10071,6 +10460,8 @@ namespace hyperbrowse::ui
             return OnViewerZoomMessage(lParam);
         case viewer::ViewerWindow::kActivityChangedMessage:
             return OnViewerActivityMessage(lParam);
+        case viewer::ViewerWindow::kDeleteRequestedMessage:
+            return OnViewerDeleteRequested();
         case viewer::ViewerWindow::kClosedMessage:
             return OnViewerClosedMessage();
         case kMemoryPressureSampledMessage:
@@ -10090,6 +10481,14 @@ namespace hyperbrowse::ui
             {
                 toolbarHotIndex_ = -1;
                 InvalidateToolbarStrip();
+            }
+            if (quickAccessHotButtonIndex_ >= 0)
+            {
+                quickAccessHotButtonIndex_ = -1;
+                if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+                {
+                    InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+                }
             }
             break;
         case WM_NOTIFY:
