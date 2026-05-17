@@ -110,6 +110,9 @@ namespace
     constexpr UINT ID_FILE_COMPARE_SELECTED = 1025;
     constexpr UINT ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS = 1026;
     constexpr UINT ID_FILE_BATCH_RENAME_SELECTION = 1027;
+    constexpr UINT ID_FILE_CLEAR_FAVORITE_DESTINATIONS = 1028;
+    constexpr UINT ID_FILE_CLEAR_RECENT_FOLDERS = 1029;
+    constexpr UINT ID_FILE_CLEAR_RECENT_DESTINATIONS = 1038;
     constexpr UINT ID_FILE_SET_RATING_0 = 1080;
     constexpr UINT ID_FILE_SET_RATING_1 = 1081;
     constexpr UINT ID_FILE_SET_RATING_2 = 1082;
@@ -215,6 +218,7 @@ namespace
     constexpr int kToolbarDropdownChevronSize = 10;
     constexpr int kToolbarSeparatorWidth = 9;
     constexpr int kToolbarSeparatorGap = 4;
+    constexpr int kToolbarFilterEditHeight = 24;
     constexpr int kFilterEditMinWidth = 160;
     constexpr int kDetailsStripHeight = 22;
     constexpr int kDetailsPanelPreferredWidth = 340;
@@ -230,6 +234,8 @@ namespace
     constexpr int kQuickAccessPanelRowGap = 6;
     constexpr int kQuickAccessPanelButtonWidth = 56;
     constexpr int kQuickAccessPanelButtonGap = 8;
+    constexpr int kQuickAccessPanelButtonRightInset = 8;
+    constexpr int kQuickAccessPanelRemoveButtonWidth = 24;
     constexpr int kQuickAccessPanelHeaderVerticalPadding = 4;
     constexpr int kQuickAccessPanelRowTextTopInset = 5;
     constexpr int kQuickAccessPanelRowTextGap = 4;
@@ -242,6 +248,10 @@ namespace
     constexpr int kTextInputDialogWidth = 440;
     constexpr int kTextInputDialogHeight = 160;
     constexpr int kTextInputDialogMargin = 14;
+    constexpr int kTextInputDialogInstructionMinHeight = 42;
+    constexpr int kTextInputDialogEditTopGap = 8;
+    constexpr int kTextInputDialogDividerTopGap = 14;
+    constexpr int kTextInputDialogButtonTopGap = 10;
     constexpr int kTextInputEditHeight = 24;
     constexpr int kTextInputButtonWidth = 88;
     constexpr int kTextInputButtonHeight = 28;
@@ -421,6 +431,16 @@ namespace
         int selectionEnd{};
         bool accepted{};
         bool done{};
+    };
+
+    struct TextInputDialogLayoutMetrics
+    {
+        int contentWidth{};
+        int instructionHeight{};
+        int editTop{};
+        int dividerTop{};
+        int buttonTop{};
+        int clientHeight{};
     };
 
     struct BatchRenamePreviewRow
@@ -825,6 +845,22 @@ namespace
         ReleaseDC(nullptr, screenDc);
         const int measuredHeight = static_cast<int>(bounds.bottom - bounds.top);
         return std::max(minimumHeight, measuredHeight);
+    }
+
+    TextInputDialogLayoutMetrics BuildTextInputDialogLayoutMetrics(const TextInputDialogState& state)
+    {
+        TextInputDialogLayoutMetrics metrics;
+        metrics.contentWidth = kTextInputDialogWidth - (kTextInputDialogMargin * 2);
+        metrics.instructionHeight = MeasureTextBlockHeight(static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                                           state.instruction,
+                                                           metrics.contentWidth,
+                                                           DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                                           kTextInputDialogInstructionMinHeight);
+        metrics.editTop = kTextInputDialogMargin + metrics.instructionHeight + kTextInputDialogEditTopGap;
+        metrics.dividerTop = metrics.editTop + kTextInputEditHeight + kTextInputDialogDividerTopGap;
+        metrics.buttonTop = metrics.dividerTop + kTextInputDialogButtonTopGap;
+        metrics.clientHeight = metrics.buttonTop + kTextInputButtonHeight + kTextInputDialogMargin;
+        return metrics;
     }
 
     struct QuickAccessPanelMetrics
@@ -2160,10 +2196,9 @@ namespace
 
             const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const int clientWidth = kTextInputDialogWidth;
-            const int clientHeight = kTextInputDialogHeight;
-            const int contentWidth = clientWidth - (kTextInputDialogMargin * 2);
-            const int instructionHeight = 34;
-            const int buttonTop = clientHeight - kTextInputDialogMargin - kTextInputButtonHeight;
+            const TextInputDialogLayoutMetrics metrics = BuildTextInputDialogLayoutMetrics(*state);
+            const int contentWidth = metrics.contentWidth;
+            const int buttonTop = metrics.buttonTop;
             const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
             const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
 
@@ -2175,7 +2210,7 @@ namespace
                 kTextInputDialogMargin,
                 kTextInputDialogMargin,
                 contentWidth,
-                instructionHeight,
+                metrics.instructionHeight,
                 hwnd,
                 nullptr,
                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
@@ -2186,11 +2221,24 @@ namespace
                 state->initialText.c_str(),
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
                 kTextInputDialogMargin,
-                kTextInputDialogMargin + instructionHeight + 6,
+                metrics.editTop,
                 contentWidth,
                 kTextInputEditHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kTextInputEditControlId)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
+                nullptr);
+            HWND dividerWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                nullptr,
+                WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
+                kTextInputDialogMargin,
+                metrics.dividerTop,
+                contentWidth,
+                2,
+                hwnd,
+                nullptr,
                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
                 nullptr);
             state->okButton = CreateWindowExW(
@@ -2222,11 +2270,13 @@ namespace
 
             if (instructionWindow) SendMessageW(instructionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
             if (state->editWindow) SendMessageW(state->editWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            if (dividerWindow) SendMessageW(dividerWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
             if (state->okButton) SendMessageW(state->okButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
             if (cancelButton) SendMessageW(cancelButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
 
             if (state->editWindow)
             {
+                SendMessageW(state->editWindow, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(6, 6));
                 SendMessageW(state->editWindow,
                              EM_SETSEL,
                              static_cast<WPARAM>(state->selectionStart),
@@ -2243,6 +2293,13 @@ namespace
                 return FALSE;
             }
             break;
+        case WM_CTLCOLORDLG:
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_CTLCOLORSTATIC:
+            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
+            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
         case WM_COMMAND:
             if (!state)
             {
@@ -3221,7 +3278,8 @@ namespace
         state.selectionStart = selectionStart;
         state.selectionEnd = selectionEnd;
 
-        RECT windowRect{0, 0, kTextInputDialogWidth, kTextInputDialogHeight};
+        const TextInputDialogLayoutMetrics layoutMetrics = BuildTextInputDialogLayoutMetrics(state);
+        RECT windowRect{0, 0, kTextInputDialogWidth, std::max(kTextInputDialogHeight, layoutMetrics.clientHeight)};
         AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
 
         if (ownerWindow)
@@ -3233,7 +3291,7 @@ namespace
             WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
             kTextInputDialogClassName,
             state.title.c_str(),
-            WS_CAPTION | WS_SYSMENU | WS_POPUP,
+            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             windowRect.right - windowRect.left,
@@ -4653,6 +4711,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(openRecentFolderMenu_), L"Open &Recent Folder");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, L"Add Current Folder to Favorite &Destinations");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_CLEAR_FAVORITE_DESTINATIONS, L"Clear All Favorite &Destinations");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
@@ -4798,7 +4857,7 @@ namespace hyperbrowse::ui
             L"EDIT",
             L"",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-            0, 0, 120, kToolbarItemSize - 8,
+            0, 0, 120, kToolbarFilterEditHeight,
             hwnd_,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_ACTION_FILTER_EDIT)),
             instance_,
@@ -5700,6 +5759,9 @@ namespace hyperbrowse::ui
                 const std::wstring label = FormatFolderShortcutMenuLabel(recentFolders_[index]);
                 AppendMenuW(openRecentFolderMenu_, MF_STRING, ID_FILE_OPEN_RECENT_FOLDER_BASE + static_cast<UINT>(index), label.c_str());
             }
+
+            AppendMenuW(openRecentFolderMenu_, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(openRecentFolderMenu_, MF_STRING, ID_FILE_CLEAR_RECENT_FOLDERS, L"C&lear All Recent Folders");
         }
 
         const std::vector<std::wstring> recentDestinationPaths = RecentDestinationShortcutPaths();
@@ -5757,6 +5819,9 @@ namespace hyperbrowse::ui
                                 recentBaseCommandId + static_cast<UINT>(index),
                                 label.c_str());
                 }
+
+                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(menu, MF_STRING, ID_FILE_CLEAR_RECENT_DESTINATIONS, L"Clear All Recent &Destinations");
             }
         };
 
@@ -6420,17 +6485,23 @@ namespace hyperbrowse::ui
             const COLORREF enabledButtonText = palette.accentText;
             const COLORREF disabledButtonFill = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 10 : 20);
 
-            auto drawActionButton = [&](const RECT& rect, const wchar_t* label, int buttonIndex)
+            auto drawActionButton = [&](const RECT& rect,
+                                        const wchar_t* label,
+                                        int buttonIndex,
+                                        bool enabled,
+                                        COLORREF baseFill,
+                                        COLORREF baseText,
+                                        COLORREF enabledBorder)
             {
                 const bool hot = buttonIndex == quickAccessHotButtonIndex_;
                 const bool pressed = buttonIndex == quickAccessPressedButtonIndex_;
-                const COLORREF fillColor = actionsEnabled
-                    ? (pressed ? palette.accent : (hot ? BlendColor(enabledButtonFill, palette.accent, 48) : enabledButtonFill))
+                const COLORREF fillColor = enabled
+                    ? (pressed ? palette.accent : (hot ? BlendColor(baseFill, palette.accent, 48) : baseFill))
                     : disabledButtonFill;
-                const COLORREF textColor = actionsEnabled ? enabledButtonText : palette.mutedText;
+                const COLORREF textColor = enabled ? baseText : palette.mutedText;
 
                 HBRUSH buttonBrush = CreateSolidBrush(fillColor);
-                HPEN buttonPen = CreatePen(PS_SOLID, 1, actionsEnabled ? palette.accent : rowBorder);
+                HPEN buttonPen = CreatePen(PS_SOLID, 1, enabled ? enabledBorder : rowBorder);
                 const HGDIOBJ oldBrush = SelectObject(hdc, buttonBrush);
                 const HGDIOBJ oldButtonPen = SelectObject(hdc, buttonPen);
                 RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, 10, 10);
@@ -6479,8 +6550,27 @@ namespace hyperbrowse::ui
                 SelectObject(hdc, detailsPanelBodyFont_ ? detailsPanelBodyFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
                 DrawTextW(hdc, row.metadataLabel.c_str(), -1, &metadataRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
-                drawActionButton(row.copyRect, L"Copy", static_cast<int>(rowIndex * 2));
-                drawActionButton(row.moveRect, L"Move", static_cast<int>(rowIndex * 2 + 1));
+                drawActionButton(row.copyRect,
+                                 L"Copy",
+                                 static_cast<int>(rowIndex * 3),
+                                 actionsEnabled,
+                                 enabledButtonFill,
+                                 enabledButtonText,
+                                 palette.accent);
+                drawActionButton(row.moveRect,
+                                 L"Move",
+                                 static_cast<int>(rowIndex * 3 + 1),
+                                 actionsEnabled,
+                                 enabledButtonFill,
+                                 enabledButtonText,
+                                 palette.accent);
+                drawActionButton(row.removeRect,
+                                 L"x",
+                                 static_cast<int>(rowIndex * 3 + 2),
+                                 true,
+                                 BlendColor(rowBackground, palette.actionFieldBackground, themeMode_ == ThemeMode::Dark ? 12 : 20),
+                                 palette.mutedText,
+                                 rowBorder);
             }
         }
 
@@ -6730,11 +6820,18 @@ namespace hyperbrowse::ui
             row.destinationPath = path;
             row.displayLabel = FormatFolderShortcutMenuLabel(path);
             row.metadataLabel = BuildQuickAccessDestinationMetadata(path, favorite);
+            row.favorite = favorite;
             row.rowRect = RECT{innerLeft, rowTop, innerRight, rowTop + metrics.rowHeight};
             const int buttonTop = rowTop + metrics.buttonTopInset;
-            row.moveRect = RECT{innerRight - kQuickAccessPanelButtonWidth,
+            int buttonRight = innerRight - kQuickAccessPanelButtonRightInset;
+            row.removeRect = RECT{buttonRight - kQuickAccessPanelRemoveButtonWidth,
+                                  buttonTop,
+                                  buttonRight,
+                                  buttonTop + metrics.buttonHeight};
+            buttonRight = row.removeRect.left - kQuickAccessPanelButtonGap;
+            row.moveRect = RECT{buttonRight - kQuickAccessPanelButtonWidth,
                                 buttonTop,
-                                innerRight,
+                                buttonRight,
                                 buttonTop + metrics.buttonHeight};
             row.copyRect = RECT{row.moveRect.left - kQuickAccessPanelButtonGap - kQuickAccessPanelButtonWidth,
                                 row.moveRect.top,
@@ -6766,31 +6863,32 @@ namespace hyperbrowse::ui
 
     int MainWindow::HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type) const
     {
-        if (!CanUseQuickAccessDestinationActions())
-        {
-            return -1;
-        }
-
         const POINT point{x, y};
+        const bool actionsEnabled = CanUseQuickAccessDestinationActions();
         for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
         {
             const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
-            if (PtInRect(&row.copyRect, point) != FALSE)
+            if (actionsEnabled && PtInRect(&row.copyRect, point) != FALSE)
             {
                 if (type)
                 {
                     *type = services::FileOperationType::Copy;
                 }
-                return static_cast<int>(rowIndex * 2);
+                return static_cast<int>(rowIndex * 3);
             }
 
-            if (PtInRect(&row.moveRect, point) != FALSE)
+            if (actionsEnabled && PtInRect(&row.moveRect, point) != FALSE)
             {
                 if (type)
                 {
                     *type = services::FileOperationType::Move;
                 }
-                return static_cast<int>(rowIndex * 2 + 1);
+                return static_cast<int>(rowIndex * 3 + 1);
+            }
+
+            if (PtInRect(&row.removeRect, point) != FALSE)
+            {
+                return static_cast<int>(rowIndex * 3 + 2);
             }
         }
 
@@ -7053,6 +7151,87 @@ namespace hyperbrowse::ui
         }
 
         return paths;
+    }
+
+    void MainWindow::RemoveFavoriteDestination(std::wstring_view folderPath)
+    {
+        const auto newEnd = std::remove_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(),
+                                           [&](const std::wstring& candidate)
+                                           {
+                                               return FolderPathsEqual(candidate, folderPath);
+                                           });
+        if (newEnd == favoriteDestinationFolders_.end())
+        {
+            return;
+        }
+
+        favoriteDestinationFolders_.erase(newEnd, favoriteDestinationFolders_.end());
+        UpdateMenuState();
+        if (hwnd_ && detailsStripVisible_)
+        {
+            LayoutChildren();
+        }
+    }
+
+    void MainWindow::RemoveRecentDestination(std::wstring_view folderPath)
+    {
+        const auto newEnd = std::remove_if(recentDestinationFolders_.begin(), recentDestinationFolders_.end(),
+                                           [&](const std::wstring& candidate)
+                                           {
+                                               return FolderPathsEqual(candidate, folderPath);
+                                           });
+        if (newEnd == recentDestinationFolders_.end())
+        {
+            return;
+        }
+
+        recentDestinationFolders_.erase(newEnd, recentDestinationFolders_.end());
+        UpdateMenuState();
+        if (hwnd_ && detailsStripVisible_)
+        {
+            LayoutChildren();
+        }
+    }
+
+    void MainWindow::ClearFavoriteDestinations()
+    {
+        if (favoriteDestinationFolders_.empty())
+        {
+            return;
+        }
+
+        favoriteDestinationFolders_.clear();
+        UpdateMenuState();
+        if (hwnd_ && detailsStripVisible_)
+        {
+            LayoutChildren();
+        }
+    }
+
+    void MainWindow::ClearRecentFolders()
+    {
+        if (recentFolders_.empty())
+        {
+            return;
+        }
+
+        recentFolders_.clear();
+        UpdateMenuState();
+    }
+
+    void MainWindow::ClearRecentDestinations()
+    {
+        if (recentDestinationFolders_.empty())
+        {
+            return;
+        }
+
+        recentDestinationFolders_.clear();
+        UpdateMenuState();
+        if (hwnd_ && detailsStripVisible_)
+        {
+            LayoutChildren();
+        }
     }
 
     void MainWindow::ToggleCurrentFolderFavoriteDestination()
@@ -8775,6 +8954,8 @@ namespace hyperbrowse::ui
                               : MF_UNCHECKED));
         }
         EnableMenuItem(menu_, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_CLEAR_FAVORITE_DESTINATIONS,
+                   MF_BYCOMMAND | (!favoriteDestinationFolders_.empty() ? MF_ENABLED : MF_GRAYED));
         CheckMenuItem(menu_, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS,
                   MF_BYCOMMAND | (rawJpegPairedOperationsEnabled_ ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(menu_, ID_FILE_COPY_SELECTION,
@@ -9874,6 +10055,15 @@ namespace hyperbrowse::ui
         case ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION:
             ToggleCurrentFolderFavoriteDestination();
             return true;
+        case ID_FILE_CLEAR_FAVORITE_DESTINATIONS:
+            ClearFavoriteDestinations();
+            return true;
+        case ID_FILE_CLEAR_RECENT_FOLDERS:
+            ClearRecentFolders();
+            return true;
+        case ID_FILE_CLEAR_RECENT_DESTINATIONS:
+            ClearRecentDestinations();
+            return true;
         case ID_FILE_EXIT:
             PostMessageW(hwnd_, WM_CLOSE, 0, 0);
             return true;
@@ -10371,9 +10561,10 @@ namespace hyperbrowse::ui
             const int filterLeft = leftCursor + 6;
             const int filterRight = rightCursor - 6;
             const int filterWidth = std::max(0, filterRight - filterLeft);
+            const int filterTop = itemTop + std::max(0, (kToolbarItemSize - kToolbarFilterEditHeight) / 2);
             toolbarItems_[static_cast<std::size_t>(filterItemIndex)].rect =
                 RECT{filterLeft, itemTop, filterLeft + filterWidth, itemTop + kToolbarItemSize};
-            MoveWindow(filterEdit_, filterLeft + 10, itemTop + 7, std::max(0, filterWidth - 20), kToolbarItemSize - 14, TRUE);
+            MoveWindow(filterEdit_, filterLeft + 10, filterTop, std::max(0, filterWidth - 20), kToolbarFilterEditHeight, TRUE);
         }
 
         // Update tooltip rects
@@ -10803,10 +10994,26 @@ namespace hyperbrowse::ui
             const int hitButton = HitTestQuickAccessDestinationButton(point.x, point.y, &type);
             if (hitButton == pressedButton)
             {
-                const std::size_t rowIndex = static_cast<std::size_t>(pressedButton / 2);
+                const std::size_t rowIndex = static_cast<std::size_t>(pressedButton / 3);
                 if (rowIndex < quickAccessDestinationRows_.size())
                 {
-                    StartSelectionFileOperationToDestination(type, quickAccessDestinationRows_[rowIndex].destinationPath);
+                    const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
+                    const int actionIndex = pressedButton % 3;
+                    if (actionIndex == 2)
+                    {
+                        if (row.favorite)
+                        {
+                            RemoveFavoriteDestination(row.destinationPath);
+                        }
+                        else
+                        {
+                            RemoveRecentDestination(row.destinationPath);
+                        }
+                    }
+                    else
+                    {
+                        StartSelectionFileOperationToDestination(type, row.destinationPath);
+                    }
                 }
             }
             return;

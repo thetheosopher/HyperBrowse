@@ -157,9 +157,11 @@ namespace hyperbrowse::ui
             std::wstring destinationPath;
             std::wstring displayLabel;
             std::wstring metadataLabel;
+            bool favorite{};
             RECT rowRect{};
             RECT copyRect{};
             RECT moveRect{};
+            RECT removeRect{};
         };
 
         bool RegisterWindowClass() const;
@@ -274,6 +276,11 @@ namespace hyperbrowse::ui
         void SetThemeMode(ThemeMode themeMode);
         bool IsFavoriteDestination(std::wstring_view folderPath) const;
         std::vector<std::wstring> RecentDestinationShortcutPaths() const;
+        void RemoveFavoriteDestination(std::wstring_view folderPath);
+        void RemoveRecentDestination(std::wstring_view folderPath);
+        void ClearFavoriteDestinations();
+        void ClearRecentFolders();
+        void ClearRecentDestinations();
         void RecordRecentFolder(std::wstring folderPath);
         void RecordRecentDestination(std::wstring folderPath);
         void RefreshQuickAccessMenus();
