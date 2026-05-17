@@ -1730,6 +1730,18 @@ namespace hyperbrowse::browser
         ShowScrollBar(hwnd_, SB_VERT, maxOffset > 0);
     }
 
+    void BrowserPane::CancelSmoothScrollAnimation()
+    {
+        if (smoothScrollTimerId_)
+        {
+            KillTimer(hwnd_, kSmoothScrollTimerId);
+            smoothScrollTimerId_ = 0;
+        }
+
+        smoothScrollCurrent_ = static_cast<double>(scrollOffsetY_);
+        smoothScrollTarget_ = smoothScrollCurrent_;
+    }
+
     void BrowserPane::SetScrollOffset(int value)
     {
         RECT clientRect{};
@@ -1756,6 +1768,121 @@ namespace hyperbrowse::browser
         SetScrollInfo(hwnd_, SB_VERT, &scrollInfo, TRUE);
         InvalidateRect(hwnd_, nullptr, FALSE);
         ScheduleVisibleThumbnailWork();
+    }
+
+    int BrowserPane::PrimarySelectedViewIndex() const
+    {
+        const int primaryModelIndex = PrimarySelectedModelIndex();
+        if (primaryModelIndex >= 0)
+        {
+            return ViewIndexFromModelIndex(primaryModelIndex);
+        }
+
+        return orderedModelIndices_.empty() ? -1 : 0;
+    }
+
+    int BrowserPane::ComputeThumbnailNavigationTarget(int currentViewIndex, WPARAM keyCode) const
+    {
+        const int itemCount = static_cast<int>(orderedModelIndices_.size());
+        if (itemCount <= 0)
+        {
+            return -1;
+        }
+
+        if (currentViewIndex < 0)
+        {
+            return 0;
+        }
+
+        switch (keyCode)
+        {
+        case VK_LEFT:
+            return currentViewIndex > 0 ? currentViewIndex - 1 : currentViewIndex;
+        case VK_RIGHT:
+            return currentViewIndex + 1 < itemCount ? currentViewIndex + 1 : currentViewIndex;
+        case VK_UP:
+        case VK_DOWN:
+        {
+            RECT clientRect{};
+            GetClientRect(hwnd_, &clientRect);
+            const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
+            const int currentRow = currentViewIndex / columns;
+            const int currentColumn = currentViewIndex % columns;
+            const int lastRow = (itemCount - 1) / columns;
+            const int targetRow = keyCode == VK_UP ? currentRow - 1 : currentRow + 1;
+            if (targetRow < 0 || targetRow > lastRow)
+            {
+                return currentViewIndex;
+            }
+
+            const int targetRowStart = targetRow * columns;
+            const int targetRowLast = std::min(itemCount - 1, targetRowStart + columns - 1);
+            return std::min(targetRowStart + currentColumn, targetRowLast);
+        }
+        default:
+            break;
+        }
+
+        return -1;
+    }
+
+    void BrowserPane::EnsureThumbnailViewIndexVisible(int viewIndex)
+    {
+        if (!hwnd_
+            || viewMode_ != BrowserViewMode::Thumbnails
+            || viewIndex < 0
+            || viewIndex >= static_cast<int>(orderedModelIndices_.size()))
+        {
+            return;
+        }
+
+        RECT clientRect{};
+        GetClientRect(hwnd_, &clientRect);
+        const int clientHeight = clientRect.bottom - clientRect.top;
+        if (clientHeight <= 0)
+        {
+            return;
+        }
+
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
+        const int row = viewIndex / columns;
+        const int cellTop = layout.cellPadding + row * (layout.itemHeight + layout.cellPadding);
+        const int cellBottom = cellTop + layout.itemHeight;
+
+        int nextOffset = scrollOffsetY_;
+        if (cellTop < scrollOffsetY_)
+        {
+            nextOffset = cellTop;
+        }
+        else if (cellBottom > scrollOffsetY_ + clientHeight)
+        {
+            nextOffset = cellBottom - clientHeight;
+        }
+
+        SetScrollOffset(nextOffset);
+    }
+
+    bool BrowserPane::HandleThumbnailNavigationKey(WPARAM keyCode, bool extendSelection)
+    {
+        const int currentViewIndex = PrimarySelectedViewIndex();
+        const int targetViewIndex = ComputeThumbnailNavigationTarget(currentViewIndex, keyCode);
+        if (targetViewIndex < 0)
+        {
+            return false;
+        }
+
+        if (extendSelection)
+        {
+            ExtendSelectionToViewIndex(targetViewIndex);
+        }
+        else
+        {
+            SelectSingleViewIndex(targetViewIndex);
+        }
+
+        EnsureThumbnailViewIndexVisible(targetViewIndex);
+        return true;
     }
 
     int BrowserPane::ColumnsForClientWidth(int width) const
@@ -3903,6 +4030,7 @@ namespace hyperbrowse::browser
             if (viewMode_ == BrowserViewMode::Thumbnails)
             {
                 const bool controlPressed = GetKeyState(VK_CONTROL) < 0;
+                const bool shiftPressed = GetKeyState(VK_SHIFT) < 0;
                 if (wParam == VK_RETURN)
                 {
                     RequestOpenPrimarySelection();
@@ -3923,16 +4051,25 @@ namespace hyperbrowse::browser
                     ShowContextMenu(ContextMenuAnchorScreenPoint());
                     return 0;
                 }
+                if (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_UP || wParam == VK_DOWN)
+                {
+                    if (HandleThumbnailNavigationKey(wParam, shiftPressed))
+                    {
+                        return 0;
+                    }
+                }
             }
             break;
         case WM_VSCROLL:
             if (viewMode_ == BrowserViewMode::Thumbnails)
             {
                 HideThumbnailTooltip();
+                CancelSmoothScrollAnimation();
                 SCROLLINFO scrollInfo{};
                 scrollInfo.cbSize = sizeof(scrollInfo);
                 scrollInfo.fMask = SIF_ALL;
-                GetScrollInfo(hwnd_, SB_VERT, &scrollInfo);
+                const BOOL hasScrollInfo = GetScrollInfo(hwnd_, SB_VERT, &scrollInfo);
+                const int thumbPosition = static_cast<int>(HIWORD(wParam));
 
                 int nextOffset = scrollOffsetY_;
                 switch (LOWORD(wParam))
@@ -3951,7 +4088,7 @@ namespace hyperbrowse::browser
                     break;
                 case SB_THUMBTRACK:
                 case SB_THUMBPOSITION:
-                    nextOffset = scrollInfo.nTrackPos;
+                    nextOffset = hasScrollInfo ? scrollInfo.nTrackPos : thumbPosition;
                     break;
                 case SB_TOP:
                     nextOffset = 0;

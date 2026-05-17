@@ -186,6 +186,7 @@ namespace hyperbrowse::browser
         void PruneSelectionToVisibleItems();
         void UpdateDetailsListView();
         void UpdateVerticalScrollBar();
+        void CancelSmoothScrollAnimation();
         void SetScrollOffset(int value);
         int ColumnsForClientWidth(int width) const;
         RECT GetThumbnailCellRect(int viewIndex) const;
@@ -205,6 +206,10 @@ namespace hyperbrowse::browser
         void SyncDetailsListSelectionFromModel();
         void UpdateSelectionBytes();
         void SelectAll();
+        int PrimarySelectedViewIndex() const;
+        int ComputeThumbnailNavigationTarget(int currentViewIndex, WPARAM keyCode) const;
+        void EnsureThumbnailViewIndexVisible(int viewIndex);
+        bool HandleThumbnailNavigationKey(WPARAM keyCode, bool extendSelection);
         void FocusSelectedViewIndex(int viewIndex);
         void SelectSingleViewIndex(int viewIndex);
         void ToggleViewIndexSelection(int viewIndex);

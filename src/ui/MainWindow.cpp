@@ -263,6 +263,8 @@ namespace
     constexpr int kBatchRenameDialogHeight = 460;
     constexpr int kBatchRenamePatternEditControlId = 200;
     constexpr int kBatchRenamePreviewListControlId = 201;
+    constexpr int kBatchRenameInstructionControlId = 202;
+    constexpr int kBatchRenameHelpControlId = 203;
     constexpr wchar_t kAboutDialogClassName[] = L"HyperBrowseAboutDialog";
     constexpr wchar_t kAboutDialogGitHubLabel[] = L"GitHub Project";
     constexpr wchar_t kAboutDialogSupportLabel[] = L"Buy Me A Coffee";
@@ -2361,7 +2363,7 @@ namespace
         const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
         const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
 
-        const HWND instructionWindow = GetDlgItem(hwnd, 1);
+        const HWND instructionWindow = GetDlgItem(hwnd, kBatchRenameInstructionControlId);
         if (instructionWindow)
         {
             MoveWindow(instructionWindow,
@@ -2382,7 +2384,7 @@ namespace
                        TRUE);
         }
 
-        const HWND helpWindow = GetDlgItem(hwnd, 2);
+        const HWND helpWindow = GetDlgItem(hwnd, kBatchRenameHelpControlId);
         if (helpWindow)
         {
             MoveWindow(helpWindow,
@@ -2561,7 +2563,7 @@ namespace
                 100,
                 40,
                 hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(1)),
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBatchRenameInstructionControlId)),
                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
                 nullptr);
 
@@ -2589,7 +2591,7 @@ namespace
                 100,
                 38,
                 hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(2)),
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBatchRenameHelpControlId)),
                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
                 nullptr);
 
@@ -7989,7 +7991,7 @@ namespace hyperbrowse::ui
         std::wstring renamedLeafName;
         if (!PromptForRenameLeafName(hwnd_,
                                      instance_,
-                                     L"Rename Image",
+                                     L"Rename File",
                                      L"Enter a new file name.",
                                      item.fileName,
                                      true,
