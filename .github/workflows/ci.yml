@@ -26,7 +26,7 @@ jobs:
         # nvJPEG support itself stays compiled in (HYPERBROWSE_ENABLE_NVJPEG=ON);
         # only the post-build copy of cudart64/nvjpeg64 DLLs is skipped.
         run: >-
-          cmake --preset vs2022-x64
+          cmake --preset vs2026-x64
           -DHYPERBROWSE_BUNDLE_CUDA_REDIST=OFF
           -DHYPERBROWSE_WARNINGS_AS_ERRORS=ON
 

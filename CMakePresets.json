@@ -1,15 +1,15 @@
 {
     "version": 4,
     "cmakeMinimumRequired": {
-        "major": 3,
-        "minor": 23,
+        "major": 4,
+        "minor": 2,
         "patch": 0
     },
     "configurePresets": [
         {
-            "name": "vs2022-x64",
-            "displayName": "Visual Studio 2022 x64",
-            "generator": "Visual Studio 17 2022",
+            "name": "vs2026-x64",
+            "displayName": "Visual Studio 2026 x64",
+            "generator": "Visual Studio 18 2026",
             "binaryDir": "${sourceDir}/build",
             "architecture": {
                 "value": "x64",
@@ -21,10 +21,10 @@
             }
         },
         {
-            "name": "vs2022-x64-release-package",
-            "displayName": "Visual Studio 2022 x64 Release Packaging",
+            "name": "vs2026-x64-release-package",
+            "displayName": "Visual Studio 2026 x64 Release Packaging",
             "inherits": [
-                "vs2022-x64"
+                "vs2026-x64"
             ],
             "binaryDir": "${sourceDir}/build-release-package",
             "cacheVariables": {
@@ -40,19 +40,19 @@
         {
             "name": "debug",
             "displayName": "Debug",
-            "configurePreset": "vs2022-x64",
+            "configurePreset": "vs2026-x64",
             "configuration": "Debug"
         },
         {
             "name": "release",
             "displayName": "Release",
-            "configurePreset": "vs2022-x64",
+            "configurePreset": "vs2026-x64",
             "configuration": "Release"
         },
         {
             "name": "release-package",
             "displayName": "Release Package",
-            "configurePreset": "vs2022-x64-release-package",
+            "configurePreset": "vs2026-x64-release-package",
             "configuration": "Release",
             "targets": [
                 "HyperBrowseReleaseArtifacts"
@@ -63,7 +63,7 @@
         {
             "name": "debug-tests",
             "displayName": "Debug Tests",
-            "configurePreset": "vs2022-x64",
+            "configurePreset": "vs2026-x64",
             "configuration": "Debug",
             "output": {
                 "outputOnFailure": true
@@ -72,7 +72,7 @@
         {
             "name": "release-tests",
             "displayName": "Release Tests",
-            "configurePreset": "vs2022-x64",
+            "configurePreset": "vs2026-x64",
             "configuration": "Release",
             "output": {
                 "outputOnFailure": true
@@ -81,7 +81,7 @@
         {
             "name": "release-package-tests",
             "displayName": "Release Package Tests",
-            "configurePreset": "vs2022-x64-release-package",
+            "configurePreset": "vs2026-x64-release-package",
             "configuration": "Release",
             "output": {
                 "outputOnFailure": true

@@ -172,6 +172,20 @@ namespace hyperbrowse::ui
             RECT removeRect{};
         };
 
+        struct MenuDrawItemData
+        {
+            std::wstring text;
+            bool separator{};
+            bool hasSubmenu{};
+        };
+
+        struct CommandBarMenuButton
+        {
+            std::wstring label;
+            HMENU menu{};
+            RECT rect{};
+        };
+
         bool RegisterWindowClass() const;
         bool CreateAccelerators();
         bool CreateMenuBar();
@@ -193,7 +207,7 @@ namespace hyperbrowse::ui
         FolderTreeNodeData* GetFolderTreeNodeData(HTREEITEM item) const;
         std::wstring GetSelectedFolderTreePath() const;
         void LayoutChildren();
-        void UpdateStatusText() const;
+        void UpdateStatusText();
         void UpdateMenuState();
         void UpdateWindowTitle() const;
         void ApplyViewerMouseWheelSetting();
@@ -201,6 +215,7 @@ namespace hyperbrowse::ui
         void ApplyThumbnailMemoryPressureState();
         void ApplyResourceProfileSetting();
         void ApplyPersistentThumbnailCacheSetting();
+        void ApplyRawJpegPairingSettings();
         void ApplyTheme();
         void QueueMemoryPressureSample();
         void LoadWindowState();
@@ -215,14 +230,25 @@ namespace hyperbrowse::ui
                        int selectedIndex,
                        bool startSlideshow,
                        bool preferSecondaryMonitor = false);
+        bool ShouldDefaultViewerToSecondaryMonitor() const;
+        browser::BrowserItem ResolvePairedRawJpegViewerItem(
+            const browser::BrowserItem& item,
+            browser::RawJpegDisplayPreference preference) const;
+        std::vector<browser::BrowserItem> ResolvePairedRawJpegViewerItems(
+            std::vector<browser::BrowserItem> items,
+            bool startSlideshow) const;
         bool SyncViewerToBrowserModel(std::wstring_view preferredPath = {});
         void RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top);
         bool IsQuickAccessDestinationCurrentFolder(std::wstring_view folderPath) const;
         bool CanNavigateToQuickAccessDestination(std::wstring_view folderPath) const;
         bool CanUseQuickAccessDestinationActions(std::wstring_view folderPath) const;
+        void SelectRightPaneTab(RightPaneTab tab);
+        int HitTestDetailsPanelTab(int x, int y) const;
         int HitTestQuickAccessDestinationRow(int x, int y) const;
         int HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type = nullptr) const;
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
+        std::vector<std::wstring> ExpandRawJpegPairedPaths(const std::vector<std::wstring>& paths,
+                                   std::size_t* pairedCompanionCount = nullptr) const;
         std::vector<std::wstring> SelectedFileOperationPathsSnapshot(std::size_t* pairedCompanionCount = nullptr) const;
         bool ChooseFolder(std::wstring* folderPath) const;
         bool HasSelectedJpegItems() const;
@@ -297,6 +323,10 @@ namespace hyperbrowse::ui
         void RecordRecentFolder(std::wstring folderPath);
         void RecordRecentDestination(std::wstring folderPath);
         void RefreshQuickAccessMenus();
+        void RefreshPersistentMenuOwnerDraw();
+        void PrepareMenuForOwnerDraw(HMENU menu,
+                         std::vector<std::unique_ptr<MenuDrawItemData>>& storage,
+                         bool ownerDrawCurrentLevel) const;
         void UpdateDetailsPanel();
         void ApplyDetailsPanelText(std::wstring title, std::wstring summary, std::wstring body);
         void RefreshDetailsPanelBodyPresentation();
@@ -306,6 +336,14 @@ namespace hyperbrowse::ui
         void RequestDetailsPanelHistogram(const browser::BrowserItem& item, int modelIndex);
         void ApplyDetailsPanelHistogram(const cache::CachedThumbnail& thumbnail);
         void PaintDetailsPanel(HDC hdc, const RECT& clientRect) const;
+        void DrawStatusStrip(const DRAWITEMSTRUCT& drawItem) const;
+        void MeasureOwnerDrawMenuItem(MEASUREITEMSTRUCT* measureItem) const;
+        void DrawOwnerDrawMenuItem(const DRAWITEMSTRUCT& drawItem) const;
+        int CommandBarMenuHitTest(int x, int y) const;
+        void ActivateCommandBarKeyboardMode(int index);
+        void DeactivateCommandBarKeyboardMode(bool restoreFocus);
+        bool HandleCommandBarKeyboardInput(UINT message, WPARAM wParam, LPARAM lParam);
+        void OpenCommandBarMenu(int index);
         ThemePalette GetThemePalette() const;
         void InitToolbarItems();
         void LayoutToolbar();
@@ -334,19 +372,25 @@ namespace hyperbrowse::ui
         HWND treePane_{};
         HWND browserPane_{};
         HWND statusBar_{};
-        HWND detailsPanelTabs_{};
         HWND detailsPanelText_{};
         HWND tooltipControl_{};
         HMODULE detailsPanelRichEditModule_{};
         HIMAGELIST treeImageList_{};
         HMENU menu_{};
         HMENU fileMenu_{};
+        HMENU viewMenu_{};
+        HMENU helpMenu_{};
         HMENU openRecentFolderMenu_{};
         HMENU copySelectionToMenu_{};
         HMENU moveSelectionToMenu_{};
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
         int detailsPanelWidth_{340};
+        std::array<CommandBarMenuButton, 3> commandBarMenuButtons_{};
+        int commandBarHotIndex_{-1};
+        int commandBarPressedIndex_{-1};
+        HWND commandBarPreviousFocus_{};
+        bool commandBarKeyboardActive_{};
         int toolbarHotIndex_{-1};
         int toolbarPressedIndex_{-1};
         bool toolbarMouseTracking_{};
@@ -357,7 +401,9 @@ namespace hyperbrowse::ui
         ThemeMode themeMode_{ThemeMode::Light};
         bool recursiveBrowsingEnabled_{false};
         bool rawJpegPairedOperationsEnabled_{false};
+        browser::RawJpegDisplayPreference pairedRawJpegViewerPreference_{browser::RawJpegDisplayPreference::Raw};
         bool persistentThumbnailCacheEnabled_{true};
+        bool defaultViewerToSecondaryMonitor_{false};
         bool suppressTreeSelectionChange_{};
         DragMode dragMode_{DragMode::None};
         HBRUSH backgroundBrush_{};
@@ -372,6 +418,7 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> recentFolders_;
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
+        std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems_;
         std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
         std::unique_ptr<browser::BrowserModel> browserModel_;
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
@@ -388,6 +435,10 @@ namespace hyperbrowse::ui
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::wstring pendingTreeSelectionPath_;
         RECT detailsPanelRect_{};
+        RECT detailsPanelTabStripRect_{};
+        std::array<RECT, 2> detailsPanelTabRects_{};
+        std::wstring statusPrimaryText_;
+        std::wstring statusSecondaryText_;
         RECT detailsPanelContentRect_{};
         RECT detailsPanelHistogramRect_{};
         RECT quickAccessDestinationPanelRect_{};
@@ -402,6 +453,8 @@ namespace hyperbrowse::ui
         int detailsPanelHistogramModelIndex_{-1};
         bool detailsPanelHistogramVisible_{};
         bool detailsPanelHistogramLoading_{};
+        int detailsPanelHotTabIndex_{-1};
+        int detailsPanelPressedTabIndex_{-1};
         int quickAccessHotRowIndex_{-1};
         int quickAccessHotButtonIndex_{-1};
         int quickAccessPressedRowIndex_{-1};
@@ -424,6 +477,7 @@ namespace hyperbrowse::ui
         std::wstring activeTreeFolderOperationPath_;
         std::wstring activeTreeFolderRenamePath_;
         std::wstring pendingViewerDeleteSourcePath_;
+        std::vector<std::wstring> pendingViewerDeleteSourcePaths_;
         std::wstring pendingViewerDeletePreferredFocusPath_;
         std::wstring pendingFolderWatchReloadPath_;
         bool pendingFolderWatchTreeRefresh_{};

@@ -1,52 +1,24 @@
 #include "services/JpegTransformService.h"
 
+#include "decode/WicDecodeHelpers.h"
+
+#include <windows.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+
 #include <array>
 #include <cstdint>
-#include <fstream>
-#include <vector>
+#include <string>
 
 namespace
 {
-    std::uint16_t ReadUInt16(const std::vector<std::uint8_t>& bytes, std::size_t offset, bool littleEndian)
-    {
-        if (littleEndian)
-        {
-            return static_cast<std::uint16_t>(bytes[offset])
-                | (static_cast<std::uint16_t>(bytes[offset + 1]) << 8);
-        }
+    using Microsoft::WRL::ComPtr;
 
-        return (static_cast<std::uint16_t>(bytes[offset]) << 8)
-            | static_cast<std::uint16_t>(bytes[offset + 1]);
-    }
-
-    std::uint32_t ReadUInt32(const std::vector<std::uint8_t>& bytes, std::size_t offset, bool littleEndian)
-    {
-        if (littleEndian)
-        {
-            return static_cast<std::uint32_t>(bytes[offset])
-                | (static_cast<std::uint32_t>(bytes[offset + 1]) << 8)
-                | (static_cast<std::uint32_t>(bytes[offset + 2]) << 16)
-                | (static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
-        }
-
-        return (static_cast<std::uint32_t>(bytes[offset]) << 24)
-            | (static_cast<std::uint32_t>(bytes[offset + 1]) << 16)
-            | (static_cast<std::uint32_t>(bytes[offset + 2]) << 8)
-            | static_cast<std::uint32_t>(bytes[offset + 3]);
-    }
-
-    void WriteUInt16(std::vector<std::uint8_t>* bytes, std::size_t offset, bool littleEndian, std::uint16_t value)
-    {
-        if (littleEndian)
-        {
-            (*bytes)[offset] = static_cast<std::uint8_t>(value & 0xff);
-            (*bytes)[offset + 1] = static_cast<std::uint8_t>((value >> 8) & 0xff);
-            return;
-        }
-
-        (*bytes)[offset] = static_cast<std::uint8_t>((value >> 8) & 0xff);
-        (*bytes)[offset + 1] = static_cast<std::uint8_t>(value & 0xff);
-    }
+    constexpr const wchar_t* kOrientationMetadataQueries[] = {
+        L"System.Photo.Orientation",
+        L"/app1/ifd/{ushort=274}",
+        L"/ifd/{ushort=274}",
+    };
 
     std::uint16_t RotateRightOrientation(std::uint16_t orientation)
     {
@@ -57,6 +29,28 @@ namespace
     int NormalizeClockwiseQuarterTurns(int quarterTurnsDelta)
     {
         return ((quarterTurnsDelta % 4) + 4) % 4;
+    }
+
+    bool TrySetOrientationMetadata(IWICMetadataQueryWriter* queryWriter, std::uint16_t orientation)
+    {
+        if (!queryWriter)
+        {
+            return false;
+        }
+
+        PROPVARIANT value{};
+        value.vt = VT_UI2;
+        value.uiVal = orientation;
+
+        for (const wchar_t* query : kOrientationMetadataQueries)
+        {
+            if (SUCCEEDED(queryWriter->SetMetadataByName(query, &value)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 
@@ -71,139 +65,92 @@ namespace hyperbrowse::services
             return true;
         }
 
-        std::ifstream input(filePath, std::ios::binary);
-        if (!input)
+        hyperbrowse::decode::wic_support::ComInitializationScope comInitialization(
+            COINIT_MULTITHREADED,
+            errorMessage,
+            L"Failed to initialize COM for JPEG orientation adjustment.");
+        if (!comInitialization.Succeeded())
+        {
+            return false;
+        }
+
+        ComPtr<IWICImagingFactory> factory;
+        if (!hyperbrowse::decode::wic_support::InitializeWicFactory(&factory, errorMessage))
+        {
+            return false;
+        }
+
+        ComPtr<IWICBitmapDecoder> decoder;
+        HRESULT result = factory->CreateDecoderFromFilename(filePath.c_str(),
+                                                            nullptr,
+                                                            GENERIC_READ | GENERIC_WRITE,
+                                                            WICDecodeMetadataCacheOnDemand,
+                                                            decoder.GetAddressOf());
+        if (FAILED(result) || !decoder)
         {
             if (errorMessage)
             {
-                *errorMessage = L"Failed to open the JPEG file for orientation adjustment.";
+                *errorMessage = L"Failed to open the JPEG file for metadata editing.";
             }
             return false;
         }
 
-        std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-        if (bytes.size() < 4 || bytes[0] != 0xff || bytes[1] != 0xd8)
+        ComPtr<IWICBitmapFrameDecode> frame;
+        result = decoder->GetFrame(0, frame.GetAddressOf());
+        if (FAILED(result) || !frame)
         {
             if (errorMessage)
             {
-                *errorMessage = L"The selected file is not a valid JPEG stream.";
+                *errorMessage = L"Failed to read the JPEG frame for orientation adjustment.";
             }
             return false;
         }
 
-        bool updated = false;
-        for (std::size_t offset = 2; offset + 4 <= bytes.size();)
+        std::uint16_t orientation = hyperbrowse::decode::wic_support::ReadOrientation(frame.Get());
+        if (orientation < 1 || orientation > 8)
         {
-            if (bytes[offset] != 0xff)
-            {
-                break;
-            }
-
-            const std::uint8_t marker = bytes[offset + 1];
-            if (marker == 0xda || marker == 0xd9)
-            {
-                break;
-            }
-
-            if (offset + 4 > bytes.size())
-            {
-                break;
-            }
-
-            const std::uint16_t segmentLength = static_cast<std::uint16_t>((bytes[offset + 2] << 8) | bytes[offset + 3]);
-            if (segmentLength < 2 || offset + 2 + segmentLength > bytes.size())
-            {
-                break;
-            }
-
-            const std::size_t segmentDataOffset = offset + 4;
-            const std::size_t segmentDataSize = segmentLength - 2;
-            if (marker == 0xe1 && segmentDataSize >= 14
-                && bytes[segmentDataOffset + 0] == 'E'
-                && bytes[segmentDataOffset + 1] == 'x'
-                && bytes[segmentDataOffset + 2] == 'i'
-                && bytes[segmentDataOffset + 3] == 'f'
-                && bytes[segmentDataOffset + 4] == 0
-                && bytes[segmentDataOffset + 5] == 0)
-            {
-                const std::size_t tiffOffset = segmentDataOffset + 6;
-                const bool littleEndian = bytes[tiffOffset] == 'I' && bytes[tiffOffset + 1] == 'I';
-                if (!littleEndian && !(bytes[tiffOffset] == 'M' && bytes[tiffOffset + 1] == 'M'))
-                {
-                    break;
-                }
-
-                const std::uint32_t ifdOffset = ReadUInt32(bytes, tiffOffset + 4, littleEndian);
-                const std::size_t ifdPosition = tiffOffset + ifdOffset;
-                if (ifdPosition + 2 > bytes.size())
-                {
-                    break;
-                }
-
-                const std::uint16_t entryCount = ReadUInt16(bytes, ifdPosition, littleEndian);
-                for (std::uint16_t entryIndex = 0; entryIndex < entryCount; ++entryIndex)
-                {
-                    const std::size_t entryOffset = ifdPosition + 2 + (static_cast<std::size_t>(entryIndex) * 12U);
-                    if (entryOffset + 12 > bytes.size())
-                    {
-                        break;
-                    }
-
-                    const std::uint16_t tag = ReadUInt16(bytes, entryOffset, littleEndian);
-                    const std::uint16_t type = ReadUInt16(bytes, entryOffset + 2, littleEndian);
-                    const std::uint32_t count = ReadUInt32(bytes, entryOffset + 4, littleEndian);
-                    if (tag != 0x0112 || type != 3 || count != 1)
-                    {
-                        continue;
-                    }
-
-                    std::uint16_t orientation = ReadUInt16(bytes, entryOffset + 8, littleEndian);
-                    if (orientation < 1 || orientation > 8)
-                    {
-                        orientation = 1;
-                    }
-
-                    const int clockwiseTurns = NormalizeClockwiseQuarterTurns(quarterTurnsDelta);
-                    for (int step = 0; step < clockwiseTurns; ++step)
-                    {
-                        orientation = RotateRightOrientation(orientation);
-                    }
-
-                    WriteUInt16(&bytes, entryOffset + 8, littleEndian, orientation);
-                    updated = true;
-                    break;
-                }
-
-                if (updated)
-                {
-                    break;
-                }
-            }
-
-            offset += static_cast<std::size_t>(segmentLength) + 2;
+            orientation = 1;
         }
 
-        if (!updated)
+        const int clockwiseTurns = NormalizeClockwiseQuarterTurns(quarterTurnsDelta);
+        for (int step = 0; step < clockwiseTurns; ++step)
+        {
+            orientation = RotateRightOrientation(orientation);
+        }
+
+        ComPtr<IWICFastMetadataEncoder> metadataEncoder;
+        result = factory->CreateFastMetadataEncoderFromFrameDecode(frame.Get(), metadataEncoder.GetAddressOf());
+        if (FAILED(result) || !metadataEncoder)
         {
             if (errorMessage)
             {
-                *errorMessage = L"The JPEG file does not expose an editable EXIF orientation tag.";
+                *errorMessage = L"Failed to create the JPEG metadata editor.";
             }
             return false;
         }
 
-        std::ofstream output(filePath, std::ios::binary | std::ios::trunc);
-        if (!output)
+        ComPtr<IWICMetadataQueryWriter> metadataWriter;
+        result = metadataEncoder->GetMetadataQueryWriter(metadataWriter.GetAddressOf());
+        if (FAILED(result) || !metadataWriter)
         {
             if (errorMessage)
             {
-                *errorMessage = L"Failed to reopen the JPEG file for writing the adjusted orientation metadata.";
+                *errorMessage = L"Failed to access the JPEG metadata writer.";
             }
             return false;
         }
 
-        output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        if (!output)
+        if (!TrySetOrientationMetadata(metadataWriter.Get(), orientation))
+        {
+            if (errorMessage)
+            {
+                *errorMessage = L"Failed to update the JPEG EXIF orientation metadata.";
+            }
+            return false;
+        }
+
+        result = metadataEncoder->Commit();
+        if (FAILED(result))
         {
             if (errorMessage)
             {

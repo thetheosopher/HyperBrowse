@@ -152,7 +152,7 @@ if (-not (Test-Path $cmakeListsPath)) {
 }
 
 if (-not (Test-Path $buildDir)) {
-    throw "Build directory does not exist: $buildDir. Run 'cmake --preset vs2022-x64-release-package' first, or pass -BuildDir to an existing configured tree."
+    throw "Build directory does not exist: $buildDir. Run 'cmake --preset vs2026-x64-release-package' first, or pass -BuildDir to an existing configured tree."
 }
 
 $projectRoot = (Resolve-Path $projectRoot).Path

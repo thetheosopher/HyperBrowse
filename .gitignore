@@ -1,5 +1,6 @@
 # Build outputs
 /build/
+/build-*/
 /build-release-package/
 /build-runbutton-probe/
 /build-runbutton-probe-vs/

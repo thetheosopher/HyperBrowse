@@ -8,6 +8,12 @@
 
 namespace hyperbrowse::browser
 {
+    enum class RawJpegDisplayPreference : int
+    {
+        Jpeg = 0,
+        Raw = 1,
+    };
+
     struct BrowserItem
     {
         std::wstring fileName;

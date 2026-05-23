@@ -54,8 +54,8 @@ The current implementation combines a Win32 shell with Direct2D and DirectWrite 
 ## Build Requirements
 
 - Windows 10 or Windows 11, x64.
-- Visual Studio 2022 with Desktop development for C++.
-- CMake 3.23 or newer.
+- Visual Studio 2026 Build Tools or Visual Studio 2026 with Desktop development for C++.
+- CMake 4.2 or newer for the bundled Visual Studio 2026 presets.
 - PowerShell and Inno Setup 6 for release packaging.
 - Optional internet access when `HYPERBROWSE_BUNDLE_CUDA_REDIST=ON`, because CMake downloads NVIDIA redistributables for packaging.
 
@@ -64,7 +64,7 @@ The current implementation combines a Win32 shell with Direct2D and DirectWrite 
 ### Recommended: CMake presets
 
 ```powershell
-cmake --preset vs2022-x64
+cmake --preset vs2026-x64
 cmake --build --preset debug
 ctest --preset debug-tests
 ```
@@ -79,7 +79,7 @@ ctest --preset release-tests
 ### Visual Studio generator
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64
 cmake --build build --config Debug --target HyperBrowse
 ```
 
@@ -100,8 +100,8 @@ Launch the `HyperBrowse` startup project from Visual Studio, or run the built ex
 Examples:
 
 ```powershell
-cmake --preset vs2022-x64 -DHYPERBROWSE_BUNDLE_CUDA_REDIST=OFF
-cmake --preset vs2022-x64 -DHYPERBROWSE_ENABLE_NVJPEG=OFF
+cmake --preset vs2026-x64 -DHYPERBROWSE_BUNDLE_CUDA_REDIST=OFF
+cmake --preset vs2026-x64 -DHYPERBROWSE_ENABLE_NVJPEG=OFF
 ```
 
 If nvJPEG is compiled in but the runtime is unavailable on the machine, HyperBrowse falls back to WIC automatically.
@@ -136,7 +136,7 @@ cmake --install build --config Release --component Runtime --prefix build/dist/H
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
 
 ```powershell
-cmake --preset vs2022-x64-release-package
+cmake --preset vs2026-x64-release-package
 cmake --build --preset release-package
 ```
 

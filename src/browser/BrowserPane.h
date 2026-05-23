@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "browser/BrowserModel.h"
 #include "util/ResourceSizing.h"
 
 namespace hyperbrowse::browser
@@ -118,6 +119,10 @@ namespace hyperbrowse::browser
         const std::wstring& GetFilterQuery() const noexcept;
         bool HasActiveFilter() const noexcept;
         std::uint64_t DisplayedItemCount() const noexcept;
+        void SetRawJpegStackingEnabled(bool enabled);
+        bool IsRawJpegStackingEnabled() const noexcept;
+        void SetRawJpegDisplayPreference(RawJpegDisplayPreference preference);
+        RawJpegDisplayPreference GetRawJpegDisplayPreference() const noexcept;
         void SetThumbnailSizePreset(ThumbnailSizePreset preset);
         ThumbnailSizePreset GetThumbnailSizePreset() const noexcept;
         void SetCompactThumbnailLayout(bool enabled);
@@ -187,7 +192,7 @@ namespace hyperbrowse::browser
         void UpdateDetailsListView();
         void UpdateVerticalScrollBar();
         void CancelSmoothScrollAnimation();
-        void SetScrollOffset(int value);
+        void SetScrollOffset(int value, bool scheduleVisibleWork = true, bool forceVisibleWork = false);
         int ColumnsForClientWidth(int width) const;
         RECT GetThumbnailCellRect(int viewIndex) const;
         RECT GetThumbnailPreviewRect(const RECT& cellRect) const;
@@ -207,6 +212,8 @@ namespace hyperbrowse::browser
         void UpdateSelectionBytes();
         void SelectAll();
         int PrimarySelectedViewIndex() const;
+        int VisibleRepresentativeForModelIndex(int modelIndex) const noexcept;
+        int PairedCompanionModelIndex(int modelIndex) const noexcept;
         int ComputeThumbnailNavigationTarget(int currentViewIndex, WPARAM keyCode) const;
         void EnsureThumbnailViewIndexVisible(int viewIndex);
         bool HandleThumbnailNavigationKey(WPARAM keyCode, bool extendSelection);
@@ -253,6 +260,7 @@ namespace hyperbrowse::browser
                            decode::ThumbnailDecodeFailureKind failureKind,
                            bool selected) const;
         void DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item, bool selected) const;
+        std::wstring BuildDisplayFileTypeLabel(const BrowserItem& item, int modelIndex) const;
         std::wstring BuildListText(int viewIndex, int subItem) const;
         std::wstring BuildThumbnailTooltipText(int viewIndex) const;
         std::wstring BuildPlaceholderText() const;
@@ -298,11 +306,15 @@ namespace hyperbrowse::browser
         bool sortAscending_{true};
         std::wstring filterQuery_;
         std::wstring filterQueryLower_;
+        bool rawJpegStackingEnabled_{};
+        RawJpegDisplayPreference rawJpegDisplayPreference_{RawJpegDisplayPreference::Raw};
         ThumbnailSizePreset thumbnailSizePreset_{ThumbnailSizePreset::Pixels192};
         bool compactThumbnailLayout_{true};
         bool thumbnailDetailsVisible_{true};
         BrowserModel* model_{};
         std::vector<int> orderedModelIndices_;
+        std::unordered_map<int, int> pairedCompanionByRepresentativeModelIndex_;
+        std::unordered_map<int, int> pairedRepresentativeByHiddenModelIndex_;
         std::unordered_set<int> selectedModelIndices_;
         std::unordered_set<int> rubberBandSeedSelection_;
         std::uint64_t selectedBytes_{};
@@ -311,6 +323,7 @@ namespace hyperbrowse::browser
         int focusedModelIndex_{-1};
         bool rubberBandActive_{};
         bool quickSendDragArmed_{};
+        bool quickSendDragOwnsCapture_{};
         bool trackingMouseLeave_{};
         POINT quickSendDragStartPoint_{};
         POINT rubberBandStart_{};

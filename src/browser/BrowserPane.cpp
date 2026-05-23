@@ -189,6 +189,55 @@ namespace
         return value;
     }
 
+    bool IsJpegFileType(std::wstring_view fileType)
+    {
+        const std::wstring normalized = ToLowercase(std::wstring(fileType));
+        return normalized == L"jpg"
+            || normalized == L"jpeg"
+            || normalized == L".jpg"
+            || normalized == L".jpeg";
+    }
+
+    enum class RawJpegPairKind : int
+    {
+        None = 0,
+        Raw = 1,
+        Jpeg = 2,
+    };
+
+    bool TryBuildRawJpegPairKey(const hyperbrowse::browser::BrowserItem& item,
+                                std::wstring* key,
+                                RawJpegPairKind* kind)
+    {
+        const bool isRaw = hyperbrowse::decode::IsRawFileType(item.fileType);
+        const bool isJpeg = IsJpegFileType(item.fileType);
+        if (!isRaw && !isJpeg)
+        {
+            if (key)
+            {
+                key->clear();
+            }
+            if (kind)
+            {
+                *kind = RawJpegPairKind::None;
+            }
+            return false;
+        }
+
+        const fs::path itemPath(item.filePath);
+        if (key)
+        {
+            *key = ToLowercase(itemPath.parent_path().wstring());
+            key->push_back(L'|');
+            key->append(ToLowercase(itemPath.stem().wstring()));
+        }
+        if (kind)
+        {
+            *kind = isRaw ? RawJpegPairKind::Raw : RawJpegPairKind::Jpeg;
+        }
+        return true;
+    }
+
     std::wstring TrimWhitespace(std::wstring value)
     {
         const auto isSpace = [](wchar_t character)
@@ -809,6 +858,44 @@ namespace hyperbrowse::browser
         return static_cast<std::uint64_t>(orderedModelIndices_.size());
     }
 
+    void BrowserPane::SetRawJpegStackingEnabled(bool enabled)
+    {
+        if (rawJpegStackingEnabled_ == enabled)
+        {
+            return;
+        }
+
+        rawJpegStackingEnabled_ = enabled;
+        if (hwnd_)
+        {
+            RefreshFromModel();
+        }
+    }
+
+    bool BrowserPane::IsRawJpegStackingEnabled() const noexcept
+    {
+        return rawJpegStackingEnabled_;
+    }
+
+    void BrowserPane::SetRawJpegDisplayPreference(RawJpegDisplayPreference preference)
+    {
+        if (rawJpegDisplayPreference_ == preference)
+        {
+            return;
+        }
+
+        rawJpegDisplayPreference_ = preference;
+        if (rawJpegStackingEnabled_ && hwnd_)
+        {
+            RefreshFromModel();
+        }
+    }
+
+    RawJpegDisplayPreference BrowserPane::GetRawJpegDisplayPreference() const noexcept
+    {
+        return rawJpegDisplayPreference_;
+    }
+
     void BrowserPane::SetThumbnailSizePreset(ThumbnailSizePreset preset)
     {
         if (thumbnailSizePreset_ == preset)
@@ -1148,6 +1235,7 @@ namespace hyperbrowse::browser
             focusedModelIndex_ = *selectedModelIndices_.begin();
         }
 
+        PruneSelectionToVisibleItems();
         UpdateSelectionBytes();
         SyncDetailsListSelectionFromModel();
         NotifyStateChanged();
@@ -1459,6 +1547,8 @@ namespace hyperbrowse::browser
     void BrowserPane::RebuildOrder()
     {
         orderedModelIndices_.clear();
+        pairedCompanionByRepresentativeModelIndex_.clear();
+        pairedRepresentativeByHiddenModelIndex_.clear();
         if (!model_)
         {
             return;
@@ -1469,7 +1559,8 @@ namespace hyperbrowse::browser
         const StructuredFilterQuery structuredFilter = useStructuredFilter
             ? ParseStructuredFilterQuery(filterQueryLower_)
             : StructuredFilterQuery{};
-        orderedModelIndices_.reserve(items.size());
+        std::vector<int> filteredModelIndices;
+        filteredModelIndices.reserve(items.size());
         for (std::size_t index = 0; index < items.size(); ++index)
         {
             if (!filterQueryLower_.empty())
@@ -1494,7 +1585,91 @@ namespace hyperbrowse::browser
                 }
             }
 
-            orderedModelIndices_.push_back(static_cast<int>(index));
+            filteredModelIndices.push_back(static_cast<int>(index));
+        }
+
+        if (rawJpegStackingEnabled_)
+        {
+            struct PairGroup
+            {
+                int rawIndex{-1};
+                int jpegIndex{-1};
+                int rawCount{};
+                int jpegCount{};
+            };
+
+            std::unordered_map<std::wstring, PairGroup> pairGroups;
+            pairGroups.reserve(filteredModelIndices.size());
+            for (const int modelIndex : filteredModelIndices)
+            {
+                std::wstring pairKey;
+                RawJpegPairKind pairKind = RawJpegPairKind::None;
+                if (!TryBuildRawJpegPairKey(items[static_cast<std::size_t>(modelIndex)], &pairKey, &pairKind))
+                {
+                    continue;
+                }
+
+                PairGroup& group = pairGroups[pairKey];
+                if (pairKind == RawJpegPairKind::Raw)
+                {
+                    group.rawIndex = modelIndex;
+                    ++group.rawCount;
+                }
+                else if (pairKind == RawJpegPairKind::Jpeg)
+                {
+                    group.jpegIndex = modelIndex;
+                    ++group.jpegCount;
+                }
+            }
+
+            std::unordered_set<std::wstring> emittedPairKeys;
+            emittedPairKeys.reserve(pairGroups.size());
+            orderedModelIndices_.reserve(filteredModelIndices.size());
+            for (const int modelIndex : filteredModelIndices)
+            {
+                std::wstring pairKey;
+                RawJpegPairKind pairKind = RawJpegPairKind::None;
+                if (!TryBuildRawJpegPairKey(items[static_cast<std::size_t>(modelIndex)], &pairKey, &pairKind))
+                {
+                    orderedModelIndices_.push_back(modelIndex);
+                    continue;
+                }
+
+                const auto groupIterator = pairGroups.find(pairKey);
+                if (groupIterator == pairGroups.end())
+                {
+                    orderedModelIndices_.push_back(modelIndex);
+                    continue;
+                }
+
+                const PairGroup& group = groupIterator->second;
+                const bool isExactPair = group.rawCount == 1
+                    && group.jpegCount == 1
+                    && group.rawIndex >= 0
+                    && group.jpegIndex >= 0;
+                if (!isExactPair)
+                {
+                    orderedModelIndices_.push_back(modelIndex);
+                    continue;
+                }
+
+                if (emittedPairKeys.contains(pairKey))
+                {
+                    continue;
+                }
+
+                emittedPairKeys.insert(pairKey);
+                const bool preferRaw = rawJpegDisplayPreference_ == RawJpegDisplayPreference::Raw;
+                const int representativeModelIndex = preferRaw ? group.rawIndex : group.jpegIndex;
+                const int hiddenCompanionModelIndex = preferRaw ? group.jpegIndex : group.rawIndex;
+                orderedModelIndices_.push_back(representativeModelIndex);
+                pairedCompanionByRepresentativeModelIndex_.emplace(representativeModelIndex, hiddenCompanionModelIndex);
+                pairedRepresentativeByHiddenModelIndex_.emplace(hiddenCompanionModelIndex, representativeModelIndex);
+            }
+        }
+        else
+        {
+            orderedModelIndices_ = std::move(filteredModelIndices);
         }
 
         const auto comparator = [this, &items](int lhsIndex, int rhsIndex)
@@ -1646,7 +1821,7 @@ namespace hyperbrowse::browser
 
     void BrowserPane::PruneSelectionToVisibleItems()
     {
-        if (selectedModelIndices_.empty())
+        if (selectedModelIndices_.empty() && focusedModelIndex_ < 0 && anchorModelIndex_ < 0)
         {
             return;
         }
@@ -1658,27 +1833,51 @@ namespace hyperbrowse::browser
             visibleModelIndices.insert(modelIndex);
         }
 
-        for (auto iterator = selectedModelIndices_.begin(); iterator != selectedModelIndices_.end();)
+        std::unordered_set<int> remappedSelection;
+        remappedSelection.reserve(selectedModelIndices_.size());
+        for (const int selectedModelIndex : selectedModelIndices_)
         {
-            if (!visibleModelIndices.contains(*iterator))
+            const int visibleModelIndex = VisibleRepresentativeForModelIndex(selectedModelIndex);
+            if (visibleModelIndices.contains(visibleModelIndex))
             {
-                iterator = selectedModelIndices_.erase(iterator);
+                remappedSelection.insert(visibleModelIndex);
             }
-            else
+        }
+        selectedModelIndices_ = std::move(remappedSelection);
+
+        if (focusedModelIndex_ >= 0)
+        {
+            focusedModelIndex_ = VisibleRepresentativeForModelIndex(focusedModelIndex_);
+            if (!visibleModelIndices.contains(focusedModelIndex_))
             {
-                ++iterator;
+                focusedModelIndex_ = selectedModelIndices_.empty() ? -1 : *selectedModelIndices_.begin();
             }
         }
 
-        if (focusedModelIndex_ >= 0 && !visibleModelIndices.contains(focusedModelIndex_))
+        if (anchorModelIndex_ >= 0)
         {
-            focusedModelIndex_ = selectedModelIndices_.empty() ? -1 : *selectedModelIndices_.begin();
+            anchorModelIndex_ = VisibleRepresentativeForModelIndex(anchorModelIndex_);
+            if (!visibleModelIndices.contains(anchorModelIndex_))
+            {
+                anchorModelIndex_ = focusedModelIndex_;
+            }
         }
+    }
 
-        if (anchorModelIndex_ >= 0 && !visibleModelIndices.contains(anchorModelIndex_))
-        {
-            anchorModelIndex_ = focusedModelIndex_;
-        }
+    int BrowserPane::VisibleRepresentativeForModelIndex(int modelIndex) const noexcept
+    {
+        const auto iterator = pairedRepresentativeByHiddenModelIndex_.find(modelIndex);
+        return iterator != pairedRepresentativeByHiddenModelIndex_.end()
+            ? iterator->second
+            : modelIndex;
+    }
+
+    int BrowserPane::PairedCompanionModelIndex(int modelIndex) const noexcept
+    {
+        const auto iterator = pairedCompanionByRepresentativeModelIndex_.find(modelIndex);
+        return iterator != pairedCompanionByRepresentativeModelIndex_.end()
+            ? iterator->second
+            : -1;
     }
 
     void BrowserPane::UpdateDetailsListView()
@@ -1742,7 +1941,7 @@ namespace hyperbrowse::browser
         smoothScrollTarget_ = smoothScrollCurrent_;
     }
 
-    void BrowserPane::SetScrollOffset(int value)
+    void BrowserPane::SetScrollOffset(int value, bool scheduleVisibleWork, bool forceVisibleWork)
     {
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
@@ -1756,6 +1955,10 @@ namespace hyperbrowse::browser
         const int clampedValue = std::clamp(value, 0, maxOffset);
         if (clampedValue == scrollOffsetY_)
         {
+            if (scheduleVisibleWork && forceVisibleWork)
+            {
+                ScheduleVisibleThumbnailWork();
+            }
             return;
         }
 
@@ -1767,7 +1970,10 @@ namespace hyperbrowse::browser
         scrollInfo.nPos = scrollOffsetY_;
         SetScrollInfo(hwnd_, SB_VERT, &scrollInfo, TRUE);
         InvalidateRect(hwnd_, nullptr, FALSE);
-        ScheduleVisibleThumbnailWork();
+        if (scheduleVisibleWork)
+        {
+            ScheduleVisibleThumbnailWork();
+        }
     }
 
     int BrowserPane::PrimarySelectedViewIndex() const
@@ -2380,13 +2586,16 @@ namespace hyperbrowse::browser
         quickSendDragArmed_ = true;
         quickSendDragStartPoint_ = point;
         SetCapture(hwnd_);
+        quickSendDragOwnsCapture_ = GetCapture() == hwnd_;
     }
 
     void BrowserPane::ClearQuickSendDragState()
     {
+        const bool shouldReleaseCapture = quickSendDragOwnsCapture_ && !rubberBandActive_ && GetCapture() == hwnd_;
         quickSendDragArmed_ = false;
+        quickSendDragOwnsCapture_ = false;
         quickSendDragStartPoint_ = {};
-        if (!rubberBandActive_ && GetCapture() == hwnd_)
+        if (shouldReleaseCapture)
         {
             ReleaseCapture();
         }
@@ -3141,10 +3350,25 @@ namespace hyperbrowse::browser
             const D2D1_RECT_F previewRect = render::ToD2DRect(previewRectGdi);
             const float previewCorner = static_cast<float>(layout.previewCornerRadius);
             const D2D1_ROUNDED_RECT roundedPreview = D2D1::RoundedRect(previewRect, previewCorner, previewCorner);
+            const bool stackedPair = PairedCompanionModelIndex(modelIndex) >= 0;
 
             ID2D1SolidColorBrush* previewBrush = selected
                 ? (d2dSelectedPreviewBrush_ ? d2dSelectedPreviewBrush_.Get() : d2dPreviewBrush_.Get())
                 : (d2dPreviewBrush_ ? d2dPreviewBrush_.Get() : d2dBackgroundBrush_.Get());
+            if (stackedPair)
+            {
+                const D2D1_RECT_F stackedPreviewRect = D2D1::RectF(
+                    previewRect.left - 5.0f,
+                    previewRect.top - 5.0f,
+                    previewRect.right - 5.0f,
+                    previewRect.bottom - 5.0f);
+                const D2D1_ROUNDED_RECT stackedRoundedPreview = D2D1::RoundedRect(
+                    stackedPreviewRect,
+                    previewCorner,
+                    previewCorner);
+                if (previewBrush) rt->FillRoundedRectangle(stackedRoundedPreview, previewBrush);
+                if (borderBrush) rt->DrawRoundedRectangle(stackedRoundedPreview, borderBrush, 1.0f);
+            }
             if (previewBrush) rt->FillRoundedRectangle(roundedPreview, previewBrush);
 
             D2DDrawPreviewThumbnail(rt, previewRect, *item, selected);
@@ -3173,7 +3397,7 @@ namespace hyperbrowse::browser
                     cellRect.left + layout.textInset, infoTop,
                     cellRect.right - layout.textInset, cellRect.bottom - layout.infoBottomInset);
 
-                const std::wstring typeLabel = ToUppercase(item->fileType);
+                const std::wstring typeLabel = BuildDisplayFileTypeLabel(*item, modelIndex);
                 const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
 
                 if (d2dMetaFormat_)
@@ -3526,6 +3750,18 @@ namespace hyperbrowse::browser
                 ? (selectedPreviewBrush_ ? selectedPreviewBrush_ : previewBrush_)
                 : (previewBrush_ ? previewBrush_ : backgroundBrush_);
             SelectObject(hdc, previewBrush);
+            if (PairedCompanionModelIndex(modelIndex) >= 0)
+            {
+                RECT stackedPreviewRect = previewRect;
+                OffsetRect(&stackedPreviewRect, -5, -5);
+                RoundRect(hdc,
+                          stackedPreviewRect.left,
+                          stackedPreviewRect.top,
+                          stackedPreviewRect.right,
+                          stackedPreviewRect.bottom,
+                          layout.previewCornerRadius,
+                          layout.previewCornerRadius);
+            }
             RoundRect(hdc,
                       previewRect.left,
                       previewRect.top,
@@ -3563,7 +3799,7 @@ namespace hyperbrowse::browser
                               cellRect.bottom - layout.infoBottomInset - layout.infoHeight,
                               cellRect.right - layout.textInset,
                               cellRect.bottom - layout.infoBottomInset};
-                const std::wstring typeLabel = ToUppercase(item->fileType);
+                const std::wstring typeLabel = BuildDisplayFileTypeLabel(*item, modelIndex);
                 const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
                 HGDIOBJ footerFont = thumbnailMetaFont_
                     ? SelectObject(hdc, thumbnailMetaFont_)
@@ -3796,7 +4032,10 @@ namespace hyperbrowse::browser
         case 0:
             return item->fileName;
         case 1:
-            return item->fileType;
+        {
+            const int modelIndex = ModelIndexFromViewIndex(viewIndex);
+            return BuildDisplayFileTypeLabel(*item, modelIndex);
+        }
         case 2:
             return FormatByteSize(item->fileSizeBytes);
         case 3:
@@ -3849,6 +4088,26 @@ namespace hyperbrowse::browser
         default:
             return L"";
         }
+    }
+
+    std::wstring BrowserPane::BuildDisplayFileTypeLabel(const BrowserItem& item, int modelIndex) const
+    {
+        std::wstring label = ToUppercase(item.fileType);
+        const int companionModelIndex = PairedCompanionModelIndex(modelIndex);
+        if (!model_ || companionModelIndex < 0)
+        {
+            return label;
+        }
+
+        const auto& items = model_->Items();
+        if (companionModelIndex >= static_cast<int>(items.size()))
+        {
+            return label;
+        }
+
+        label.push_back(L'+');
+        label.append(ToUppercase(items[static_cast<std::size_t>(companionModelIndex)].fileType));
+        return label;
     }
 
     std::wstring BrowserPane::BuildThumbnailTooltipText(int viewIndex) const
@@ -4072,6 +4331,8 @@ namespace hyperbrowse::browser
                 const int thumbPosition = static_cast<int>(HIWORD(wParam));
 
                 int nextOffset = scrollOffsetY_;
+                bool scheduleVisibleWork = true;
+                bool forceVisibleWork = false;
                 switch (LOWORD(wParam))
                 {
                 case SB_LINEUP:
@@ -4087,8 +4348,14 @@ namespace hyperbrowse::browser
                     nextOffset += static_cast<int>(scrollInfo.nPage);
                     break;
                 case SB_THUMBTRACK:
+                    scheduleVisibleWork = false;
+                    [[fallthrough]];
                 case SB_THUMBPOSITION:
                     nextOffset = hasScrollInfo ? scrollInfo.nTrackPos : thumbPosition;
+                    forceVisibleWork = LOWORD(wParam) == SB_THUMBPOSITION;
+                    break;
+                case SB_ENDSCROLL:
+                    forceVisibleWork = true;
                     break;
                 case SB_TOP:
                     nextOffset = 0;
@@ -4100,7 +4367,7 @@ namespace hyperbrowse::browser
                     break;
                 }
 
-                SetScrollOffset(nextOffset);
+                SetScrollOffset(nextOffset, scheduleVisibleWork, forceVisibleWork);
             }
             return 0;
         case WM_MOUSEWHEEL:

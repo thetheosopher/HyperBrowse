@@ -1561,6 +1561,34 @@ namespace
         ListView_GetItemText(listView, 0, 4, buffer, static_cast<int>(std::size(buffer)));
         Expect(std::wstring(buffer) == L"10x10", "Dimensions column did not surface the decoded dimensions");
 
+        std::vector<hyperbrowse::browser::BrowserItem> pairedItems;
+        pairedItems.push_back(hyperbrowse::browser::BrowserItem{L"pair.nef", L"C:\\Alpha\\pair.nef", L"NEF", L"2026-04-11 10:04", 500, 90, 4032, 3024});
+        pairedItems.push_back(hyperbrowse::browser::BrowserItem{L"pair.jpg", L"C:\\Alpha\\pair.jpg", L"JPG", L"2026-04-11 10:05", 600, 20, 4032, 3024});
+        pairedItems.push_back(hyperbrowse::browser::BrowserItem{L"solo.png", L"C:\\Alpha\\solo.png", L"PNG", L"2026-04-11 10:06", 700, 15, 640, 480});
+        model.Reset(L"C:\\Alpha", false);
+        model.AppendItems(std::move(pairedItems), 3, 205);
+        model.Complete();
+
+        browserPane.SetSortMode(hyperbrowse::browser::BrowserSortMode::FileName);
+        browserPane.SetSortAscending(true);
+        browserPane.SetRawJpegDisplayPreference(hyperbrowse::browser::RawJpegDisplayPreference::Jpeg);
+        browserPane.SetRawJpegStackingEnabled(true);
+        browserPane.RefreshFromModel();
+
+        Expect(ListView_GetItemCount(listView) == 2, "Paired RAW+JPEG stacking did not collapse to a single details entry");
+        browserPane.RestoreSelectionByFilePaths({L"C:\\Alpha\\pair.nef"}, L"C:\\Alpha\\pair.nef");
+        Expect(browserPane.SelectedCount() == 1, "Stacked RAW+JPEG selection did not remap to the visible representative");
+        const auto stackedSelectionPaths = browserPane.SelectedFilePathsSnapshot();
+        Expect(stackedSelectionPaths.size() == 1
+            && stackedSelectionPaths.front() == L"C:\\Alpha\\pair.jpg",
+            "Stacked RAW+JPEG selection did not expose the JPEG browser representative");
+        ListView_GetItemText(listView, 0, 1, buffer, static_cast<int>(std::size(buffer)));
+        Expect(std::wstring(buffer) == L"JPG+NEF", "Stacked RAW+JPEG type label did not reveal the hidden companion");
+
+        browserPane.SetRawJpegStackingEnabled(false);
+        browserPane.RefreshFromModel();
+        Expect(ListView_GetItemCount(listView) == 3, "Disabling RAW+JPEG stacking did not restore both browser items");
+
         DestroyWindow(hostWindow);
     }
 
