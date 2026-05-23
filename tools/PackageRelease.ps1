@@ -22,7 +22,7 @@ if ([string]::IsNullOrWhiteSpace($BuildDir)) {
 function Get-ProjectVersion {
     param([string]$CMakeListsPath)
 
-    $match = Select-String -Path $CMakeListsPath -Pattern 'project\(HyperBrowse VERSION ([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
+    $match = Select-String -Path $CMakeListsPath -Pattern 'project\(HyperBrowse VERSION ([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)' | Select-Object -First 1
     if (-not $match) {
         throw "Failed to determine HyperBrowse version from $CMakeListsPath."
     }

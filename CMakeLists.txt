@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 
-project(HyperBrowse VERSION 1.0.0 LANGUAGES CXX)
+project(HyperBrowse VERSION 1.1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,6 +34,11 @@ set(HYPERBROWSE_TOOLBAR_ICONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/toolbar-ic
 set(HYPERBROWSE_APP_PUBLISHER "thetheosopher")
 set(HYPERBROWSE_APP_PUBLISHER_URL "https://github.com/thetheosopher/HyperBrowse")
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/HyperBrowse.ico" HYPERBROWSE_APP_ICON_PATH)
+
+set(HYPERBROWSE_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
+if(HYPERBROWSE_VERSION_TWEAK STREQUAL "")
+    set(HYPERBROWSE_VERSION_TWEAK 0)
+endif()
 
 option(HYPERBROWSE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(HYPERBROWSE_BUILD_TESTS "Build the HyperBrowse smoke/integration test suite" ON)
