@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.1.0.0-2EA043)
+![Version](https://img.shields.io/badge/Version-1.1.0.1-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -22,7 +22,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
 - WIC baseline decode path, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
-- Full-screen viewer with zoom, pan, rotate, side-by-side compare, info overlays, slideshow support, and adjacent-image prefetch.
+- Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, info overlays, slideshow support, and adjacent-image prefetch.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Portable and installer packaging outputs, plus a Windows GitHub Actions workflow for build verification.
 
@@ -31,7 +31,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 | Area | Included today |
 | --- | --- |
 | Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename filter, thumbnail detail toggle with inline star ratings, selected-item info strip, and remembered window/folder restore |
-| Viewer | Separate viewer window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, overlay HUD, slideshow, transition styles, and multi-monitor open |
+| Viewer | Separate viewer window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD, slideshow, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, viewer prefetch, folder watch refresh, and optional GPU-assisted JPEG decode |
@@ -125,13 +125,13 @@ The repository also includes a GitHub Actions workflow at [.github/workflows/ci.
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.1.0.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.1.0.1-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.1.0.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.1.0.1-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -192,9 +192,14 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.1.0.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.1.0.0-portable-win64.zip` and `HyperBrowse-1.1.0.0-installer.exe`).
+Current release: **1.1.0.1**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.1.0.1-portable-win64.zip` and `HyperBrowse-1.1.0.1-installer.exe`).
 
 ## Version History
+
+### 1.1.0.1
+
+- Added viewer mouse-edge previous/next navigation with directional hover cursors and click-to-navigate behavior.
+- Narrowed the navigation hit zones and reduced the custom arrow cursor size so edge navigation stays available without overpowering drag-to-pan.
 
 ### 1.1.0.0
 

@@ -4,6 +4,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include <array>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -143,6 +144,199 @@ namespace
         RegCloseKey(key);
     }
 
+    using NavigationCursorPolygon = std::array<POINT, 7>;
+
+    NavigationCursorPolygon MakeBaseNavigationCursorPolygon(int width, int height)
+    {
+        const int paddingX = std::max(3, width / 8);
+        const int paddingY = std::max(4, height / 8);
+        const int centerY = height / 2;
+        const int shaftHalfHeight = std::max(3, height / 10);
+        const int headBaseX = std::max(paddingX + 4, width * 7 / 16);
+        const int tailX = width - paddingX - 1;
+
+        return {{
+            POINT{paddingX, centerY},
+            POINT{headBaseX, paddingY},
+            POINT{headBaseX, centerY - shaftHalfHeight},
+            POINT{tailX, centerY - shaftHalfHeight},
+            POINT{tailX, centerY + shaftHalfHeight},
+            POINT{headBaseX, centerY + shaftHalfHeight},
+            POINT{headBaseX, height - paddingY - 1},
+        }};
+    }
+
+    NavigationCursorPolygon MirrorNavigationCursorPolygon(const NavigationCursorPolygon& polygon, int width)
+    {
+        NavigationCursorPolygon mirrored = polygon;
+        for (POINT& point : mirrored)
+        {
+            point.x = (width - 1) - point.x;
+        }
+
+        return mirrored;
+    }
+
+    bool PointInPolygon(const NavigationCursorPolygon& polygon, double x, double y)
+    {
+        bool inside = false;
+        for (std::size_t i = 0, j = polygon.size() - 1; i < polygon.size(); j = i++)
+        {
+            const double currentX = static_cast<double>(polygon[i].x);
+            const double currentY = static_cast<double>(polygon[i].y);
+            const double previousX = static_cast<double>(polygon[j].x);
+            const double previousY = static_cast<double>(polygon[j].y);
+            const bool intersects = ((currentY > y) != (previousY > y))
+                && (x < (((previousX - currentX) * (y - currentY)) / (previousY - currentY) + currentX));
+            if (intersects)
+            {
+                inside = !inside;
+            }
+        }
+
+        return inside;
+    }
+
+    HCURSOR CreateViewerNavigationCursor(bool previous)
+    {
+        const int width = std::max(22, (GetSystemMetrics(SM_CXCURSOR) * 7) / 10);
+        const int height = std::max(22, (GetSystemMetrics(SM_CYCURSOR) * 7) / 10);
+
+        BITMAPV5HEADER header{};
+        header.bV5Size = sizeof(header);
+        header.bV5Width = width;
+        header.bV5Height = -height;
+        header.bV5Planes = 1;
+        header.bV5BitCount = 32;
+        header.bV5Compression = BI_BITFIELDS;
+        header.bV5RedMask = 0x00FF0000;
+        header.bV5GreenMask = 0x0000FF00;
+        header.bV5BlueMask = 0x000000FF;
+        header.bV5AlphaMask = 0xFF000000;
+
+        void* bitmapBits = nullptr;
+        HDC screenDc = GetDC(nullptr);
+        HBITMAP colorBitmap = CreateDIBSection(screenDc,
+                                               reinterpret_cast<BITMAPINFO*>(&header),
+                                               DIB_RGB_COLORS,
+                                               &bitmapBits,
+                                               nullptr,
+                                               0);
+        if (screenDc)
+        {
+            ReleaseDC(nullptr, screenDc);
+        }
+        if (!colorBitmap || !bitmapBits)
+        {
+            if (colorBitmap)
+            {
+                DeleteObject(colorBitmap);
+            }
+            return nullptr;
+        }
+
+        HBITMAP maskBitmap = CreateBitmap(width, height, 1, 1, nullptr);
+        if (!maskBitmap)
+        {
+            DeleteObject(colorBitmap);
+            return nullptr;
+        }
+
+        NavigationCursorPolygon polygon = MakeBaseNavigationCursorPolygon(width, height);
+        if (!previous)
+        {
+            polygon = MirrorNavigationCursorPolygon(polygon, width);
+        }
+
+        std::vector<std::uint8_t> fillMask(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0);
+        for (int y = 0; y < height; ++y)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                if (PointInPolygon(polygon, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5))
+                {
+                    fillMask[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)] = 1;
+                }
+            }
+        }
+
+        auto* pixels = static_cast<std::uint32_t*>(bitmapBits);
+        constexpr std::uint32_t fillColor = 0xFFF7F9FCu;
+        constexpr std::uint32_t outlineColor = 0xFF11161Bu;
+        std::fill(pixels, pixels + (static_cast<std::size_t>(width) * static_cast<std::size_t>(height)), 0u);
+
+        for (int y = 0; y < height; ++y)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+                if (fillMask[index] != 0)
+                {
+                    pixels[index] = fillColor;
+                }
+            }
+        }
+
+        for (int y = 0; y < height; ++y)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+                if (fillMask[index] != 0)
+                {
+                    continue;
+                }
+
+                bool touchesFilledPixel = false;
+                for (int offsetY = -1; offsetY <= 1 && !touchesFilledPixel; ++offsetY)
+                {
+                    for (int offsetX = -1; offsetX <= 1; ++offsetX)
+                    {
+                        const int neighborX = x + offsetX;
+                        const int neighborY = y + offsetY;
+                        if (neighborX < 0 || neighborY < 0 || neighborX >= width || neighborY >= height)
+                        {
+                            continue;
+                        }
+
+                        const std::size_t neighborIndex = static_cast<std::size_t>(neighborY) * static_cast<std::size_t>(width)
+                            + static_cast<std::size_t>(neighborX);
+                        if (fillMask[neighborIndex] != 0)
+                        {
+                            touchesFilledPixel = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (touchesFilledPixel)
+                {
+                    pixels[index] = outlineColor;
+                }
+            }
+        }
+
+        ICONINFO cursorInfo{};
+        cursorInfo.fIcon = FALSE;
+        cursorInfo.xHotspot = static_cast<DWORD>(polygon[0].x);
+        cursorInfo.yHotspot = static_cast<DWORD>(polygon[0].y);
+        cursorInfo.hbmMask = maskBitmap;
+        cursorInfo.hbmColor = colorBitmap;
+
+        HCURSOR cursor = CreateIconIndirect(&cursorInfo);
+        DeleteObject(maskBitmap);
+        DeleteObject(colorBitmap);
+        return cursor;
+    }
+
+    bool ExceedsPanDragThreshold(POINT origin, POINT current)
+    {
+        const int dragThresholdX = std::max(4, GetSystemMetrics(SM_CXDRAG));
+        const int dragThresholdY = std::max(4, GetSystemMetrics(SM_CYDRAG));
+        return std::abs(current.x - origin.x) >= dragThresholdX
+            || std::abs(current.y - origin.y) >= dragThresholdY;
+    }
+
 }
 
 namespace hyperbrowse::viewer
@@ -180,6 +374,16 @@ namespace hyperbrowse::viewer
         if (backgroundBrush_)
         {
             DeleteObject(backgroundBrush_);
+        }
+
+        if (previousNavigationCursor_)
+        {
+            DestroyCursor(previousNavigationCursor_);
+        }
+
+        if (nextNavigationCursor_)
+        {
+            DestroyCursor(nextNavigationCursor_);
         }
     }
 
@@ -1005,6 +1209,74 @@ namespace hyperbrowse::viewer
         util::IncrementCounter(L"viewer.prefetch.miss");
         currentIndex_ = nextIndex;
         LoadCurrentImageAsync(LoadReason::Navigation);
+    }
+
+    int ViewerWindow::NavigationDeltaForPoint(POINT point) const noexcept
+    {
+        if (!hwnd_ || items_.size() < 2)
+        {
+            return 0;
+        }
+
+        RECT clientRect{};
+        if (GetClientRect(hwnd_, &clientRect) == FALSE)
+        {
+            return 0;
+        }
+
+        const int clientWidth = clientRect.right - clientRect.left;
+        if (clientWidth < 8)
+        {
+            return 0;
+        }
+
+        const int navigationZoneWidth = std::max(1, clientWidth / 8);
+        const int leftBoundary = clientRect.left + navigationZoneWidth;
+        const int rightBoundary = clientRect.right - navigationZoneWidth;
+        if (point.x < leftBoundary && currentIndex_ > 0)
+        {
+            return -1;
+        }
+
+        if (point.x >= rightBoundary && currentIndex_ + 1 < static_cast<int>(items_.size()))
+        {
+            return +1;
+        }
+
+        return 0;
+    }
+
+    bool ViewerWindow::SetNavigationCursorForPoint(POINT point)
+    {
+        const int navigationDelta = NavigationDeltaForPoint(point);
+        if (navigationDelta < 0)
+        {
+            if (!previousNavigationCursor_)
+            {
+                previousNavigationCursor_ = CreateViewerNavigationCursor(true);
+            }
+
+            if (previousNavigationCursor_)
+            {
+                SetCursor(previousNavigationCursor_);
+                return true;
+            }
+        }
+        else if (navigationDelta > 0)
+        {
+            if (!nextNavigationCursor_)
+            {
+                nextNavigationCursor_ = CreateViewerNavigationCursor(false);
+            }
+
+            if (nextNavigationCursor_)
+            {
+                SetCursor(nextNavigationCursor_);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     void ViewerWindow::ScheduleAdjacentPrefetch(std::uint64_t navigationGeneration)
@@ -1992,37 +2264,107 @@ namespace hyperbrowse::viewer
             }
             return 0;
         }
+        case WM_SETCURSOR:
+            if (LOWORD(lParam) == HTCLIENT && !panning_)
+            {
+                POINT point{};
+                if (GetCursorPos(&point) != FALSE
+                    && ScreenToClient(hwnd_, &point) != FALSE
+                    && SetNavigationCursorForPoint(point))
+                {
+                    return TRUE;
+                }
+            }
+            break;
         case WM_LBUTTONDOWN:
+        {
+            const POINT clickPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            const int navigationDelta = NavigationDeltaForPoint(clickPoint);
+            if (navigationDelta != 0)
+            {
+                pendingNavigationDelta_ = navigationDelta;
+                pendingNavigationPoint_ = clickPoint;
+                SetCapture(hwnd_);
+                return 0;
+            }
+
             if (currentImage_)
             {
                 panning_ = true;
-                lastPanPoint_ = POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                lastPanPoint_ = clickPoint;
                 SetCapture(hwnd_);
             }
             return 0;
+        }
         case WM_MOUSEMOVE:
+        {
+            const POINT currentPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            if (pendingNavigationDelta_ != 0)
+            {
+                if (currentImage_ && ExceedsPanDragThreshold(pendingNavigationPoint_, currentPoint))
+                {
+                    pendingNavigationDelta_ = 0;
+                    panning_ = true;
+                    lastPanPoint_ = pendingNavigationPoint_;
+                    panOffsetX_ += static_cast<double>(currentPoint.x - lastPanPoint_.x);
+                    panOffsetY_ += static_cast<double>(currentPoint.y - lastPanPoint_.y);
+                    lastPanPoint_ = currentPoint;
+                    RequestRepaint();
+                    return 0;
+                }
+
+                if (!SetNavigationCursorForPoint(currentPoint))
+                {
+                    SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+                }
+                return 0;
+            }
+
             if (panning_)
             {
-                const POINT currentPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
                 panOffsetX_ += static_cast<double>(currentPoint.x - lastPanPoint_.x);
                 panOffsetY_ += static_cast<double>(currentPoint.y - lastPanPoint_.y);
                 lastPanPoint_ = currentPoint;
                 RequestRepaint();
                 return 0;
             }
+
+            if (!SetNavigationCursorForPoint(currentPoint))
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            }
             break;
+        }
         case WM_LBUTTONUP:
+        {
+            const POINT releasePoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            const int navigationDelta = pendingNavigationDelta_;
+            pendingNavigationDelta_ = 0;
+
             if (panning_)
             {
                 panning_ = false;
-                if (GetCapture() == hwnd_)
-                {
-                    ReleaseCapture();
-                }
+            }
+
+            if (GetCapture() == hwnd_)
+            {
+                ReleaseCapture();
+            }
+
+            if (navigationDelta != 0)
+            {
+                Navigate(navigationDelta);
+            }
+
+            if (!SetNavigationCursorForPoint(releasePoint))
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_ARROW));
             }
             return 0;
+        }
         case WM_CAPTURECHANGED:
             panning_ = false;
+            pendingNavigationDelta_ = 0;
             return 0;
         case WM_LBUTTONDBLCLK:
             ToggleFullScreen();

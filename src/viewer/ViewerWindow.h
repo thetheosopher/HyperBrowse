@@ -115,6 +115,8 @@ namespace hyperbrowse::viewer
         void UpdateWindowTitle() const;
         void LoadCurrentImageAsync(LoadReason reason);
         void Navigate(int delta);
+        int NavigationDeltaForPoint(POINT point) const noexcept;
+        bool SetNavigationCursorForPoint(POINT point);
         void PrepareForImageChange(bool keepDisplayedImage = false);
         void ResetCachedImageSlots();
         void ResetPrefetchStatistics();
@@ -187,6 +189,8 @@ namespace hyperbrowse::viewer
         std::shared_ptr<AsyncState> asyncState_;
         HBRUSH backgroundBrush_{};
         std::shared_ptr<const cache::CachedThumbnail> statusArt_;
+        HCURSOR previousNavigationCursor_{};
+        HCURSOR nextNavigationCursor_{};
         ZoomMode zoomMode_{ZoomMode::Fit};
         double customZoomScale_{1.0};
         int currentZoomPercent_{};
@@ -195,6 +199,8 @@ namespace hyperbrowse::viewer
         double panOffsetY_{};
         bool compareMode_{};
         CompareDirection compareDirection_{CompareDirection::Next};
+        int pendingNavigationDelta_{};
+        POINT pendingNavigationPoint_{};
         bool infoOverlaysVisible_{true};
         MouseWheelBehavior mouseWheelBehavior_{MouseWheelBehavior::Zoom};
         bool panning_{};
