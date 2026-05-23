@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <string_view>
 
 #include "app/resource.h"
 #include "browser/BrowserModel.h"
@@ -52,6 +53,8 @@ namespace
     constexpr int kUnavailableThumbnailIconSize = 48;
     constexpr int kPlaceholderTitlePointSize = 18;
     constexpr int kPlaceholderBodyPointSize = 13;
+    constexpr std::wstring_view kThumbnailRatingStars = L"\x2605\x2605\x2605\x2605\x2605";
+    constexpr COLORREF kThumbnailRatingGold = RGB(214, 172, 46);
 
     int TopOfFolderThumbnailWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
     {
@@ -586,6 +589,53 @@ namespace
         logFont.lfCharSet = DEFAULT_CHARSET;
         logFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
         return CreateFontIndirectW(&logFont);
+    }
+
+    int ThumbnailRatingForItem(const hyperbrowse::services::UserMetadataStore* userMetadataStore,
+                               const hyperbrowse::browser::BrowserItem& item)
+    {
+        if (!userMetadataStore)
+        {
+            return 0;
+        }
+
+        return std::clamp(userMetadataStore->EntryForPath(item.filePath).rating,
+                          0,
+                          static_cast<int>(kThumbnailRatingStars.size()));
+    }
+
+    float MeasureDWriteTextWidth(IDWriteTextFormat* format, std::wstring_view text)
+    {
+        if (!format || text.empty())
+        {
+            return 0.0f;
+        }
+
+        IDWriteFactory* dwriteFactory = hyperbrowse::render::D2DRenderer::Instance().DWriteFactory();
+        if (!dwriteFactory)
+        {
+            return 0.0f;
+        }
+
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> textLayout;
+        const HRESULT result = dwriteFactory->CreateTextLayout(text.data(),
+                                                               static_cast<UINT32>(text.size()),
+                                                               format,
+                                                               512.0f,
+                                                               128.0f,
+                                                               textLayout.GetAddressOf());
+        if (FAILED(result) || !textLayout)
+        {
+            return 0.0f;
+        }
+
+        DWRITE_TEXT_METRICS textMetrics{};
+        if (FAILED(textLayout->GetMetrics(&textMetrics)))
+        {
+            return 0.0f;
+        }
+
+        return textMetrics.widthIncludingTrailingWhitespace;
     }
 
     D2D1_RECT_F InsetD2DRect(const D2D1_RECT_F& rect, float insetX, float insetY)
@@ -3315,6 +3365,19 @@ namespace hyperbrowse::browser
         const int lastRow = std::max(firstRow, (scrollOffsetY_ + clientHeight) / verticalStride + 1);
         const int firstIndex = firstRow * columns;
         const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (lastRow + 1) * columns);
+        const float footerGap = thumbnailDetailsVisible_ ? static_cast<float>(std::max(6, layout.badgeGap - 1)) : 0.0f;
+        float ratingStripWidth = 0.0f;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dRatingBrush;
+        if (thumbnailDetailsVisible_)
+        {
+            ratingStripWidth = MeasureDWriteTextWidth(d2dMetaFormat_.Get(), kThumbnailRatingStars);
+            if (ratingStripWidth <= 0.0f)
+            {
+                ratingStripWidth = static_cast<float>(layout.infoHeight * 3);
+            }
+            ratingStripWidth += 2.0f;
+            rt->CreateSolidColorBrush(render::ToD2DColor(kThumbnailRatingGold), d2dRatingBrush.GetAddressOf());
+        }
 
         for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
         {
@@ -3380,8 +3443,10 @@ namespace hyperbrowse::browser
 
                 const float titleTop = previewRect.bottom + static_cast<float>(layout.titleTopGap);
                 D2D1_RECT_F nameRect = D2D1::RectF(
-                    cellRect.left + layout.textInset, titleTop,
-                    cellRect.right - layout.textInset, titleTop + layout.titleHeight);
+                    cellRect.left + layout.textInset,
+                    titleTop,
+                    cellRect.right - layout.textInset,
+                    titleTop + layout.titleHeight);
 
                 if (d2dTitleFormat_ && textBrush)
                 {
@@ -3396,9 +3461,30 @@ namespace hyperbrowse::browser
                 D2D1_RECT_F infoRect = D2D1::RectF(
                     cellRect.left + layout.textInset, infoTop,
                     cellRect.right - layout.textInset, cellRect.bottom - layout.infoBottomInset);
+                const float infoWidth = std::max(0.0f, infoRect.right - infoRect.left);
+                const float centeredRatingWidth = std::min(infoWidth, ratingStripWidth);
+                const float ratingLeft = infoRect.left + std::max(0.0f, (infoWidth - centeredRatingWidth) / 2.0f);
+                const float ratingRight = ratingLeft + centeredRatingWidth;
+                const D2D1_RECT_F dimensionsRect = D2D1::RectF(
+                    infoRect.left,
+                    infoRect.top,
+                    std::max(infoRect.left, ratingLeft - footerGap),
+                    infoRect.bottom);
+                const D2D1_RECT_F ratingRect = D2D1::RectF(
+                    ratingLeft,
+                    infoRect.top,
+                    ratingRight,
+                    infoRect.bottom);
+                const D2D1_RECT_F typeRect = D2D1::RectF(
+                    std::min(infoRect.right, ratingRight + footerGap),
+                    infoRect.top,
+                    infoRect.right,
+                    infoRect.bottom);
 
                 const std::wstring typeLabel = BuildDisplayFileTypeLabel(*item, modelIndex);
                 const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
+                const int rating = ThumbnailRatingForItem(userMetadataStore_, *item);
+                ID2D1SolidColorBrush* ratingBaseBrush = d2dMutedTextBrush_ ? d2dMutedTextBrush_.Get() : mutedBrush;
 
                 if (d2dMetaFormat_)
                 {
@@ -3406,14 +3492,28 @@ namespace hyperbrowse::browser
                     if (mutedBrush && !dimensionLabel.empty())
                     {
                         rt->DrawText(dimensionLabel.c_str(), static_cast<UINT32>(dimensionLabel.size()),
-                                     d2dMetaFormat_.Get(), infoRect, mutedBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                                     d2dMetaFormat_.Get(), dimensionsRect, mutedBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    }
+
+                    d2dMetaFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                    if (ratingBaseBrush)
+                    {
+                        rt->DrawText(kThumbnailRatingStars.data(),
+                                     static_cast<UINT32>(kThumbnailRatingStars.size()),
+                                     d2dMetaFormat_.Get(), ratingRect, ratingBaseBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    }
+                    if (rating > 0 && d2dRatingBrush)
+                    {
+                        rt->DrawText(kThumbnailRatingStars.data(),
+                                     static_cast<UINT32>(rating),
+                                     d2dMetaFormat_.Get(), ratingRect, d2dRatingBrush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
                     }
 
                     if (textBrush && !typeLabel.empty())
                     {
                         d2dMetaFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
                         rt->DrawText(typeLabel.c_str(), static_cast<UINT32>(typeLabel.size()),
-                                     d2dMetaFormat_.Get(), infoRect, textBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                                     d2dMetaFormat_.Get(), typeRect, textBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
                         d2dMetaFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
                     }
                 }
@@ -3710,6 +3810,31 @@ namespace hyperbrowse::browser
         const int lastRow = std::max(firstRow, (scrollOffsetY_ + static_cast<int>(clientRect.bottom - clientRect.top)) / verticalStride + 1);
         const int firstIndex = firstRow * columns;
         const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (lastRow + 1) * columns);
+        const int footerGap = thumbnailDetailsVisible_ ? std::max(6, layout.badgeGap - 1) : 0;
+        int ratingStripWidth = 0;
+        if (thumbnailDetailsVisible_)
+        {
+            HGDIOBJ measureFont = thumbnailMetaFont_
+                ? SelectObject(hdc, thumbnailMetaFont_)
+                : static_cast<HGDIOBJ>(nullptr);
+            SIZE ratingExtent{};
+            if (GetTextExtentPoint32W(hdc,
+                                      kThumbnailRatingStars.data(),
+                                      static_cast<int>(kThumbnailRatingStars.size()),
+                                      &ratingExtent) != FALSE)
+            {
+                ratingStripWidth = ratingExtent.cx;
+            }
+            if (measureFont)
+            {
+                SelectObject(hdc, measureFont);
+            }
+            if (ratingStripWidth <= 0)
+            {
+                ratingStripWidth = layout.infoHeight * 3;
+            }
+            ratingStripWidth += 2;
+        }
 
         SetBkMode(hdc, TRANSPARENT);
         for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
@@ -3777,19 +3902,20 @@ namespace hyperbrowse::browser
             {
                 SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
                 const int titleTop = previewRect.bottom + layout.titleTopGap;
+                HGDIOBJ oldFont = thumbnailTitleFont_
+                    ? SelectObject(hdc, thumbnailTitleFont_)
+                    : static_cast<HGDIOBJ>(nullptr);
                 RECT nameRect{cellRect.left + layout.textInset,
                               titleTop,
                               cellRect.right - layout.textInset,
                               titleTop + layout.titleHeight};
-                HGDIOBJ oldFont = thumbnailTitleFont_
-                    ? SelectObject(hdc, thumbnailTitleFont_)
-                    : static_cast<HGDIOBJ>(nullptr);
                 const std::wstring displayTitle = BuildThumbnailDisplayTitle(*item);
                 DrawTextW(hdc,
                           displayTitle.c_str(),
                           -1,
                           &nameRect,
                           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
                 if (oldFont)
                 {
                     SelectObject(hdc, oldFont);
@@ -3799,47 +3925,28 @@ namespace hyperbrowse::browser
                               cellRect.bottom - layout.infoBottomInset - layout.infoHeight,
                               cellRect.right - layout.textInset,
                               cellRect.bottom - layout.infoBottomInset};
-                const std::wstring typeLabel = BuildDisplayFileTypeLabel(*item, modelIndex);
-                const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
-                HGDIOBJ footerFont = thumbnailMetaFont_
-                    ? SelectObject(hdc, thumbnailMetaFont_)
-                    : static_cast<HGDIOBJ>(nullptr);
-
-                SIZE typeTextExtent{};
-                if (!typeLabel.empty())
-                {
-                    GetTextExtentPoint32W(hdc,
-                                          typeLabel.c_str(),
-                                          static_cast<int>(typeLabel.size()),
-                                          &typeTextExtent);
-                }
-
-                SIZE dimensionTextExtent{};
-                if (!dimensionLabel.empty())
-                {
-                    GetTextExtentPoint32W(hdc,
-                                          dimensionLabel.c_str(),
-                                          static_cast<int>(dimensionLabel.size()),
-                                          &dimensionTextExtent);
-                }
-
-                const int footerWidth = infoRect.right - infoRect.left;
-                const int gapWidth = typeLabel.empty() ? 0 : std::max(4, layout.badgeGap - 2);
-                const int typeTextWidth = static_cast<int>(typeTextExtent.cx);
-                const int preferredTypeWidth = typeLabel.empty() ? 0 : (typeTextWidth + 2);
-                const int requiredDimensionsWidth = static_cast<int>(dimensionTextExtent.cx) + 2;
-                const int maxTypeWidth = std::max(0, footerWidth - requiredDimensionsWidth - gapWidth);
-                const int typeWidth = typeLabel.empty()
-                    ? 0
-                    : std::max(0, std::min(preferredTypeWidth, maxTypeWidth));
+                const LONG infoWidth = std::max<LONG>(0, infoRect.right - infoRect.left);
+                const LONG centeredRatingWidth = std::min(infoWidth, static_cast<LONG>(ratingStripWidth));
+                const LONG ratingLeft = infoRect.left + std::max<LONG>(0, (infoWidth - centeredRatingWidth) / 2);
+                const LONG ratingRight = ratingLeft + centeredRatingWidth;
                 RECT dimensionsRect{infoRect.left,
                                     infoRect.top,
-                                    std::max(infoRect.left, infoRect.right - typeWidth - (typeWidth > 0 ? gapWidth : 0)),
+                                    std::max(infoRect.left, ratingLeft - static_cast<LONG>(footerGap)),
                                     infoRect.bottom};
-                RECT typeRect{std::max(infoRect.left, infoRect.right - typeWidth),
+                RECT ratingRect{ratingLeft,
+                                infoRect.top,
+                                ratingRight,
+                                infoRect.bottom};
+                RECT typeRect{std::min(infoRect.right, ratingRight + static_cast<LONG>(footerGap)),
                               infoRect.top,
                               infoRect.right,
                               infoRect.bottom};
+                const std::wstring typeLabel = BuildDisplayFileTypeLabel(*item, modelIndex);
+                const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
+                const int rating = ThumbnailRatingForItem(userMetadataStore_, *item);
+                HGDIOBJ footerFont = thumbnailMetaFont_
+                    ? SelectObject(hdc, thumbnailMetaFont_)
+                    : static_cast<HGDIOBJ>(nullptr);
 
                 SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
                 DrawTextW(hdc,
@@ -3848,7 +3955,23 @@ namespace hyperbrowse::browser
                           &dimensionsRect,
                           DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
-                if (typeWidth > 0)
+                SetTextColor(hdc, colors_.mutedText);
+                DrawTextW(hdc,
+                          kThumbnailRatingStars.data(),
+                          static_cast<int>(kThumbnailRatingStars.size()),
+                          &ratingRect,
+                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                if (rating > 0)
+                {
+                    SetTextColor(hdc, kThumbnailRatingGold);
+                    DrawTextW(hdc,
+                              kThumbnailRatingStars.data(),
+                              rating,
+                              &ratingRect,
+                              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                }
+
+                if (typeRect.right > typeRect.left)
                 {
                     SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
                     DrawTextW(hdc,

@@ -15,12 +15,28 @@ namespace hyperbrowse::cache
     class DiskThumbnailCache
     {
     public:
+        struct Statistics
+        {
+            std::wstring cacheDirectory;
+            std::size_t capacityBytes{};
+            std::size_t indexedEntryCount{};
+            std::size_t indexedBytes{};
+            std::size_t indexFileBytes{};
+            std::size_t cacheFileCount{};
+            std::size_t cacheFileBytes{};
+            std::size_t orphanFileCount{};
+            std::size_t orphanFileBytes{};
+            std::size_t missingFileCount{};
+        };
+
         explicit DiskThumbnailCache(std::size_t capacityBytes = 0);
 
         std::shared_ptr<const CachedThumbnail> TryLoad(const ThumbnailCacheKey& key);
         void Store(const ThumbnailCacheKey& key, std::shared_ptr<const CachedThumbnail> thumbnail);
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
         void Clear();
+        bool Compact();
+        Statistics QueryStatistics() const;
         std::size_t CurrentBytes() const;
         std::size_t CapacityBytes() const noexcept;
 
@@ -33,6 +49,7 @@ namespace hyperbrowse::cache
         };
 
         void EnsureLoadedLocked();
+        void ReloadIndexLocked();
         bool LoadIndexLocked();
         void SaveIndexLocked() const;
         void EvictIfNeededLocked();

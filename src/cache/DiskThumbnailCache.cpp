@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "util/HashUtils.h"
@@ -34,6 +35,20 @@ namespace
 #pragma pack(pop)
 
     constexpr std::array<char, 8> kDiskThumbnailMagic{{'H', 'B', 'T', 'H', 'M', 'B', '0', '1'}};
+
+    struct ParsedIndexEntry
+    {
+        hyperbrowse::cache::ThumbnailCacheKey key;
+        std::wstring cacheFileName;
+        std::size_t fileBytes{};
+        std::uint64_t lastAccessOrdinal{};
+    };
+
+    std::mutex& PersistentCacheFilesystemMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
 
     std::wstring EscapeField(std::wstring_view value)
     {
@@ -275,6 +290,31 @@ namespace
             + L"\t" + std::to_wstring(fileBytes)
             + L"\t" + std::to_wstring(lastAccessOrdinal);
     }
+
+    bool TryParseIndexEntry(const std::wstring& line, ParsedIndexEntry* entry)
+    {
+        if (!entry || line.empty())
+        {
+            return false;
+        }
+
+        const std::vector<std::wstring> fields = SplitTabFields(line);
+        if (fields.size() != 7)
+        {
+            return false;
+        }
+
+        ParsedIndexEntry parsed;
+        parsed.key.filePath = fields[0];
+        parsed.key.modifiedTimestampUtc = _wcstoui64(fields[1].c_str(), nullptr, 10);
+        parsed.key.targetWidth = _wtoi(fields[2].c_str());
+        parsed.key.targetHeight = _wtoi(fields[3].c_str());
+        parsed.cacheFileName = fields[4];
+        parsed.fileBytes = static_cast<std::size_t>(_wcstoui64(fields[5].c_str(), nullptr, 10));
+        parsed.lastAccessOrdinal = _wcstoui64(fields[6].c_str(), nullptr, 10);
+        *entry = std::move(parsed);
+        return true;
+    }
 }
 
 namespace hyperbrowse::cache
@@ -286,13 +326,15 @@ namespace hyperbrowse::cache
 
     std::shared_ptr<const CachedThumbnail> DiskThumbnailCache::TryLoad(const ThumbnailCacheKey& key)
     {
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
+
         ThumbnailCacheKey normalizedKey = key;
         normalizedKey.filePath = util::NormalizePathForComparison(normalizedKey.filePath);
 
         std::wstring cachePath;
         {
             std::scoped_lock lock(mutex_);
-            EnsureLoadedLocked();
+            ReloadIndexLocked();
             const auto iterator = entries_.find(normalizedKey);
             if (iterator == entries_.end())
             {
@@ -308,8 +350,14 @@ namespace hyperbrowse::cache
         if (!stream)
         {
             std::scoped_lock lock(mutex_);
-            entries_.erase(normalizedKey);
-            SaveIndexLocked();
+            ReloadIndexLocked();
+            const auto iterator = entries_.find(normalizedKey);
+            if (iterator != entries_.end())
+            {
+                currentBytes_ -= iterator->second.fileBytes;
+                entries_.erase(iterator);
+                SaveIndexLocked();
+            }
             return {};
         }
 
@@ -353,6 +401,8 @@ namespace hyperbrowse::cache
             return;
         }
 
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
+
         int width = 0;
         int height = 0;
         std::vector<unsigned char> pixels;
@@ -368,23 +418,16 @@ namespace hyperbrowse::cache
         Entry entry;
         {
             std::scoped_lock lock(mutex_);
-            EnsureLoadedLocked();
+            ReloadIndexLocked();
             cacheDirectory = EnsureCacheDirectoryLocked();
             entry.cacheFileName = BuildCacheFileName(normalizedKey);
             entry.fileBytes = sizeof(DiskThumbnailHeader) + pixels.size();
             entry.lastAccessOrdinal = nextAccessOrdinal_++;
+        }
 
-            const auto existing = entries_.find(normalizedKey);
-            if (existing != entries_.end())
-            {
-                currentBytes_ -= existing->second.fileBytes;
-                entries_.erase(existing);
-            }
-
-            entries_[normalizedKey] = entry;
-            currentBytes_ += entry.fileBytes;
-            EvictIfNeededLocked();
-            SaveIndexLocked();
+        if (cacheDirectory.empty())
+        {
+            return;
         }
 
         DiskThumbnailHeader header{};
@@ -403,6 +446,24 @@ namespace hyperbrowse::cache
 
         stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
         stream.write(reinterpret_cast<const char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+        if (!stream)
+        {
+            return;
+        }
+
+        std::scoped_lock lock(mutex_);
+        ReloadIndexLocked();
+        const auto existing = entries_.find(normalizedKey);
+        if (existing != entries_.end())
+        {
+            currentBytes_ -= existing->second.fileBytes;
+            entries_.erase(existing);
+        }
+
+        entries_[normalizedKey] = entry;
+        currentBytes_ += entry.fileBytes;
+        EvictIfNeededLocked();
+        SaveIndexLocked();
     }
 
     void DiskThumbnailCache::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
@@ -411,6 +472,8 @@ namespace hyperbrowse::cache
         {
             return;
         }
+
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
 
         std::vector<std::wstring> normalizedPaths;
         normalizedPaths.reserve(filePaths.size());
@@ -422,7 +485,7 @@ namespace hyperbrowse::cache
         std::vector<std::wstring> cacheFilesToDelete;
         {
             std::scoped_lock lock(mutex_);
-            EnsureLoadedLocked();
+            ReloadIndexLocked();
             for (auto iterator = entries_.begin(); iterator != entries_.end();)
             {
                 const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), iterator->first.filePath) != normalizedPaths.end();
@@ -452,10 +515,14 @@ namespace hyperbrowse::cache
 
     void DiskThumbnailCache::Clear()
     {
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
+
         std::vector<std::wstring> cacheFilesToDelete;
+        std::wstring cacheDirectory;
         {
             std::scoped_lock lock(mutex_);
-            EnsureLoadedLocked();
+            ReloadIndexLocked();
+            cacheDirectory = EnsureCacheDirectoryLocked();
             for (const auto& [_, entry] : entries_)
             {
                 cacheFilesToDelete.push_back(entry.cacheFileName);
@@ -463,19 +530,193 @@ namespace hyperbrowse::cache
             entries_.clear();
             currentBytes_ = 0;
             SaveIndexLocked();
+
+            std::error_code directoryError;
+            for (const fs::directory_entry& directoryEntry : fs::directory_iterator(fs::path(cacheDirectory), directoryError))
+            {
+                if (directoryError)
+                {
+                    break;
+                }
+
+                std::error_code fileError;
+                if (!directoryEntry.is_regular_file(fileError) || fileError)
+                {
+                    continue;
+                }
+
+                cacheFilesToDelete.push_back(directoryEntry.path().filename().wstring());
+            }
         }
 
-        const fs::path cacheDirectory = cacheDirectory_;
+        const fs::path cacheDirectoryPath(cacheDirectory);
         for (const std::wstring& cacheFileName : cacheFilesToDelete)
         {
             std::error_code error;
-            fs::remove(cacheDirectory / cacheFileName, error);
+            fs::remove(cacheDirectoryPath / cacheFileName, error);
         }
+    }
+
+    bool DiskThumbnailCache::Compact()
+    {
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
+        std::scoped_lock lock(mutex_);
+
+        const std::wstring cacheDirectory = EnsureCacheDirectoryLocked();
+        if (cacheDirectory.empty())
+        {
+            return false;
+        }
+
+        ReloadIndexLocked();
+
+        std::unordered_map<std::wstring, std::size_t> existingCacheFiles;
+        std::error_code directoryError;
+        for (const fs::directory_entry& directoryEntry : fs::directory_iterator(fs::path(cacheDirectory), directoryError))
+        {
+            if (directoryError)
+            {
+                break;
+            }
+
+            std::error_code fileError;
+            if (!directoryEntry.is_regular_file(fileError) || fileError)
+            {
+                continue;
+            }
+
+            const std::wstring fileName = directoryEntry.path().filename().wstring();
+            if (fileName == kIndexFileName)
+            {
+                continue;
+            }
+
+            const std::uintmax_t fileSize = directoryEntry.file_size(fileError);
+            if (fileError)
+            {
+                continue;
+            }
+
+            existingCacheFiles[fileName] = static_cast<std::size_t>(fileSize);
+        }
+
+        currentBytes_ = 0;
+        nextAccessOrdinal_ = 1;
+        std::unordered_set<std::wstring> referencedCacheFiles;
+        for (auto iterator = entries_.begin(); iterator != entries_.end();)
+        {
+            const auto fileIterator = existingCacheFiles.find(iterator->second.cacheFileName);
+            if (fileIterator == existingCacheFiles.end())
+            {
+                iterator = entries_.erase(iterator);
+                continue;
+            }
+
+            iterator->second.fileBytes = fileIterator->second;
+            currentBytes_ += iterator->second.fileBytes;
+            nextAccessOrdinal_ = std::max(nextAccessOrdinal_, iterator->second.lastAccessOrdinal + 1);
+            referencedCacheFiles.insert(iterator->second.cacheFileName);
+            ++iterator;
+        }
+
+        const fs::path cacheDirectoryPath(cacheDirectory);
+        for (const auto& [fileName, _] : existingCacheFiles)
+        {
+            if (referencedCacheFiles.contains(fileName))
+            {
+                continue;
+            }
+
+            std::error_code removeError;
+            fs::remove(cacheDirectoryPath / fileName, removeError);
+        }
+
+        EvictIfNeededLocked();
+        SaveIndexLocked();
+        return true;
+    }
+
+    DiskThumbnailCache::Statistics DiskThumbnailCache::QueryStatistics() const
+    {
+        Statistics statistics{};
+        statistics.capacityBytes = capacityBytes_;
+
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
+        std::scoped_lock lock(mutex_);
+
+        auto* self = const_cast<DiskThumbnailCache*>(this);
+        const std::wstring cacheDirectory = self->EnsureCacheDirectoryLocked();
+        statistics.cacheDirectory = cacheDirectory;
+        if (cacheDirectory.empty())
+        {
+            return statistics;
+        }
+
+        self->ReloadIndexLocked();
+        statistics.indexedEntryCount = entries_.size();
+        statistics.indexedBytes = currentBytes_;
+
+        std::unordered_set<std::wstring> referencedCacheFiles;
+        referencedCacheFiles.reserve(entries_.size());
+        for (const auto& [_, entry] : entries_)
+        {
+            referencedCacheFiles.insert(entry.cacheFileName);
+        }
+
+        const fs::path cacheDirectoryPath(cacheDirectory);
+        std::error_code directoryError;
+        for (const fs::directory_entry& directoryEntry : fs::directory_iterator(cacheDirectoryPath, directoryError))
+        {
+            if (directoryError)
+            {
+                break;
+            }
+
+            std::error_code fileError;
+            if (!directoryEntry.is_regular_file(fileError) || fileError)
+            {
+                continue;
+            }
+
+            const std::uintmax_t fileSize = directoryEntry.file_size(fileError);
+            if (fileError)
+            {
+                continue;
+            }
+
+            const std::wstring fileName = directoryEntry.path().filename().wstring();
+            if (fileName == kIndexFileName)
+            {
+                statistics.indexFileBytes = static_cast<std::size_t>(fileSize);
+                continue;
+            }
+
+            statistics.cacheFileCount += 1;
+            statistics.cacheFileBytes += static_cast<std::size_t>(fileSize);
+            if (!referencedCacheFiles.contains(fileName))
+            {
+                statistics.orphanFileCount += 1;
+                statistics.orphanFileBytes += static_cast<std::size_t>(fileSize);
+            }
+        }
+
+        for (const auto& [_, entry] : entries_)
+        {
+            std::error_code existsError;
+            if (!fs::exists(cacheDirectoryPath / entry.cacheFileName, existsError) || existsError)
+            {
+                statistics.missingFileCount += 1;
+            }
+        }
+
+        return statistics;
     }
 
     std::size_t DiskThumbnailCache::CurrentBytes() const
     {
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
         std::scoped_lock lock(mutex_);
+        const_cast<DiskThumbnailCache*>(this)->ReloadIndexLocked();
         return currentBytes_;
     }
 
@@ -491,6 +732,11 @@ namespace hyperbrowse::cache
             return;
         }
 
+        ReloadIndexLocked();
+    }
+
+    void DiskThumbnailCache::ReloadIndexLocked()
+    {
         LoadIndexLocked();
         loaded_ = true;
     }
@@ -511,30 +757,19 @@ namespace hyperbrowse::cache
         std::wstring line;
         while (std::getline(stream, line))
         {
-            if (line.empty())
+            ParsedIndexEntry parsedEntry;
+            if (!TryParseIndexEntry(line, &parsedEntry))
             {
                 continue;
             }
-
-            const std::vector<std::wstring> fields = SplitTabFields(line);
-            if (fields.size() != 7)
-            {
-                continue;
-            }
-
-            ThumbnailCacheKey key;
-            key.filePath = fields[0];
-            key.modifiedTimestampUtc = _wcstoui64(fields[1].c_str(), nullptr, 10);
-            key.targetWidth = _wtoi(fields[2].c_str());
-            key.targetHeight = _wtoi(fields[3].c_str());
 
             Entry entry;
-            entry.cacheFileName = fields[4];
-            entry.fileBytes = static_cast<std::size_t>(_wcstoui64(fields[5].c_str(), nullptr, 10));
-            entry.lastAccessOrdinal = _wcstoui64(fields[6].c_str(), nullptr, 10);
+            entry.cacheFileName = std::move(parsedEntry.cacheFileName);
+            entry.fileBytes = parsedEntry.fileBytes;
+            entry.lastAccessOrdinal = parsedEntry.lastAccessOrdinal;
             nextAccessOrdinal_ = std::max(nextAccessOrdinal_, entry.lastAccessOrdinal + 1);
             currentBytes_ += entry.fileBytes;
-            entries_.emplace(std::move(key), std::move(entry));
+            entries_.emplace(std::move(parsedEntry.key), std::move(entry));
         }
 
         return true;

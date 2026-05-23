@@ -229,7 +229,8 @@ namespace hyperbrowse::ui
         bool OpenItemsInViewer(std::vector<browser::BrowserItem> items,
                        int selectedIndex,
                        bool startSlideshow,
-                       bool preferSecondaryMonitor = false);
+                       bool preferSecondaryMonitor = false,
+                       bool resolvePairedRawJpegItems = true);
         bool ShouldDefaultViewerToSecondaryMonitor() const;
         browser::BrowserItem ResolvePairedRawJpegViewerItem(
             const browser::BrowserItem& item,
@@ -256,6 +257,7 @@ namespace hyperbrowse::ui
         void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
         void ShowAboutDialog() const;
         void ShowPerformanceSettingsDialog();
+        void ShowPersistentThumbnailCacheDialog();
         void ShowDiagnosticsSnapshot();
         void ResetDiagnosticsState();
         void ShowImageInformation();
@@ -405,6 +407,7 @@ namespace hyperbrowse::ui
         bool persistentThumbnailCacheEnabled_{true};
         bool defaultViewerToSecondaryMonitor_{false};
         bool suppressTreeSelectionChange_{};
+        bool hasPersistedWindowBounds_{};
         DragMode dragMode_{DragMode::None};
         HBRUSH backgroundBrush_{};
         HBRUSH actionFieldBrush_{};
@@ -435,6 +438,7 @@ namespace hyperbrowse::ui
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::wstring pendingTreeSelectionPath_;
         RECT detailsPanelRect_{};
+        RECT persistedWindowBounds_{};
         RECT detailsPanelTabStripRect_{};
         std::array<RECT, 2> detailsPanelTabRects_{};
         std::wstring statusPrimaryText_;

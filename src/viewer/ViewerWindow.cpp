@@ -1635,6 +1635,8 @@ namespace hyperbrowse::viewer
             return;
         }
 
+        const float clientLeft = static_cast<float>(clientRect.left);
+        const float clientTop = static_cast<float>(clientRect.top);
         const float clientWidth = static_cast<float>(std::max(1L, clientRect.right - clientRect.left));
         const float clientHeight = static_cast<float>(std::max(1L, clientRect.bottom - clientRect.top));
         const double baseScale = FitScaleForImage(image, clientRect);
@@ -1646,8 +1648,8 @@ namespace hyperbrowse::viewer
         const int rotatedHeight = swapDimensions ? sourceWidth : sourceHeight;
         const float destW = static_cast<float>(std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedWidth) * scale))));
         const float destH = static_cast<float>(std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedHeight) * scale))));
-        const float cx = ((clientWidth - destW) / 2.0f) + offsetX;
-        const float cy = ((clientHeight - destH) / 2.0f) + offsetY;
+        const float cx = clientLeft + ((clientWidth - destW) / 2.0f) + offsetX;
+        const float cy = clientTop + ((clientHeight - destH) / 2.0f) + offsetY;
 
         if (rotationQuarterTurns_ == 0)
         {

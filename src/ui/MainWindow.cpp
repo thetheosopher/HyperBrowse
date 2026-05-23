@@ -15,6 +15,7 @@
 #include <cwctype>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <unordered_map>
@@ -23,6 +24,7 @@
 
 #include "browser/BrowserModel.h"
 #include "browser/BrowserPane.h"
+#include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
 #include "services/BatchConvertService.h"
 #include "services/FileOperationService.h"
@@ -61,6 +63,10 @@ namespace
     constexpr wchar_t kRegistryValueCompactThumbnailLayout[] = L"CompactThumbnailLayout";
     constexpr wchar_t kRegistryValueThumbnailDetailsVisible[] = L"ThumbnailDetailsVisible";
     constexpr wchar_t kRegistryValueSelectedFolderPath[] = L"SelectedFolderPath";
+    constexpr wchar_t kRegistryValueWindowLeft[] = L"WindowLeft";
+    constexpr wchar_t kRegistryValueWindowTop[] = L"WindowTop";
+    constexpr wchar_t kRegistryValueWindowWidth[] = L"WindowWidth";
+    constexpr wchar_t kRegistryValueWindowHeight[] = L"WindowHeight";
     constexpr wchar_t kRegistryValueSortMode[] = L"SortMode";
     constexpr wchar_t kRegistryValueSortAscending[] = L"SortAscending";
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
@@ -156,6 +162,7 @@ namespace
     constexpr UINT ID_VIEW_LIBRAW_OUT_OF_PROCESS = 2104;
     constexpr UINT ID_VIEW_PERSISTENT_THUMBNAIL_CACHE = 2105;
     constexpr UINT ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR = 2106;
+    constexpr UINT ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER = 2107;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_96 = 2110;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_128 = 2111;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_160 = 2112;
@@ -605,6 +612,85 @@ namespace
     void WriteDwordValue(HKEY key, const wchar_t* valueName, DWORD value)
     {
         RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+    }
+
+    bool TryReadPersistedWindowBounds(HKEY key, RECT* bounds)
+    {
+        if (!bounds)
+        {
+            return false;
+        }
+
+        DWORD leftValue = 0;
+        DWORD topValue = 0;
+        DWORD widthValue = 0;
+        DWORD heightValue = 0;
+        if (!TryReadDwordValue(key, kRegistryValueWindowLeft, &leftValue)
+            || !TryReadDwordValue(key, kRegistryValueWindowTop, &topValue)
+            || !TryReadDwordValue(key, kRegistryValueWindowWidth, &widthValue)
+            || !TryReadDwordValue(key, kRegistryValueWindowHeight, &heightValue))
+        {
+            return false;
+        }
+
+        if (widthValue > static_cast<DWORD>(std::numeric_limits<LONG>::max())
+            || heightValue > static_cast<DWORD>(std::numeric_limits<LONG>::max()))
+        {
+            return false;
+        }
+
+        const LONG left = static_cast<LONG>(leftValue);
+        const LONG top = static_cast<LONG>(topValue);
+        const LONG width = static_cast<LONG>(widthValue);
+        const LONG height = static_cast<LONG>(heightValue);
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        const long long right = static_cast<long long>(left) + static_cast<long long>(width);
+        const long long bottom = static_cast<long long>(top) + static_cast<long long>(height);
+        if (right < static_cast<long long>(std::numeric_limits<LONG>::min())
+            || right > static_cast<long long>(std::numeric_limits<LONG>::max())
+            || bottom < static_cast<long long>(std::numeric_limits<LONG>::min())
+            || bottom > static_cast<long long>(std::numeric_limits<LONG>::max()))
+        {
+            return false;
+        }
+
+        bounds->left = left;
+        bounds->top = top;
+        bounds->right = static_cast<LONG>(right);
+        bounds->bottom = static_cast<LONG>(bottom);
+        return true;
+    }
+
+    bool IsPersistedWindowBoundsValid(const RECT& bounds, LONG minimumWidth, LONG minimumHeight)
+    {
+        const LONG width = bounds.right - bounds.left;
+        const LONG height = bounds.bottom - bounds.top;
+        if (width < minimumWidth || height < minimumHeight)
+        {
+            return false;
+        }
+
+        const HMONITOR monitor = MonitorFromRect(&bounds, MONITOR_DEFAULTTONULL);
+        if (!monitor)
+        {
+            return false;
+        }
+
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (!GetMonitorInfoW(monitor, &monitorInfo))
+        {
+            return false;
+        }
+
+        return bounds.left >= monitorInfo.rcWork.left
+            && bounds.top >= monitorInfo.rcWork.top
+            && bounds.right <= monitorInfo.rcWork.right
+            && bounds.bottom <= monitorInfo.rcWork.bottom;
     }
 
     bool TryReadQwordValue(HKEY key, const wchar_t* valueName, std::uint64_t* value)
@@ -1695,6 +1781,39 @@ namespace
     std::wstring FormatMegabytesFromBytes(std::size_t bytes)
     {
         return std::to_wstring(bytes / (1024ULL * 1024ULL));
+    }
+
+    std::wstring BuildPersistentThumbnailCacheSummary(const hyperbrowse::cache::DiskThumbnailCache::Statistics& statistics,
+                                                      bool persistentCacheEnabled)
+    {
+        std::wstring summary = persistentCacheEnabled
+            ? L"Persistent thumbnail caching is currently enabled.\r\n"
+            : L"Persistent thumbnail caching is currently disabled. Saved thumbnails remain on disk until they are purged.\r\n";
+        summary.append(L"Indexed thumbnails: ");
+        summary.append(std::to_wstring(statistics.indexedEntryCount));
+        summary.append(L"\r\nDisk usage: ");
+        summary.append(hyperbrowse::browser::FormatByteSize(statistics.cacheFileBytes));
+        summary.append(L" on disk, ");
+        summary.append(hyperbrowse::browser::FormatByteSize(statistics.indexedBytes));
+        summary.append(L" tracked in the cache index.\r\nConfigured budget: ");
+        summary.append(hyperbrowse::browser::FormatByteSize(statistics.capacityBytes));
+        return summary;
+    }
+
+    std::wstring BuildPersistentThumbnailCacheDetails(const hyperbrowse::cache::DiskThumbnailCache::Statistics& statistics)
+    {
+        std::wstring details;
+        AppendLabeledLine(&details, L"Cache Folder: ", statistics.cacheDirectory.empty() ? std::wstring(L"(unavailable)") : statistics.cacheDirectory);
+        AppendLabeledLine(&details, L"Configured Budget: ", hyperbrowse::browser::FormatByteSize(statistics.capacityBytes));
+        AppendLabeledLine(&details, L"Indexed Entries: ", std::to_wstring(statistics.indexedEntryCount));
+        AppendLabeledLine(&details, L"Indexed Bytes: ", hyperbrowse::browser::FormatByteSize(statistics.indexedBytes));
+        AppendLabeledLine(&details, L"Thumbnail Files On Disk: ", std::to_wstring(statistics.cacheFileCount));
+        AppendLabeledLine(&details, L"Thumbnail File Bytes: ", hyperbrowse::browser::FormatByteSize(statistics.cacheFileBytes));
+        AppendLabeledLine(&details, L"Index File Size: ", hyperbrowse::browser::FormatByteSize(statistics.indexFileBytes));
+        AppendLabeledLine(&details, L"Missing Indexed Files: ", std::to_wstring(statistics.missingFileCount));
+        AppendLabeledLine(&details, L"Orphaned Files: ", std::to_wstring(statistics.orphanFileCount));
+        AppendLabeledLine(&details, L"Orphaned File Bytes: ", hyperbrowse::browser::FormatByteSize(statistics.orphanFileBytes));
+        return details;
     }
 
     void RefreshPerformanceSettingsDialogControls(const PerformanceSettingsDialogState& state)
@@ -3985,6 +4104,57 @@ namespace
         return SUCCEEDED(result);
     }
 
+    bool ShowMultiFilePropertiesDialog(const std::vector<std::wstring>& selectedPaths)
+    {
+        if (selectedPaths.size() < 2)
+        {
+            return false;
+        }
+
+        std::vector<PIDLIST_ABSOLUTE> itemPidls;
+        std::vector<PCIDLIST_ABSOLUTE> absolutePidls;
+        itemPidls.reserve(selectedPaths.size());
+        absolutePidls.reserve(selectedPaths.size());
+        for (const std::wstring& path : selectedPaths)
+        {
+            PIDLIST_ABSOLUTE itemPidl = ILCreateFromPathW(path.c_str());
+            if (!itemPidl)
+            {
+                continue;
+            }
+
+            itemPidls.push_back(itemPidl);
+            absolutePidls.push_back(itemPidl);
+        }
+
+        HRESULT result = E_FAIL;
+        if (absolutePidls.size() >= 2)
+        {
+            Microsoft::WRL::ComPtr<IShellItemArray> shellItemArray;
+            result = SHCreateShellItemArrayFromIDLists(static_cast<UINT>(absolutePidls.size()),
+                                                       absolutePidls.data(),
+                                                       shellItemArray.GetAddressOf());
+            if (SUCCEEDED(result) && shellItemArray)
+            {
+                Microsoft::WRL::ComPtr<IDataObject> dataObject;
+                result = shellItemArray->BindToHandler(nullptr,
+                                                       BHID_DataObject,
+                                                       IID_PPV_ARGS(dataObject.GetAddressOf()));
+                if (SUCCEEDED(result) && dataObject)
+                {
+                    result = SHMultiFileProperties(dataObject.Get(), 0);
+                }
+            }
+        }
+
+        for (PIDLIST_ABSOLUTE itemPidl : itemPidls)
+        {
+            ILFree(itemPidl);
+        }
+
+        return SUCCEEDED(result);
+    }
+
     struct ShellTreeItemInfo
     {
         std::wstring displayName;
@@ -4772,15 +4942,27 @@ namespace hyperbrowse::ui
         ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
 
+        int initialWindowX = CW_USEDEFAULT;
+        int initialWindowY = CW_USEDEFAULT;
+        int initialWindowWidth = CW_USEDEFAULT;
+        int initialWindowHeight = CW_USEDEFAULT;
+        if (hasPersistedWindowBounds_)
+        {
+            initialWindowX = persistedWindowBounds_.left;
+            initialWindowY = persistedWindowBounds_.top;
+            initialWindowWidth = persistedWindowBounds_.right - persistedWindowBounds_.left;
+            initialWindowHeight = persistedWindowBounds_.bottom - persistedWindowBounds_.top;
+        }
+
         hwnd_ = CreateWindowExW(
             0,
             kWindowClassName,
             L"HyperBrowse",
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            1400,
-            900,
+            initialWindowX,
+            initialWindowY,
+            initialWindowWidth,
+            initialWindowHeight,
             nullptr,
             nullptr,
             instance_,
@@ -5040,6 +5222,7 @@ namespace hyperbrowse::ui
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(themeMenu), L"&Theme");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE, L"Persistent Thumbnail &Cache");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR, L"Open Viewer on Secondary &Monitor by Default");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
@@ -7593,14 +7776,18 @@ namespace hyperbrowse::ui
     bool MainWindow::OpenItemsInViewer(std::vector<browser::BrowserItem> items,
                                        int selectedIndex,
                                        bool startSlideshow,
-                                       bool preferSecondaryMonitor)
+                                       bool preferSecondaryMonitor,
+                                       bool resolvePairedRawJpegItems)
     {
         if (!viewerWindow_ || items.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(items.size()))
         {
             return false;
         }
 
-        items = ResolvePairedRawJpegViewerItems(std::move(items), startSlideshow);
+        if (resolvePairedRawJpegItems)
+        {
+            items = ResolvePairedRawJpegViewerItems(std::move(items), startSlideshow);
+        }
 
         const HMONITOR targetMonitor = ResolveViewerMonitor(hwnd_, preferSecondaryMonitor);
         if (preferSecondaryMonitor && !targetMonitor)
@@ -8131,7 +8318,7 @@ namespace hyperbrowse::ui
         const viewer::CompareDirection compareDirection = selectedIndex == 0
             ? viewer::CompareDirection::Next
             : viewer::CompareDirection::Previous;
-        if (OpenItemsInViewer(std::move(items), selectedIndex, false))
+        if (OpenItemsInViewer(std::move(items), selectedIndex, false, false, false))
         {
             viewerWindow_->SetCompareMode(true, compareDirection);
         }
@@ -9154,10 +9341,19 @@ namespace hyperbrowse::ui
             return;
         }
 
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (selectedPaths.size() > 1)
+        {
+            if (!ShowMultiFilePropertiesDialog(selectedPaths))
+            {
+                MessageBoxW(hwnd_, L"Failed to open the file properties dialog.", L"Properties", MB_OK | MB_ICONERROR);
+            }
+            return;
+        }
+
         std::wstring targetPath = browserPaneController_->FocusedFilePathSnapshot();
         if (targetPath.empty())
         {
-            const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
             if (!selectedPaths.empty())
             {
                 targetPath = selectedPaths.front();
@@ -10500,6 +10696,97 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ShowPersistentThumbnailCacheDialog()
+    {
+        constexpr int kCompactPersistentCacheButtonId = 1001;
+        constexpr int kPurgePersistentCacheButtonId = 1002;
+
+        for (;;)
+        {
+            cache::DiskThumbnailCache persistentCache;
+            const cache::DiskThumbnailCache::Statistics statistics = persistentCache.QueryStatistics();
+            if (statistics.cacheDirectory.empty())
+            {
+                MessageBoxW(hwnd_,
+                            L"The persistent thumbnail cache folder could not be resolved.",
+                            L"Persistent Thumbnail Cache",
+                            MB_OK | MB_ICONERROR);
+                return;
+            }
+
+            std::wstring content = BuildPersistentThumbnailCacheSummary(statistics, persistentThumbnailCacheEnabled_);
+            std::wstring expandedInformation = BuildPersistentThumbnailCacheDetails(statistics);
+
+            TASKDIALOG_BUTTON buttons[] = {
+                {kCompactPersistentCacheButtonId, L"Compact cache\nRepair the saved index, remove orphaned thumbnails, and trim the cache to its storage budget."},
+                {kPurgePersistentCacheButtonId, L"Purge cache\nDelete every persistent thumbnail and clear the saved cache index."},
+            };
+
+            TASKDIALOGCONFIG config{};
+            config.cbSize = sizeof(config);
+            config.hwndParent = hwnd_;
+            config.hInstance = instance_;
+            config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+            config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
+            config.pszWindowTitle = L"Persistent Thumbnail Cache";
+            config.pszMainIcon = MAKEINTRESOURCEW(IDI_HYPERBROWSE);
+            config.pszMainInstruction = L"Inspect or clean the persistent thumbnail cache.";
+            config.pszContent = content.c_str();
+            config.pszExpandedInformation = expandedInformation.c_str();
+            config.pszCollapsedControlText = L"Show Cache Details";
+            config.pszExpandedControlText = L"Hide Cache Details";
+            config.cButtons = static_cast<UINT>(std::size(buttons));
+            config.pButtons = buttons;
+            config.nDefaultButton = kCompactPersistentCacheButtonId;
+
+            int clickedButton = 0;
+            const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
+            if (FAILED(dialogResult))
+            {
+                MessageBoxW(hwnd_,
+                            L"Failed to open the persistent thumbnail cache dialog.",
+                            L"Persistent Thumbnail Cache",
+                            MB_OK | MB_ICONERROR);
+                return;
+            }
+
+            if (clickedButton == IDCANCEL || clickedButton == IDCLOSE || clickedButton == 0)
+            {
+                return;
+            }
+
+            if (clickedButton == kCompactPersistentCacheButtonId)
+            {
+                if (!persistentCache.Compact())
+                {
+                    MessageBoxW(hwnd_,
+                                L"Failed to compact the persistent thumbnail cache.",
+                                L"Persistent Thumbnail Cache",
+                                MB_OK | MB_ICONERROR);
+                    return;
+                }
+                continue;
+            }
+
+            if (clickedButton == kPurgePersistentCacheButtonId)
+            {
+                const int confirmResult = MessageBoxW(hwnd_,
+                                                      L"Delete all thumbnails saved in the persistent cache? This does not delete your images.",
+                                                      L"Purge Persistent Thumbnail Cache",
+                                                      MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+                if (confirmResult != IDYES)
+                {
+                    continue;
+                }
+
+                persistentCache.Clear();
+                continue;
+            }
+
+            return;
+        }
+    }
+
     void MainWindow::ApplyRawJpegPairingSettings()
     {
         if (!browserPaneController_)
@@ -10556,6 +10843,8 @@ namespace hyperbrowse::ui
     {
         // Always start non-recursive so restoring the last folder cannot trigger an expensive drive-wide scan.
         recursiveBrowsingEnabled_ = false;
+        hasPersistedWindowBounds_ = false;
+        persistedWindowBounds_ = {};
 
         HKEY key{};
         if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) == ERROR_SUCCESS)
@@ -10598,6 +10887,14 @@ namespace hyperbrowse::ui
             }
 
             TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
+
+            RECT persistedWindowBounds{};
+            if (TryReadPersistedWindowBounds(key, &persistedWindowBounds)
+                && IsPersistedWindowBoundsValid(persistedWindowBounds, kMinWindowWidth, kMinWindowHeight))
+            {
+                persistedWindowBounds_ = persistedWindowBounds;
+                hasPersistedWindowBounds_ = true;
+            }
 
             std::wstring serializedPaths;
             if (TryReadStringValue(key, kRegistryValueRecentFolders, &serializedPaths))
@@ -10763,6 +11060,22 @@ namespace hyperbrowse::ui
                 ? NormalizeFolderPath(browserModel_->FolderPath())
                 : GetSelectedFolderTreePath();
 
+            WINDOWPLACEMENT placement{};
+            placement.length = sizeof(placement);
+            if (hwnd_ && GetWindowPlacement(hwnd_, &placement))
+            {
+                const RECT& normalBounds = placement.rcNormalPosition;
+                const LONG width = normalBounds.right - normalBounds.left;
+                const LONG height = normalBounds.bottom - normalBounds.top;
+                if (width >= kMinWindowWidth && height >= kMinWindowHeight)
+                {
+                    WriteDwordValue(key, kRegistryValueWindowLeft, static_cast<DWORD>(normalBounds.left));
+                    WriteDwordValue(key, kRegistryValueWindowTop, static_cast<DWORD>(normalBounds.top));
+                    WriteDwordValue(key, kRegistryValueWindowWidth, static_cast<DWORD>(width));
+                    WriteDwordValue(key, kRegistryValueWindowHeight, static_cast<DWORD>(height));
+                }
+            }
+
             WriteDwordValue(key, kRegistryValueLeftPaneWidth, static_cast<DWORD>(leftPaneWidth_));
             WriteDwordValue(key, kRegistryValueBrowserMode, static_cast<DWORD>(browserMode_));
             WriteDwordValue(key, kRegistryValueThemeMode, static_cast<DWORD>(themeMode_));
@@ -10772,7 +11085,10 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueThumbnailSizePreset, static_cast<DWORD>(thumbnailSizePreset_));
             RegDeleteValueW(key, kRegistryValueCompactThumbnailLayout);
             WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
-            WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
+            if (!selectedFolderPath.empty())
+            {
+                WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
+            }
             WriteStringValue(key, kRegistryValueRecentFolders, SerializeFolderPathList(recentFolders_));
             WriteStringValue(key, kRegistryValueRecentDestinationFolders, SerializeFolderPathList(recentDestinationFolders_));
             WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, SerializeFolderPathList(favoriteDestinationFolders_));
@@ -11496,6 +11812,9 @@ namespace hyperbrowse::ui
             persistentThumbnailCacheEnabled_ = !persistentThumbnailCacheEnabled_;
             ApplyPersistentThumbnailCacheSetting();
             UpdateMenuState();
+            return true;
+        case ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER:
+            ShowPersistentThumbnailCacheDialog();
             return true;
         case ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG:
             pairedRawJpegViewerPreference_ = browser::RawJpegDisplayPreference::Jpeg;
