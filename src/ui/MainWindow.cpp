@@ -199,6 +199,11 @@ namespace
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE = 2304;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_SLIDE = 2305;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS = 2306;
+    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_1000 = 2321;
+    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_2000 = 2322;
+    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_3000 = 2323;
+    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_5000 = 2324;
+    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_10000 = 2325;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200 = 2311;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350 = 2312;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500 = 2313;
@@ -4439,6 +4444,51 @@ namespace
             && commandId <= ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS;
     }
 
+    UINT SlideshowIntervalFromCommandId(UINT commandId)
+    {
+        switch (commandId)
+        {
+        case ID_VIEW_SLIDESHOW_DURATION_1000:
+            return 1000;
+        case ID_VIEW_SLIDESHOW_DURATION_2000:
+            return 2000;
+        case ID_VIEW_SLIDESHOW_DURATION_5000:
+            return 5000;
+        case ID_VIEW_SLIDESHOW_DURATION_10000:
+            return 10000;
+        case ID_VIEW_SLIDESHOW_DURATION_3000:
+        default:
+            return 3000;
+        }
+    }
+
+    UINT CommandIdFromSlideshowInterval(UINT intervalMs)
+    {
+        if (intervalMs <= 1000)
+        {
+            return ID_VIEW_SLIDESHOW_DURATION_1000;
+        }
+        if (intervalMs <= 2000)
+        {
+            return ID_VIEW_SLIDESHOW_DURATION_2000;
+        }
+        if (intervalMs <= 3000)
+        {
+            return ID_VIEW_SLIDESHOW_DURATION_3000;
+        }
+        if (intervalMs <= 5000)
+        {
+            return ID_VIEW_SLIDESHOW_DURATION_5000;
+        }
+        return ID_VIEW_SLIDESHOW_DURATION_10000;
+    }
+
+    bool IsSlideshowIntervalCommand(UINT commandId)
+    {
+        return commandId >= ID_VIEW_SLIDESHOW_DURATION_1000
+            && commandId <= ID_VIEW_SLIDESHOW_DURATION_10000;
+    }
+
     UINT TransitionDurationFromCommandId(UINT commandId)
     {
         switch (commandId)
@@ -5095,21 +5145,30 @@ namespace hyperbrowse::ui
         openRecentFolderMenu_ = CreatePopupMenu();
         copySelectionToMenu_ = CreatePopupMenu();
         moveSelectionToMenu_ = CreatePopupMenu();
+        HMENU fileMetadataMenu = CreatePopupMenu();
+        HMENU fileOrganizeMenu = CreatePopupMenu();
+        HMENU fileConvertMenu = CreatePopupMenu();
         HMENU batchConvertSelectionMenu = CreatePopupMenu();
         HMENU batchConvertFolderMenu = CreatePopupMenu();
         HMENU ratingMenu = CreatePopupMenu();
         HMENU viewMenu = viewMenu_;
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
+        HMENU slideshowMenu = CreatePopupMenu();
+        HMENU slideshowDurationMenu = CreatePopupMenu();
         HMENU slideshowTransitionMenu = CreatePopupMenu();
         HMENU slideshowTransitionDurationMenu = CreatePopupMenu();
+        HMENU viewerMenu = CreatePopupMenu();
         HMENU viewerMouseWheelMenu = CreatePopupMenu();
         HMENU pairedRawJpegViewerMenu = CreatePopupMenu();
         HMENU themeMenu = CreatePopupMenu();
+        HMENU advancedViewMenu = CreatePopupMenu();
+        HMENU performanceMenu = CreatePopupMenu();
         HMENU performanceProfileMenu = CreatePopupMenu();
+        HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMouseWheelMenu || !pairedRawJpegViewerMenu || !themeMenu || !performanceProfileMenu)
+        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !slideshowDurationMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMenu || !viewerMouseWheelMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -5117,6 +5176,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_FOLDER, L"&Open Folder...\tCtrl+O");
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(openRecentFolderMenu_), L"Open &Recent Folder");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
+        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, L"Add Current Folder to Favorite &Destinations");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_CLEAR_FAVORITE_DESTINATIONS, L"Clear All Favorite &Destinations");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
@@ -5124,46 +5184,52 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information\tCtrl+I");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties\tAlt+Enter");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...\tF2");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties\tAlt+Enter");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_2, L"&2 Stars");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_3, L"&3 Stars");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_4, L"&4 Stars");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_5, L"&5 Stars");
-        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set &Rating");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_EDIT_TAGS, L"Edit &Tags...");
-        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To");
-        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS, L"Include Paired &RAW+JPEG");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete\tDel");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently\tShift+Del");
-        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ROTATE_JPEG_LEFT, L"Adjust JPEG Orientation &Left");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
-        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMetadataMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set &Rating");
+        AppendMenuW(fileMetadataMenu, MF_STRING, ID_FILE_EDIT_TAGS, L"Edit &Tags...");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMetadataMenu), L"&Metadata");
+
+        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...\tF2");
+        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
+        AppendMenuW(fileOrganizeMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To");
+        AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To");
+        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS, L"Include Paired &RAW+JPEG");
+        AppendMenuW(fileOrganizeMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete\tDel");
+        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently\tShift+Del");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileOrganizeMenu), L"&Organize");
+
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_JPEG, L"Selection to &JPEG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_PNG, L"Selection to &PNG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_TIFF, L"Selection to &TIFF");
         AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_JPEG, L"Folder to JPE&G");
         AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_PNG, L"Folder to P&NG");
         AppendMenuW(batchConvertFolderMenu, MF_STRING, ID_FILE_BATCH_CONVERT_FOLDER_TIFF, L"Folder to TIF&F");
-        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertSelectionMenu), L"Batch Convert &Selection");
-        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertFolderMenu), L"Batch Convert &Folder");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_BATCH_CONVERT_CANCEL, L"&Cancel Batch Convert");
+        AppendMenuW(fileConvertMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertSelectionMenu), L"Batch Convert &Selection");
+        AppendMenuW(fileConvertMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertFolderMenu), L"Batch Convert &Folder");
+        AppendMenuW(fileConvertMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileConvertMenu, MF_STRING, ID_FILE_ROTATE_JPEG_LEFT, L"Adjust JPEG Orientation &Left");
+        AppendMenuW(fileConvertMenu, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
+        AppendMenuW(fileConvertMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileConvertMenu, MF_STRING, ID_FILE_BATCH_CONVERT_CANCEL, L"&Cancel Batch Convert");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileConvertMenu), L"&Convert");
+
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_EXIT, L"E&xit");
 
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode\tCtrl+1");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS, L"&Details Mode\tCtrl+2");
-        AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_RECURSIVE, L"&Recursive Browsing\tCtrl+R");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By &Filename");
@@ -5192,10 +5258,11 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel\tCtrl+3");
-        AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(viewMenu, MF_STRING, ID_FILE_COMPARE_SELECTED, L"Compare &Selected");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection\tCtrl+Shift+S");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder\tCtrl+Shift+F");
+        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_1000, L"&1 second");
+        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_2000, L"&2 seconds");
+        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_3000, L"&3 seconds");
+        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_5000, L"&5 seconds");
+        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_10000, L"1&0 seconds");
         AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CUT, L"&Cut");
         AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE, L"&Crossfade");
         AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_SLIDE, L"S&lide");
@@ -5208,35 +5275,46 @@ namespace hyperbrowse::ui
         AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200, L"1&200 ms");
         AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000, L"2&000 ms");
         AppendMenuW(slideshowTransitionMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionDurationMenu), L"&Duration");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionMenu), L"Slideshow &Transition");
+        AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"From &Selection\tCtrl+Shift+S");
+        AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"From &Folder\tCtrl+Shift+F");
+        AppendMenuW(slideshowMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(slideshowMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowDurationMenu), L"&Duration");
+        AppendMenuW(slideshowMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionMenu), L"&Transition");
+        AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowMenu), L"S&lideshow");
+
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM, L"&Zoom");
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE, L"&Next/Previous Image");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMouseWheelMenu), L"Viewer Mouse &Wheel");
         AppendMenuW(pairedRawJpegViewerMenu, MF_STRING, ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG, L"Prefer &JPEG");
         AppendMenuW(pairedRawJpegViewerMenu, MF_STRING, ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW, L"Prefer &RAW");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(pairedRawJpegViewerMenu), L"Paired RAW+JPEG &Viewer");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Viewer Detail &Overlays");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PRESSURE_STATE_STATUS, L"Show Memory Pressure &Status");
-        AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMouseWheelMenu), L"Mouse &Wheel");
+        AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(pairedRawJpegViewerMenu), L"Paired RAW+JPEG &Viewer");
+        AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR, L"Open on Secondary &Monitor by Default");
+        AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Detail &Overlays");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMenu), L"&Viewer");
+
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(themeMenu), L"&Theme");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE, L"Persistent Thumbnail &Cache");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR, L"Open Viewer on Secondary &Monitor by Default");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
+        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE, L"Persistent Thumbnail &Cache");
+        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
+        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PRESSURE_STATE_STATUS, L"Show Memory Pressure &Status");
+        AppendMenuW(advancedViewMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
+        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Advanced");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
         AppendMenuW(helpMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE, L"&Conservative");
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_BALANCED, L"&Balanced");
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE, L"&Performance");
-        AppendMenuW(helpMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceProfileMenu), L"Performance &Profile");
-        AppendMenuW(helpMenu, MF_STRING, ID_HELP_PERFORMANCE_SETTINGS, L"Performance &Settings...");
-        AppendMenuW(helpMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(helpMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"Diagnostics &Snapshot\tCtrl+Shift+D");
-        AppendMenuW(helpMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"Reset Diagnostics\tCtrl+Shift+X");
+        AppendMenuW(performanceMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceProfileMenu), L"Performance &Profile");
+        AppendMenuW(performanceMenu, MF_STRING, ID_HELP_PERFORMANCE_SETTINGS, L"Performance &Settings...");
+        AppendMenuW(helpMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
+        AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"&Snapshot\tCtrl+Shift+D");
+        AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"&Reset\tCtrl+Shift+X");
+        AppendMenuW(helpMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
 
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu_), L"&File");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(viewMenu), L"&View");
@@ -8541,13 +8619,20 @@ namespace hyperbrowse::ui
         const bool allowRenameSelected = hasSingleSelection && !fileOperationActive_;
         const bool allowBatchRenameSelected = hasBatchRenameSelection && !fileOperationActive_;
         const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
+        const bool sizeCommandsEnabled = hasFolder && browserMode_ == BrowserMode::Thumbnails;
 
         HMENU menu = CreatePopupMenu();
+        HMENU metadataMenu = CreatePopupMenu();
         HMENU batchConvertSelectionMenu = CreatePopupMenu();
         HMENU ratingMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
-        if (!menu || !batchConvertSelectionMenu || !ratingMenu || !sortMenu)
+        HMENU thumbnailSizeMenu = CreatePopupMenu();
+        if (!menu || !metadataMenu || !batchConvertSelectionMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu)
         {
+            if (thumbnailSizeMenu)
+            {
+                DestroyMenu(thumbnailSizeMenu);
+            }
             if (sortMenu)
             {
                 DestroyMenu(sortMenu);
@@ -8560,6 +8645,10 @@ namespace hyperbrowse::ui
             {
                 DestroyMenu(batchConvertSelectionMenu);
             }
+            if (metadataMenu)
+            {
+                DestroyMenu(metadataMenu);
+            }
             if (menu)
             {
                 DestroyMenu(menu);
@@ -8567,41 +8656,15 @@ namespace hyperbrowse::ui
             return;
         }
 
-        AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
-        AppendMenuW(menu, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
-        AppendMenuW(menu, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
-        AppendMenuW(menu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information");
-        AppendMenuW(menu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer");
-        AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
-        AppendMenuW(menu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h");
-        AppendMenuW(menu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...");
-        AppendMenuW(menu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
-        AppendMenuW(menu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_2, L"&2 Stars");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_3, L"&3 Stars");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_4, L"&4 Stars");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_5, L"&5 Stars");
-        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set &Rating");
-        AppendMenuW(menu, MF_STRING, ID_FILE_EDIT_TAGS, L"Edit &Tags...");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
-        AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
-        AppendMenuW(menu, MF_STRING, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS, L"Include Paired &RAW+JPEG");
-        AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete");
-        AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_JPEG, L"Selection to &JPEG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_PNG, L"Selection to &PNG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_TIFF, L"Selection to &TIFF");
-        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertSelectionMenu), L"Batch Convert &Selection");
-        AppendMenuW(menu, MF_STRING, ID_FILE_ROTATE_JPEG_LEFT, L"Adjust JPEG Orientation &Left");
-        AppendMenuW(menu, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode");
-        AppendMenuW(menu, MF_STRING, ID_VIEW_DETAILS, L"&Details Mode");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By &Filename");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_MODIFIED, L"By &Modified Date");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_SIZE, L"By File &Size");
@@ -8613,24 +8676,124 @@ namespace hyperbrowse::ui
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_RANDOM, L"By &Random");
         AppendMenuW(sortMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"&Descending");
-        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(sortMenu), L"&Sort By");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_FOLDER, L"Open &Folder...");
-        AppendMenuW(menu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_96, L"&96 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_128, L"1&28 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_160, L"1&60 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_192, L"1&92 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_256, L"2&56 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_320, L"3&20 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_360, L"3&60 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_420, L"4&20 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_480, L"4&80 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_560, L"5&60 px");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"6&40 px");
 
-        EnableMenuItem(menu, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_COMPARE_SELECTED,
-                   MF_BYCOMMAND | ((browserPaneController_ && browserPaneController_->SelectedCount() == 2) ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
-                   MF_BYCOMMAND | ((hasSelection && hasSecondaryMonitor) ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_RENAME_SELECTED, MF_BYCOMMAND | (allowRenameSelected ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_BATCH_RENAME_SELECTION, MF_BYCOMMAND | (allowBatchRenameSelected ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_EDIT_TAGS, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+        if (hasSelection)
+        {
+            AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+            AppendMenuW(menu, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
+            AppendMenuW(menu, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer");
+            AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
+            AppendMenuW(menu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h");
+            AppendMenuW(menu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information");
+            AppendMenuW(menu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties");
+            AppendMenuW(metadataMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set &Rating");
+            AppendMenuW(metadataMenu, MF_STRING, ID_FILE_EDIT_TAGS, L"Edit &Tags...");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(metadataMenu), L"&Metadata");
+            AppendMenuW(menu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...");
+            AppendMenuW(menu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
+            AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
+            AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete");
+            AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(batchConvertSelectionMenu), L"Batch Convert &Selection");
+            AppendMenuW(menu, MF_STRING, ID_FILE_ROTATE_JPEG_LEFT, L"Adjust JPEG Orientation &Left");
+            AppendMenuW(menu, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
+
+            EnableMenuItem(menu, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_COMPARE_SELECTED,
+                           MF_BYCOMMAND | ((browserPaneController_ && browserPaneController_->SelectedCount() == 2) ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
+                           MF_BYCOMMAND | ((hasSelection && hasSecondaryMonitor) ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_COPY_PATH, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_PROPERTIES, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_EDIT_TAGS, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_RENAME_SELECTED, MF_BYCOMMAND | (allowRenameSelected ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_BATCH_RENAME_SELECTION, MF_BYCOMMAND | (allowBatchRenameSelected ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_COPY_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_MOVE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_DELETE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_DELETE_SELECTION_PERMANENT, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_ROTATE_JPEG_LEFT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_ROTATE_JPEG_RIGHT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
+        }
+        else
+        {
+            AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_FOLDER, L"Open &Folder...");
+            AppendMenuW(menu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_DETAILS, L"&Details Mode");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_RECURSIVE, L"&Recursive Browsing");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(sortMenu), L"&Sort By");
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder");
+
+            EnableMenuItem(menu, ID_FILE_REFRESH_TREE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_VIEW_THUMBNAILS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_VIEW_DETAILS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_VIEW_RECURSIVE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_VIEW_THUMBNAIL_DETAILS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_VIEW_DETAILS_STRIP, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_VIEW_SLIDESHOW_FOLDER, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+
+            CheckMenuRadioItem(
+                menu,
+                ID_VIEW_THUMBNAILS,
+                ID_VIEW_DETAILS,
+                browserMode_ == BrowserMode::Thumbnails ? ID_VIEW_THUMBNAILS : ID_VIEW_DETAILS,
+                MF_BYCOMMAND);
+            CheckMenuItem(
+                menu,
+                ID_VIEW_RECURSIVE,
+                MF_BYCOMMAND | (recursiveBrowsingEnabled_ ? MF_CHECKED : MF_UNCHECKED));
+            CheckMenuItem(
+                menu,
+                ID_VIEW_THUMBNAIL_DETAILS,
+                MF_BYCOMMAND | (thumbnailDetailsVisible_ ? MF_CHECKED : MF_UNCHECKED));
+            CheckMenuItem(
+                menu,
+                ID_VIEW_DETAILS_STRIP,
+                MF_BYCOMMAND | (detailsStripVisible_ ? MF_CHECKED : MF_UNCHECKED));
+
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_FILENAME, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_MODIFIED, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_SIZE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_DIMENSIONS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_TYPE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_RANDOM, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_DATETAKEN, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_RATING, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(sortMenu, ID_VIEW_SORT_TAGS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            for (UINT thumbnailSizeCommandId = ID_VIEW_THUMBNAIL_SIZE_96; thumbnailSizeCommandId <= ID_VIEW_THUMBNAIL_SIZE_640; ++thumbnailSizeCommandId)
+            {
+                EnableMenuItem(thumbnailSizeMenu, thumbnailSizeCommandId, MF_BYCOMMAND | (sizeCommandsEnabled ? MF_ENABLED : MF_GRAYED));
+            }
+        }
+
         for (UINT ratingCommandId = ID_FILE_SET_RATING_0; ratingCommandId <= ID_FILE_SET_RATING_5; ++ratingCommandId)
         {
             EnableMenuItem(ratingMenu, ratingCommandId, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
@@ -8640,26 +8803,6 @@ namespace hyperbrowse::ui
                               ? MF_CHECKED
                               : MF_UNCHECKED));
         }
-        EnableMenuItem(menu, ID_FILE_COPY_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_MOVE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
-        CheckMenuItem(menu, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS,
-                  MF_BYCOMMAND | (rawJpegPairedOperationsEnabled_ ? MF_CHECKED : MF_UNCHECKED));
-        EnableMenuItem(menu, ID_FILE_DELETE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_DELETE_SELECTION_PERMANENT, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_ROTATE_JPEG_LEFT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_FILE_ROTATE_JPEG_RIGHT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_VIEW_THUMBNAILS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu, ID_VIEW_DETAILS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_FILENAME, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_MODIFIED, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_SIZE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_DIMENSIONS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_TYPE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_RANDOM, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_DATETAKEN, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_RATING, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(sortMenu, ID_VIEW_SORT_TAGS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(batchConvertSelectionMenu, ID_FILE_BATCH_CONVERT_SELECTION_JPEG,
                        MF_BYCOMMAND | (hasSelection && !batchConvertActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(batchConvertSelectionMenu, ID_FILE_BATCH_CONVERT_SELECTION_PNG,
@@ -8668,10 +8811,10 @@ namespace hyperbrowse::ui
                        MF_BYCOMMAND | (hasSelection && !batchConvertActive_ ? MF_ENABLED : MF_GRAYED));
 
         CheckMenuRadioItem(
-            menu,
-            ID_VIEW_THUMBNAILS,
-            ID_VIEW_DETAILS,
-            browserMode_ == BrowserMode::Thumbnails ? ID_VIEW_THUMBNAILS : ID_VIEW_DETAILS,
+            thumbnailSizeMenu,
+            ID_VIEW_THUMBNAIL_SIZE_96,
+            ID_VIEW_THUMBNAIL_SIZE_640,
+            CommandIdFromThumbnailSizePreset(thumbnailSizePreset_),
             MF_BYCOMMAND);
 
         const browser::BrowserSortMode sortMode = browserPaneController_
@@ -9495,46 +9638,6 @@ namespace hyperbrowse::ui
             return;
         }
 
-        TASKDIALOG_BUTTON buttons[] = {
-            {1001, L"1 second"},
-            {1002, L"2 seconds"},
-            {1003, L"3 seconds"},
-            {1005, L"5 seconds"},
-            {1010, L"10 seconds"},
-        };
-
-        TASKDIALOGCONFIG config{};
-        config.cbSize = sizeof(config);
-        config.hwndParent = hwnd_;
-        config.dwFlags = TDF_USE_COMMAND_LINKS;
-        config.pszWindowTitle = L"Slideshow";
-        config.pszMainInstruction = L"Choose slideshow interval";
-        config.pszContent = L"Press Space in the viewer to pause/resume.";
-        config.cButtons = static_cast<UINT>(std::size(buttons));
-        config.pButtons = buttons;
-        config.nDefaultButton = slideshowIntervalMs_ <= 1000 ? 1001
-            : slideshowIntervalMs_ <= 2000 ? 1002
-            : slideshowIntervalMs_ <= 3000 ? 1003
-            : slideshowIntervalMs_ <= 5000 ? 1005
-            : 1010;
-
-        int clickedButton = 0;
-        const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
-        if (FAILED(dialogResult) || clickedButton == IDCANCEL)
-        {
-            return;
-        }
-
-        switch (clickedButton)
-        {
-        case 1001: slideshowIntervalMs_ = 1000; break;
-        case 1002: slideshowIntervalMs_ = 2000; break;
-        case 1003: slideshowIntervalMs_ = 3000; break;
-        case 1005: slideshowIntervalMs_ = 5000; break;
-        case 1010: slideshowIntervalMs_ = 10000; break;
-        default:   slideshowIntervalMs_ = 3000; break;
-        }
-
         int selectedIndex = 0;
         if (!selectionScope)
         {
@@ -10345,6 +10448,12 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_DETAILS_STRIP,
             MF_BYCOMMAND | (detailsStripVisible_ ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuRadioItem(
+            menu_,
+            ID_VIEW_SLIDESHOW_DURATION_1000,
+            ID_VIEW_SLIDESHOW_DURATION_10000,
+            CommandIdFromSlideshowInterval(slideshowIntervalMs_),
+            MF_BYCOMMAND);
         CheckMenuRadioItem(
             menu_,
             ID_VIEW_SLIDESHOW_TRANSITION_CUT,
@@ -11624,6 +11733,17 @@ namespace hyperbrowse::ui
         {
             slideshowTransitionStyle_ = TransitionStyleFromCommandId(commandId);
             ApplyViewerTransitionSettings();
+            UpdateMenuState();
+            return true;
+        }
+
+        if (IsSlideshowIntervalCommand(commandId))
+        {
+            slideshowIntervalMs_ = SlideshowIntervalFromCommandId(commandId);
+            if (viewerWindow_ && viewerWindow_->IsSlideshowActive())
+            {
+                viewerWindow_->StartSlideshow(slideshowIntervalMs_);
+            }
             UpdateMenuState();
             return true;
         }
