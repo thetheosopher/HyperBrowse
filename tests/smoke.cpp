@@ -48,6 +48,7 @@ namespace
     constexpr wchar_t kTestWindowClassName[] = L"HyperBrowseFolderEnumerationTestWindow";
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
+    constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
 
     struct EnumerationResult
     {
@@ -91,6 +92,8 @@ namespace
         ThumbnailResult thumbnailResult;
         FolderTreeEnumerationResult folderTreeEnumerationResult;
         FileOperationResult fileOperationResult;
+        int viewerStartFolderSlideshowRequests{};
+        HWND lastViewerStartFolderSlideshowSource{};
     };
 
     class ComScope
@@ -497,6 +500,18 @@ namespace
 
             state->fileOperationResult.update = std::move(*update);
             state->fileOperationResult.completed = true;
+            return 0;
+        }
+
+        if (message == hyperbrowse::viewer::ViewerWindow::kStartFolderSlideshowMessage)
+        {
+            if (!state)
+            {
+                return 0;
+            }
+
+            ++state->viewerStartFolderSlideshowRequests;
+            state->lastViewerStartFolderSlideshowSource = reinterpret_cast<HWND>(wParam);
             return 0;
         }
 
@@ -1595,12 +1610,16 @@ namespace
     void RunViewerWindowScenario(HINSTANCE instance, HWND ownerWindow)
     {
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
+        ScopedRegistryDwordBackup overlayTextSizeBackup(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
+        auto* state = reinterpret_cast<TestWindowState*>(GetWindowLongPtrW(ownerWindow, GWLP_USERDATA));
+        Expect(state != nullptr, "Failed to locate the hidden test window state");
 
         {
             HKEY key{};
             if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_WRITE, &key) == ERROR_SUCCESS)
             {
                 RegDeleteValueW(key, kRegistryValueViewerInfoOverlaysVisible);
+                RegDeleteValueW(key, kRegistryValueViewerInfoOverlayTextSize);
                 RegCloseKey(key);
             }
         }
@@ -1621,10 +1640,38 @@ namespace
                "Viewer window did not finish the initial image decode");
          Expect(viewer.IsFullScreen(), "Viewer should open in full screen by default");
          Expect(viewer.AreInfoOverlaysVisible(), "Viewer should default to showing info overlays when no persisted preference exists");
+         Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Small,
+             "Viewer should default to the small overlay text size when no persisted preference exists");
+
+        viewer.SetOverlayTextSize(hyperbrowse::viewer::InfoOverlayTextSize::Large);
+        Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Large,
+            "Viewer did not apply the requested overlay text size");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
                "Viewer next-image navigation failed");
+
+        state->viewerStartFolderSlideshowRequests = 0;
+        state->lastViewerStartFolderSlideshowSource = nullptr;
+        BYTE originalKeyboardState[256]{};
+        BYTE modifiedKeyboardState[256]{};
+        Expect(GetKeyboardState(originalKeyboardState) != FALSE,
+            "Failed to read the keyboard state before testing the folder slideshow shortcut");
+        for (int index = 0; index < static_cast<int>(std::size(originalKeyboardState)); ++index)
+        {
+            modifiedKeyboardState[index] = originalKeyboardState[index];
+        }
+        modifiedKeyboardState[VK_CONTROL] |= 0x80;
+        modifiedKeyboardState[VK_SHIFT] |= 0x80;
+        Expect(SetKeyboardState(modifiedKeyboardState) != FALSE,
+            "Failed to stage the keyboard state for the folder slideshow shortcut test");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'F', 0);
+        PumpMessagesFor(100);
+        SetKeyboardState(originalKeyboardState);
+        Expect(state->viewerStartFolderSlideshowRequests == 1,
+            "Viewer Ctrl+Shift+F did not request a folder slideshow from the owner window");
+        Expect(state->lastViewerStartFolderSlideshowSource == viewer.Hwnd(),
+            "Viewer folder slideshow request did not identify the active viewer window");
 
          SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
          PumpMessagesFor(100);
@@ -1670,6 +1717,8 @@ namespace
          Expect(PumpMessagesUntil([&]() { return restoredViewer.CurrentZoomPercent() > 0; }, 5000),
              "Restored viewer window did not finish the initial image decode");
          Expect(!restoredViewer.AreInfoOverlaysVisible(), "Viewer did not restore the persisted info-overlay visibility");
+         Expect(restoredViewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Large,
+             "Viewer did not restore the persisted overlay text size");
          SendMessageW(restoredViewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
          PumpMessagesFor(100);
          Expect(restoredViewer.AreInfoOverlaysVisible(), "Viewer Tab key did not restore the info overlays after reopening");

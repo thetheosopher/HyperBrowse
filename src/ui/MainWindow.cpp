@@ -193,6 +193,9 @@ namespace
     constexpr UINT ID_VIEW_PRESSURE_STATE_STATUS = 2215;
     constexpr UINT ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG = 2216;
     constexpr UINT ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW = 2217;
+    constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL = 2218;
+    constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_MEDIUM = 2219;
+    constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE = 2220;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CUT = 2303;
@@ -4570,6 +4573,40 @@ namespace
             && commandId <= ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE;
     }
 
+    hyperbrowse::viewer::InfoOverlayTextSize ViewerOverlayTextSizeFromCommandId(UINT commandId)
+    {
+        switch (commandId)
+        {
+        case ID_VIEW_VIEWER_OVERLAY_TEXT_MEDIUM:
+            return hyperbrowse::viewer::InfoOverlayTextSize::Medium;
+        case ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE:
+            return hyperbrowse::viewer::InfoOverlayTextSize::Large;
+        case ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL:
+        default:
+            return hyperbrowse::viewer::InfoOverlayTextSize::Small;
+        }
+    }
+
+    UINT CommandIdFromViewerOverlayTextSize(hyperbrowse::viewer::InfoOverlayTextSize size)
+    {
+        switch (size)
+        {
+        case hyperbrowse::viewer::InfoOverlayTextSize::Medium:
+            return ID_VIEW_VIEWER_OVERLAY_TEXT_MEDIUM;
+        case hyperbrowse::viewer::InfoOverlayTextSize::Large:
+            return ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE;
+        case hyperbrowse::viewer::InfoOverlayTextSize::Small:
+        default:
+            return ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL;
+        }
+    }
+
+    bool IsViewerOverlayTextSizeCommand(UINT commandId)
+    {
+        return commandId >= ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL
+            && commandId <= ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE;
+    }
+
     bool TryParseResourceProfile(DWORD value, hyperbrowse::util::ResourceProfile* resourceProfile)
     {
         if (!resourceProfile)
@@ -5160,6 +5197,7 @@ namespace hyperbrowse::ui
         HMENU slideshowTransitionDurationMenu = CreatePopupMenu();
         HMENU viewerMenu = CreatePopupMenu();
         HMENU viewerMouseWheelMenu = CreatePopupMenu();
+        HMENU viewerOverlayTextSizeMenu = CreatePopupMenu();
         HMENU pairedRawJpegViewerMenu = CreatePopupMenu();
         HMENU themeMenu = CreatePopupMenu();
         HMENU advancedViewMenu = CreatePopupMenu();
@@ -5168,7 +5206,7 @@ namespace hyperbrowse::ui
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !slideshowDurationMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMenu || !viewerMouseWheelMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !slideshowDurationMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -5285,12 +5323,16 @@ namespace hyperbrowse::ui
 
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM, L"&Zoom");
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE, L"&Next/Previous Image");
+        AppendMenuW(viewerOverlayTextSizeMenu, MF_STRING, ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL, L"&Small");
+        AppendMenuW(viewerOverlayTextSizeMenu, MF_STRING, ID_VIEW_VIEWER_OVERLAY_TEXT_MEDIUM, L"&Medium");
+        AppendMenuW(viewerOverlayTextSizeMenu, MF_STRING, ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE, L"&Large");
         AppendMenuW(pairedRawJpegViewerMenu, MF_STRING, ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG, L"Prefer &JPEG");
         AppendMenuW(pairedRawJpegViewerMenu, MF_STRING, ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW, L"Prefer &RAW");
         AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMouseWheelMenu), L"Mouse &Wheel");
         AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(pairedRawJpegViewerMenu), L"Paired RAW+JPEG &Viewer");
         AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR, L"Open on Secondary &Monitor by Default");
         AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Detail &Overlays");
+        AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerOverlayTextSizeMenu), L"Overlay Text Si&ze");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMenu), L"&Viewer");
 
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
@@ -9628,6 +9670,12 @@ namespace hyperbrowse::ui
             return;
         }
 
+        if (!selectionScope)
+        {
+            StartFolderSlideshow();
+            return;
+        }
+
         std::vector<browser::BrowserItem> items = CollectItemsForScope(selectionScope);
         if (items.empty())
         {
@@ -9638,8 +9686,40 @@ namespace hyperbrowse::ui
             return;
         }
 
-        int selectedIndex = 0;
-        if (!selectionScope)
+        OpenItemsInViewer(std::move(items), 0, true);
+    }
+
+    void MainWindow::StartFolderSlideshow(std::wstring_view preferredPath)
+    {
+        if (!browserModel_ || !browserPaneController_)
+        {
+            return;
+        }
+
+        std::vector<browser::BrowserItem> items = CollectItemsForScope(false);
+        if (items.empty())
+        {
+            MessageBoxW(hwnd_,
+                        L"Open a folder with images first.",
+                        L"Slideshow",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        int selectedIndex = -1;
+        if (!preferredPath.empty())
+        {
+            for (int index = 0; index < static_cast<int>(items.size()); ++index)
+            {
+                if (browser::FilePathsEqual(items[static_cast<std::size_t>(index)].filePath, preferredPath))
+                {
+                    selectedIndex = index;
+                    break;
+                }
+            }
+        }
+
+        if (selectedIndex < 0)
         {
             const int primaryModelIndex = browserPaneController_->PrimarySelectedModelIndex();
             const auto orderedModelIndices = browserPaneController_->OrderedModelIndicesSnapshot();
@@ -9651,6 +9731,11 @@ namespace hyperbrowse::ui
                     break;
                 }
             }
+        }
+
+        if (selectedIndex < 0)
+        {
+            selectedIndex = 0;
         }
 
         OpenItemsInViewer(std::move(items), selectedIndex, true);
@@ -10471,6 +10556,15 @@ namespace hyperbrowse::ui
             ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM,
             ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE,
             CommandIdFromViewerMouseWheelBehavior(viewerMouseWheelBehavior_),
+            MF_BYCOMMAND);
+        const viewer::InfoOverlayTextSize overlayTextSize = viewerWindow_
+            ? viewerWindow_->OverlayTextSize()
+            : viewer::InfoOverlayTextSize::Small;
+        CheckMenuRadioItem(
+            menu_,
+            ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL,
+            ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE,
+            CommandIdFromViewerOverlayTextSize(overlayTextSize),
             MF_BYCOMMAND);
         CheckMenuItem(
             menu_,
@@ -11607,6 +11701,22 @@ namespace hyperbrowse::ui
         return 0;
     }
 
+    LRESULT MainWindow::OnViewerStartFolderSlideshowMessage(WPARAM wParam)
+    {
+        if (!viewerWindow_ || !viewerWindow_->IsOpen())
+        {
+            return 0;
+        }
+
+        if (reinterpret_cast<HWND>(wParam) != viewerWindow_->Hwnd())
+        {
+            return 0;
+        }
+
+        StartFolderSlideshow(viewerWindow_->CurrentFilePath());
+        return 0;
+    }
+
     LRESULT MainWindow::OnViewerClosedMessage()
     {
         viewerWindowActive_ = false;
@@ -11720,6 +11830,16 @@ namespace hyperbrowse::ui
             viewerMouseWheelBehavior_ = ViewerMouseWheelBehaviorFromCommandId(commandId);
             ApplyViewerMouseWheelSetting();
             UpdateMenuState();
+            return true;
+        }
+
+        if (IsViewerOverlayTextSizeCommand(commandId))
+        {
+            if (viewerWindow_)
+            {
+                viewerWindow_->SetOverlayTextSize(ViewerOverlayTextSizeFromCommandId(commandId));
+                UpdateMenuState();
+            }
             return true;
         }
 
@@ -13303,6 +13423,8 @@ namespace hyperbrowse::ui
             return OnViewerActivityMessage(lParam);
         case viewer::ViewerWindow::kDeleteRequestedMessage:
             return OnViewerDeleteRequested(wParam);
+        case viewer::ViewerWindow::kStartFolderSlideshowMessage:
+            return OnViewerStartFolderSlideshowMessage(wParam);
         case viewer::ViewerWindow::kClosedMessage:
             return OnViewerClosedMessage();
         case kMemoryPressureSampledMessage:

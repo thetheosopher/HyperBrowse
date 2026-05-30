@@ -218,6 +218,8 @@ Status bar should update incrementally and never block UI.
 ## 8.5 Info Overlay / HUD
 - toggled via Tab key
 - visibility persisted to registry
+- text size presets: Small, Medium, Large
+- Small matches the legacy overlay size; Medium and Large are progressively larger without changing overlay content
 - top-left panel: filename, position (N/Total), file type, file size
 - bottom-right panel: dimensions, zoom percentage, zoom mode (Fit/Custom)
 - loading and error states always visible regardless of overlay toggle
@@ -231,6 +233,7 @@ Status bar should update incrementally and never block UI.
 - support full-screen slideshow mode
 - default interval 3000 ms (minimum 1000 ms)
 - Space bar toggles slideshow on/off in the viewer
+- Ctrl+Shift+F in the viewer starts a current-folder slideshow from the currently displayed image
 
 Note: Configurable slideshow interval is not yet exposed in the UI. The API accepts an interval parameter but there is no settings surface for it. Pause/resume is currently handled by the Space bar toggle (stop/start).
 

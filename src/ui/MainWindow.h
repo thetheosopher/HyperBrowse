@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -282,6 +283,7 @@ namespace hyperbrowse::ui
         void CopySelectedPathsToClipboard() const;
         void ShowSelectedFileProperties() const;
         void StartSlideshow(bool selectionScope);
+        void StartFolderSlideshow(std::wstring_view preferredPath = {});
         void StartBatchConvert(bool selectionScope, services::BatchConvertFormat format);
         void AdjustSelectedJpegOrientation(int quarterTurnsDelta);
         void ApplyCompletedFileOperation(const services::FileOperationUpdate& update);
@@ -305,6 +307,7 @@ namespace hyperbrowse::ui
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
         LRESULT OnViewerDeleteRequested(WPARAM wParam);
+        LRESULT OnViewerStartFolderSlideshowMessage(WPARAM wParam);
         LRESULT OnViewerClosedMessage();
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
         void TryOpenPendingStartupViewerPath(bool clearIfNotFound);

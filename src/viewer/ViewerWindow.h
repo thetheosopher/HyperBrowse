@@ -38,6 +38,13 @@ namespace hyperbrowse::viewer
         KenBurns = 3,
     };
 
+    enum class InfoOverlayTextSize : int
+    {
+        Small = 0,
+        Medium = 1,
+        Large = 2,
+    };
+
     class ViewerWindow
     {
     public:
@@ -45,6 +52,7 @@ namespace hyperbrowse::viewer
         static constexpr UINT kActivityChangedMessage = WM_APP + 61;
         static constexpr UINT kClosedMessage = WM_APP + 62;
         static constexpr UINT kDeleteRequestedMessage = WM_APP + 65;
+        static constexpr UINT kStartFolderSlideshowMessage = WM_APP + 66;
         static constexpr WPARAM kDeleteRequestPermanent = 0x1;
 
         explicit ViewerWindow(HINSTANCE instance);
@@ -64,6 +72,7 @@ namespace hyperbrowse::viewer
         int RotationQuarterTurns() const noexcept;
         POINT PanOffset() const noexcept;
         bool AreInfoOverlaysVisible() const noexcept;
+        InfoOverlayTextSize OverlayTextSize() const noexcept;
         void StartSlideshow(UINT intervalMs = 3000);
         void StopSlideshow();
         bool IsSlideshowActive() const noexcept;
@@ -72,6 +81,7 @@ namespace hyperbrowse::viewer
         void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
         void SetInfoOverlaysVisible(bool visible);
+        void SetOverlayTextSize(InfoOverlayTextSize size);
         void SetMemoryPressureActive(bool active);
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
         void SetDarkTheme(bool enabled);
@@ -167,6 +177,7 @@ namespace hyperbrowse::viewer
         void EnsureD2DRenderTarget();
         void ReleaseD2DResources();
         void RebuildD2DBrushes();
+        void RebuildD2DTextFormats();
         LRESULT HandleDecodedImageMessage(LPARAM lParam);
         LRESULT HandlePrefetchImageMessage(LPARAM lParam);
         LRESULT HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -202,6 +213,7 @@ namespace hyperbrowse::viewer
         int pendingNavigationDelta_{};
         POINT pendingNavigationPoint_{};
         bool infoOverlaysVisible_{true};
+        InfoOverlayTextSize infoOverlayTextSize_{InfoOverlayTextSize::Small};
         MouseWheelBehavior mouseWheelBehavior_{MouseWheelBehavior::Zoom};
         bool panning_{};
         POINT lastPanPoint_{};
