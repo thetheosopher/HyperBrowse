@@ -221,7 +221,8 @@ Status bar should update incrementally and never block UI.
 - text size presets: Small, Medium, Large
 - Small matches the legacy overlay size; Medium and Large are progressively larger without changing overlay content
 - top-left panel: filename, position (N/Total), file type, file size
-- bottom-right panel: dimensions, zoom percentage, zoom mode (Fit/Custom)
+- bottom-right panel: dimensions, zoom percentage, zoom mode (Fit/Custom); this block uses a more prominent treatment than the upper HUD text
+- optional full metadata pane: rendered over the right third of the viewer with a translucent background and the available image metadata; when shown, the bottom-right panel is hidden
 - loading and error states always visible regardless of overlay toggle
 
 ## 9. Slideshow Behavior

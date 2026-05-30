@@ -15,6 +15,7 @@
 #include "app/resource.h"
 #include "decode/ImageDecoder.h"
 #include "render/D2DRenderer.h"
+#include "services/ImageMetadataService.h"
 #include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
@@ -24,6 +25,7 @@ namespace
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
+    constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
     constexpr int kPlaceholderBrandArtSize = 256;
     constexpr bool kEnableFullImagePrefetch = false;
     constexpr std::size_t kViewerFullImageCacheBytes = 256ULL * 1024ULL * 1024ULL;
@@ -34,6 +36,8 @@ namespace
     {
         float nameFontSize;
         float infoFontSize;
+        float bottomInfoFontSize;
+        float metadataFontSize;
         float overlayWidthScale;
         float topPanelPaddingX;
         float topPanelPaddingY;
@@ -46,6 +50,8 @@ namespace
         float loadingTitleHeight;
         float loadingBodyHeight;
         float loadingGap;
+        float metadataPanelPadding;
+        float metadataGap;
     };
 
     std::wstring FormatWindowHandle(HWND hwnd)
@@ -92,6 +98,14 @@ namespace
         std::wstring errorMessage;
     };
 
+    struct MetadataReadyResult
+    {
+        std::uint64_t requestId{};
+        int index{-1};
+        std::shared_ptr<const hyperbrowse::services::ImageMetadata> metadata;
+        std::wstring text;
+    };
+
     COLORREF BackgroundColor(bool darkTheme)
     {
         return darkTheme ? RGB(18, 21, 25) : RGB(247, 249, 252);
@@ -115,6 +129,16 @@ namespace
     COLORREF PanelBorderColor(bool darkTheme)
     {
         return darkTheme ? RGB(70, 80, 94) : RGB(206, 215, 225);
+    }
+
+    float MetadataPanelFillAlpha(bool darkTheme)
+    {
+        return darkTheme ? 0.68f : 0.74f;
+    }
+
+    float MetadataPanelBorderAlpha(bool darkTheme)
+    {
+        return darkTheme ? 0.88f : 0.82f;
     }
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
@@ -213,55 +237,156 @@ namespace
         RegCloseKey(key);
     }
 
+    bool LoadViewerFullMetadataVisibleSetting()
+    {
+        HKEY key{};
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        {
+            return false;
+        }
+
+        DWORD value = 0;
+        const bool foundValue = TryReadDwordValue(key, kRegistryValueViewerFullMetadataVisible, &value);
+        RegCloseKey(key);
+        return foundValue && value != 0;
+    }
+
+    void SaveViewerFullMetadataVisibleSetting(bool visible)
+    {
+        HKEY key{};
+        DWORD disposition = 0;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                            kRegistryPath,
+                            0,
+                            nullptr,
+                            0,
+                            KEY_WRITE,
+                            nullptr,
+                            &key,
+                            &disposition) != ERROR_SUCCESS)
+        {
+            return;
+        }
+
+        WriteDwordValue(key, kRegistryValueViewerFullMetadataVisible, visible ? 1UL : 0UL);
+        RegCloseKey(key);
+    }
+
+    std::wstring BuildMetadataOverlayText(const hyperbrowse::browser::BrowserItem& item,
+                                          const hyperbrowse::services::ImageMetadata* metadata,
+                                          const std::wstring& errorMessage)
+    {
+        std::wstring text = hyperbrowse::services::FormatImageInfoContent(item);
+        text.append(L"\r\n\r\n");
+
+        if (metadata)
+        {
+            const std::wstring expanded = hyperbrowse::services::FormatImageInfoExpanded(*metadata);
+            if (!expanded.empty())
+            {
+                text.append(expanded);
+                return text;
+            }
+        }
+
+        if (!errorMessage.empty())
+        {
+            text.append(errorMessage);
+            return text;
+        }
+
+        text.append(L"No embedded EXIF, IPTC, or XMP metadata is available for this image.");
+        return text;
+    }
+
+    float MeasureWrappedTextHeight(IDWriteFactory* dwriteFactory,
+                                   IDWriteTextFormat* textFormat,
+                                   const std::wstring& text,
+                                   float maxWidth,
+                                   float maxHeight)
+    {
+        if (!dwriteFactory || !textFormat || text.empty() || maxWidth <= 0.0f || maxHeight <= 0.0f)
+        {
+            return 0.0f;
+        }
+
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> textLayout;
+        if (FAILED(dwriteFactory->CreateTextLayout(text.c_str(),
+                                                   static_cast<UINT32>(text.size()),
+                                                   textFormat,
+                                                   maxWidth,
+                                                   maxHeight,
+                                                   textLayout.GetAddressOf()))
+            || !textLayout)
+        {
+            return 0.0f;
+        }
+
+        DWRITE_TEXT_METRICS metrics{};
+        return SUCCEEDED(textLayout->GetMetrics(&metrics)) ? metrics.height : 0.0f;
+    }
+
     const ViewerOverlayMetrics& ViewerOverlayMetricsForTextSize(InfoOverlayTextSize size)
     {
         static const ViewerOverlayMetrics kSmall{
             13.0f,
             11.0f,
+            13.0f,
+            14.0f,
             1.0f,
             14.0f,
             10.0f,
+            14.0f,
             12.0f,
-            10.0f,
             24.0f,
             24.0f,
-            16.0f,
+            18.0f,
             20.0f,
             34.0f,
             34.0f,
             8.0f,
-        };
-        static const ViewerOverlayMetrics kMedium{
-            16.0f,
-            13.5f,
-            1.08f,
-            16.0f,
-            11.0f,
-            14.0f,
-            11.0f,
-            28.0f,
-            26.0f,
-            21.0f,
-            24.0f,
-            40.0f,
-            40.0f,
+            18.0f,
             10.0f,
         };
-        static const ViewerOverlayMetrics kLarge{
-            19.0f,
+        static const ViewerOverlayMetrics kMedium{
+            20.0f,
             16.0f,
-            1.16f,
+            19.0f,
+            18.0f,
+            1.18f,
             18.0f,
             12.0f,
             16.0f,
+            14.0f,
+            30.0f,
+            28.0f,
+            26.0f,
+            24.0f,
+            42.0f,
+            40.0f,
+            10.0f,
+            20.0f,
             12.0f,
+        };
+        static const ViewerOverlayMetrics kLarge{
+            25.0f,
+            19.0f,
+            23.0f,
+            21.0f,
+            1.28f,
+            20.0f,
+            14.0f,
+            18.0f,
+            16.0f,
+            34.0f,
             32.0f,
             30.0f,
-            26.0f,
             28.0f,
-            46.0f,
+            48.0f,
             46.0f,
             12.0f,
+            22.0f,
+            14.0f,
         };
 
         switch (size)
@@ -478,6 +603,7 @@ namespace hyperbrowse::viewer
         , asyncState_(std::make_shared<AsyncState>())
         , infoOverlaysVisible_(LoadViewerInfoOverlaysVisibleSetting())
         , infoOverlayTextSize_(LoadViewerInfoOverlayTextSizeSetting())
+        , fullMetadataVisible_(LoadViewerFullMetadataVisibleSetting())
     {
         backgroundBrush_ = CreateSolidBrush(BackgroundColor(false));
         statusArt_ = util::LoadPngResourceBitmap(instance_,
@@ -663,6 +789,11 @@ namespace hyperbrowse::viewer
         return infoOverlayTextSize_;
     }
 
+    bool ViewerWindow::IsFullMetadataVisible() const noexcept
+    {
+        return fullMetadataVisible_;
+    }
+
     void ViewerWindow::StartSlideshow(UINT intervalMs)
     {
         if (!hwnd_ || items_.size() < 2)
@@ -780,6 +911,30 @@ namespace hyperbrowse::viewer
         {
             RebuildD2DTextFormats();
         }
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            RequestRepaint();
+        }
+    }
+
+    void ViewerWindow::SetFullMetadataVisible(bool visible)
+    {
+        if (fullMetadataVisible_ == visible)
+        {
+            return;
+        }
+
+        fullMetadataVisible_ = visible;
+        SaveViewerFullMetadataVisibleSetting(fullMetadataVisible_);
+        if (fullMetadataVisible_)
+        {
+            LoadMetadataAsyncForIndex(currentIndex_);
+        }
+        else
+        {
+            ClearCurrentMetadata();
+        }
+
         if (hwnd_ && IsWindow(hwnd_) != FALSE)
         {
             RequestRepaint();
@@ -978,6 +1133,8 @@ namespace hyperbrowse::viewer
     {
         d2dNameFormat_.Reset();
         d2dInfoFormat_.Reset();
+        d2dBottomInfoFormat_.Reset();
+        d2dMetadataFormat_.Reset();
 
         if (!d2dRenderTarget_)
         {
@@ -993,6 +1150,8 @@ namespace hyperbrowse::viewer
         const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
         d2dNameFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.nameFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         d2dInfoFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.infoFontSize, DWRITE_FONT_WEIGHT_NORMAL);
+    d2dBottomInfoFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.bottomInfoFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    d2dMetadataFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.metadataFontSize, DWRITE_FONT_WEIGHT_NORMAL);
 
         const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
         if (d2dNameFormat_)
@@ -1008,6 +1167,22 @@ namespace hyperbrowse::viewer
             d2dInfoFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             d2dInfoFormat_->SetTrimming(&trimming, nullptr);
             d2dInfoFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        }
+
+        if (d2dBottomInfoFormat_)
+        {
+            d2dBottomInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            d2dBottomInfoFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            d2dBottomInfoFormat_->SetTrimming(&trimming, nullptr);
+            d2dBottomInfoFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        }
+
+        if (d2dMetadataFormat_)
+        {
+            d2dMetadataFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            d2dMetadataFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+            d2dMetadataFormat_->SetTrimming(&trimming, nullptr);
+            d2dMetadataFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
         }
     }
 
@@ -1025,11 +1200,15 @@ namespace hyperbrowse::viewer
         d2dStatusArtBitmap_.Reset();
         d2dNameFormat_.Reset();
         d2dInfoFormat_.Reset();
+        d2dBottomInfoFormat_.Reset();
+        d2dMetadataFormat_.Reset();
         d2dBackgroundBrush_.Reset();
         d2dTextBrush_.Reset();
         d2dMutedTextBrush_.Reset();
         d2dPanelFillBrush_.Reset();
         d2dPanelBorderBrush_.Reset();
+        d2dMetadataPanelFillBrush_.Reset();
+        d2dMetadataPanelBorderBrush_.Reset();
         d2dRenderTarget_.Reset();
         d2dCurrentImageIndex_ = -1;
         d2dCompareImageIndex_ = -1;
@@ -1047,12 +1226,18 @@ namespace hyperbrowse::viewer
         d2dMutedTextBrush_.Reset();
         d2dPanelFillBrush_.Reset();
         d2dPanelBorderBrush_.Reset();
+        d2dMetadataPanelFillBrush_.Reset();
+        d2dMetadataPanelBorderBrush_.Reset();
 
         d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(BackgroundColor(darkTheme_)), d2dBackgroundBrush_.GetAddressOf());
         d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(TextColor(darkTheme_)), d2dTextBrush_.GetAddressOf());
         d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(MutedTextColor(darkTheme_)), d2dMutedTextBrush_.GetAddressOf());
         d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(PanelFillColor(darkTheme_)), d2dPanelFillBrush_.GetAddressOf());
         d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(PanelBorderColor(darkTheme_)), d2dPanelBorderBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(PanelFillColor(darkTheme_), MetadataPanelFillAlpha(darkTheme_)),
+                                                d2dMetadataPanelFillBrush_.GetAddressOf());
+        d2dRenderTarget_->CreateSolidColorBrush(render::ToD2DColor(PanelBorderColor(darkTheme_), MetadataPanelBorderAlpha(darkTheme_)),
+                                                d2dMetadataPanelBorderBrush_.GetAddressOf());
     }
 
     bool ViewerWindow::RegisterWindowClass() const
@@ -1133,6 +1318,7 @@ namespace hyperbrowse::viewer
         currentSlot_ = {};
         previousSlot_ = {};
         nextSlot_ = {};
+        ClearCurrentMetadata();
     }
 
     CompareDirection ViewerWindow::ResolveCompareDirection(CompareDirection preferred) const noexcept
@@ -1207,6 +1393,83 @@ namespace hyperbrowse::viewer
         currentSlot_.image = std::move(image);
         currentSlot_.prefetched = prefetched;
         currentImage_ = currentSlot_.image;
+        ClearCurrentMetadata();
+        if (fullMetadataVisible_)
+        {
+            LoadMetadataAsyncForIndex(index);
+        }
+    }
+
+    void ViewerWindow::ClearCurrentMetadata(bool invalidateRequest)
+    {
+        if (invalidateRequest)
+        {
+            metadataRequestId_.fetch_add(1, std::memory_order_acq_rel);
+        }
+
+        metadataLoading_ = false;
+        currentMetadataIndex_ = -1;
+        currentMetadata_.reset();
+        currentMetadataText_.clear();
+    }
+
+    void ViewerWindow::LoadMetadataAsyncForIndex(int index)
+    {
+        if (!fullMetadataVisible_)
+        {
+            return;
+        }
+
+        if (index < 0 || index >= static_cast<int>(items_.size()))
+        {
+            ClearCurrentMetadata();
+            return;
+        }
+
+        currentMetadataIndex_ = index;
+        currentMetadata_.reset();
+        currentMetadataText_.clear();
+        metadataLoading_ = true;
+
+        const browser::BrowserItem item = items_[static_cast<std::size_t>(index)];
+        const std::uint64_t requestId = metadataRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        asyncState_->targetWindow = hwnd_;
+
+        if (!backgroundExecutor_
+            || !backgroundExecutor_->Post([asyncState = asyncState_, metadataRequestId = &metadataRequestId_, item, index, requestId]()
+            {
+                std::wstring errorMessage;
+                auto metadata = hyperbrowse::services::ExtractImageMetadata(item, &errorMessage);
+
+                if (asyncState->shutdown.load(std::memory_order_acquire)
+                    || metadataRequestId->load(std::memory_order_acquire) != requestId)
+                {
+                    return;
+                }
+
+                auto update = std::make_unique<MetadataReadyResult>();
+                update->requestId = requestId;
+                update->index = index;
+                update->metadata = std::move(metadata);
+                update->text = BuildMetadataOverlayText(item, update->metadata.get(), errorMessage);
+
+                HWND targetWindow = asyncState->targetWindow;
+                if (!targetWindow || !PostMessageW(targetWindow, ViewerWindow::kMetadataReadyMessage, 0, reinterpret_cast<LPARAM>(update.get())))
+                {
+                    return;
+                }
+
+                update.release();
+            }))
+        {
+            metadataLoading_ = false;
+            currentMetadataText_ = BuildMetadataOverlayText(item, nullptr, L"Metadata loading is unavailable.");
+        }
+
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            RequestRepaint();
+        }
     }
 
     void ViewerWindow::ReapCompletedBackgroundTasks()
@@ -2229,6 +2492,31 @@ namespace hyperbrowse::viewer
         return 0;
     }
 
+    LRESULT ViewerWindow::HandleMetadataReadyMessage(LPARAM lParam)
+    {
+        std::unique_ptr<MetadataReadyResult> update(reinterpret_cast<MetadataReadyResult*>(lParam));
+        if (!update)
+        {
+            return 0;
+        }
+
+        if (update->requestId != metadataRequestId_.load(std::memory_order_acquire)
+            || update->index != currentMetadataIndex_)
+        {
+            return 0;
+        }
+
+        currentMetadata_ = std::move(update->metadata);
+        currentMetadataText_ = std::move(update->text);
+        metadataLoading_ = false;
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            RequestRepaint();
+        }
+
+        return 0;
+    }
+
     LRESULT ViewerWindow::HandlePrefetchImageMessage(LPARAM lParam)
     {
         std::unique_ptr<PrefetchedImageResult> update(reinterpret_cast<PrefetchedImageResult*>(lParam));
@@ -2603,6 +2891,8 @@ namespace hyperbrowse::viewer
             return HandleDecodedImageMessage(lParam);
         case kPrefetchImageMessage:
             return HandlePrefetchImageMessage(lParam);
+        case kMetadataReadyMessage:
+            return HandleMetadataReadyMessage(lParam);
         case WM_PAINT:
         {
             EnsureD2DRenderTarget();
@@ -2976,6 +3266,7 @@ namespace hyperbrowse::viewer
                     if (infoOverlaysVisible_)
                     {
                         const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
+                        const bool showBottomOverlay = !fullMetadataVisible_;
                         std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
                         if (compareLayout && compareItem)
                         {
@@ -3011,9 +3302,11 @@ namespace hyperbrowse::viewer
                                 : L"  |  Loading compare image...");
                         }
 
-                        const float availablePanelWidth = std::max(120.0f, clientWidth - 32.0f);
+                        const float availablePanelWidth = fullMetadataVisible_
+                            ? std::max(120.0f, (clientWidth * (2.0f / 3.0f)) - 32.0f)
+                            : std::max(120.0f, clientWidth - 32.0f);
                         const float topPanelWidth = std::min((compareLayout ? 760.0f : 560.0f) * overlayMetrics.overlayWidthScale, availablePanelWidth);
-                        const float bottomPanelWidth = std::min((compareLayout ? 560.0f : 320.0f) * overlayMetrics.overlayWidthScale, availablePanelWidth);
+                        const float bottomPanelWidth = std::min((compareLayout ? 640.0f : 380.0f) * overlayMetrics.overlayWidthScale, availablePanelWidth);
                         const float topPanelHeight = (overlayMetrics.topPanelPaddingY * 2.0f)
                             + overlayMetrics.topNameHeight
                             + overlayMetrics.topInfoHeight;
@@ -3030,8 +3323,8 @@ namespace hyperbrowse::viewer
 
                         if (d2dPanelFillBrush_) d2dRenderTarget_->FillRoundedRectangle(roundedTop, d2dPanelFillBrush_.Get());
                         if (d2dPanelBorderBrush_) d2dRenderTarget_->DrawRoundedRectangle(roundedTop, d2dPanelBorderBrush_.Get(), 1.0f);
-                        if (d2dPanelFillBrush_) d2dRenderTarget_->FillRoundedRectangle(roundedBottom, d2dPanelFillBrush_.Get());
-                        if (d2dPanelBorderBrush_) d2dRenderTarget_->DrawRoundedRectangle(roundedBottom, d2dPanelBorderBrush_.Get(), 1.0f);
+                        if (showBottomOverlay && d2dPanelFillBrush_) d2dRenderTarget_->FillRoundedRectangle(roundedBottom, d2dPanelFillBrush_.Get());
+                        if (showBottomOverlay && d2dPanelBorderBrush_) d2dRenderTarget_->DrawRoundedRectangle(roundedBottom, d2dPanelBorderBrush_.Get(), 1.0f);
 
                         D2D1_RECT_F nameRect = D2D1::RectF(topPanel.left + overlayMetrics.topPanelPaddingX,
                                                            topPanel.top + overlayMetrics.topPanelPaddingY,
@@ -3057,8 +3350,76 @@ namespace hyperbrowse::viewer
                             d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
                             d2dRenderTarget_->DrawText(topLine.c_str(), static_cast<UINT32>(topLine.size()),
                                                        d2dInfoFormat_.Get(), topInfoRect, d2dMutedTextBrush_.Get());
+                        }
+                        if (showBottomOverlay && d2dBottomInfoFormat_ && d2dTextBrush_)
+                        {
+                            d2dBottomInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
                             d2dRenderTarget_->DrawText(bottomLine.c_str(), static_cast<UINT32>(bottomLine.size()),
-                                                       d2dInfoFormat_.Get(), bottomInfoRect, d2dMutedTextBrush_.Get());
+                                                       d2dBottomInfoFormat_.Get(), bottomInfoRect, d2dTextBrush_.Get());
+                        }
+                    }
+
+                    if (infoOverlaysVisible_ && fullMetadataVisible_)
+                    {
+                        const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
+                        const float metadataLeft = std::max(16.0f, (clientWidth * (2.0f / 3.0f)) + 8.0f);
+                        const std::wstring metadataBody = metadataLoading_
+                            ? std::wstring(L"Loading metadata...")
+                            : (currentMetadataText_.empty() ? std::wstring(L"No metadata is available for the current image.") : currentMetadataText_);
+                        const float metadataPadding = overlayMetrics.metadataPanelPadding;
+                        const float metadataPanelWidth = std::max(160.0f, clientWidth - metadataLeft - 16.0f);
+                        const float metadataTextWidth = std::max(64.0f, metadataPanelWidth - (metadataPadding * 2.0f));
+                        const float metadataMaxPanelHeight = std::max(96.0f, clientHeight - 32.0f);
+                        const float metadataMaxBodyHeight = std::max(
+                            overlayMetrics.metadataFontSize + overlayMetrics.metadataGap,
+                            metadataMaxPanelHeight - ((metadataPadding * 2.0f) + overlayMetrics.topNameHeight + overlayMetrics.metadataGap));
+                        const float measuredBodyHeight = (d2dMetadataFormat_ && render::D2DRenderer::Instance().DWriteFactory())
+                            ? MeasureWrappedTextHeight(render::D2DRenderer::Instance().DWriteFactory(),
+                                                       d2dMetadataFormat_.Get(),
+                                                       metadataBody,
+                                                       metadataTextWidth,
+                                                       metadataMaxBodyHeight)
+                            : 0.0f;
+                        const float metadataBodyHeight = measuredBodyHeight > 0.0f
+                            ? std::min(metadataMaxBodyHeight, measuredBodyHeight)
+                            : metadataMaxBodyHeight;
+                        const float metadataPanelHeight = std::min(
+                            metadataMaxPanelHeight,
+                            (metadataPadding * 2.0f) + overlayMetrics.topNameHeight + overlayMetrics.metadataGap + metadataBodyHeight);
+                        const D2D1_RECT_F metadataPanel = D2D1::RectF(metadataLeft,
+                                                                      16.0f,
+                                                                      metadataLeft + metadataPanelWidth,
+                                                                      16.0f + metadataPanelHeight);
+                        const D2D1_ROUNDED_RECT roundedMetadata = D2D1::RoundedRect(metadataPanel, 10.0f, 10.0f);
+                        const D2D1_RECT_F metadataTitleRect = D2D1::RectF(metadataPanel.left + metadataPadding,
+                                                                          metadataPanel.top + metadataPadding,
+                                                                          metadataPanel.right - metadataPadding,
+                                                                          metadataPanel.top + metadataPadding + overlayMetrics.topNameHeight);
+                        const D2D1_RECT_F metadataBodyRect = D2D1::RectF(metadataPanel.left + metadataPadding,
+                                                                         metadataTitleRect.bottom + overlayMetrics.metadataGap,
+                                                                         metadataPanel.right - metadataPadding,
+                                                                         metadataTitleRect.bottom + overlayMetrics.metadataGap + metadataBodyHeight);
+
+                        if (d2dMetadataPanelFillBrush_)
+                        {
+                            d2dRenderTarget_->FillRoundedRectangle(roundedMetadata, d2dMetadataPanelFillBrush_.Get());
+                        }
+                        if (d2dMetadataPanelBorderBrush_)
+                        {
+                            d2dRenderTarget_->DrawRoundedRectangle(roundedMetadata, d2dMetadataPanelBorderBrush_.Get(), 1.0f);
+                        }
+                        if (d2dNameFormat_ && d2dTextBrush_)
+                        {
+                            d2dNameFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                            d2dRenderTarget_->DrawText(L"Image Metadata", 14,
+                                                       d2dNameFormat_.Get(), metadataTitleRect, d2dTextBrush_.Get());
+                        }
+                        if (d2dMetadataFormat_ && (metadataLoading_ ? d2dMutedTextBrush_ : d2dTextBrush_))
+                        {
+                            d2dMetadataFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                            d2dRenderTarget_->DrawText(metadataBody.c_str(), static_cast<UINT32>(metadataBody.size()),
+                                                       d2dMetadataFormat_.Get(), metadataBodyRect,
+                                                       metadataLoading_ ? d2dMutedTextBrush_.Get() : d2dTextBrush_.Get());
                         }
                     }
                 }

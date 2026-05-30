@@ -16,6 +16,11 @@
 #include "util/BackgroundExecutor.h"
 #include "util/ResourceSizing.h"
 
+namespace hyperbrowse::services
+{
+    struct ImageMetadata;
+}
+
 namespace hyperbrowse::viewer
 {
     enum class CompareDirection : int
@@ -73,6 +78,7 @@ namespace hyperbrowse::viewer
         POINT PanOffset() const noexcept;
         bool AreInfoOverlaysVisible() const noexcept;
         InfoOverlayTextSize OverlayTextSize() const noexcept;
+        bool IsFullMetadataVisible() const noexcept;
         void StartSlideshow(UINT intervalMs = 3000);
         void StopSlideshow();
         bool IsSlideshowActive() const noexcept;
@@ -82,6 +88,7 @@ namespace hyperbrowse::viewer
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
         void SetInfoOverlaysVisible(bool visible);
         void SetOverlayTextSize(InfoOverlayTextSize size);
+        void SetFullMetadataVisible(bool visible);
         void SetMemoryPressureActive(bool active);
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
         void SetDarkTheme(bool enabled);
@@ -93,6 +100,7 @@ namespace hyperbrowse::viewer
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseViewerWindow";
         static constexpr UINT kDecodedImageMessage = WM_APP + 63;
         static constexpr UINT kPrefetchImageMessage = WM_APP + 64;
+        static constexpr UINT kMetadataReadyMessage = WM_APP + 67;
 
         enum class ZoomMode
         {
@@ -137,6 +145,8 @@ namespace hyperbrowse::viewer
         void SetCurrentImageSlot(int index,
                                  std::shared_ptr<const cache::CachedThumbnail> image,
                                  bool prefetched);
+        void ClearCurrentMetadata(bool invalidateRequest = true);
+        void LoadMetadataAsyncForIndex(int index);
         void ReapCompletedBackgroundTasks();
         void WaitForBackgroundTasks();
         void LogPrefetchStats() const;
@@ -180,6 +190,7 @@ namespace hyperbrowse::viewer
         void RebuildD2DTextFormats();
         LRESULT HandleDecodedImageMessage(LPARAM lParam);
         LRESULT HandlePrefetchImageMessage(LPARAM lParam);
+        LRESULT HandleMetadataReadyMessage(LPARAM lParam);
         LRESULT HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
@@ -214,6 +225,12 @@ namespace hyperbrowse::viewer
         POINT pendingNavigationPoint_{};
         bool infoOverlaysVisible_{true};
         InfoOverlayTextSize infoOverlayTextSize_{InfoOverlayTextSize::Small};
+        bool fullMetadataVisible_{};
+        std::atomic_uint64_t metadataRequestId_{0};
+        bool metadataLoading_{};
+        int currentMetadataIndex_{-1};
+        std::shared_ptr<const services::ImageMetadata> currentMetadata_;
+        std::wstring currentMetadataText_;
         MouseWheelBehavior mouseWheelBehavior_{MouseWheelBehavior::Zoom};
         bool panning_{};
         POINT lastPanPoint_{};
@@ -257,8 +274,12 @@ namespace hyperbrowse::viewer
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dMutedTextBrush_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dPanelFillBrush_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dPanelBorderBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dMetadataPanelFillBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dMetadataPanelBorderBrush_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dNameFormat_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dInfoFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dBottomInfoFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dMetadataFormat_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dCurrentImageBitmap_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dCompareImageBitmap_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dStatusArtBitmap_;

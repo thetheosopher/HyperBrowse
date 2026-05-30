@@ -49,6 +49,7 @@ namespace
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
+    constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
 
     struct EnumerationResult
     {
@@ -1611,6 +1612,7 @@ namespace
     {
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
         ScopedRegistryDwordBackup overlayTextSizeBackup(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
+        ScopedRegistryDwordBackup fullMetadataBackup(kRegistryPath, kRegistryValueViewerFullMetadataVisible);
         auto* state = reinterpret_cast<TestWindowState*>(GetWindowLongPtrW(ownerWindow, GWLP_USERDATA));
         Expect(state != nullptr, "Failed to locate the hidden test window state");
 
@@ -1620,6 +1622,7 @@ namespace
             {
                 RegDeleteValueW(key, kRegistryValueViewerInfoOverlaysVisible);
                 RegDeleteValueW(key, kRegistryValueViewerInfoOverlayTextSize);
+                RegDeleteValueW(key, kRegistryValueViewerFullMetadataVisible);
                 RegCloseKey(key);
             }
         }
@@ -1642,10 +1645,13 @@ namespace
          Expect(viewer.AreInfoOverlaysVisible(), "Viewer should default to showing info overlays when no persisted preference exists");
          Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Small,
              "Viewer should default to the small overlay text size when no persisted preference exists");
+         Expect(!viewer.IsFullMetadataVisible(), "Viewer should default to hiding the full metadata pane when no persisted preference exists");
 
         viewer.SetOverlayTextSize(hyperbrowse::viewer::InfoOverlayTextSize::Large);
         Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Large,
             "Viewer did not apply the requested overlay text size");
+        viewer.SetFullMetadataVisible(true);
+        Expect(viewer.IsFullMetadataVisible(), "Viewer did not apply the requested full metadata visibility");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
@@ -1719,6 +1725,7 @@ namespace
          Expect(!restoredViewer.AreInfoOverlaysVisible(), "Viewer did not restore the persisted info-overlay visibility");
          Expect(restoredViewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Large,
              "Viewer did not restore the persisted overlay text size");
+         Expect(restoredViewer.IsFullMetadataVisible(), "Viewer did not restore the persisted full metadata visibility");
          SendMessageW(restoredViewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
          PumpMessagesFor(100);
          Expect(restoredViewer.AreInfoOverlaysVisible(), "Viewer Tab key did not restore the info overlays after reopening");

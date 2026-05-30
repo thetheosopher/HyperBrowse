@@ -196,6 +196,7 @@ namespace
     constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL = 2218;
     constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_MEDIUM = 2219;
     constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE = 2220;
+    constexpr UINT ID_VIEW_VIEWER_FULL_METADATA = 2221;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CUT = 2303;
@@ -5332,6 +5333,7 @@ namespace hyperbrowse::ui
         AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(pairedRawJpegViewerMenu), L"Paired RAW+JPEG &Viewer");
         AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR, L"Open on Secondary &Monitor by Default");
         AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Detail &Overlays");
+        AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_FULL_METADATA, L"Show Full &Metadata");
         AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerOverlayTextSizeMenu), L"Overlay Text Si&ze");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMenu), L"&Viewer");
 
@@ -10572,6 +10574,10 @@ namespace hyperbrowse::ui
             MF_BYCOMMAND | ((viewerWindow_ && viewerWindow_->AreInfoOverlaysVisible()) ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(
             menu_,
+            ID_VIEW_VIEWER_FULL_METADATA,
+            MF_BYCOMMAND | ((viewerWindow_ && viewerWindow_->IsFullMetadataVisible()) ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
             ID_VIEW_PRESSURE_STATE_STATUS,
             MF_BYCOMMAND | (showPressureStateInStatusBar_ ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuRadioItem(
@@ -12146,6 +12152,13 @@ namespace hyperbrowse::ui
             if (viewerWindow_)
             {
                 viewerWindow_->SetInfoOverlaysVisible(!viewerWindow_->AreInfoOverlaysVisible());
+                UpdateMenuState();
+            }
+            return true;
+        case ID_VIEW_VIEWER_FULL_METADATA:
+            if (viewerWindow_)
+            {
+                viewerWindow_->SetFullMetadataVisible(!viewerWindow_->IsFullMetadataVisible());
                 UpdateMenuState();
             }
             return true;
