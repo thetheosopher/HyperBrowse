@@ -10203,15 +10203,48 @@ namespace hyperbrowse::ui
             return;
         }
 
+        if (fileOperationActive_)
+        {
+            pendingFolderWatchReloadPath_ = update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath;
+
+            const auto treeRefreshNeededForPath = [&](const std::wstring& path)
+            {
+                return !path.empty() && FindFolderTreeItemByPath(path);
+            };
+            const auto isExistingDirectory = [](const std::wstring& path)
+            {
+                if (path.empty())
+                {
+                    return false;
+                }
+
+                std::error_code error;
+                return fs::is_directory(fs::path(path), error) && !error;
+            };
+
+            pendingFolderWatchTreeRefresh_ = pendingFolderWatchTreeRefresh_
+                || update.requiresFullReload
+                || std::any_of(update.events.begin(), update.events.end(), [&](const services::FolderWatchEvent& event)
+                {
+                    switch (event.kind)
+                    {
+                    case services::FolderWatchEventKind::Added:
+                        return isExistingDirectory(event.path);
+                    case services::FolderWatchEventKind::Removed:
+                        return treeRefreshNeededForPath(event.path);
+                    case services::FolderWatchEventKind::Renamed:
+                        return treeRefreshNeededForPath(event.oldPath)
+                            || isExistingDirectory(event.path);
+                    case services::FolderWatchEventKind::Modified:
+                    default:
+                        return false;
+                    }
+                });
+            return;
+        }
+
         if (update.requiresFullReload)
         {
-            if (fileOperationActive_)
-            {
-                pendingFolderWatchReloadPath_ = update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath;
-                pendingFolderWatchTreeRefresh_ = true;
-                return;
-            }
-
             RefreshFolderTree();
             LoadFolderAsync(update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath);
             return;
@@ -10324,14 +10357,6 @@ namespace hyperbrowse::ui
 
         if (preferAsyncReload)
         {
-            if (fileOperationActive_)
-            {
-                pendingFolderWatchReloadPath_ = browserModel_->FolderPath();
-                pendingFolderWatchTreeRefresh_ = pendingFolderWatchTreeRefresh_
-                    || refreshFolderTree;
-                return;
-            }
-
             if (refreshFolderTree)
             {
                 RefreshFolderTree();

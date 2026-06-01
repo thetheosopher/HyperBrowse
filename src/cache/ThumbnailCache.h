@@ -27,7 +27,7 @@ namespace hyperbrowse::cache
             return modifiedTimestampUtc == other.modifiedTimestampUtc
                 && targetWidth == other.targetWidth
                 && targetHeight == other.targetHeight
-                && util::NormalizePathForComparison(filePath) == util::NormalizePathForComparison(other.filePath);
+                && util::NormalizedPathEquals(filePath, other.filePath);
         }
     };
 

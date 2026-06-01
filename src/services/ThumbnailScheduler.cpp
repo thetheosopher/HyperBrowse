@@ -132,20 +132,44 @@ namespace
         return totalWorkerCount - ResolveRawWorkerCount(totalWorkerCount, resourceProfile);
     }
 
+    // Allocation-free extension extraction (including the leading '.') for hot-path use.
+    std::wstring_view ExtensionView(std::wstring_view path)
+    {
+        const std::size_t lastSeparator = path.find_last_of(L"\\/");
+        const std::size_t searchStart = lastSeparator == std::wstring_view::npos ? 0 : lastSeparator + 1;
+        const std::size_t dot = path.find_last_of(L'.');
+        if (dot == std::wstring_view::npos || dot < searchStart)
+        {
+            return {};
+        }
+        return path.substr(dot);
+    }
+
+    bool EqualsIgnoreCase(std::wstring_view lhs, std::wstring_view rhs)
+    {
+        if (lhs.size() != rhs.size())
+        {
+            return false;
+        }
+        for (std::size_t index = 0; index < lhs.size(); ++index)
+        {
+            if (towlower(lhs[index]) != towlower(rhs[index]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     bool IsJpegCacheKey(const hyperbrowse::cache::ThumbnailCacheKey& cacheKey)
     {
-        std::wstring extension = fs::path(cacheKey.filePath).extension().wstring();
-        std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t value)
-        {
-            return static_cast<wchar_t>(towlower(value));
-        });
-
-        return extension == L".jpg" || extension == L".jpeg";
+        const std::wstring_view extension = ExtensionView(cacheKey.filePath);
+        return EqualsIgnoreCase(extension, L".jpg") || EqualsIgnoreCase(extension, L".jpeg");
     }
 
     bool IsRawCacheKey(const hyperbrowse::cache::ThumbnailCacheKey& cacheKey)
     {
-        return hyperbrowse::decode::IsRawFileType(fs::path(cacheKey.filePath).extension().wstring());
+        return hyperbrowse::decode::IsRawFileType(std::wstring(ExtensionView(cacheKey.filePath)));
     }
 
 }

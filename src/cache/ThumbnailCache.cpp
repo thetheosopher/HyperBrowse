@@ -9,7 +9,7 @@ namespace hyperbrowse::cache
     std::size_t ThumbnailCacheKeyHasher::operator()(const ThumbnailCacheKey& key) const noexcept
     {
         std::size_t seed = 0;
-        util::HashCombine(&seed, util::NormalizePathForComparison(key.filePath));
+        util::HashCombine(&seed, util::NormalizedPathHash(key.filePath));
         util::HashCombine(&seed, key.modifiedTimestampUtc);
         util::HashCombine(&seed, key.targetWidth);
         util::HashCombine(&seed, key.targetHeight);
@@ -76,11 +76,10 @@ namespace hyperbrowse::cache
 
     std::shared_ptr<const CachedThumbnail> ThumbnailCache::Find(const ThumbnailCacheKey& key) const
     {
-        ThumbnailCacheKey normalizedKey = key;
-        normalizedKey.filePath = util::NormalizePathForComparison(normalizedKey.filePath);
-
+        // Hashing and equality normalize paths on the fly, so the lookup key does not
+        // need a pre-normalized copy.
         std::scoped_lock lock(mutex_);
-        const auto iterator = entries_.find(normalizedKey);
+        const auto iterator = entries_.find(key);
         if (iterator == entries_.end())
         {
             return {};

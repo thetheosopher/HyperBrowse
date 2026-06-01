@@ -1,6 +1,7 @@
 #include "util/Log.h"
 
 #include <windows.h>
+#include <mutex>
 #include <string>
 
 namespace
@@ -51,6 +52,11 @@ namespace
                                     nullptr);
         if (handle == INVALID_HANDLE_VALUE)
         {
+            static std::once_flag noticeFlag;
+            std::call_once(noticeFlag, []()
+            {
+                OutputDebugStringW(L"[HyperBrowse] [WARN] Unable to open debug log file; file logging disabled for this session.\r\n");
+            });
             return;
         }
 

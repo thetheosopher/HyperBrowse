@@ -1,6 +1,7 @@
 #include "browser/BrowserModel.h"
 
 #include "decode/ImageDecoder.h"
+#include "util/PathUtils.h"
 
 #include <algorithm>
 #include <cwctype>
@@ -304,13 +305,13 @@ namespace hyperbrowse::browser
     bool IsSupportedImageExtension(std::wstring_view extension)
     {
         const std::wstring normalized = ToLowercase(extension);
-            return hyperbrowse::decode::IsWicFileType(normalized)
-                || hyperbrowse::decode::IsRawFileType(normalized);
+        return hyperbrowse::decode::IsWicFileType(normalized)
+            || hyperbrowse::decode::IsRawFileType(normalized);
     }
 
     bool FilePathsEqual(std::wstring_view lhs, std::wstring_view rhs)
     {
-        return NormalizePathForComparison(lhs) == NormalizePathForComparison(rhs);
+        return util::NormalizedPathEquals(lhs, rhs);
     }
 
     bool PathHasPrefix(std::wstring_view path, std::wstring_view prefix)
