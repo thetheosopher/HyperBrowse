@@ -187,6 +187,9 @@ namespace
     constexpr UINT ID_VIEW_SORT_TAGS = 2209;
     constexpr UINT ID_VIEW_SORT_DIRECTION = 2210;
     constexpr UINT ID_VIEW_DETAILS_STRIP = 2211;
+    constexpr int kDetailsPanelCloseButtonSize = 18;
+    constexpr int kDetailsPanelCloseButtonMargin = 8;
+    constexpr int kDetailsPanelCloseButtonGap = 8;
     constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM = 2212;
     constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE = 2213;
     constexpr UINT ID_VIEW_VIEWER_DETAIL_OVERLAYS = 2214;
@@ -6121,6 +6124,7 @@ namespace hyperbrowse::ui
         detailsPanelTabRects_ = {};
         detailsPanelContentRect_ = RECT{};
         detailsPanelHistogramRect_ = RECT{};
+        detailsPanelCloseButtonRect_ = RECT{};
         quickAccessDestinationPanelRect_ = RECT{};
         quickAccessDestinationRows_.clear();
         quickAccessHotRowIndex_ = -1;
@@ -6165,6 +6169,15 @@ namespace hyperbrowse::ui
                     innerRight,
                     detailsPanelRect_.bottom - kDetailsPanelMargin,
                 };
+
+                const int closeButtonRight = detailsPanelRect_.right - kDetailsPanelCloseButtonMargin;
+                const int closeButtonLeft = closeButtonRight - kDetailsPanelCloseButtonSize;
+                const int closeButtonTop = detailsPanelRect_.top + kDetailsPanelCloseButtonMargin;
+                const int closeButtonBottom = closeButtonTop + kDetailsPanelCloseButtonSize;
+                if (closeButtonLeft > detailsPanelTabStripRect_.right + kDetailsPanelCloseButtonGap)
+                {
+                    detailsPanelCloseButtonRect_ = RECT{closeButtonLeft, closeButtonTop, closeButtonRight, closeButtonBottom};
+                }
 
                 if (detailsPanelContentRect_.right > detailsPanelContentRect_.left
                     && detailsPanelContentRect_.bottom > detailsPanelContentRect_.top)
@@ -7521,6 +7534,49 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (!IsRectEmpty(&detailsPanelCloseButtonRect_))
+        {
+            const bool hot = detailsPanelCloseButtonHot_;
+            const bool pressed = detailsPanelCloseButtonPressed_;
+            const COLORREF fillColor = pressed
+                ? BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 24 : 16)
+                : (hot
+                    ? BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 14 : 10)
+                    : palette.actionFieldBackground);
+            const COLORREF borderColor = hot || pressed ? palette.accent : palette.actionStripBorder;
+            const COLORREF textColor = hot || pressed ? palette.accentText : palette.mutedText;
+
+            HBRUSH buttonBrush = CreateSolidBrush(fillColor);
+            HPEN buttonPen = CreatePen(PS_SOLID, 1, borderColor);
+            const HGDIOBJ oldBrush = SelectObject(hdc, buttonBrush);
+            const HGDIOBJ oldButtonPen = SelectObject(hdc, buttonPen);
+            RoundRect(hdc,
+                      detailsPanelCloseButtonRect_.left,
+                      detailsPanelCloseButtonRect_.top,
+                      detailsPanelCloseButtonRect_.right,
+                      detailsPanelCloseButtonRect_.bottom,
+                      6,
+                      6);
+            SelectObject(hdc, oldButtonPen);
+            SelectObject(hdc, oldBrush);
+            DeleteObject(buttonPen);
+            DeleteObject(buttonBrush);
+
+            const int inset = 5;
+            const int left = detailsPanelCloseButtonRect_.left + inset;
+            const int top = detailsPanelCloseButtonRect_.top + inset;
+            const int right = detailsPanelCloseButtonRect_.right - inset;
+            const int bottom = detailsPanelCloseButtonRect_.bottom - inset;
+            HPEN xPen = CreatePen(PS_SOLID, 1, textColor);
+            const HGDIOBJ oldXPen = SelectObject(hdc, xPen);
+            MoveToEx(hdc, left, top, nullptr);
+            LineTo(hdc, right, bottom);
+            MoveToEx(hdc, left, bottom, nullptr);
+            LineTo(hdc, right, top);
+            SelectObject(hdc, oldXPen);
+            DeleteObject(xPen);
+        }
+
         SelectObject(hdc, detailsPanelTitleFont_ ? detailsPanelTitleFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
         if (activeRightPaneTab_ == RightPaneTab::FileDetails && !IsRectEmpty(&detailsPanelContentRect_))
         {
@@ -8191,6 +8247,26 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ToggleDetailsPanelVisibility()
+    {
+        detailsStripVisible_ = !detailsStripVisible_;
+        if (detailsStripVisible_)
+        {
+            detailsPanelWidth_ = std::max(detailsPanelWidth_, kDetailsPanelMinWidth);
+        }
+
+        if (detailsPanelText_)
+        {
+            ShowWindow(detailsPanelText_, detailsStripVisible_ && activeRightPaneTab_ == RightPaneTab::FileDetails ? SW_SHOW : SW_HIDE);
+        }
+
+        detailsPanelCloseButtonHot_ = false;
+        detailsPanelCloseButtonPressed_ = false;
+        LayoutChildren();
+        UpdateDetailsPanel();
+        UpdateMenuState();
+    }
+
     int MainWindow::HitTestDetailsPanelTab(int x, int y) const
     {
         if (!detailsStripVisible_ || IsRectEmpty(&detailsPanelTabStripRect_))
@@ -8208,6 +8284,17 @@ namespace hyperbrowse::ui
         }
 
         return -1;
+    }
+
+    int MainWindow::HitTestDetailsPanelCloseButton(int x, int y) const
+    {
+        if (!detailsStripVisible_ || IsRectEmpty(&detailsPanelCloseButtonRect_))
+        {
+            return -1;
+        }
+
+        const POINT point{x, y};
+        return PtInRect(&detailsPanelCloseButtonRect_, point) != FALSE ? 0 : -1;
     }
 
     std::vector<browser::BrowserItem> MainWindow::CollectItemsForScope(bool selectionScope) const
@@ -12150,18 +12237,7 @@ namespace hyperbrowse::ui
             UpdateMenuState();
             return true;
         case ID_VIEW_DETAILS_STRIP:
-            detailsStripVisible_ = !detailsStripVisible_;
-            if (detailsStripVisible_)
-            {
-                detailsPanelWidth_ = std::max(detailsPanelWidth_, kDetailsPanelMinWidth);
-            }
-            if (detailsPanelText_)
-            {
-                ShowWindow(detailsPanelText_, detailsStripVisible_ && activeRightPaneTab_ == RightPaneTab::FileDetails ? SW_SHOW : SW_HIDE);
-            }
-            LayoutChildren();
-            UpdateDetailsPanel();
-            UpdateMenuState();
+            ToggleDetailsPanelVisibility();
             return true;
         case ID_VIEW_SORT_FILENAME:
         case ID_VIEW_SORT_MODIFIED:
@@ -12940,6 +13016,17 @@ namespace hyperbrowse::ui
             return;
         }
 
+        if (HitTestDetailsPanelCloseButton(x, y) >= 0)
+        {
+            detailsPanelCloseButtonPressed_ = true;
+            SetCapture(hwnd_);
+            if (!IsRectEmpty(&detailsPanelRect_))
+            {
+                InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+            }
+            return;
+        }
+
         const int quickAccessButton = HitTestQuickAccessDestinationButton(x, y);
         if (quickAccessButton >= 0)
         {
@@ -13063,6 +13150,27 @@ namespace hyperbrowse::ui
                 SelectRightPaneTab(hitTab == static_cast<int>(RightPaneTab::QuickSend)
                     ? RightPaneTab::QuickSend
                     : RightPaneTab::FileDetails);
+            }
+            return;
+        }
+
+        if (detailsPanelCloseButtonPressed_)
+        {
+            detailsPanelCloseButtonPressed_ = false;
+            ReleaseCapture();
+
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(hwnd_, &point);
+            detailsPanelCloseButtonHot_ = HitTestDetailsPanelCloseButton(point.x, point.y) >= 0;
+            if (!IsRectEmpty(&detailsPanelRect_))
+            {
+                InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+            }
+
+            if (detailsPanelCloseButtonHot_)
+            {
+                ToggleDetailsPanelVisibility();
             }
             return;
         }
@@ -13208,6 +13316,14 @@ namespace hyperbrowse::ui
                 detailsPanelHotTabIndex_ = -1;
                 invalidateDetailsPanelTabs();
             }
+            if (detailsPanelCloseButtonHot_)
+            {
+                detailsPanelCloseButtonHot_ = false;
+                if (!IsRectEmpty(&detailsPanelRect_))
+                {
+                    InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+                }
+            }
 
             const int menuHit = CommandBarMenuHitTest(x, y);
             if (!commandBarKeyboardActive_ && menuHit != commandBarHotIndex_)
@@ -13270,6 +13386,16 @@ namespace hyperbrowse::ui
             invalidateDetailsPanelTabs();
         }
 
+        const int detailsPanelCloseButtonHit = HitTestDetailsPanelCloseButton(x, y);
+        if ((detailsPanelCloseButtonHit >= 0) != detailsPanelCloseButtonHot_)
+        {
+            detailsPanelCloseButtonHot_ = detailsPanelCloseButtonHit >= 0;
+            if (!IsRectEmpty(&detailsPanelRect_))
+            {
+                InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+            }
+        }
+
         const int quickAccessRowHit = HitTestQuickAccessDestinationRow(x, y);
         const int quickAccessHit = dragMode_ == DragMode::QuickAccessInternal
             ? -1
@@ -13313,7 +13439,9 @@ namespace hyperbrowse::ui
             SetCursor(LoadCursorW(nullptr,
                                   IsOverSplitter(x, y)
                                       ? IDC_SIZEWE
-                                      : ((quickAccessRowHit >= 0 || quickAccessHit >= 0) ? IDC_HAND : IDC_ARROW)));
+                                      : ((detailsPanelCloseButtonHit >= 0 || quickAccessRowHit >= 0 || quickAccessHit >= 0)
+                                          ? IDC_HAND
+                                          : IDC_ARROW)));
         }
     }
 
@@ -13586,6 +13714,15 @@ namespace hyperbrowse::ui
                 if (!IsRectEmpty(&detailsPanelTabStripRect_))
                 {
                     InvalidateRect(hwnd_, &detailsPanelTabStripRect_, FALSE);
+                }
+            }
+            if (detailsPanelCloseButtonHot_ || detailsPanelCloseButtonPressed_)
+            {
+                detailsPanelCloseButtonHot_ = false;
+                detailsPanelCloseButtonPressed_ = false;
+                if (!IsRectEmpty(&detailsPanelRect_))
+                {
+                    InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
                 }
             }
             if (quickAccessHotRowIndex_ >= 0 || quickAccessHotButtonIndex_ >= 0)

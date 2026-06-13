@@ -245,7 +245,9 @@ namespace hyperbrowse::ui
         bool CanNavigateToQuickAccessDestination(std::wstring_view folderPath) const;
         bool CanUseQuickAccessDestinationActions(std::wstring_view folderPath) const;
         void SelectRightPaneTab(RightPaneTab tab);
+        void ToggleDetailsPanelVisibility();
         int HitTestDetailsPanelTab(int x, int y) const;
+        int HitTestDetailsPanelCloseButton(int x, int y) const;
         int HitTestQuickAccessDestinationRow(int x, int y) const;
         int HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type = nullptr) const;
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
@@ -448,6 +450,7 @@ namespace hyperbrowse::ui
         std::wstring statusSecondaryText_;
         RECT detailsPanelContentRect_{};
         RECT detailsPanelHistogramRect_{};
+        RECT detailsPanelCloseButtonRect_{};
         RECT quickAccessDestinationPanelRect_{};
         std::wstring detailsPanelTitleText_;
         std::wstring detailsPanelSummaryText_;
@@ -462,6 +465,8 @@ namespace hyperbrowse::ui
         bool detailsPanelHistogramLoading_{};
         int detailsPanelHotTabIndex_{-1};
         int detailsPanelPressedTabIndex_{-1};
+        bool detailsPanelCloseButtonHot_{};
+        bool detailsPanelCloseButtonPressed_{};
         int quickAccessHotRowIndex_{-1};
         int quickAccessHotButtonIndex_{-1};
         int quickAccessPressedRowIndex_{-1};
