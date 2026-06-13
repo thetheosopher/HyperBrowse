@@ -46,8 +46,11 @@ namespace hyperbrowse::services
             std::atomic_uint64_t activeRequestId{0};
             std::atomic_bool shutdown{false};
             std::mutex handleMutex;
+            std::mutex pendingUpdateMutex;
             HANDLE directoryHandle{INVALID_HANDLE_VALUE};
             HANDLE stopEvent{};
+            std::unique_ptr<FolderWatchUpdate> pendingUpdate;
+            bool updatePosted{};
         };
 
         FolderWatchService();
@@ -55,6 +58,7 @@ namespace hyperbrowse::services
 
         std::uint64_t StartWatching(HWND targetWindow, std::wstring folderPath, bool recursive);
         void Stop();
+        std::unique_ptr<FolderWatchUpdate> TakePendingUpdate();
 
     private:
         std::shared_ptr<SharedState> sharedState_;

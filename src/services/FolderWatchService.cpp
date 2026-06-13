@@ -10,22 +10,83 @@ namespace fs = std::filesystem;
 
 namespace
 {
-    void PostUpdate(HWND targetWindow, std::unique_ptr<hyperbrowse::services::FolderWatchUpdate> update)
+    constexpr std::size_t kCoalescedEventReloadLimit = 64;
+
+    void MergeUpdate(hyperbrowse::services::FolderWatchUpdate& destination,
+                     hyperbrowse::services::FolderWatchUpdate&& source)
     {
-        if (!targetWindow)
+        if (destination.requestId != source.requestId)
+        {
+            destination = std::move(source);
+            return;
+        }
+
+        if (destination.folderPath.empty())
+        {
+            destination.folderPath = std::move(source.folderPath);
+        }
+
+        if (!source.message.empty())
+        {
+            destination.message = std::move(source.message);
+        }
+
+        destination.requiresFullReload = destination.requiresFullReload || source.requiresFullReload;
+        if (!source.events.empty())
+        {
+            destination.events.insert(destination.events.end(),
+                                      std::make_move_iterator(source.events.begin()),
+                                      std::make_move_iterator(source.events.end()));
+            if (destination.events.size() >= kCoalescedEventReloadLimit)
+            {
+                destination.requiresFullReload = true;
+                destination.events.clear();
+            }
+        }
+    }
+
+    void QueueUpdate(const std::shared_ptr<hyperbrowse::services::FolderWatchService::SharedState>& sharedState,
+                     HWND targetWindow,
+                     std::unique_ptr<hyperbrowse::services::FolderWatchUpdate> update)
+    {
+        if (!targetWindow || !update)
         {
             return;
         }
 
-        if (!PostMessageW(targetWindow,
-                          hyperbrowse::services::FolderWatchService::kMessageId,
-                          0,
-                          reinterpret_cast<LPARAM>(update.get())))
+        bool shouldPost = false;
         {
-            return;
+            std::scoped_lock lock(sharedState->pendingUpdateMutex);
+            if (sharedState->pendingUpdate)
+            {
+                MergeUpdate(*sharedState->pendingUpdate, std::move(*update));
+            }
+            else
+            {
+                if (update->events.size() >= kCoalescedEventReloadLimit)
+                {
+                    update->requiresFullReload = true;
+                    update->events.clear();
+                }
+                sharedState->pendingUpdate = std::move(update);
+            }
+
+            if (!sharedState->updatePosted && sharedState->pendingUpdate)
+            {
+                sharedState->updatePosted = true;
+                shouldPost = true;
+            }
         }
 
-        update.release();
+        if (shouldPost
+            && !PostMessageW(targetWindow,
+                             hyperbrowse::services::FolderWatchService::kMessageId,
+                             0,
+                             0))
+        {
+            std::scoped_lock lock(sharedState->pendingUpdateMutex);
+            sharedState->updatePosted = false;
+        }
     }
 
     bool ShouldStop(const std::shared_ptr<hyperbrowse::services::FolderWatchService::SharedState>& sharedState,
@@ -86,7 +147,7 @@ namespace
             update->folderPath = folderPath;
             update->requiresFullReload = true;
             update->message = L"Failed to open the folder watcher handle.";
-            PostUpdate(targetWindow, std::move(update));
+            QueueUpdate(sharedState, targetWindow, std::move(update));
             return;
         }
 
@@ -136,7 +197,7 @@ namespace
                 update->folderPath = folderPath;
                 update->requiresFullReload = true;
                 update->message = L"ReadDirectoryChangesW failed for the current folder watcher.";
-                PostUpdate(targetWindow, std::move(update));
+                QueueUpdate(sharedState, targetWindow, std::move(update));
                 break;
             }
 
@@ -167,7 +228,7 @@ namespace
                 update->message = error == ERROR_NOTIFY_ENUM_DIR
                     ? L"Folder watcher overflowed and requested a full reload."
                     : L"Folder watcher could not process a filesystem notification.";
-                PostUpdate(targetWindow, std::move(update));
+                QueueUpdate(sharedState, targetWindow, std::move(update));
                 continue;
             }
 
@@ -220,7 +281,7 @@ namespace
 
             if (!update->events.empty())
             {
-                PostUpdate(targetWindow, std::move(update));
+                QueueUpdate(sharedState, targetWindow, std::move(update));
             }
         }
 
@@ -274,5 +335,16 @@ namespace hyperbrowse::services
         {
             worker_.join();
         }
+
+        std::scoped_lock lock(sharedState_->pendingUpdateMutex);
+        sharedState_->pendingUpdate.reset();
+        sharedState_->updatePosted = false;
+    }
+
+    std::unique_ptr<FolderWatchUpdate> FolderWatchService::TakePendingUpdate()
+    {
+        std::scoped_lock lock(sharedState_->pendingUpdateMutex);
+        sharedState_->updatePosted = false;
+        return std::move(sharedState_->pendingUpdate);
     }
 }

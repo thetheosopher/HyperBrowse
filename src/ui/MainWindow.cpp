@@ -11485,8 +11485,10 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnFolderWatchMessage(LPARAM lParam)
     {
-        std::unique_ptr<services::FolderWatchUpdate> update(
-            reinterpret_cast<services::FolderWatchUpdate*>(lParam));
+        (void)lParam;
+        std::unique_ptr<services::FolderWatchUpdate> update = folderWatchService_
+            ? folderWatchService_->TakePendingUpdate()
+            : nullptr;
         if (!update || update->requestId != activeFolderWatchRequestId_)
         {
             return 0;
