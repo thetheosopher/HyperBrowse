@@ -8917,14 +8917,20 @@ namespace hyperbrowse::ui
         constexpr UINT kRenameFolderCommandId = 1;
         constexpr UINT kDeleteFolderCommandId = 2;
         constexpr UINT kDeleteFolderPermanentCommandId = 3;
+        constexpr UINT kOpenInExplorerCommandId = 4;
+        constexpr UINT kCopyPathCommandId = 5;
 
         AppendMenuW(menu, MF_STRING, kRenameFolderCommandId, L"Re&name Folder...");
+        AppendMenuW(menu, MF_STRING, kOpenInExplorerCommandId, L"Open in &Explorer");
+        AppendMenuW(menu, MF_STRING, kCopyPathCommandId, L"Copy Pat&h");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kDeleteFolderCommandId, L"&Delete Folder");
         AppendMenuW(menu, MF_STRING, kDeleteFolderPermanentCommandId, L"Delete Folder &Permanently");
 
         const UINT enableState = fileOperationActive_ ? MF_GRAYED : MF_ENABLED;
         EnableMenuItem(menu, kRenameFolderCommandId, MF_BYCOMMAND | enableState);
+        EnableMenuItem(menu, kOpenInExplorerCommandId, MF_BYCOMMAND | MF_ENABLED);
+        EnableMenuItem(menu, kCopyPathCommandId, MF_BYCOMMAND | MF_ENABLED);
         EnableMenuItem(menu, kDeleteFolderCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(menu, kDeleteFolderPermanentCommandId, MF_BYCOMMAND | enableState);
 
@@ -8946,6 +8952,18 @@ namespace hyperbrowse::ui
         {
         case kRenameFolderCommandId:
             StartFolderTreeRename(folderPath);
+            break;
+        case kOpenInExplorerCommandId:
+            if (!LaunchShellTarget(hwnd_, L"open", folderPath))
+            {
+                MessageBoxW(hwnd_, L"Failed to open the folder in Explorer.", L"Open in Explorer", MB_OK | MB_ICONERROR);
+            }
+            break;
+        case kCopyPathCommandId:
+            if (!CopyTextToClipboard(hwnd_, folderPath))
+            {
+                MessageBoxW(hwnd_, L"Failed to copy the folder path to the clipboard.", L"Copy Path", MB_OK | MB_ICONERROR);
+            }
             break;
         case kDeleteFolderCommandId:
             StartFolderTreeDelete(folderPath, false);
