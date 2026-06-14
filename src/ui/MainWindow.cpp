@@ -1826,7 +1826,7 @@ namespace
         return std::to_wstring(bytes / (1024ULL * 1024ULL));
     }
 
-    constexpr std::array<SlideshowTransitionOption, 14> kSlideshowTransitionOptions = {{
+    constexpr std::array<SlideshowTransitionOption, 21> kSlideshowTransitionOptions = {{
         {hyperbrowse::viewer::TransitionStyle::Cut, L"None (Cut)"},
         {hyperbrowse::viewer::TransitionStyle::Crossfade, L"Crossfade"},
         {hyperbrowse::viewer::TransitionStyle::Slide, L"Slide"},
@@ -1841,6 +1841,13 @@ namespace
         {hyperbrowse::viewer::TransitionStyle::HorizontalBlinds, L"Horizontal Blinds"},
         {hyperbrowse::viewer::TransitionStyle::CheckerboardWipe, L"Checkerboard Wipe"},
         {hyperbrowse::viewer::TransitionStyle::ZoomFade, L"Zoom Fade"},
+        {hyperbrowse::viewer::TransitionStyle::BlurCrossfade, L"Blur Crossfade"},
+        {hyperbrowse::viewer::TransitionStyle::MotionBlur, L"Motion Blur"},
+        {hyperbrowse::viewer::TransitionStyle::ColorWash, L"Color Wash"},
+        {hyperbrowse::viewer::TransitionStyle::SepiaDrift, L"Sepia Drift"},
+        {hyperbrowse::viewer::TransitionStyle::Flashbulb, L"Flashbulb"},
+        {hyperbrowse::viewer::TransitionStyle::Prism, L"Prism"},
+        {hyperbrowse::viewer::TransitionStyle::MonochromeReveal, L"Monochrome Reveal"},
     }};
 
     int SlideshowTransitionComboIndex(hyperbrowse::viewer::TransitionStyle style)
@@ -11828,7 +11835,7 @@ namespace hyperbrowse::ui
             }
 
             if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionStyle, &value)
-                && value <= static_cast<DWORD>(viewer::TransitionStyle::ZoomFade))
+                && value <= static_cast<DWORD>(viewer::TransitionStyle::MonochromeReveal))
             {
                 slideshowTransitionStyle_ = static_cast<viewer::TransitionStyle>(value);
             }

@@ -52,6 +52,13 @@ namespace hyperbrowse::viewer
         HorizontalBlinds = 11,
         CheckerboardWipe = 12,
         ZoomFade = 13,
+        BlurCrossfade = 14,
+        MotionBlur = 15,
+        ColorWash = 16,
+        SepiaDrift = 17,
+        Flashbulb = 18,
+        Prism = 19,
+        MonochromeReveal = 20,
     };
 
     enum class InfoOverlayTextSize : int
@@ -186,13 +193,21 @@ namespace hyperbrowse::viewer
         double FitScaleForClient(const RECT& clientRect) const;
         double EffectiveScaleForClient(const RECT& clientRect) const;
         void DrawImageBitmap(ID2D1RenderTarget* renderTarget,
-                     ID2D1Bitmap* bitmap,
-                     const cache::CachedThumbnail& image,
-                     const RECT& clientRect,
-                     float opacity,
-                     float scaleMultiplier,
-                     float offsetX,
-                     float offsetY) const;
+                             ID2D1Bitmap* bitmap,
+                             const cache::CachedThumbnail& image,
+                             const RECT& clientRect,
+                             float opacity,
+                             float scaleMultiplier,
+                             float offsetX,
+                             float offsetY) const;
+        bool DrawImageEffect(ID2D1RenderTarget* renderTarget,
+                             ID2D1Image* imageSource,
+                             const cache::CachedThumbnail& image,
+                             const RECT& clientRect,
+                             float opacity,
+                             float scaleMultiplier,
+                             float offsetX,
+                             float offsetY) const;
         void RequestRepaint() const;
         void NotifyZoomChanged(int zoomPercent);
         void NotifyActivityChanged(bool isActive) const;

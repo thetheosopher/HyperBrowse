@@ -2,6 +2,8 @@
 
 #include <windowsx.h>
 #include <d2d1.h>
+#include <d2d1_1helper.h>
+#include <d2d1effects.h>
 #include <dwrite.h>
 
 #include <array>
@@ -22,6 +24,13 @@
 
 namespace
 {
+    constexpr CLSID kGaussianBlurEffectClsid =
+        {0x1feb6d69, 0x2fe6, 0x4ac9, {0x8c, 0x58, 0x1d, 0x7f, 0x93, 0xe7, 0xa6, 0xa5}};
+    constexpr CLSID kDirectionalBlurEffectClsid =
+        {0x174319a6, 0x58e9, 0x49b2, {0xbb, 0x63, 0xca, 0xf2, 0xc8, 0x11, 0xa3, 0xdb}};
+    constexpr CLSID kColorMatrixEffectClsid =
+        {0x921f03d6, 0x641c, 0x47df, {0x85, 0x2d, 0xb4, 0xbb, 0x61, 0x53, 0xae, 0x11}};
+
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
@@ -79,6 +88,24 @@ namespace
     {
         value = std::clamp(value, 0.0f, 1.0f);
         return value * value * (3.0f - (2.0f * value));
+    }
+
+    D2D1_MATRIX_5X4_F LerpColorMatrix(const D2D1_MATRIX_5X4_F& start,
+                                      const D2D1_MATRIX_5X4_F& end,
+                                      float amount)
+    {
+        amount = std::clamp(amount, 0.0f, 1.0f);
+        const auto lerp = [amount](float a, float b)
+        {
+            return a + ((b - a) * amount);
+        };
+
+        return D2D1::Matrix5x4F(
+            lerp(start._11, end._11), lerp(start._12, end._12), lerp(start._13, end._13), lerp(start._14, end._14),
+            lerp(start._21, end._21), lerp(start._22, end._22), lerp(start._23, end._23), lerp(start._24, end._24),
+            lerp(start._31, end._31), lerp(start._32, end._32), lerp(start._33, end._33), lerp(start._34, end._34),
+            lerp(start._41, end._41), lerp(start._42, end._42), lerp(start._43, end._43), lerp(start._44, end._44),
+            lerp(start._51, end._51), lerp(start._52, end._52), lerp(start._53, end._53), lerp(start._54, end._54));
     }
 
     struct DecodedImageResult
@@ -891,7 +918,7 @@ namespace hyperbrowse::viewer
             return transitionStyle_;
         }
 
-        static constexpr std::array<TransitionStyle, 12> kRandomStyles = {
+        static constexpr std::array<TransitionStyle, 19> kRandomStyles = {
             TransitionStyle::Crossfade,
             TransitionStyle::Slide,
             TransitionStyle::KenBurns,
@@ -904,6 +931,13 @@ namespace hyperbrowse::viewer
             TransitionStyle::HorizontalBlinds,
             TransitionStyle::CheckerboardWipe,
             TransitionStyle::ZoomFade,
+            TransitionStyle::BlurCrossfade,
+            TransitionStyle::MotionBlur,
+            TransitionStyle::ColorWash,
+            TransitionStyle::SepiaDrift,
+            TransitionStyle::Flashbulb,
+            TransitionStyle::Prism,
+            TransitionStyle::MonochromeReveal,
         };
         std::uniform_int_distribution<std::size_t> distribution(0, kRandomStyles.size() - 1);
         return kRandomStyles[distribution(transitionRandomEngine_)];
@@ -2417,6 +2451,114 @@ namespace hyperbrowse::viewer
         renderTarget->SetTransform(previousTransform);
     }
 
+    bool ViewerWindow::DrawImageEffect(ID2D1RenderTarget* renderTarget,
+                                       ID2D1Image* imageSource,
+                                       const cache::CachedThumbnail& image,
+                                       const RECT& clientRect,
+                                       float opacity,
+                                       float scaleMultiplier,
+                                       float offsetX,
+                                       float offsetY) const
+    {
+        if (!renderTarget || !imageSource || opacity <= 0.0f)
+        {
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<ID2D1DeviceContext> deviceContext;
+        if (FAILED(renderTarget->QueryInterface(__uuidof(ID2D1DeviceContext),
+                                                reinterpret_cast<void**>(deviceContext.GetAddressOf()))))
+        {
+            return false;
+        }
+
+        const float clientLeft = static_cast<float>(clientRect.left);
+        const float clientTop = static_cast<float>(clientRect.top);
+        const float clientWidth = static_cast<float>(std::max(1L, clientRect.right - clientRect.left));
+        const float clientHeight = static_cast<float>(std::max(1L, clientRect.bottom - clientRect.top));
+        const double baseScale = FitScaleForImage(image, clientRect);
+        const double scale = std::max(0.01, baseScale * static_cast<double>(scaleMultiplier));
+        const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+        const int sourceWidth = image.SourceWidth();
+        const int sourceHeight = image.SourceHeight();
+        const int rotatedWidth = swapDimensions ? sourceHeight : sourceWidth;
+        const int rotatedHeight = swapDimensions ? sourceWidth : sourceHeight;
+        const float destW = static_cast<float>(std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedWidth) * scale))));
+        const float destH = static_cast<float>(std::max(1, static_cast<int>(std::lround(static_cast<double>(rotatedHeight) * scale))));
+        const float cx = clientLeft + ((clientWidth - destW) / 2.0f) + offsetX;
+        const float cy = clientTop + ((clientHeight - destH) / 2.0f) + offsetY;
+
+        D2D1_MATRIX_3X2_F previousTransform{};
+        deviceContext->GetTransform(&previousTransform);
+
+        Microsoft::WRL::ComPtr<ID2D1Layer> opacityLayer;
+        const bool useOpacityLayer = opacity < 0.999f;
+        if (useOpacityLayer)
+        {
+            if (FAILED(deviceContext->CreateLayer(nullptr, opacityLayer.GetAddressOf())) || !opacityLayer)
+            {
+                return false;
+            }
+
+            deviceContext->PushLayer(
+                D2D1::LayerParameters1(
+                    D2D1::InfiniteRect(),
+                    nullptr,
+                    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                    D2D1::IdentityMatrix(),
+                    opacity,
+                    nullptr,
+                    D2D1_LAYER_OPTIONS1_NONE),
+                opacityLayer.Get());
+        }
+
+        if (rotationQuarterTurns_ == 0)
+        {
+            const float scaleX = destW / static_cast<float>(std::max(1, sourceWidth));
+            const float scaleY = destH / static_cast<float>(std::max(1, sourceHeight));
+            const D2D1_POINT_2F drawOrigin = D2D1::Point2F(0.0f, 0.0f);
+            deviceContext->SetTransform(previousTransform
+                * D2D1::Matrix3x2F::Scale(scaleX, scaleY, D2D1::Point2F(0.0f, 0.0f))
+                * D2D1::Matrix3x2F::Translation(cx, cy));
+            deviceContext->DrawImage(imageSource,
+                                     &drawOrigin,
+                                     nullptr,
+                                     D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+                                     D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            if (useOpacityLayer)
+            {
+                deviceContext->PopLayer();
+            }
+            deviceContext->SetTransform(previousTransform);
+            return true;
+        }
+
+        const float centerX = cx + (destW / 2.0f);
+        const float centerY = cy + (destH / 2.0f);
+        const float unrotW = static_cast<float>(std::max(1, static_cast<int>(std::lround(static_cast<double>(sourceWidth) * scale))));
+        const float unrotH = static_cast<float>(std::max(1, static_cast<int>(std::lround(static_cast<double>(sourceHeight) * scale))));
+        const float drawX = centerX - (unrotW / 2.0f);
+        const float drawY = centerY - (unrotH / 2.0f);
+        const D2D1_POINT_2F drawOrigin = D2D1::Point2F(0.0f, 0.0f);
+
+        deviceContext->SetTransform(previousTransform
+            * D2D1::Matrix3x2F::Scale(static_cast<float>(scale), static_cast<float>(scale), D2D1::Point2F(0.0f, 0.0f))
+            * D2D1::Matrix3x2F::Translation(drawX, drawY)
+            * D2D1::Matrix3x2F::Rotation(static_cast<float>(rotationQuarterTurns_) * 90.0f,
+                                         D2D1::Point2F(centerX, centerY)));
+        deviceContext->DrawImage(imageSource,
+                                 &drawOrigin,
+                                 nullptr,
+                                 D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+                                 D2D1_COMPOSITE_MODE_SOURCE_OVER);
+        if (useOpacityLayer)
+        {
+            deviceContext->PopLayer();
+        }
+        deviceContext->SetTransform(previousTransform);
+        return true;
+    }
+
     void ViewerWindow::RequestRepaint() const
     {
         if (hwnd_ && IsWindow(hwnd_) != FALSE)
@@ -3223,6 +3365,12 @@ namespace hyperbrowse::viewer
                                 const float eased = SmoothStep(progress);
                                 const float direction = transitionForward_ ? 1.0f : -1.0f;
                                 const float parityDirection = (transitionFromIndex_ % 2 == 0) ? 1.0f : -1.0f;
+                                Microsoft::WRL::ComPtr<ID2D1DeviceContext> transitionDeviceContext;
+                                if (d2dRenderTarget_)
+                                {
+                                    d2dRenderTarget_->QueryInterface(__uuidof(ID2D1DeviceContext),
+                                                                     reinterpret_cast<void**>(transitionDeviceContext.GetAddressOf()));
+                                }
                                 const auto drawClippedImage = [&](ID2D1Bitmap* bitmap,
                                                                   const cache::CachedThumbnail& image,
                                                                   const D2D1_RECT_F& clipRect,
@@ -3468,6 +3616,591 @@ namespace hyperbrowse::viewer
                                                     0.0f, 0.0f);
                                     drewTransition = true;
                                     break;
+                                case TransitionStyle::BlurCrossfade:
+                                {
+                                    bool renderedWithEffects = false;
+                                    if (transitionDeviceContext)
+                                    {
+                                        const auto buildBlurImage = [&](ID2D1Bitmap* bitmap,
+                                                                        float blurDeviation,
+                                                                               Microsoft::WRL::ComPtr<ID2D1Image>* outputImage)
+                                        {
+                                            if (!outputImage || !bitmap)
+                                            {
+                                                return false;
+                                            }
+
+                                            Microsoft::WRL::ComPtr<ID2D1Effect> blurEffect;
+                                            if (FAILED(transitionDeviceContext->CreateEffect(kGaussianBlurEffectClsid,
+                                                                                            blurEffect.GetAddressOf())))
+                                            {
+                                                return false;
+                                            }
+
+                                            blurEffect->SetInput(0, bitmap);
+                                            blurEffect->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, blurDeviation);
+
+                                            Microsoft::WRL::ComPtr<ID2D1Image> imageOutput;
+                                            blurEffect->GetOutput(imageOutput.GetAddressOf());
+                                            if (!imageOutput)
+                                            {
+                                                return false;
+                                            }
+
+                                            *outputImage = std::move(imageOutput);
+                                            return true;
+                                        };
+
+                                        Microsoft::WRL::ComPtr<ID2D1Image> fromImageEffect;
+                                        Microsoft::WRL::ComPtr<ID2D1Image> toImageEffect;
+                                        const float outgoingBlur = 12.0f * eased;
+                                        const float incomingBlur = 12.0f * (1.0f - eased);
+                                        if (buildBlurImage(transitionFromBitmap_.Get(), outgoingBlur, &fromImageEffect)
+                                            && buildBlurImage(d2dCurrentImageBitmap_.Get(), incomingBlur, &toImageEffect)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), fromImageEffect.Get(), *transitionFromImage_,
+                                                               gdiClientRect, 1.0f - eased, 1.0f + (0.04f * eased), 0.0f, 0.0f)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), toImageEffect.Get(), *currentImage_,
+                                                               gdiClientRect, eased, 1.02f - (0.02f * eased), 0.0f, 0.0f))
+                                        {
+                                            renderedWithEffects = true;
+                                        }
+                                    }
+
+                                    if (!renderedWithEffects)
+                                    {
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                        gdiClientRect, 1.0f - eased, 1.0f, 0.0f, 0.0f);
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                        gdiClientRect, eased, 1.0f, 0.0f, 0.0f);
+                                    }
+
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::MotionBlur:
+                                {
+                                    bool renderedWithEffects = false;
+                                    if (transitionDeviceContext)
+                                    {
+                                        const auto buildDirectionalBlurImage = [&](ID2D1Bitmap* bitmap,
+                                                                                   float blurDeviation,
+                                                                                   float blurAngle,
+                                                                                   Microsoft::WRL::ComPtr<ID2D1Image>* outputImage)
+                                        {
+                                            if (!outputImage || !bitmap)
+                                            {
+                                                return false;
+                                            }
+
+                                            Microsoft::WRL::ComPtr<ID2D1Effect> blurEffect;
+                                            if (FAILED(transitionDeviceContext->CreateEffect(kDirectionalBlurEffectClsid,
+                                                                                            blurEffect.GetAddressOf())))
+                                            {
+                                                return false;
+                                            }
+
+                                            blurEffect->SetInput(0, bitmap);
+                                            blurEffect->SetValue(D2D1_DIRECTIONALBLUR_PROP_STANDARD_DEVIATION, blurDeviation);
+                                            blurEffect->SetValue(D2D1_DIRECTIONALBLUR_PROP_ANGLE, blurAngle);
+                                            blurEffect->SetValue(D2D1_DIRECTIONALBLUR_PROP_OPTIMIZATION,
+                                                                 D2D1_DIRECTIONALBLUR_OPTIMIZATION_BALANCED);
+
+                                            Microsoft::WRL::ComPtr<ID2D1Image> imageOutput;
+                                            blurEffect->GetOutput(imageOutput.GetAddressOf());
+                                            if (!imageOutput)
+                                            {
+                                                return false;
+                                            }
+
+                                            *outputImage = std::move(imageOutput);
+                                            return true;
+                                        };
+
+                                        Microsoft::WRL::ComPtr<ID2D1Image> fromImageEffect;
+                                        Microsoft::WRL::ComPtr<ID2D1Image> toImageEffect;
+                                        const float outgoingBlur = 18.0f * eased;
+                                        const float incomingBlur = 18.0f * (1.0f - eased);
+                                        const float motionAngle = direction > 0.0f ? 0.0f : 180.0f;
+                                        if (buildDirectionalBlurImage(transitionFromBitmap_.Get(), outgoingBlur, motionAngle, &fromImageEffect)
+                                            && buildDirectionalBlurImage(d2dCurrentImageBitmap_.Get(), incomingBlur, motionAngle, &toImageEffect)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), fromImageEffect.Get(), *transitionFromImage_,
+                                                               gdiClientRect, 1.0f - eased, 1.0f,
+                                                               -direction * clientWidth * 0.10f * eased, 0.0f)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), toImageEffect.Get(), *currentImage_,
+                                                               gdiClientRect, eased, 1.0f,
+                                                               direction * clientWidth * 0.10f * (1.0f - eased), 0.0f))
+                                        {
+                                            renderedWithEffects = true;
+                                        }
+                                    }
+
+                                    if (!renderedWithEffects)
+                                    {
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                        gdiClientRect, 1.0f - eased, 1.0f,
+                                                        -direction * clientWidth * 0.10f * eased, 0.0f);
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                        gdiClientRect, eased, 1.0f,
+                                                        direction * clientWidth * 0.10f * (1.0f - eased), 0.0f);
+                                    }
+
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::ColorWash:
+                                {
+                                    bool renderedWithEffects = false;
+                                    if (transitionDeviceContext)
+                                    {
+                                        const auto buildColorMatrixImage = [&](ID2D1Bitmap* bitmap,
+                                                                               const D2D1_MATRIX_5X4_F& colorMatrix,
+                                                                               Microsoft::WRL::ComPtr<ID2D1Image>* outputImage)
+                                        {
+                                            if (!outputImage || !bitmap)
+                                            {
+                                                return false;
+                                            }
+
+                                            Microsoft::WRL::ComPtr<ID2D1Effect> colorMatrixEffect;
+                                            if (FAILED(transitionDeviceContext->CreateEffect(kColorMatrixEffectClsid,
+                                                                                            colorMatrixEffect.GetAddressOf())))
+                                            {
+                                                return false;
+                                            }
+
+                                            colorMatrixEffect->SetInput(0, bitmap);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, colorMatrix);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, TRUE);
+
+                                            Microsoft::WRL::ComPtr<ID2D1Image> imageOutput;
+                                            colorMatrixEffect->GetOutput(imageOutput.GetAddressOf());
+                                            if (!imageOutput)
+                                            {
+                                                return false;
+                                            }
+
+                                            *outputImage = std::move(imageOutput);
+                                            return true;
+                                        };
+
+                                        const D2D1_MATRIX_5X4_F identityMatrix = D2D1::Matrix5x4F();
+                                        const D2D1_MATRIX_5X4_F warmMatrix = D2D1::Matrix5x4F(
+                                            1.08f, 0.04f, 0.01f, 0.0f,
+                                            0.14f, 1.00f, 0.06f, 0.0f,
+                                            0.04f, 0.14f, 0.72f, 0.0f,
+                                            0.00f, 0.00f, 0.00f, 1.0f,
+                                            0.03f, 0.00f, -0.02f, 0.0f);
+                                        const D2D1_MATRIX_5X4_F coolMatrix = D2D1::Matrix5x4F(
+                                            0.82f, 0.06f, 0.02f, 0.0f,
+                                            0.06f, 0.94f, 0.12f, 0.0f,
+                                            0.12f, 0.18f, 1.10f, 0.0f,
+                                            0.00f, 0.00f, 0.00f, 1.0f,
+                                            -0.02f, 0.01f, 0.03f, 0.0f);
+
+                                        Microsoft::WRL::ComPtr<ID2D1Image> fromImageEffect;
+                                        Microsoft::WRL::ComPtr<ID2D1Image> toImageEffect;
+                                        const D2D1_MATRIX_5X4_F outgoingMatrix = LerpColorMatrix(identityMatrix, warmMatrix, eased);
+                                        const D2D1_MATRIX_5X4_F incomingMatrix = LerpColorMatrix(coolMatrix, identityMatrix, eased);
+                                        if (buildColorMatrixImage(transitionFromBitmap_.Get(), outgoingMatrix, &fromImageEffect)
+                                            && buildColorMatrixImage(d2dCurrentImageBitmap_.Get(), incomingMatrix, &toImageEffect)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), fromImageEffect.Get(), *transitionFromImage_,
+                                                               gdiClientRect, 1.0f - eased, 1.0f + (0.03f * eased),
+                                                               -direction * clientWidth * 0.02f * eased,
+                                                               parityDirection * clientHeight * 0.02f * eased)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), toImageEffect.Get(), *currentImage_,
+                                                               gdiClientRect, eased, 1.03f - (0.03f * eased),
+                                                               direction * clientWidth * 0.02f * (1.0f - eased),
+                                                               -parityDirection * clientHeight * 0.02f * (1.0f - eased)))
+                                        {
+                                            renderedWithEffects = true;
+                                        }
+                                    }
+
+                                    if (!renderedWithEffects)
+                                    {
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                        gdiClientRect, 1.0f - eased, 1.0f + (0.03f * eased),
+                                                        -direction * clientWidth * 0.02f * eased,
+                                                        parityDirection * clientHeight * 0.02f * eased);
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                        gdiClientRect, eased, 1.03f - (0.03f * eased),
+                                                        direction * clientWidth * 0.02f * (1.0f - eased),
+                                                        -parityDirection * clientHeight * 0.02f * (1.0f - eased));
+                                    }
+
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::SepiaDrift:
+                                {
+                                    bool renderedWithEffects = false;
+                                    if (transitionDeviceContext)
+                                    {
+                                        const auto buildColorMatrixImage = [&](ID2D1Bitmap* bitmap,
+                                                                               const D2D1_MATRIX_5X4_F& colorMatrix,
+                                                                               Microsoft::WRL::ComPtr<ID2D1Image>* outputImage)
+                                        {
+                                            if (!outputImage || !bitmap)
+                                            {
+                                                return false;
+                                            }
+
+                                            Microsoft::WRL::ComPtr<ID2D1Effect> colorMatrixEffect;
+                                            if (FAILED(transitionDeviceContext->CreateEffect(kColorMatrixEffectClsid,
+                                                                                            colorMatrixEffect.GetAddressOf())))
+                                            {
+                                                return false;
+                                            }
+
+                                            colorMatrixEffect->SetInput(0, bitmap);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, colorMatrix);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, TRUE);
+
+                                            Microsoft::WRL::ComPtr<ID2D1Image> imageOutput;
+                                            colorMatrixEffect->GetOutput(imageOutput.GetAddressOf());
+                                            if (!imageOutput)
+                                            {
+                                                return false;
+                                            }
+
+                                            *outputImage = std::move(imageOutput);
+                                            return true;
+                                        };
+
+                                        const D2D1_MATRIX_5X4_F identityMatrix = D2D1::Matrix5x4F();
+                                        const D2D1_MATRIX_5X4_F sepiaMatrix = D2D1::Matrix5x4F(
+                                            0.420f, 0.390f, 0.300f, 0.0f,
+                                            0.770f, 0.720f, 0.560f, 0.0f,
+                                            0.200f, 0.190f, 0.150f, 0.0f,
+                                            0.000f, 0.000f, 0.000f, 1.0f,
+                                            0.040f, 0.010f, -0.030f, 0.0f);
+                                        const D2D1_MATRIX_5X4_F dustMatrix = D2D1::Matrix5x4F(
+                                            0.82f, 0.05f, 0.01f, 0.0f,
+                                            0.09f, 0.74f, 0.03f, 0.0f,
+                                            0.03f, 0.10f, 0.63f, 0.0f,
+                                            0.00f, 0.00f, 0.00f, 1.0f,
+                                            0.030f, 0.020f, -0.020f, 0.0f);
+
+                                        Microsoft::WRL::ComPtr<ID2D1Image> fromImageEffect;
+                                        Microsoft::WRL::ComPtr<ID2D1Image> toImageEffect;
+                                        const float outgoingAmount = std::min(1.0f, eased * 1.15f);
+                                        const float incomingAmount = 1.0f - eased;
+                                        const D2D1_MATRIX_5X4_F outgoingMatrix = LerpColorMatrix(identityMatrix, sepiaMatrix, outgoingAmount);
+                                        const D2D1_MATRIX_5X4_F incomingMatrix = LerpColorMatrix(dustMatrix, identityMatrix, eased);
+                                        if (buildColorMatrixImage(transitionFromBitmap_.Get(), outgoingMatrix, &fromImageEffect)
+                                            && buildColorMatrixImage(d2dCurrentImageBitmap_.Get(), incomingMatrix, &toImageEffect)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), fromImageEffect.Get(), *transitionFromImage_,
+                                                               gdiClientRect, 1.0f - eased, 1.02f + (0.02f * eased),
+                                                               -direction * clientWidth * 0.03f * eased,
+                                                               -clientHeight * 0.01f * eased)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), toImageEffect.Get(), *currentImage_,
+                                                               gdiClientRect, eased, 1.05f - (0.05f * eased),
+                                                               direction * clientWidth * 0.03f * incomingAmount,
+                                                               clientHeight * 0.01f * incomingAmount))
+                                        {
+                                            renderedWithEffects = true;
+                                        }
+                                    }
+
+                                    if (!renderedWithEffects)
+                                    {
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                        gdiClientRect, 1.0f - eased, 1.02f + (0.02f * eased),
+                                                        -direction * clientWidth * 0.03f * eased,
+                                                        -clientHeight * 0.01f * eased);
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                        gdiClientRect, eased, 1.05f - (0.05f * eased),
+                                                        direction * clientWidth * 0.03f * (1.0f - eased),
+                                                        clientHeight * 0.01f * (1.0f - eased));
+                                    }
+
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::Flashbulb:
+                                {
+                                    bool renderedWithEffects = false;
+                                    if (transitionDeviceContext)
+                                    {
+                                        const auto buildColorMatrixImage = [&](ID2D1Bitmap* bitmap,
+                                                                               const D2D1_MATRIX_5X4_F& colorMatrix,
+                                                                               Microsoft::WRL::ComPtr<ID2D1Image>* outputImage)
+                                        {
+                                            if (!outputImage || !bitmap)
+                                            {
+                                                return false;
+                                            }
+
+                                            Microsoft::WRL::ComPtr<ID2D1Effect> colorMatrixEffect;
+                                            if (FAILED(transitionDeviceContext->CreateEffect(kColorMatrixEffectClsid,
+                                                                                            colorMatrixEffect.GetAddressOf())))
+                                            {
+                                                return false;
+                                            }
+
+                                            colorMatrixEffect->SetInput(0, bitmap);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, colorMatrix);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, TRUE);
+
+                                            Microsoft::WRL::ComPtr<ID2D1Image> imageOutput;
+                                            colorMatrixEffect->GetOutput(imageOutput.GetAddressOf());
+                                            if (!imageOutput)
+                                            {
+                                                return false;
+                                            }
+
+                                            *outputImage = std::move(imageOutput);
+                                            return true;
+                                        };
+
+                                        const D2D1_MATRIX_5X4_F identityMatrix = D2D1::Matrix5x4F();
+                                        const D2D1_MATRIX_5X4_F flashMatrix = D2D1::Matrix5x4F(
+                                            1.35f, 0.18f, 0.18f, 0.0f,
+                                            0.18f, 1.35f, 0.18f, 0.0f,
+                                            0.18f, 0.18f, 1.35f, 0.0f,
+                                            0.00f, 0.00f, 0.00f, 1.0f,
+                                            0.22f, 0.22f, 0.22f, 0.0f);
+                                        const D2D1_MATRIX_5X4_F bleachedMatrix = D2D1::Matrix5x4F(
+                                            1.12f, 0.08f, 0.08f, 0.0f,
+                                            0.08f, 1.12f, 0.08f, 0.0f,
+                                            0.08f, 0.08f, 1.12f, 0.0f,
+                                            0.00f, 0.00f, 0.00f, 1.0f,
+                                            0.08f, 0.08f, 0.08f, 0.0f);
+
+                                        const float outgoingFlash = std::clamp(eased / 0.45f, 0.0f, 1.0f);
+                                        const float incomingRecover = std::clamp((eased - 0.22f) / 0.78f, 0.0f, 1.0f);
+                                        const D2D1_MATRIX_5X4_F outgoingMatrix = LerpColorMatrix(identityMatrix, flashMatrix, outgoingFlash);
+                                        const D2D1_MATRIX_5X4_F incomingMatrix = LerpColorMatrix(bleachedMatrix, identityMatrix, incomingRecover);
+
+                                        Microsoft::WRL::ComPtr<ID2D1Image> fromImageEffect;
+                                        Microsoft::WRL::ComPtr<ID2D1Image> toImageEffect;
+                                        if (buildColorMatrixImage(transitionFromBitmap_.Get(), outgoingMatrix, &fromImageEffect)
+                                            && buildColorMatrixImage(d2dCurrentImageBitmap_.Get(), incomingMatrix, &toImageEffect)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), fromImageEffect.Get(), *transitionFromImage_,
+                                                               gdiClientRect, 1.0f - eased, 1.0f + (0.04f * outgoingFlash), 0.0f, 0.0f)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), toImageEffect.Get(), *currentImage_,
+                                                               gdiClientRect, eased, 1.02f - (0.02f * incomingRecover), 0.0f, 0.0f))
+                                        {
+                                            renderedWithEffects = true;
+
+                                            Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> flashBrush;
+                                            if (SUCCEEDED(d2dRenderTarget_->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f),
+                                                                                                  flashBrush.GetAddressOf()))
+                                                && flashBrush)
+                                            {
+                                                const float flashPeak = 1.0f - std::min(1.0f, std::abs((eased - 0.35f) / 0.35f));
+                                                const float overlayOpacity = 0.50f * flashPeak * flashPeak;
+                                                if (overlayOpacity > 0.0f)
+                                                {
+                                                    flashBrush->SetOpacity(overlayOpacity);
+                                                    d2dRenderTarget_->FillRectangle(D2D1::RectF(static_cast<float>(gdiClientRect.left),
+                                                                                                static_cast<float>(gdiClientRect.top),
+                                                                                                static_cast<float>(gdiClientRect.right),
+                                                                                                static_cast<float>(gdiClientRect.bottom)),
+                                                                                    flashBrush.Get());
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (!renderedWithEffects)
+                                    {
+                                        const float flashPeak = 1.0f - std::min(1.0f, std::abs((eased - 0.35f) / 0.35f));
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                        gdiClientRect, 1.0f - eased, 1.0f + (0.04f * flashPeak), 0.0f, 0.0f);
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                        gdiClientRect, eased, 1.02f - (0.02f * eased), 0.0f, 0.0f);
+
+                                        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> flashBrush;
+                                        if (d2dRenderTarget_
+                                            && SUCCEEDED(d2dRenderTarget_->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f),
+                                                                                                  flashBrush.GetAddressOf()))
+                                            && flashBrush)
+                                        {
+                                            const float overlayOpacity = 0.42f * flashPeak * flashPeak;
+                                            if (overlayOpacity > 0.0f)
+                                            {
+                                                flashBrush->SetOpacity(overlayOpacity);
+                                                d2dRenderTarget_->FillRectangle(D2D1::RectF(static_cast<float>(gdiClientRect.left),
+                                                                                            static_cast<float>(gdiClientRect.top),
+                                                                                            static_cast<float>(gdiClientRect.right),
+                                                                                            static_cast<float>(gdiClientRect.bottom)),
+                                                                                flashBrush.Get());
+                                            }
+                                        }
+                                    }
+
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::Prism:
+                                {
+                                    bool renderedWithEffects = false;
+                                    if (transitionDeviceContext)
+                                    {
+                                        const auto buildColorMatrixImage = [&](ID2D1Bitmap* bitmap,
+                                                                               const D2D1_MATRIX_5X4_F& colorMatrix,
+                                                                               Microsoft::WRL::ComPtr<ID2D1Image>* outputImage)
+                                        {
+                                            if (!outputImage || !bitmap)
+                                            {
+                                                return false;
+                                            }
+
+                                            Microsoft::WRL::ComPtr<ID2D1Effect> colorMatrixEffect;
+                                            if (FAILED(transitionDeviceContext->CreateEffect(kColorMatrixEffectClsid,
+                                                                                            colorMatrixEffect.GetAddressOf())))
+                                            {
+                                                return false;
+                                            }
+
+                                            colorMatrixEffect->SetInput(0, bitmap);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, colorMatrix);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, TRUE);
+
+                                            Microsoft::WRL::ComPtr<ID2D1Image> imageOutput;
+                                            colorMatrixEffect->GetOutput(imageOutput.GetAddressOf());
+                                            if (!imageOutput)
+                                            {
+                                                return false;
+                                            }
+
+                                            *outputImage = std::move(imageOutput);
+                                            return true;
+                                        };
+
+                                        const D2D1_MATRIX_5X4_F identityMatrix = D2D1::Matrix5x4F();
+                                        const D2D1_MATRIX_5X4_F prismOutMatrix = D2D1::Matrix5x4F(
+                                            1.10f, 0.08f, 0.05f, 0.0f,
+                                            0.05f, 1.10f, 0.08f, 0.0f,
+                                            0.08f, 0.05f, 1.10f, 0.0f,
+                                            0.00f, 0.00f, 0.00f, 1.0f,
+                                            0.02f, 0.02f, 0.02f, 0.0f);
+                                        const D2D1_MATRIX_5X4_F prismInMatrix = D2D1::Matrix5x4F(
+                                            1.00f, 0.06f, 0.14f, 0.0f,
+                                            0.14f, 1.00f, 0.06f, 0.0f,
+                                            0.06f, 0.14f, 1.00f, 0.0f,
+                                            0.00f, 0.00f, 0.00f, 1.0f,
+                                            0.00f, 0.01f, 0.02f, 0.0f);
+
+                                        const float outgoingAmount = eased;
+                                        const float incomingAmount = 1.0f - eased;
+                                        const D2D1_MATRIX_5X4_F outgoingMatrix = LerpColorMatrix(identityMatrix, prismOutMatrix, outgoingAmount);
+                                        const D2D1_MATRIX_5X4_F incomingMatrix = LerpColorMatrix(prismInMatrix, identityMatrix, eased);
+
+                                        Microsoft::WRL::ComPtr<ID2D1Image> fromImageEffect;
+                                        Microsoft::WRL::ComPtr<ID2D1Image> toImageEffect;
+                                        const float prismOffset = clientWidth * 0.015f;
+                                        if (buildColorMatrixImage(transitionFromBitmap_.Get(), outgoingMatrix, &fromImageEffect)
+                                            && buildColorMatrixImage(d2dCurrentImageBitmap_.Get(), incomingMatrix, &toImageEffect)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), fromImageEffect.Get(), *transitionFromImage_,
+                                                               gdiClientRect, 1.0f - eased, 1.01f,
+                                                               -direction * prismOffset * outgoingAmount,
+                                                               -parityDirection * clientHeight * 0.01f * outgoingAmount)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), toImageEffect.Get(), *currentImage_,
+                                                               gdiClientRect, eased, 1.01f,
+                                                               direction * prismOffset * incomingAmount,
+                                                               parityDirection * clientHeight * 0.01f * incomingAmount))
+                                        {
+                                            renderedWithEffects = true;
+                                        }
+                                    }
+
+                                    if (!renderedWithEffects)
+                                    {
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                        gdiClientRect, 1.0f - eased, 1.01f,
+                                                        -direction * clientWidth * 0.015f * eased,
+                                                        -parityDirection * clientHeight * 0.01f * eased);
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                        gdiClientRect, eased, 1.01f,
+                                                        direction * clientWidth * 0.015f * (1.0f - eased),
+                                                        parityDirection * clientHeight * 0.01f * (1.0f - eased));
+                                    }
+
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::MonochromeReveal:
+                                {
+                                    bool renderedWithEffects = false;
+                                    if (transitionDeviceContext)
+                                    {
+                                        const auto buildColorMatrixImage = [&](ID2D1Bitmap* bitmap,
+                                                                               const D2D1_MATRIX_5X4_F& colorMatrix,
+                                                                               Microsoft::WRL::ComPtr<ID2D1Image>* outputImage)
+                                        {
+                                            if (!outputImage || !bitmap)
+                                            {
+                                                return false;
+                                            }
+
+                                            Microsoft::WRL::ComPtr<ID2D1Effect> colorMatrixEffect;
+                                            if (FAILED(transitionDeviceContext->CreateEffect(kColorMatrixEffectClsid,
+                                                                                            colorMatrixEffect.GetAddressOf())))
+                                            {
+                                                return false;
+                                            }
+
+                                            colorMatrixEffect->SetInput(0, bitmap);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, colorMatrix);
+                                            colorMatrixEffect->SetValue(D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, TRUE);
+
+                                            Microsoft::WRL::ComPtr<ID2D1Image> imageOutput;
+                                            colorMatrixEffect->GetOutput(imageOutput.GetAddressOf());
+                                            if (!imageOutput)
+                                            {
+                                                return false;
+                                            }
+
+                                            *outputImage = std::move(imageOutput);
+                                            return true;
+                                        };
+
+                                        const D2D1_MATRIX_5X4_F grayscaleMatrix = D2D1::Matrix5x4F(
+                                            0.299f, 0.299f, 0.299f, 0.0f,
+                                            0.587f, 0.587f, 0.587f, 0.0f,
+                                            0.114f, 0.114f, 0.114f, 0.0f,
+                                            0.000f, 0.000f, 0.000f, 1.0f,
+                                            0.000f, 0.000f, 0.000f, 0.0f);
+                                        const D2D1_MATRIX_5X4_F contrastGrayMatrix = D2D1::Matrix5x4F(
+                                            0.380f, 0.380f, 0.380f, 0.0f,
+                                            0.560f, 0.560f, 0.560f, 0.0f,
+                                            0.120f, 0.120f, 0.120f, 0.0f,
+                                            0.000f, 0.000f, 0.000f, 1.0f,
+                                            0.020f, 0.020f, 0.020f, 0.0f);
+                                        const D2D1_MATRIX_5X4_F identityMatrix = D2D1::Matrix5x4F();
+
+                                        const float outgoingAmount = std::clamp(eased * 1.1f, 0.0f, 1.0f);
+                                        const float incomingAmount = std::clamp((1.0f - eased) * 1.05f, 0.0f, 1.0f);
+                                        const D2D1_MATRIX_5X4_F outgoingMatrix = LerpColorMatrix(identityMatrix, contrastGrayMatrix, outgoingAmount);
+                                        const D2D1_MATRIX_5X4_F incomingMatrix = LerpColorMatrix(grayscaleMatrix, identityMatrix, eased);
+
+                                        Microsoft::WRL::ComPtr<ID2D1Image> fromImageEffect;
+                                        Microsoft::WRL::ComPtr<ID2D1Image> toImageEffect;
+                                        if (buildColorMatrixImage(transitionFromBitmap_.Get(), outgoingMatrix, &fromImageEffect)
+                                            && buildColorMatrixImage(d2dCurrentImageBitmap_.Get(), incomingMatrix, &toImageEffect)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), fromImageEffect.Get(), *transitionFromImage_,
+                                                               gdiClientRect, 1.0f - eased, 1.0f, 0.0f, 0.0f)
+                                            && DrawImageEffect(d2dRenderTarget_.Get(), toImageEffect.Get(), *currentImage_,
+                                                               gdiClientRect, eased, 1.01f + (0.01f * incomingAmount),
+                                                               0.0f, 0.0f))
+                                        {
+                                            renderedWithEffects = true;
+                                        }
+                                    }
+
+                                    if (!renderedWithEffects)
+                                    {
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                        gdiClientRect, 1.0f - eased, 1.0f, 0.0f, 0.0f);
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                        gdiClientRect, eased, 1.01f + (0.01f * (1.0f - eased)), 0.0f, 0.0f);
+                                    }
+
+                                    drewTransition = true;
+                                    break;
+                                }
                                 case TransitionStyle::Cut:
                                 default:
                                     break;
