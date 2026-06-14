@@ -275,6 +275,8 @@ namespace hyperbrowse::ui
         void StartDeleteSelection(bool permanent);
         void StartFolderTreeRename(std::wstring folderPath);
         void StartFolderTreeDelete(std::wstring folderPath, bool permanent);
+        void StartFolderTreeMoveToDestination(std::wstring folderPath, std::wstring destinationFolder);
+        void StartFolderTreeCreateNewFolder(std::wstring parentPath);
         void StartSelectionFileOperationToDestination(services::FileOperationType type, std::wstring destinationFolder);
         void StartFileOperation(services::FileOperationType type,
                     std::vector<std::wstring> sourcePaths,
@@ -298,7 +300,10 @@ namespace hyperbrowse::ui
         LRESULT OnFolderTreeNotify(LPARAM lParam);
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
+        LRESULT OnFolderTreeBeginDrag(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeRightClick();
+        void UpdateFolderTreeDrag(POINT windowPoint);
+        void FinishFolderTreeDrag(bool commitDrop);
         LRESULT OnDropFiles(HDROP dropHandle);
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
@@ -384,6 +389,7 @@ namespace hyperbrowse::ui
         HWND tooltipControl_{};
         HMODULE detailsPanelRichEditModule_{};
         HIMAGELIST treeImageList_{};
+        HIMAGELIST treeDragImageList_{};
         HMENU menu_{};
         HMENU fileMenu_{};
         HMENU viewMenu_{};
@@ -414,6 +420,8 @@ namespace hyperbrowse::ui
         bool defaultViewerToSecondaryMonitor_{false};
         bool suppressTreeSelectionChange_{};
         bool hasPersistedWindowBounds_{};
+        bool treeFolderDragActive_{};
+        bool treeFolderDropAllowed_{};
         DragMode dragMode_{DragMode::None};
         HBRUSH backgroundBrush_{};
         HBRUSH actionFieldBrush_{};
@@ -443,6 +451,10 @@ namespace hyperbrowse::ui
         std::unique_ptr<util::BackgroundExecutor> memoryPressureExecutor_;
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::wstring pendingTreeSelectionPath_;
+        HTREEITEM treeDragSourceItem_{};
+        HTREEITEM treeDragHoverItem_{};
+        std::wstring treeDragSourcePath_;
+        std::wstring treeDragDestinationPath_;
         RECT detailsPanelRect_{};
         RECT persistedWindowBounds_{};
         RECT detailsPanelTabStripRect_{};
@@ -495,6 +507,8 @@ namespace hyperbrowse::ui
         std::wstring pendingFolderWatchReloadPath_;
         bool pendingFolderWatchTreeRefresh_{};
         std::wstring activeFileOperationLabel_;
+        std::wstring activeTreeFolderMoveSourcePath_;
+        std::wstring activeTreeFolderMoveDestinationFolder_;
         int viewerZoomPercent_{};
         bool viewerWindowActive_{};
         bool nvJpegEnabled_{};

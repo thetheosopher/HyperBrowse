@@ -4438,6 +4438,84 @@ namespace
         return fs::is_directory(fs::path(folderPath), error) && !error;
     }
 
+    bool AreFoldersOnSameDrive(std::wstring_view lhs, std::wstring_view rhs)
+    {
+        if (lhs.empty() || rhs.empty())
+        {
+            return false;
+        }
+
+        const std::wstring leftRoot = NormalizeFolderPath(fs::path(lhs).root_path().wstring());
+        const std::wstring rightRoot = NormalizeFolderPath(fs::path(rhs).root_path().wstring());
+        if (leftRoot.empty() || rightRoot.empty())
+        {
+            return false;
+        }
+
+        return FolderPathsEqual(leftRoot, rightRoot);
+    }
+
+    bool IsValidFolderTreeDropDestination(std::wstring_view sourcePath, std::wstring_view destinationPath)
+    {
+        if (sourcePath.empty() || destinationPath.empty())
+        {
+            return false;
+        }
+
+        if (!IsExistingDirectory(destinationPath)
+            || !AreFoldersOnSameDrive(sourcePath, destinationPath))
+        {
+            return false;
+        }
+
+        if (FolderPathsEqual(sourcePath, destinationPath)
+            || hyperbrowse::browser::PathHasPrefix(destinationPath, sourcePath))
+        {
+            return false;
+        }
+
+        const std::wstring sourceParentPath = NormalizeFolderPath(fs::path(sourcePath).parent_path().wstring());
+        if (!sourceParentPath.empty() && FolderPathsEqual(sourceParentPath, destinationPath))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool IsValidFolderName(const std::wstring& name, std::wstring* errorMessage)
+    {
+        if (name.empty())
+        {
+            if (errorMessage) *errorMessage = L"Folder name cannot be empty.";
+            return false;
+        }
+
+        if (name.size() > 255)
+        {
+            if (errorMessage) *errorMessage = L"Folder name is too long.";
+            return false;
+        }
+
+        const wchar_t invalidChars[] = L"<>:\"/\\|?*";
+        for (const wchar_t invalidChar : invalidChars)
+        {
+            if (name.find(invalidChar) != std::wstring::npos)
+            {
+                if (errorMessage) *errorMessage = L"Folder name contains invalid characters.";
+                return false;
+            }
+        }
+
+        if (name.back() == L' ' || name.back() == L'.')
+        {
+            if (errorMessage) *errorMessage = L"Folder names cannot end with a space or a period.";
+            return false;
+        }
+
+        return true;
+    }
+
     std::wstring ResolveStartupPath(std::wstring_view path)
     {
         if (path.empty())
@@ -5687,6 +5765,13 @@ namespace hyperbrowse::ui
             }
         }
 
+        // Do not translate the Escape accelerator (ID_FILE_EXIT) when a folder drag is active.
+        // The drag operation should have exclusive control over the Escape key to cancel itself.
+        if (treeFolderDragActive_ && message->message == WM_KEYDOWN && message->wParam == VK_ESCAPE)
+        {
+            return false;
+        }
+
         return TranslateAcceleratorW(hwnd_, accelerators_, message) != 0;
     }
 
@@ -6541,6 +6626,8 @@ namespace hyperbrowse::ui
         {
         case NM_RCLICK:
             return OnFolderTreeRightClick();
+        case TVN_BEGINDRAGW:
+            return OnFolderTreeBeginDrag(*reinterpret_cast<const NMTREEVIEWW*>(lParam));
         case TVN_ITEMEXPANDINGW:
             return OnFolderTreeItemExpanding(*reinterpret_cast<const NMTREEVIEWW*>(lParam));
         case TVN_SELCHANGEDW:
@@ -6612,6 +6699,246 @@ namespace hyperbrowse::ui
 
         ShowFolderTreeContextMenu(screenPoint, item);
         return 0;
+    }
+
+    LRESULT MainWindow::OnFolderTreeBeginDrag(const NMTREEVIEWW& treeView)
+    {
+        if (!treePane_ || fileOperationActive_)
+        {
+            return 0;
+        }
+
+        FolderTreeNodeData* nodeData = GetFolderTreeNodeData(treeView.itemNew.hItem);
+        if (!nodeData || nodeData->path.empty() || !TreeView_GetParent(treePane_, treeView.itemNew.hItem))
+        {
+            return 0;
+        }
+
+        if (treeFolderDragActive_)
+        {
+            FinishFolderTreeDrag(false);
+        }
+
+        treeFolderDragActive_ = true;
+        treeFolderDropAllowed_ = false;
+        treeDragSourceItem_ = treeView.itemNew.hItem;
+        treeDragHoverItem_ = nullptr;
+        treeDragSourcePath_ = NormalizeFolderPath(nodeData->path);
+        treeDragDestinationPath_.clear();
+
+        TreeView_SelectDropTarget(treePane_, nullptr);
+
+        int preferredHotspotX = 8;
+        int preferredHotspotY = 8;
+        treeDragImageList_ = nullptr;
+
+        if (HIMAGELIST treeImageList = TreeView_GetImageList(treePane_, TVSIL_NORMAL))
+        {
+            int iconWidth = 0;
+            int iconHeight = 0;
+            if (ImageList_GetIconSize(treeImageList, &iconWidth, &iconHeight) != FALSE)
+            {
+                if (iconWidth > 0)
+                {
+                    preferredHotspotX = iconWidth / 2;
+                }
+                if (iconHeight > 0)
+                {
+                    preferredHotspotY = iconHeight / 2;
+                }
+            }
+
+            TVITEMW dragItem{};
+            dragItem.mask = TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+            dragItem.hItem = treeDragSourceItem_;
+            if (TreeView_GetItem(treePane_, &dragItem) != FALSE)
+            {
+                const int dragImageIndex = dragItem.iSelectedImage >= 0 ? dragItem.iSelectedImage : dragItem.iImage;
+                if (dragImageIndex >= 0)
+                {
+                    if (HICON dragIcon = ImageList_GetIcon(treeImageList, dragImageIndex, ILD_NORMAL))
+                    {
+                        const int dragImageWidth = std::max(1, preferredHotspotX * 2);
+                        const int dragImageHeight = std::max(1, preferredHotspotY * 2);
+                        treeDragImageList_ = ImageList_Create(dragImageWidth, dragImageHeight, ILC_COLOR32 | ILC_MASK, 1, 1);
+                        if (treeDragImageList_)
+                        {
+                            if (ImageList_AddIcon(treeDragImageList_, dragIcon) == -1)
+                            {
+                                ImageList_Destroy(treeDragImageList_);
+                                treeDragImageList_ = nullptr;
+                            }
+                        }
+                        DestroyIcon(dragIcon);
+                    }
+                }
+            }
+        }
+
+        if (!treeDragImageList_)
+        {
+            treeDragImageList_ = TreeView_CreateDragImage(treePane_, treeDragSourceItem_);
+        }
+
+        POINT dragScreenPoint = treeView.ptDrag;
+        ClientToScreen(treePane_, &dragScreenPoint);
+
+        if (treeDragImageList_)
+        {
+            int hotspotX = preferredHotspotX;
+            int hotspotY = preferredHotspotY;
+
+            int imageWidth = 0;
+            int imageHeight = 0;
+            if (ImageList_GetIconSize(treeDragImageList_, &imageWidth, &imageHeight) != FALSE)
+            {
+                if (imageWidth > 0)
+                {
+                    hotspotX = std::clamp(hotspotX, 0, imageWidth - 1);
+                }
+                if (imageHeight > 0)
+                {
+                    hotspotY = std::clamp(hotspotY, 0, imageHeight - 1);
+                }
+            }
+
+            ImageList_BeginDrag(treeDragImageList_, 0, hotspotX, hotspotY);
+            // ImageList_DragEnter expects coordinates relative to the window origin
+            // (upper-left of the full window, not the client area).
+            RECT windowRect{};
+            GetWindowRect(hwnd_, &windowRect);
+            POINT dragWindowPoint{
+                dragScreenPoint.x - windowRect.left,
+                dragScreenPoint.y - windowRect.top,
+            };
+            ImageList_DragEnter(hwnd_, dragWindowPoint.x, dragWindowPoint.y);
+        }
+
+        SetCapture(hwnd_);
+        POINT dragWindowPoint = dragScreenPoint;
+        ScreenToClient(hwnd_, &dragWindowPoint);
+        UpdateFolderTreeDrag(dragWindowPoint);
+        return 0;
+    }
+
+    void MainWindow::UpdateFolderTreeDrag(POINT windowPoint)
+    {
+        if (!treeFolderDragActive_)
+        {
+            return;
+        }
+
+        bool dragImageTemporarilyHidden = false;
+
+        POINT screenPoint = windowPoint;
+        ClientToScreen(hwnd_, &screenPoint);
+        if (treeDragImageList_)
+        {
+            // DragMove expects coordinates relative to the window origin
+            // (upper-left of the full window, not the client area).
+            RECT windowRect{};
+            GetWindowRect(hwnd_, &windowRect);
+            ImageList_DragMove(screenPoint.x - windowRect.left, screenPoint.y - windowRect.top);
+
+            // Hide the drag image while updating tree highlight state to avoid
+            // paint artifacts from control redraws beneath the ghost image.
+            ImageList_DragShowNolock(FALSE);
+            dragImageTemporarilyHidden = true;
+        }
+
+        HTREEITEM hoverItem = nullptr;
+        std::wstring destinationPath;
+        bool dropAllowed = false;
+        if (treePane_)
+        {
+            RECT treeRect{};
+            GetClientRect(treePane_, &treeRect);
+
+            POINT treePoint = screenPoint;
+            ScreenToClient(treePane_, &treePoint);
+            if (PtInRect(&treeRect, treePoint) != FALSE)
+            {
+                TVHITTESTINFO hitTest{};
+                hitTest.pt = treePoint;
+                const HTREEITEM item = TreeView_HitTest(treePane_, &hitTest);
+                if (item && (hitTest.flags & TVHT_ONITEM) != 0)
+                {
+                    const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+                    if (nodeData && !nodeData->path.empty() && item != treeDragSourceItem_)
+                    {
+                        const std::wstring normalizedDestinationPath = NormalizeFolderPath(nodeData->path);
+                        if (IsValidFolderTreeDropDestination(treeDragSourcePath_, normalizedDestinationPath))
+                        {
+                            hoverItem = item;
+                            destinationPath = normalizedDestinationPath;
+                            dropAllowed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (hoverItem != treeDragHoverItem_)
+        {
+            treeDragHoverItem_ = hoverItem;
+            TreeView_SelectDropTarget(treePane_, treeDragHoverItem_);
+        }
+
+        if (dragImageTemporarilyHidden)
+        {
+            ImageList_DragShowNolock(TRUE);
+        }
+
+        treeFolderDropAllowed_ = dropAllowed;
+        treeDragDestinationPath_ = dropAllowed ? std::move(destinationPath) : std::wstring{};
+        SetCursor(LoadCursorW(nullptr, dropAllowed ? IDC_HAND : IDC_NO));
+    }
+
+    void MainWindow::FinishFolderTreeDrag(bool commitDrop)
+    {
+        if (!treeFolderDragActive_)
+        {
+            return;
+        }
+
+        const std::wstring sourcePath = treeDragSourcePath_;
+        const std::wstring destinationPath = (commitDrop && treeFolderDropAllowed_)
+            ? treeDragDestinationPath_
+            : std::wstring{};
+
+        treeFolderDragActive_ = false;
+        treeFolderDropAllowed_ = false;
+        treeDragSourceItem_ = nullptr;
+        treeDragHoverItem_ = nullptr;
+        treeDragSourcePath_.clear();
+        treeDragDestinationPath_.clear();
+
+        if (treePane_)
+        {
+            if (treeDragImageList_)
+            {
+                ImageList_DragShowNolock(FALSE);
+            }
+            TreeView_SelectDropTarget(treePane_, nullptr);
+        }
+
+        if (treeDragImageList_)
+        {
+            ImageList_DragLeave(hwnd_);
+            ImageList_EndDrag();
+            ImageList_Destroy(treeDragImageList_);
+            treeDragImageList_ = nullptr;
+        }
+
+        if (GetCapture() == hwnd_)
+        {
+            ReleaseCapture();
+        }
+
+        if (commitDrop && !sourcePath.empty() && !destinationPath.empty())
+        {
+            StartFolderTreeMoveToDestination(sourcePath, destinationPath);
+        }
     }
 
     void MainWindow::LayoutChildren()
@@ -9553,8 +9880,105 @@ namespace hyperbrowse::ui
         constexpr UINT kDeleteFolderPermanentCommandId = 3;
         constexpr UINT kOpenInExplorerCommandId = 4;
         constexpr UINT kCopyPathCommandId = 5;
+        constexpr UINT kMoveFolderBrowseCommandId = 6;
+        constexpr UINT kMoveFolderFavoriteBaseCommandId = 10;
+        constexpr UINT kMoveFolderFavoriteLastCommandId = 17;
+        constexpr UINT kMoveFolderRecentBaseCommandId = 20;
+        constexpr UINT kMoveFolderRecentLastCommandId = 27;
+        constexpr UINT kNewFolderCommandId = 30;
 
+        std::vector<std::wstring> favoriteMoveDestinations;
+        std::vector<std::wstring> recentMoveDestinations;
+        const std::wstring sourceParentPath = NormalizeFolderPath(fs::path(folderPath).parent_path().wstring());
+        const auto canOfferMoveDestination = [&](const std::wstring& destinationPath)
+        {
+            const std::wstring normalizedDestination = NormalizeFolderPath(destinationPath);
+            if (!IsExistingDirectory(normalizedDestination))
+            {
+                return false;
+            }
+
+            if (!AreFoldersOnSameDrive(folderPath, normalizedDestination))
+            {
+                return false;
+            }
+
+            if (FolderPathsEqual(normalizedDestination, folderPath)
+                || hyperbrowse::browser::PathHasPrefix(normalizedDestination, folderPath)
+                || (!sourceParentPath.empty() && FolderPathsEqual(normalizedDestination, sourceParentPath)))
+            {
+                return false;
+            }
+
+            return true;
+        };
+
+        for (const std::wstring& favoritePath : favoriteDestinationFolders_)
+        {
+            if (canOfferMoveDestination(favoritePath))
+            {
+                favoriteMoveDestinations.push_back(NormalizeFolderPath(favoritePath));
+            }
+        }
+
+        for (const std::wstring& recentPath : RecentDestinationShortcutPaths())
+        {
+            if (!canOfferMoveDestination(recentPath))
+            {
+                continue;
+            }
+
+            const std::wstring normalizedRecentPath = NormalizeFolderPath(recentPath);
+            const bool duplicate = std::any_of(favoriteMoveDestinations.begin(), favoriteMoveDestinations.end(), [&](const std::wstring& favoritePath)
+            {
+                return FolderPathsEqual(favoritePath, normalizedRecentPath);
+            });
+            if (!duplicate)
+            {
+                recentMoveDestinations.push_back(normalizedRecentPath);
+            }
+        }
+
+        HMENU moveFolderMenu = CreatePopupMenu();
+        if (!moveFolderMenu)
+        {
+            DestroyMenu(menu);
+            return;
+        }
+
+        AppendMenuW(moveFolderMenu, MF_STRING, kMoveFolderBrowseCommandId, L"Choose &Folder...");
+        if (!favoriteMoveDestinations.empty() || !recentMoveDestinations.empty())
+        {
+            AppendMenuW(moveFolderMenu, MF_SEPARATOR, 0, nullptr);
+            const std::size_t favoriteCapacity = kMoveFolderFavoriteLastCommandId - kMoveFolderFavoriteBaseCommandId + 1;
+            const std::size_t favoriteCount = std::min<std::size_t>(favoriteMoveDestinations.size(), favoriteCapacity);
+            for (std::size_t index = 0; index < favoriteCount; ++index)
+            {
+                AppendMenuW(moveFolderMenu,
+                            MF_STRING,
+                            kMoveFolderFavoriteBaseCommandId + static_cast<UINT>(index),
+                            FormatFolderShortcutMenuLabel(favoriteMoveDestinations[index]).c_str());
+            }
+
+            const std::size_t recentCapacity = kMoveFolderRecentLastCommandId - kMoveFolderRecentBaseCommandId + 1;
+            const std::size_t recentCount = std::min<std::size_t>(recentMoveDestinations.size(), recentCapacity);
+            for (std::size_t index = 0; index < recentCount; ++index)
+            {
+                AppendMenuW(moveFolderMenu,
+                            MF_STRING,
+                            kMoveFolderRecentBaseCommandId + static_cast<UINT>(index),
+                            FormatFolderShortcutMenuLabel(recentMoveDestinations[index]).c_str());
+            }
+        }
+        else
+        {
+            AppendMenuW(moveFolderMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(moveFolderMenu, MF_STRING | MF_GRAYED, 0, L"(No compatible quick destinations)");
+        }
+
+        AppendMenuW(menu, MF_STRING, kNewFolderCommandId, L"&New Folder...");
         AppendMenuW(menu, MF_STRING, kRenameFolderCommandId, L"Re&name Folder...");
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(moveFolderMenu), L"Mo&ve Folder To");
         AppendMenuW(menu, MF_STRING, kOpenInExplorerCommandId, L"Open in &Explorer");
         AppendMenuW(menu, MF_STRING, kCopyPathCommandId, L"Copy Pat&h");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -9562,11 +9986,13 @@ namespace hyperbrowse::ui
         AppendMenuW(menu, MF_STRING, kDeleteFolderPermanentCommandId, L"Delete Folder &Permanently");
 
         const UINT enableState = fileOperationActive_ ? MF_GRAYED : MF_ENABLED;
+        EnableMenuItem(menu, kNewFolderCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(menu, kRenameFolderCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(menu, kOpenInExplorerCommandId, MF_BYCOMMAND | MF_ENABLED);
         EnableMenuItem(menu, kCopyPathCommandId, MF_BYCOMMAND | MF_ENABLED);
         EnableMenuItem(menu, kDeleteFolderCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(menu, kDeleteFolderPermanentCommandId, MF_BYCOMMAND | enableState);
+        EnableMenuItem(moveFolderMenu, kMoveFolderBrowseCommandId, MF_BYCOMMAND | enableState);
 
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems;
         PrepareMenuForOwnerDraw(menu, menuDrawItems, true);
@@ -9584,9 +10010,21 @@ namespace hyperbrowse::ui
 
         switch (commandId)
         {
+        case kNewFolderCommandId:
+            StartFolderTreeCreateNewFolder(folderPath);
+            break;
         case kRenameFolderCommandId:
             StartFolderTreeRename(folderPath);
             break;
+        case kMoveFolderBrowseCommandId:
+        {
+            std::wstring destinationFolder;
+            if (ChooseFolder(&destinationFolder) && !destinationFolder.empty())
+            {
+                StartFolderTreeMoveToDestination(folderPath, std::move(destinationFolder));
+            }
+            break;
+        }
         case kOpenInExplorerCommandId:
             if (!LaunchShellTarget(hwnd_, L"open", folderPath))
             {
@@ -9606,6 +10044,25 @@ namespace hyperbrowse::ui
             StartFolderTreeDelete(folderPath, true);
             break;
         default:
+            if (commandId >= kMoveFolderFavoriteBaseCommandId && commandId <= kMoveFolderFavoriteLastCommandId)
+            {
+                const std::size_t index = static_cast<std::size_t>(commandId - kMoveFolderFavoriteBaseCommandId);
+                if (index < favoriteMoveDestinations.size())
+                {
+                    StartFolderTreeMoveToDestination(folderPath, favoriteMoveDestinations[index]);
+                }
+                break;
+            }
+
+            if (commandId >= kMoveFolderRecentBaseCommandId && commandId <= kMoveFolderRecentLastCommandId)
+            {
+                const std::size_t index = static_cast<std::size_t>(commandId - kMoveFolderRecentBaseCommandId);
+                if (index < recentMoveDestinations.size())
+                {
+                    StartFolderTreeMoveToDestination(folderPath, recentMoveDestinations[index]);
+                }
+                break;
+            }
             break;
         }
     }
@@ -10075,6 +10532,116 @@ namespace hyperbrowse::ui
                            {});
     }
 
+    void MainWindow::StartFolderTreeCreateNewFolder(std::wstring parentPath)
+    {
+        if (parentPath.empty() || fileOperationActive_)
+        {
+            return;
+        }
+
+        parentPath = NormalizeFolderPath(std::move(parentPath));
+
+        std::error_code parentError;
+        if (!fs::is_directory(fs::path(parentPath), parentError) || parentError)
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected folder is no longer available.",
+                        L"New Folder",
+                        MB_OK | MB_ICONINFORMATION);
+            RefreshFolderTree();
+            return;
+        }
+
+        std::wstring folderName;
+        const std::wstring initialName = L"New Folder";
+        while (PromptForSingleLineText(hwnd_,
+                                       instance_,
+                                       L"New Folder",
+                                       L"Enter a name for the new folder.",
+                                       L"Create",
+                                       initialName,
+                                       0,
+                                       static_cast<int>(initialName.size()),
+                                       &folderName))
+        {
+            std::wstring errorMessage;
+            if (!IsValidFolderName(folderName, &errorMessage))
+            {
+                MessageBoxW(hwnd_, errorMessage.c_str(), L"New Folder", MB_OK | MB_ICONWARNING);
+                continue;
+            }
+
+            const std::wstring newFolderPath = NormalizeFolderPath(
+                (fs::path(parentPath) / fs::path(folderName)).wstring());
+
+            std::error_code createError;
+            if (!fs::create_directory(fs::path(newFolderPath), createError) || createError)
+            {
+                MessageBoxW(hwnd_,
+                            L"Failed to create the folder. Check that the name is valid and you have permission.",
+                            L"New Folder",
+                            MB_OK | MB_ICONERROR);
+                continue;
+            }
+
+            InsertFolderTreeFolderIfParentLoaded(newFolderPath);
+            if (browserModel_ && !browserModel_->FolderPath().empty()
+                && FolderPathsEqual(browserModel_->FolderPath(), parentPath))
+            {
+                LoadFolderAsync(parentPath);
+            }
+            break;
+        }
+    }
+
+    void MainWindow::StartFolderTreeMoveToDestination(std::wstring folderPath, std::wstring destinationFolder)
+    {
+        if (folderPath.empty() || destinationFolder.empty() || fileOperationActive_)
+        {
+            return;
+        }
+
+        folderPath = NormalizeFolderPath(std::move(folderPath));
+        destinationFolder = NormalizeFolderPath(std::move(destinationFolder));
+
+        std::error_code sourceError;
+        if (!fs::is_directory(fs::path(folderPath), sourceError) || sourceError)
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected folder is no longer available.",
+                        L"Move Folder",
+                        MB_OK | MB_ICONINFORMATION);
+            RefreshFolderTree();
+            return;
+        }
+
+        if (!IsExistingDirectory(destinationFolder))
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected destination folder is no longer available.",
+                        L"Move Folder",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (!IsValidFolderTreeDropDestination(folderPath, destinationFolder))
+        {
+            MessageBoxW(hwnd_,
+                        L"Choose a valid destination on the same drive. The folder cannot move into itself, one of its children, or its current parent.",
+                        L"Move Folder",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        activeTreeFolderMoveSourcePath_ = folderPath;
+        activeTreeFolderMoveDestinationFolder_ = destinationFolder;
+        StartFileOperation(services::FileOperationType::Move,
+                           {folderPath},
+                           std::move(destinationFolder),
+                           services::FileConflictPolicy::PromptShell,
+                           {});
+    }
+
     void MainWindow::StartFileOperation(services::FileOperationType type,
                                         std::vector<std::wstring> sourcePaths,
                                         std::wstring destinationFolder,
@@ -10517,16 +11084,52 @@ namespace hyperbrowse::ui
         activeTreeFolderOperationPath_.clear();
         const std::wstring treeFolderRenamePath = activeTreeFolderRenamePath_;
         activeTreeFolderRenamePath_.clear();
+        const std::wstring treeFolderMoveSourcePath = activeTreeFolderMoveSourcePath_;
+        activeTreeFolderMoveSourcePath_.clear();
+        const std::wstring treeFolderMoveDestinationFolder = activeTreeFolderMoveDestinationFolder_;
+        activeTreeFolderMoveDestinationFolder_.clear();
         const bool treeFolderDeleteOperation = !treeFolderOperationPath.empty()
             && (update.type == services::FileOperationType::DeleteRecycleBin
                 || update.type == services::FileOperationType::DeletePermanent);
+        const bool treeFolderMoveOperation = !treeFolderMoveSourcePath.empty()
+            && update.type == services::FileOperationType::Move;
         const bool treeFolderDeleteSucceeded = treeFolderDeleteOperation
             && std::any_of(update.succeededSourcePaths.begin(), update.succeededSourcePaths.end(), [&](const std::wstring& sourcePath)
             {
                 return FolderPathsEqual(sourcePath, treeFolderOperationPath);
             });
 
-        bool refreshFolderTree = treeFolderDeleteSucceeded;
+        std::wstring treeFolderMoveCreatedPath;
+        if (treeFolderMoveOperation)
+        {
+            const std::size_t movePairCount = std::min(update.succeededSourcePaths.size(), update.createdPaths.size());
+            for (std::size_t index = 0; index < movePairCount; ++index)
+            {
+                if (!FolderPathsEqual(update.succeededSourcePaths[index], treeFolderMoveSourcePath))
+                {
+                    continue;
+                }
+
+                treeFolderMoveCreatedPath = NormalizeFolderPath(update.createdPaths[index]);
+                break;
+            }
+
+            if (treeFolderMoveCreatedPath.empty())
+            {
+                const bool sourcePathReported = std::any_of(update.succeededSourcePaths.begin(), update.succeededSourcePaths.end(), [&](const std::wstring& sourcePath)
+                {
+                    return FolderPathsEqual(sourcePath, treeFolderMoveSourcePath);
+                });
+                if (sourcePathReported && !treeFolderMoveDestinationFolder.empty())
+                {
+                    treeFolderMoveCreatedPath = NormalizeFolderPath(
+                        (fs::path(treeFolderMoveDestinationFolder) / fs::path(treeFolderMoveSourcePath).filename()).wstring());
+                }
+            }
+        }
+        const bool treeFolderMoveSucceeded = treeFolderMoveOperation && !treeFolderMoveCreatedPath.empty();
+
+        bool refreshFolderTree = treeFolderDeleteSucceeded || treeFolderMoveSucceeded;
         std::wstring fallbackFolderPath;
         if (treeFolderDeleteSucceeded
             && browserModel_
@@ -10567,6 +11170,17 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (treeFolderMoveSucceeded && browserModel_ && !browserModel_->FolderPath().empty())
+        {
+            if (browser::PathHasPrefix(browserModel_->FolderPath(), treeFolderMoveSourcePath))
+            {
+                treeFolderReloadPath = RewritePathPrefix(
+                    browserModel_->FolderPath(),
+                    treeFolderMoveSourcePath,
+                    treeFolderMoveCreatedPath);
+            }
+        }
+
         if (userMetadataStore_)
         {
             userMetadataStore_->ApplyFileOperationUpdate(update.type, update.succeededSourcePaths, update.createdPaths);
@@ -10578,6 +11192,10 @@ namespace hyperbrowse::ui
             && FolderPathsEqual(browserModel_->FolderPath(), deferredFolderWatchReloadPath);
 
         if (!treeFolderReloadPath.empty())
+        {
+            reloadCurrentFolder = true;
+        }
+        else if (treeFolderMoveSucceeded && browserModel_ && !browserModel_->FolderPath().empty())
         {
             reloadCurrentFolder = true;
         }
@@ -10665,7 +11283,10 @@ namespace hyperbrowse::ui
             case services::FileOperationType::Move:
                 for (const std::wstring& sourcePath : update.succeededSourcePaths)
                 {
-                    modelChanged = browserModel_->RemoveItemByPath(sourcePath) || modelChanged;
+                    const bool removeByPrefix = treeFolderMoveOperation && FolderPathsEqual(sourcePath, treeFolderMoveSourcePath);
+                    modelChanged = (removeByPrefix
+                        ? browserModel_->RemoveItemsByPathPrefix(sourcePath)
+                        : browserModel_->RemoveItemByPath(sourcePath)) || modelChanged;
                 }
                 for (const std::wstring& createdPath : update.createdPaths)
                 {
@@ -13629,6 +14250,12 @@ namespace hyperbrowse::ui
 
     void MainWindow::OnLButtonUp()
     {
+        if (treeFolderDragActive_)
+        {
+            FinishFolderTreeDrag(true);
+            return;
+        }
+
         if (commandBarPressedIndex_ >= 0)
         {
             const int pressedIdx = commandBarPressedIndex_;
@@ -13825,6 +14452,12 @@ namespace hyperbrowse::ui
 
     void MainWindow::OnMouseMove(int x, int y)
     {
+        if (treeFolderDragActive_)
+        {
+            UpdateFolderTreeDrag(POINT{x, y});
+            return;
+        }
+
         auto invalidateDetailsPanelTabs = [&]()
         {
             if (!IsRectEmpty(&detailsPanelTabStripRect_))
@@ -14064,6 +14697,11 @@ namespace hyperbrowse::ui
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
         case WM_SYSCHAR:
+            if (treeFolderDragActive_ && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && wParam == VK_ESCAPE)
+            {
+                FinishFolderTreeDrag(false);
+                return 0;
+            }
             if (HandleCommandBarKeyboardInput(message, wParam, lParam))
             {
                 return 0;
@@ -14097,6 +14735,20 @@ namespace hyperbrowse::ui
         case WM_MOUSEMOVE:
             OnMouseMove(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             return 0;
+        case WM_CAPTURECHANGED:
+            if (treeFolderDragActive_)
+            {
+                FinishFolderTreeDrag(false);
+                return 0;
+            }
+            break;
+        case WM_CANCELMODE:
+            if (treeFolderDragActive_)
+            {
+                FinishFolderTreeDrag(false);
+                return 0;
+            }
+            break;
         case WM_DROPFILES:
             return OnDropFiles(reinterpret_cast<HDROP>(wParam));
         case WM_SETCURSOR:
@@ -14104,6 +14756,11 @@ namespace hyperbrowse::ui
             POINT point{};
             GetCursorPos(&point);
             ScreenToClient(hwnd_, &point);
+            if (treeFolderDragActive_)
+            {
+                SetCursor(LoadCursorW(nullptr, treeFolderDropAllowed_ ? IDC_HAND : IDC_NO));
+                return TRUE;
+            }
             if (dragMode_ == DragMode::QuickAccessInternal)
             {
                 SetCursor(LoadCursorW(nullptr,
@@ -14413,6 +15070,10 @@ namespace hyperbrowse::ui
             }
             return 0;
         case WM_DESTROY:
+            if (treeFolderDragActive_)
+            {
+                FinishFolderTreeDrag(false);
+            }
             if (memoryPressureTimerId_ != 0)
             {
                 KillTimer(hwnd_, kMemoryPressureTimerId);
