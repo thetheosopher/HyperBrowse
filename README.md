@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.2.0.0-2EA043)
+![Version](https://img.shields.io/badge/Version-1.2.1-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -126,13 +126,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.0.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.1-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.0.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.1-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -193,9 +193,13 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.2.0.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.0.0-portable-win64.zip` and `HyperBrowse-1.2.0.0-installer.exe`).
+Current release: **1.2.1**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.1-portable-win64.zip` and `HyperBrowse-1.2.1-installer.exe`).
 
 ## Version History
+
+### 1.2.1
+
+- Version bump release to align build metadata, packaging outputs, and published artifact naming.
 
 ### 1.2.0.0
 
