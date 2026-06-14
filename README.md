@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.1.0.3-2EA043)
+![Version](https://img.shields.io/badge/Version-1.2.0.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -24,6 +24,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Thumbnail and details modes, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
+- Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 
 ## Current Capabilities
@@ -125,13 +126,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.1.0.3-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.0.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.1.0.3-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.0.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -192,9 +193,16 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.1.0.3**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.1.0.3-portable-win64.zip` and `HyperBrowse-1.1.0.3-installer.exe`).
+Current release: **1.2.0.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.0.0-portable-win64.zip` and `HyperBrowse-1.2.0.0-installer.exe`).
 
 ## Version History
+
+### 1.2.0.0
+
+- Fixed slideshow settings numeric entry behavior so spinner controls and manual values remain parse-safe, while introducing clearer lower bounds of 250 ms for slide duration and 100 ms for transition duration.
+- Added a dedicated slideshow settings shortcut (`Ctrl+Shift+T`) and updated related dialog copy to reflect the expanded transition catalog.
+- Expanded classic transition options with new directional and wipe-based styles, including Fade to Black, Diagonal Slide, Push, Center Wipe, Venetian Blinds, Split Wipe, Horizontal Blinds, Checkerboard Wipe, and Zoom Fade.
+- Added Direct2D effect-backed transition styles: Blur Crossfade, Motion Blur, Color Wash, Sepia Drift, Flashbulb, Prism, and Monochrome Reveal.
 
 ### 1.1.0.3
 
