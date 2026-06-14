@@ -25,13 +25,14 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
+- Folder tree workflow upgrades with in-tree drag-and-drop folder move, validated move destinations, and inline folder creation.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 
 ## Current Capabilities
 
 | Area | Included today |
 | --- | --- |
-| Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename filter, thumbnail detail toggle with inline star ratings, selected-item info strip, and remembered window/folder restore |
+| Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, and folder context workflows for create/rename/delete plus move-to destinations and in-tree drag-drop move |
 | Viewer | Separate viewer window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
@@ -199,7 +200,10 @@ Current release: **1.2.1**. The version is defined by the top-level `project(Hyp
 
 ### 1.2.1
 
-- Version bump release to align build metadata, packaging outputs, and published artifact naming.
+- Added folder tree drag-and-drop moving with guarded destination validation (same-drive moves only, and protection against moving into self, descendants, or current parent).
+- Added New Folder creation from the folder tree context menu with interactive naming, Windows-safe name validation, and immediate tree refresh/insertion behavior.
+- Expanded folder tree move workflows with a Move Folder To submenu that supports quick destinations (favorites and recents) and manual folder browsing.
+- Aligned release metadata to 1.2.1 across build versioning, README documentation, and artifact naming.
 
 ### 1.2.0.0
 
