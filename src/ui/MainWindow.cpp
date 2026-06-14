@@ -124,6 +124,7 @@ namespace
     constexpr UINT ID_FILE_CLEAR_FAVORITE_DESTINATIONS = 1028;
     constexpr UINT ID_FILE_CLEAR_RECENT_FOLDERS = 1029;
     constexpr UINT ID_FILE_CLEAR_RECENT_DESTINATIONS = 1038;
+    constexpr UINT ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER = 1039;
     constexpr UINT ID_FILE_SET_RATING_0 = 1080;
     constexpr UINT ID_FILE_SET_RATING_1 = 1081;
     constexpr UINT ID_FILE_SET_RATING_2 = 1082;
@@ -4514,6 +4515,47 @@ namespace
         }
 
         return true;
+    }
+
+    std::wstring LongestCommonPrefix(const std::vector<std::wstring>& values)
+    {
+        if (values.empty())
+        {
+            return {};
+        }
+
+        std::wstring prefix = values.front();
+        for (std::size_t index = 1; index < values.size() && !prefix.empty(); ++index)
+        {
+            const std::wstring& value = values[index];
+            const std::size_t maxCommonLength = std::min(prefix.size(), value.size());
+            std::size_t commonLength = 0;
+            while (commonLength < maxCommonLength && prefix[commonLength] == value[commonLength])
+            {
+                ++commonLength;
+            }
+
+            prefix.resize(commonLength);
+        }
+
+        return prefix;
+    }
+
+    std::wstring TrimTrailingFolderNameSeparators(std::wstring value)
+    {
+        while (!value.empty())
+        {
+            const wchar_t ch = value.back();
+            if (ch == L' ' || ch == L'_' || ch == L'-' || ch == L'.')
+            {
+                value.pop_back();
+                continue;
+            }
+
+            break;
+        }
+
+        return value;
     }
 
     std::wstring ResolveStartupPath(std::wstring_view path)
@@ -9714,6 +9756,10 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
             AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
+            if (hasBatchRenameSelection)
+            {
+                AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER, L"Move to new child &folder...");
+            }
             AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete");
             AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -9737,6 +9783,12 @@ namespace hyperbrowse::ui
             EnableMenuItem(menu, ID_FILE_BATCH_RENAME_SELECTION, MF_BYCOMMAND | (allowBatchRenameSelected ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_COPY_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_MOVE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
+            if (hasBatchRenameSelection)
+            {
+                EnableMenuItem(menu,
+                               ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER,
+                               MF_BYCOMMAND | (allowBatchRenameSelected ? MF_ENABLED : MF_GRAYED));
+            }
             EnableMenuItem(menu, ID_FILE_DELETE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_DELETE_SELECTION_PERMANENT, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_ROTATE_JPEG_LEFT, MF_BYCOMMAND | (hasSelectedJpeg ? MF_ENABLED : MF_GRAYED));
@@ -10461,6 +10513,87 @@ namespace hyperbrowse::ui
         }
 
         StartSelectionFileOperationToDestination(services::FileOperationType::Move, std::move(destinationFolder));
+    }
+
+    void MainWindow::StartMoveSelectionToNewChildFolder()
+    {
+        if (!browserPaneController_ || !browserModel_ || fileOperationActive_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (selectedPaths.size() < 2)
+        {
+            MessageBoxW(hwnd_, L"Select two or more images first.", L"Move to New Child Folder", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const std::wstring parentPath = NormalizeFolderPath(browserModel_->FolderPath());
+        if (parentPath.empty())
+        {
+            MessageBoxW(hwnd_, L"Open a folder first.", L"Move to New Child Folder", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::error_code parentError;
+        if (!fs::is_directory(fs::path(parentPath), parentError) || parentError)
+        {
+            MessageBoxW(hwnd_, L"The active folder is no longer available.", L"Move to New Child Folder", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::vector<std::wstring> selectedLeafNames;
+        selectedLeafNames.reserve(selectedPaths.size());
+        for (const std::wstring& selectedPath : selectedPaths)
+        {
+            const std::wstring leafName = TrimWhitespaceCopy(fs::path(selectedPath).stem().wstring());
+            if (!leafName.empty())
+            {
+                selectedLeafNames.push_back(leafName);
+            }
+        }
+
+        std::wstring initialFolderName = TrimTrailingFolderNameSeparators(
+            TrimWhitespaceCopy(LongestCommonPrefix(selectedLeafNames)));
+        std::wstring validationError;
+        if (initialFolderName.empty() || !IsValidFolderName(initialFolderName, &validationError))
+        {
+            initialFolderName = L"New Folder";
+        }
+
+        std::wstring folderName;
+        while (PromptForSingleLineText(hwnd_,
+                                       instance_,
+                                       L"Move to New Child Folder",
+                                       L"Enter a name for the new child folder.",
+                                       L"Create and Move",
+                                       initialFolderName,
+                                       0,
+                                       static_cast<int>(initialFolderName.size()),
+                                       &folderName))
+        {
+            std::wstring errorMessage;
+            if (!IsValidFolderName(folderName, &errorMessage))
+            {
+                MessageBoxW(hwnd_, errorMessage.c_str(), L"Move to New Child Folder", MB_OK | MB_ICONWARNING);
+                continue;
+            }
+
+            const std::wstring destinationFolder = NormalizeFolderPath((fs::path(parentPath) / fs::path(folderName)).wstring());
+            std::error_code createError;
+            if (!fs::create_directory(fs::path(destinationFolder), createError) || createError)
+            {
+                MessageBoxW(hwnd_,
+                            L"Failed to create the folder. Check that the name is unique and that you have permission.",
+                            L"Move to New Child Folder",
+                            MB_OK | MB_ICONERROR);
+                continue;
+            }
+
+            StartSelectionFileOperationToDestination(services::FileOperationType::Move, destinationFolder);
+            break;
+        }
     }
 
     void MainWindow::StartDeleteSelection(bool permanent)
@@ -13256,6 +13389,9 @@ namespace hyperbrowse::ui
             return true;
         case ID_FILE_MOVE_SELECTION_BROWSE:
             StartMoveSelection();
+            return true;
+        case ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER:
+            StartMoveSelectionToNewChildFolder();
             return true;
         case ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS:
             rawJpegPairedOperationsEnabled_ = !rawJpegPairedOperationsEnabled_;

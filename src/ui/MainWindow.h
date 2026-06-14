@@ -272,6 +272,7 @@ namespace hyperbrowse::ui
         void EditSelectionTags();
         void StartCopySelection();
         void StartMoveSelection();
+        void StartMoveSelectionToNewChildFolder();
         void StartDeleteSelection(bool permanent);
         void StartFolderTreeRename(std::wstring folderPath);
         void StartFolderTreeDelete(std::wstring folderPath, bool permanent);
