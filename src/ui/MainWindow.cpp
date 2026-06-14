@@ -9886,6 +9886,7 @@ namespace hyperbrowse::ui
         constexpr UINT kMoveFolderRecentBaseCommandId = 20;
         constexpr UINT kMoveFolderRecentLastCommandId = 27;
         constexpr UINT kNewFolderCommandId = 30;
+        constexpr UINT kToggleFavoriteCommandId = 31;
 
         std::vector<std::wstring> favoriteMoveDestinations;
         std::vector<std::wstring> recentMoveDestinations;
@@ -9976,11 +9977,15 @@ namespace hyperbrowse::ui
             AppendMenuW(moveFolderMenu, MF_STRING | MF_GRAYED, 0, L"(No compatible quick destinations)");
         }
 
+        const bool isFavoriteDestination = IsFavoriteDestination(folderPath);
+        const wchar_t* toggleFavoriteLabel = isFavoriteDestination ? L"Remove from &Favorites" : L"&Add to Favorites";
+
         AppendMenuW(menu, MF_STRING, kNewFolderCommandId, L"&New Folder...");
         AppendMenuW(menu, MF_STRING, kRenameFolderCommandId, L"Re&name Folder...");
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(moveFolderMenu), L"Mo&ve Folder To");
         AppendMenuW(menu, MF_STRING, kOpenInExplorerCommandId, L"Open in &Explorer");
         AppendMenuW(menu, MF_STRING, kCopyPathCommandId, L"Copy Pat&h");
+        AppendMenuW(menu, MF_STRING, kToggleFavoriteCommandId, toggleFavoriteLabel);
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kDeleteFolderCommandId, L"&Delete Folder");
         AppendMenuW(menu, MF_STRING, kDeleteFolderPermanentCommandId, L"Delete Folder &Permanently");
@@ -9990,6 +9995,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu, kRenameFolderCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(menu, kOpenInExplorerCommandId, MF_BYCOMMAND | MF_ENABLED);
         EnableMenuItem(menu, kCopyPathCommandId, MF_BYCOMMAND | MF_ENABLED);
+        EnableMenuItem(menu, kToggleFavoriteCommandId, MF_BYCOMMAND | MF_ENABLED);
         EnableMenuItem(menu, kDeleteFolderCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(menu, kDeleteFolderPermanentCommandId, MF_BYCOMMAND | enableState);
         EnableMenuItem(moveFolderMenu, kMoveFolderBrowseCommandId, MF_BYCOMMAND | enableState);
@@ -10037,6 +10043,27 @@ namespace hyperbrowse::ui
                 MessageBoxW(hwnd_, L"Failed to copy the folder path to the clipboard.", L"Copy Path", MB_OK | MB_ICONERROR);
             }
             break;
+        case kToggleFavoriteCommandId:
+        {
+            const auto existing = std::find_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& candidate)
+            {
+                return FolderPathsEqual(candidate, folderPath);
+            });
+            if (existing != favoriteDestinationFolders_.end())
+            {
+                favoriteDestinationFolders_.erase(existing);
+            }
+            else
+            {
+                InsertFolderPath(&favoriteDestinationFolders_, folderPath, kQuickAccessFolderLimit, true);
+            }
+            UpdateMenuState();
+            if (hwnd_ && detailsStripVisible_)
+            {
+                LayoutChildren();
+            }
+            break;
+        }
         case kDeleteFolderCommandId:
             StartFolderTreeDelete(folderPath, false);
             break;
