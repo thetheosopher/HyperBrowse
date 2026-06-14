@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,16 @@ namespace hyperbrowse::viewer
         Crossfade = 1,
         Slide = 2,
         KenBurns = 3,
+        Random = 4,
+        FadeToBlack = 5,
+        DiagonalSlide = 6,
+        Push = 7,
+        CenterWipe = 8,
+        VenetianBlinds = 9,
+        SplitWipe = 10,
+        HorizontalBlinds = 11,
+        CheckerboardWipe = 12,
+        ZoomFade = 13,
     };
 
     enum class InfoOverlayTextSize : int
@@ -166,6 +177,7 @@ namespace hyperbrowse::viewer
         void QueueTransitionFromCurrent(bool forward);
         void BeginTransitionFromPending();
         void StopTransition(bool clearPending = true);
+        TransitionStyle ResolveActiveTransitionStyle() noexcept;
         void ResetViewState();
         CompareDirection ResolveCompareDirection(CompareDirection preferred) const noexcept;
         int CompareIndexForDirection(CompareDirection direction) const noexcept;
@@ -239,7 +251,9 @@ namespace hyperbrowse::viewer
         UINT slideshowIntervalMs_{3000};
         UINT_PTR slideshowTimerId_{};
         TransitionStyle transitionStyle_{TransitionStyle::Crossfade};
+        TransitionStyle activeTransitionStyle_{TransitionStyle::Crossfade};
         UINT transitionDurationMs_{350};
+        std::mt19937 transitionRandomEngine_{std::random_device{}()};
         bool transitionActive_{};
         bool transitionForward_{true};
         std::chrono::steady_clock::time_point transitionStartedAt_{};

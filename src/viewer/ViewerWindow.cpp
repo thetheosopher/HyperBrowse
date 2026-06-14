@@ -801,7 +801,7 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        slideshowIntervalMs_ = std::max<UINT>(1000, intervalMs);
+        slideshowIntervalMs_ = std::max<UINT>(250, intervalMs);
         slideshowTimerId_ = SetTimer(hwnd_, 1, slideshowIntervalMs_, nullptr);
         slideshowActive_ = slideshowTimerId_ != 0;
         slideshowAdvancePending_ = false;
@@ -875,12 +875,38 @@ namespace hyperbrowse::viewer
     void ViewerWindow::SetTransitionSettings(TransitionStyle style, UINT durationMs)
     {
         transitionStyle_ = style;
-        transitionDurationMs_ = std::clamp<UINT>(durationMs, 120U, 5000U);
+        transitionDurationMs_ = std::clamp<UINT>(durationMs, 100U, 5000U);
+        activeTransitionStyle_ = transitionStyle_;
 
         if (transitionStyle_ == TransitionStyle::Cut)
         {
             StopTransition();
         }
+    }
+
+    TransitionStyle ViewerWindow::ResolveActiveTransitionStyle() noexcept
+    {
+        if (transitionStyle_ != TransitionStyle::Random)
+        {
+            return transitionStyle_;
+        }
+
+        static constexpr std::array<TransitionStyle, 12> kRandomStyles = {
+            TransitionStyle::Crossfade,
+            TransitionStyle::Slide,
+            TransitionStyle::KenBurns,
+            TransitionStyle::FadeToBlack,
+            TransitionStyle::DiagonalSlide,
+            TransitionStyle::Push,
+            TransitionStyle::CenterWipe,
+            TransitionStyle::VenetianBlinds,
+            TransitionStyle::SplitWipe,
+            TransitionStyle::HorizontalBlinds,
+            TransitionStyle::CheckerboardWipe,
+            TransitionStyle::ZoomFade,
+        };
+        std::uniform_int_distribution<std::size_t> distribution(0, kRandomStyles.size() - 1);
+        return kRandomStyles[distribution(transitionRandomEngine_)];
     }
 
     void ViewerWindow::SetInfoOverlaysVisible(bool visible)
@@ -2205,13 +2231,14 @@ namespace hyperbrowse::viewer
     void ViewerWindow::QueueTransitionFromCurrent(bool forward)
     {
         StopTransition(false);
+        activeTransitionStyle_ = ResolveActiveTransitionStyle();
 
         pendingTransitionFromImage_.reset();
         pendingTransitionFromBitmap_.Reset();
         pendingTransitionFromIndex_ = -1;
         pendingTransitionForward_ = forward;
 
-        if (transitionStyle_ == TransitionStyle::Cut || transitionDurationMs_ == 0 || !currentImage_)
+        if (activeTransitionStyle_ == TransitionStyle::Cut || transitionDurationMs_ == 0 || !currentImage_)
         {
             return;
         }
@@ -2227,7 +2254,7 @@ namespace hyperbrowse::viewer
     void ViewerWindow::BeginTransitionFromPending()
     {
         if (!hwnd_
-            || transitionStyle_ == TransitionStyle::Cut
+            || activeTransitionStyle_ == TransitionStyle::Cut
             || transitionDurationMs_ == 0
             || !pendingTransitionFromImage_
             || !currentImage_
@@ -3196,8 +3223,26 @@ namespace hyperbrowse::viewer
                                 const float eased = SmoothStep(progress);
                                 const float direction = transitionForward_ ? 1.0f : -1.0f;
                                 const float parityDirection = (transitionFromIndex_ % 2 == 0) ? 1.0f : -1.0f;
+                                const auto drawClippedImage = [&](ID2D1Bitmap* bitmap,
+                                                                  const cache::CachedThumbnail& image,
+                                                                  const D2D1_RECT_F& clipRect,
+                                                                  float opacity,
+                                                                  float scaleMultiplier,
+                                                                  float offsetX,
+                                                                  float offsetY)
+                                {
+                                    if (!d2dRenderTarget_ || clipRect.right <= clipRect.left || clipRect.bottom <= clipRect.top)
+                                    {
+                                        return;
+                                    }
 
-                                switch (transitionStyle_)
+                                    d2dRenderTarget_->PushAxisAlignedClip(clipRect, D2D1_ANTIALIAS_MODE_ALIASED);
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), bitmap, image,
+                                                    gdiClientRect, opacity, scaleMultiplier, offsetX, offsetY);
+                                    d2dRenderTarget_->PopAxisAlignedClip();
+                                };
+
+                                switch (activeTransitionStyle_)
                                 {
                                 case TransitionStyle::Crossfade:
                                     DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
@@ -3224,6 +3269,203 @@ namespace hyperbrowse::viewer
                                                     gdiClientRect, eased, 1.08f - (0.08f * eased),
                                                     direction * clientWidth * 0.06f * (1.0f - eased),
                                                     -parityDirection * clientHeight * 0.04f * (1.0f - eased));
+                                    drewTransition = true;
+                                    break;
+                                case TransitionStyle::FadeToBlack:
+                                    if (eased < 0.5f)
+                                    {
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                        gdiClientRect, 1.0f - (eased * 2.0f), 1.0f, 0.0f, 0.0f);
+                                    }
+                                    else
+                                    {
+                                        DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                        gdiClientRect, (eased - 0.5f) * 2.0f, 1.0f, 0.0f, 0.0f);
+                                    }
+                                    drewTransition = true;
+                                    break;
+                                case TransitionStyle::DiagonalSlide:
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                    gdiClientRect, 1.0f, 1.0f,
+                                                    -direction * clientWidth * eased,
+                                                    parityDirection * clientHeight * 0.18f * eased);
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                    gdiClientRect, 1.0f, 1.0f,
+                                                    direction * clientWidth * (1.0f - eased),
+                                                    -parityDirection * clientHeight * 0.18f * (1.0f - eased));
+                                    drewTransition = true;
+                                    break;
+                                case TransitionStyle::Push:
+                                {
+                                    const float pushEased = std::min(eased * 1.15f, 1.0f);
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                    gdiClientRect, 1.0f, 1.0f - (0.03f * eased),
+                                                    -direction * clientWidth * pushEased, 0.0f);
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                    gdiClientRect, 1.0f, 0.97f + (0.03f * eased),
+                                                    direction * clientWidth * (1.0f - pushEased), 0.0f);
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::CenterWipe:
+                                {
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                    gdiClientRect, 1.0f - (0.35f * eased), 1.0f, 0.0f, 0.0f);
+                                    const float clipHalfWidth = (clientWidth * eased) * 0.5f;
+                                    const float clipHalfHeight = (clientHeight * eased) * 0.5f;
+                                    const float clipCenterX = static_cast<float>(gdiClientRect.left) + (clientWidth * 0.5f);
+                                    const float clipCenterY = static_cast<float>(gdiClientRect.top) + (clientHeight * 0.5f);
+                                    drawClippedImage(d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                     D2D1::RectF(clipCenterX - clipHalfWidth,
+                                                                 clipCenterY - clipHalfHeight,
+                                                                 clipCenterX + clipHalfWidth,
+                                                                 clipCenterY + clipHalfHeight),
+                                                     1.0f,
+                                                     1.03f - (0.03f * eased),
+                                                     0.0f,
+                                                     0.0f);
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::VenetianBlinds:
+                                {
+                                    constexpr int kBlindCount = 10;
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                    gdiClientRect, 1.0f - (0.25f * eased), 1.0f, 0.0f, 0.0f);
+                                    const float blindWidth = clientWidth / static_cast<float>(kBlindCount);
+                                    for (int blindIndex = 0; blindIndex < kBlindCount; ++blindIndex)
+                                    {
+                                        const float blindLeft = static_cast<float>(gdiClientRect.left)
+                                            + (blindWidth * static_cast<float>(blindIndex));
+                                        const float blindRight = blindIndex == (kBlindCount - 1)
+                                            ? static_cast<float>(gdiClientRect.right)
+                                            : blindLeft + blindWidth;
+                                        const float visibleWidth = (blindRight - blindLeft) * eased;
+                                        const bool revealFromLeft = ((blindIndex % 2) == 0) == (direction > 0.0f);
+                                        const float clipLeft = revealFromLeft ? blindLeft : (blindRight - visibleWidth);
+                                        const float clipRight = revealFromLeft ? (blindLeft + visibleWidth) : blindRight;
+                                        drawClippedImage(d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                         D2D1::RectF(clipLeft,
+                                                                     static_cast<float>(gdiClientRect.top),
+                                                                     clipRight,
+                                                                     static_cast<float>(gdiClientRect.bottom)),
+                                                         1.0f,
+                                                         1.0f,
+                                                         0.0f,
+                                                         0.0f);
+                                    }
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::SplitWipe:
+                                {
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                    gdiClientRect, 1.0f - (0.20f * eased), 1.0f, 0.0f, 0.0f);
+                                    const float centerX = static_cast<float>(gdiClientRect.left) + (clientWidth * 0.5f);
+                                    const float halfRevealWidth = (clientWidth * 0.5f) * eased;
+                                    drawClippedImage(d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                     D2D1::RectF(centerX - halfRevealWidth,
+                                                                 static_cast<float>(gdiClientRect.top),
+                                                                 centerX,
+                                                                 static_cast<float>(gdiClientRect.bottom)),
+                                                     1.0f,
+                                                     1.0f,
+                                                     -clientWidth * 0.05f * (1.0f - eased),
+                                                     0.0f);
+                                    drawClippedImage(d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                     D2D1::RectF(centerX,
+                                                                 static_cast<float>(gdiClientRect.top),
+                                                                 centerX + halfRevealWidth,
+                                                                 static_cast<float>(gdiClientRect.bottom)),
+                                                     1.0f,
+                                                     1.0f,
+                                                     clientWidth * 0.05f * (1.0f - eased),
+                                                     0.0f);
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::HorizontalBlinds:
+                                {
+                                    constexpr int kBlindCount = 8;
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                    gdiClientRect, 1.0f - (0.25f * eased), 1.0f, 0.0f, 0.0f);
+                                    const float blindHeight = clientHeight / static_cast<float>(kBlindCount);
+                                    for (int blindIndex = 0; blindIndex < kBlindCount; ++blindIndex)
+                                    {
+                                        const float blindTop = static_cast<float>(gdiClientRect.top)
+                                            + (blindHeight * static_cast<float>(blindIndex));
+                                        const float blindBottom = blindIndex == (kBlindCount - 1)
+                                            ? static_cast<float>(gdiClientRect.bottom)
+                                            : blindTop + blindHeight;
+                                        const float visibleHeight = (blindBottom - blindTop) * eased;
+                                        const bool revealFromTop = ((blindIndex % 2) == 0) == (direction > 0.0f);
+                                        const float clipTop = revealFromTop ? blindTop : (blindBottom - visibleHeight);
+                                        const float clipBottom = revealFromTop ? (blindTop + visibleHeight) : blindBottom;
+                                        drawClippedImage(d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                         D2D1::RectF(static_cast<float>(gdiClientRect.left),
+                                                                     clipTop,
+                                                                     static_cast<float>(gdiClientRect.right),
+                                                                     clipBottom),
+                                                         1.0f,
+                                                         1.0f,
+                                                         0.0f,
+                                                         0.0f);
+                                    }
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::CheckerboardWipe:
+                                {
+                                    constexpr int kGridColumns = 6;
+                                    constexpr int kGridRows = 4;
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                    gdiClientRect, 1.0f - (0.15f * eased), 1.0f, 0.0f, 0.0f);
+                                    const float cellWidth = clientWidth / static_cast<float>(kGridColumns);
+                                    const float cellHeight = clientHeight / static_cast<float>(kGridRows);
+                                    for (int row = 0; row < kGridRows; ++row)
+                                    {
+                                        for (int column = 0; column < kGridColumns; ++column)
+                                        {
+                                            const float cellLeft = static_cast<float>(gdiClientRect.left)
+                                                + (cellWidth * static_cast<float>(column));
+                                            const float cellRight = column == (kGridColumns - 1)
+                                                ? static_cast<float>(gdiClientRect.right)
+                                                : cellLeft + cellWidth;
+                                            const float cellTop = static_cast<float>(gdiClientRect.top)
+                                                + (cellHeight * static_cast<float>(row));
+                                            const float cellBottom = row == (kGridRows - 1)
+                                                ? static_cast<float>(gdiClientRect.bottom)
+                                                : cellTop + cellHeight;
+                                            const float phaseOffset = ((row + column) % 2 == 0) ? 0.0f : 0.18f;
+                                            const float phased = std::clamp((eased - phaseOffset) / (1.0f - phaseOffset), 0.0f, 1.0f);
+                                            if (phased <= 0.0f)
+                                            {
+                                                continue;
+                                            }
+
+                                            const float insetX = ((cellRight - cellLeft) * (1.0f - phased)) * 0.5f;
+                                            const float insetY = ((cellBottom - cellTop) * (1.0f - phased)) * 0.5f;
+                                            drawClippedImage(d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                             D2D1::RectF(cellLeft + insetX,
+                                                                         cellTop + insetY,
+                                                                         cellRight - insetX,
+                                                                         cellBottom - insetY),
+                                                             1.0f,
+                                                             1.0f,
+                                                             0.0f,
+                                                             0.0f);
+                                        }
+                                    }
+                                    drewTransition = true;
+                                    break;
+                                }
+                                case TransitionStyle::ZoomFade:
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), transitionFromBitmap_.Get(), *transitionFromImage_,
+                                                    gdiClientRect, 1.0f - eased, 1.0f + (0.10f * eased),
+                                                    0.0f, 0.0f);
+                                    DrawImageBitmap(d2dRenderTarget_.Get(), d2dCurrentImageBitmap_.Get(), *currentImage_,
+                                                    gdiClientRect, eased, 1.08f - (0.08f * eased),
+                                                    0.0f, 0.0f);
                                     drewTransition = true;
                                     break;
                                 case TransitionStyle::Cut:

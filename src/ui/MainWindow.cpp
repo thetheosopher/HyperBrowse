@@ -202,21 +202,7 @@ namespace
     constexpr UINT ID_VIEW_VIEWER_FULL_METADATA = 2221;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CUT = 2303;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE = 2304;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_SLIDE = 2305;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS = 2306;
-    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_1000 = 2321;
-    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_2000 = 2322;
-    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_3000 = 2323;
-    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_5000 = 2324;
-    constexpr UINT ID_VIEW_SLIDESHOW_DURATION_10000 = 2325;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200 = 2311;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350 = 2312;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500 = 2313;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800 = 2314;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200 = 2315;
-    constexpr UINT ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000 = 2316;
+    constexpr UINT ID_VIEW_SLIDESHOW_SETTINGS = 2307;
     constexpr UINT ID_ACTION_SORT_MENU = 2401;
     constexpr UINT ID_ACTION_THUMBNAIL_SIZE_MENU = 2402;
     constexpr UINT ID_ACTION_THEME_MENU = 2403;
@@ -357,6 +343,26 @@ namespace
     constexpr int kPerformanceSettingsPressureStatusControlId = 313;
     constexpr int kPerformanceSettingsFootnoteControlId = 314;
     constexpr int kPerformanceSettingsDividerControlId = 315;
+    constexpr wchar_t kSlideshowSettingsDialogClassName[] = L"HyperBrowseSlideshowSettingsDialog";
+    constexpr int kSlideshowSettingsDialogWidth = 560;
+    constexpr int kSlideshowSettingsDialogHeight = 368;
+    constexpr int kSlideshowSettingsInstructionControlId = 340;
+    constexpr int kSlideshowSettingsTransitionLabelControlId = 341;
+    constexpr int kSlideshowSettingsTransitionComboControlId = 342;
+    constexpr int kSlideshowSettingsDurationLabelControlId = 343;
+    constexpr int kSlideshowSettingsDurationEditControlId = 344;
+    constexpr int kSlideshowSettingsDurationUnitControlId = 345;
+    constexpr int kSlideshowSettingsDurationSpinControlId = 351;
+    constexpr int kSlideshowSettingsTransitionDurationLabelControlId = 346;
+    constexpr int kSlideshowSettingsTransitionDurationEditControlId = 347;
+    constexpr int kSlideshowSettingsTransitionDurationUnitControlId = 348;
+    constexpr int kSlideshowSettingsTransitionDurationSpinControlId = 352;
+    constexpr int kSlideshowSettingsFootnoteControlId = 349;
+    constexpr int kSlideshowSettingsDividerControlId = 350;
+    constexpr UINT kSlideshowMinimumDurationMs = 250U;
+    constexpr UINT kSlideshowMaximumDurationMs = 60000U;
+    constexpr UINT kSlideshowMinimumTransitionDurationMs = 100U;
+    constexpr UINT kSlideshowMaximumTransitionDurationMs = 5000U;
 
     hyperbrowse::cache::ThumbnailCacheKey MakeThumbnailCacheKey(const hyperbrowse::browser::BrowserItem& item,
                                                                 int targetWidth,
@@ -603,6 +609,31 @@ namespace
         int footnoteTop{};
         int minimumFootnoteHeight{};
         int minimumClientHeight{};
+    };
+
+    struct SlideshowTransitionOption
+    {
+        hyperbrowse::viewer::TransitionStyle style;
+        const wchar_t* label;
+    };
+
+    struct SlideshowSettingsDialogState
+    {
+        HWND ownerWindow{};
+        HWND transitionComboWindow{};
+        HWND durationEditWindow{};
+        HWND durationSpinWindow{};
+        HWND transitionDurationEditWindow{};
+        HWND transitionDurationSpinWindow{};
+        HWND okButton{};
+        std::wstring title;
+        std::wstring instruction;
+        std::wstring footnote;
+        UINT slideshowDurationMs{3000};
+        UINT transitionDurationMs{350};
+        hyperbrowse::viewer::TransitionStyle transitionStyle{hyperbrowse::viewer::TransitionStyle::Crossfade};
+        bool accepted{};
+        bool done{};
     };
 
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
@@ -1793,6 +1824,82 @@ namespace
     std::wstring FormatMegabytesFromBytes(std::size_t bytes)
     {
         return std::to_wstring(bytes / (1024ULL * 1024ULL));
+    }
+
+    constexpr std::array<SlideshowTransitionOption, 14> kSlideshowTransitionOptions = {{
+        {hyperbrowse::viewer::TransitionStyle::Cut, L"None (Cut)"},
+        {hyperbrowse::viewer::TransitionStyle::Crossfade, L"Crossfade"},
+        {hyperbrowse::viewer::TransitionStyle::Slide, L"Slide"},
+        {hyperbrowse::viewer::TransitionStyle::KenBurns, L"Ken Burns"},
+        {hyperbrowse::viewer::TransitionStyle::Random, L"Random (All animated styles)"},
+        {hyperbrowse::viewer::TransitionStyle::FadeToBlack, L"Fade to Black"},
+        {hyperbrowse::viewer::TransitionStyle::DiagonalSlide, L"Diagonal Slide"},
+        {hyperbrowse::viewer::TransitionStyle::Push, L"Push"},
+        {hyperbrowse::viewer::TransitionStyle::CenterWipe, L"Center Wipe"},
+        {hyperbrowse::viewer::TransitionStyle::VenetianBlinds, L"Venetian Blinds"},
+        {hyperbrowse::viewer::TransitionStyle::SplitWipe, L"Split Wipe"},
+        {hyperbrowse::viewer::TransitionStyle::HorizontalBlinds, L"Horizontal Blinds"},
+        {hyperbrowse::viewer::TransitionStyle::CheckerboardWipe, L"Checkerboard Wipe"},
+        {hyperbrowse::viewer::TransitionStyle::ZoomFade, L"Zoom Fade"},
+    }};
+
+    int SlideshowTransitionComboIndex(hyperbrowse::viewer::TransitionStyle style)
+    {
+        for (std::size_t index = 0; index < kSlideshowTransitionOptions.size(); ++index)
+        {
+            if (kSlideshowTransitionOptions[index].style == style)
+            {
+                return static_cast<int>(index);
+            }
+        }
+
+        return 1;
+    }
+
+    bool TryReadDialogUInt(HWND window, UINT minimum, UINT maximum, UINT* value)
+    {
+        if (!window || !value)
+        {
+            return false;
+        }
+
+        std::size_t parsedValue = 0;
+        if (!TryParsePositiveSizeValue(ReadWindowText(window), &parsedValue))
+        {
+            return false;
+        }
+
+        if (parsedValue < minimum || parsedValue > maximum)
+        {
+            return false;
+        }
+
+        *value = static_cast<UINT>(parsedValue);
+        return true;
+    }
+
+    void SetDialogUIntEditAndSpin(HWND editWindow, HWND spinWindow, UINT value)
+    {
+        if (spinWindow)
+        {
+            SendMessageW(spinWindow, UDM_SETPOS32, 0, static_cast<LPARAM>(value));
+        }
+
+        if (editWindow)
+        {
+            SetWindowTextIfDifferent(editWindow, std::to_wstring(value));
+        }
+    }
+
+    UINT ComputeNextSpinValue(HWND editWindow, int fallbackValue, int delta, UINT minimum, UINT maximum)
+    {
+        UINT currentValue = static_cast<UINT>(std::clamp(fallbackValue, static_cast<int>(minimum), static_cast<int>(maximum)));
+        TryReadDialogUInt(editWindow, minimum, maximum, &currentValue);
+
+        const int nextValue = std::clamp(static_cast<int>(currentValue) + delta,
+                                         static_cast<int>(minimum),
+                                         static_cast<int>(maximum));
+        return static_cast<UINT>(nextValue);
     }
 
     std::wstring BuildPersistentThumbnailCacheSummary(const hyperbrowse::cache::DiskThumbnailCache::Statistics& statistics,
@@ -3541,6 +3648,593 @@ namespace
         return true;
     }
 
+    bool CollectSlideshowSettingsDialogResult(HWND hwnd, SlideshowSettingsDialogState* state)
+    {
+        if (!hwnd || !state)
+        {
+            return false;
+        }
+
+        const int selectedIndex = state->transitionComboWindow
+            ? static_cast<int>(SendMessageW(state->transitionComboWindow, CB_GETCURSEL, 0, 0))
+            : -1;
+        if (selectedIndex < 0 || selectedIndex >= static_cast<int>(kSlideshowTransitionOptions.size()))
+        {
+            MessageBoxW(hwnd,
+                        L"Select a transition type.",
+                        state->title.c_str(),
+                        MB_OK | MB_ICONWARNING);
+            if (state->transitionComboWindow)
+            {
+                SetFocus(state->transitionComboWindow);
+            }
+            return false;
+        }
+
+        UINT slideshowDurationMs = 0;
+        if (!TryReadDialogUInt(state->durationEditWindow,
+                               kSlideshowMinimumDurationMs,
+                               kSlideshowMaximumDurationMs,
+                               &slideshowDurationMs))
+        {
+            MessageBoxW(hwnd,
+                        L"Slide duration must be between 250 and 60000 milliseconds.",
+                        state->title.c_str(),
+                        MB_OK | MB_ICONWARNING);
+            if (state->durationEditWindow)
+            {
+                SetFocus(state->durationEditWindow);
+            }
+            return false;
+        }
+
+        UINT transitionDurationMs = 0;
+        if (!TryReadDialogUInt(state->transitionDurationEditWindow,
+                               kSlideshowMinimumTransitionDurationMs,
+                               kSlideshowMaximumTransitionDurationMs,
+                               &transitionDurationMs))
+        {
+            MessageBoxW(hwnd,
+                        L"Transition duration must be between 100 and 5000 milliseconds.",
+                        state->title.c_str(),
+                        MB_OK | MB_ICONWARNING);
+            if (state->transitionDurationEditWindow)
+            {
+                SetFocus(state->transitionDurationEditWindow);
+            }
+            return false;
+        }
+
+        state->transitionStyle = kSlideshowTransitionOptions[static_cast<std::size_t>(selectedIndex)].style;
+        state->slideshowDurationMs = slideshowDurationMs;
+        state->transitionDurationMs = transitionDurationMs;
+        return true;
+    }
+
+    LRESULT CALLBACK SlideshowSettingsDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<SlideshowSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<SlideshowSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+
+            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+            const int contentLeft = kTextInputDialogMargin;
+            const int contentWidth = kSlideshowSettingsDialogWidth - (kTextInputDialogMargin * 2);
+            const int labelWidth = 170;
+            const int valueWidth = 300;
+            const int transitionTop = kTextInputDialogMargin + 56;
+            const int durationTop = transitionTop + 38;
+            const int transitionDurationTop = durationTop + 38;
+            const int footnoteTop = transitionDurationTop + 44;
+            const int dividerTop = kSlideshowSettingsDialogHeight - 70;
+            const int buttonTop = kSlideshowSettingsDialogHeight - 50;
+            const int cancelLeft = kSlideshowSettingsDialogWidth - kTextInputDialogMargin - kTextInputButtonWidth;
+            const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
+            const int numericEditWidth = 120;
+            const int spinWidth = 22;
+
+            const HWND instructionWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->instruction.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                contentLeft,
+                kTextInputDialogMargin,
+                contentWidth,
+                44,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsInstructionControlId)),
+                hInstance,
+                nullptr);
+            const HWND transitionLabel = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"Transition type:",
+                WS_CHILD | WS_VISIBLE,
+                contentLeft,
+                transitionTop + 4,
+                labelWidth,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionLabelControlId)),
+                hInstance,
+                nullptr);
+            state->transitionComboWindow = CreateWindowExW(
+                0,
+                L"COMBOBOX",
+                nullptr,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+                contentLeft + labelWidth,
+                transitionTop,
+                valueWidth,
+                140,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionComboControlId)),
+                hInstance,
+                nullptr);
+            const HWND durationLabel = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"Slide duration:",
+                WS_CHILD | WS_VISIBLE,
+                contentLeft,
+                durationTop + 4,
+                labelWidth,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationLabelControlId)),
+                hInstance,
+                nullptr);
+            state->durationEditWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                std::to_wstring(state->slideshowDurationMs).c_str(),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
+                contentLeft + labelWidth,
+                durationTop,
+                numericEditWidth,
+                kTextInputEditHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationEditControlId)),
+                hInstance,
+                nullptr);
+            state->durationSpinWindow = CreateWindowExW(
+                0,
+                UPDOWN_CLASSW,
+                nullptr,
+                WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_ARROWKEYS,
+                contentLeft + labelWidth + numericEditWidth,
+                durationTop,
+                spinWidth,
+                kTextInputEditHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationSpinControlId)),
+                hInstance,
+                nullptr);
+            const HWND durationUnit = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"ms",
+                WS_CHILD | WS_VISIBLE,
+                contentLeft + labelWidth + numericEditWidth + spinWidth + 8,
+                durationTop + 4,
+                36,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationUnitControlId)),
+                hInstance,
+                nullptr);
+            const HWND transitionDurationLabel = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"Transition duration:",
+                WS_CHILD | WS_VISIBLE,
+                contentLeft,
+                transitionDurationTop + 4,
+                labelWidth,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationLabelControlId)),
+                hInstance,
+                nullptr);
+            state->transitionDurationEditWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                std::to_wstring(state->transitionDurationMs).c_str(),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
+                contentLeft + labelWidth,
+                transitionDurationTop,
+                numericEditWidth,
+                kTextInputEditHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationEditControlId)),
+                hInstance,
+                nullptr);
+            state->transitionDurationSpinWindow = CreateWindowExW(
+                0,
+                UPDOWN_CLASSW,
+                nullptr,
+                WS_CHILD | WS_VISIBLE | UDS_ALIGNRIGHT | UDS_ARROWKEYS,
+                contentLeft + labelWidth + numericEditWidth,
+                transitionDurationTop,
+                spinWidth,
+                kTextInputEditHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationSpinControlId)),
+                hInstance,
+                nullptr);
+            const HWND transitionDurationUnit = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"ms",
+                WS_CHILD | WS_VISIBLE,
+                contentLeft + labelWidth + numericEditWidth + spinWidth + 8,
+                transitionDurationTop + 4,
+                36,
+                20,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationUnitControlId)),
+                hInstance,
+                nullptr);
+            const HWND footnoteWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->footnote.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                contentLeft,
+                footnoteTop,
+                contentWidth,
+                54,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsFootnoteControlId)),
+                hInstance,
+                nullptr);
+            const HWND dividerWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                nullptr,
+                WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
+                contentLeft,
+                dividerTop,
+                contentWidth,
+                2,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDividerControlId)),
+                hInstance,
+                nullptr);
+            state->okButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Apply",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                okLeft,
+                buttonTop,
+                kTextInputButtonWidth,
+                kTextInputButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
+                hInstance,
+                nullptr);
+            const HWND cancelButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Cancel",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                cancelLeft,
+                buttonTop,
+                kTextInputButtonWidth,
+                kTextInputButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
+                hInstance,
+                nullptr);
+
+            const HWND windows[] = {
+                instructionWindow,
+                transitionLabel,
+                state->transitionComboWindow,
+                durationLabel,
+                state->durationEditWindow,
+                state->durationSpinWindow,
+                durationUnit,
+                transitionDurationLabel,
+                state->transitionDurationEditWindow,
+                state->transitionDurationSpinWindow,
+                transitionDurationUnit,
+                footnoteWindow,
+                dividerWindow,
+                state->okButton,
+                cancelButton,
+            };
+            for (HWND window : windows)
+            {
+                if (window)
+                {
+                    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                }
+            }
+
+            if (state->durationEditWindow)
+            {
+                SendMessageW(state->durationEditWindow, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(6, 6));
+            }
+            if (state->durationSpinWindow)
+            {
+                SendMessageW(state->durationSpinWindow,
+                             UDM_SETRANGE32,
+                             kSlideshowMinimumDurationMs,
+                             kSlideshowMaximumDurationMs);
+                SendMessageW(state->durationSpinWindow,
+                             UDM_SETBUDDY,
+                             reinterpret_cast<WPARAM>(state->durationEditWindow),
+                             0);
+                SetDialogUIntEditAndSpin(state->durationEditWindow,
+                                         state->durationSpinWindow,
+                                         state->slideshowDurationMs);
+                const UDACCEL accelerations[] = {
+                    {0, 500},
+                    {3, 1000},
+                    {8, 5000},
+                };
+                SendMessageW(state->durationSpinWindow,
+                             UDM_SETACCEL,
+                             static_cast<WPARAM>(std::size(accelerations)),
+                             reinterpret_cast<LPARAM>(accelerations));
+            }
+            if (state->transitionDurationEditWindow)
+            {
+                SendMessageW(state->transitionDurationEditWindow, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(6, 6));
+            }
+            if (state->transitionDurationSpinWindow)
+            {
+                SendMessageW(state->transitionDurationSpinWindow,
+                             UDM_SETRANGE32,
+                             kSlideshowMinimumTransitionDurationMs,
+                             kSlideshowMaximumTransitionDurationMs);
+                SendMessageW(state->transitionDurationSpinWindow,
+                             UDM_SETBUDDY,
+                             reinterpret_cast<WPARAM>(state->transitionDurationEditWindow),
+                             0);
+                SetDialogUIntEditAndSpin(state->transitionDurationEditWindow,
+                                         state->transitionDurationSpinWindow,
+                                         state->transitionDurationMs);
+                const UDACCEL accelerations[] = {
+                    {0, 50},
+                    {3, 100},
+                    {8, 250},
+                };
+                SendMessageW(state->transitionDurationSpinWindow,
+                             UDM_SETACCEL,
+                             static_cast<WPARAM>(std::size(accelerations)),
+                             reinterpret_cast<LPARAM>(accelerations));
+            }
+
+            if (state->transitionComboWindow)
+            {
+                for (const SlideshowTransitionOption& option : kSlideshowTransitionOptions)
+                {
+                    SendMessageW(state->transitionComboWindow, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(option.label));
+                }
+                SendMessageW(state->transitionComboWindow,
+                             CB_SETCURSEL,
+                             SlideshowTransitionComboIndex(state->transitionStyle),
+                             0);
+            }
+
+            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            return 0;
+        }
+        case WM_SHOWWINDOW:
+            if (wParam != FALSE && state)
+            {
+                SetFocus(state->transitionComboWindow ? state->transitionComboWindow : state->okButton);
+                return FALSE;
+            }
+            break;
+        case WM_CTLCOLORDLG:
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_CTLCOLORSTATIC:
+            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
+            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_NOTIFY:
+            if (!state)
+            {
+                break;
+            }
+
+            if (const auto* notify = reinterpret_cast<const NMHDR*>(lParam);
+                notify && notify->code == UDN_DELTAPOS)
+            {
+                const auto* upDown = reinterpret_cast<const NMUPDOWN*>(lParam);
+                if (notify->idFrom == kSlideshowSettingsDurationSpinControlId)
+                {
+                    const UINT nextValue = ComputeNextSpinValue(state->durationEditWindow,
+                                                                upDown->iPos,
+                                                                upDown->iDelta,
+                                                                kSlideshowMinimumDurationMs,
+                                                                kSlideshowMaximumDurationMs);
+                    SetDialogUIntEditAndSpin(state->durationEditWindow, state->durationSpinWindow, nextValue);
+                    return TRUE;
+                }
+
+                if (notify->idFrom == kSlideshowSettingsTransitionDurationSpinControlId)
+                {
+                    const UINT nextValue = ComputeNextSpinValue(state->transitionDurationEditWindow,
+                                                                upDown->iPos,
+                                                                upDown->iDelta,
+                                                                kSlideshowMinimumTransitionDurationMs,
+                                                                kSlideshowMaximumTransitionDurationMs);
+                    SetDialogUIntEditAndSpin(state->transitionDurationEditWindow,
+                                             state->transitionDurationSpinWindow,
+                                             nextValue);
+                    return TRUE;
+                }
+            }
+            break;
+        case WM_COMMAND:
+            if (!state)
+            {
+                break;
+            }
+
+            if (LOWORD(wParam) == IDOK)
+            {
+                if (CollectSlideshowSettingsDialogResult(hwnd, state))
+                {
+                    state->accepted = true;
+                    DestroyWindow(hwnd);
+                }
+                return 0;
+            }
+
+            if (LOWORD(wParam) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    bool PromptForSlideshowSettings(HWND ownerWindow,
+                                    HINSTANCE instance,
+                                    UINT initialSlideshowDurationMs,
+                                    hyperbrowse::viewer::TransitionStyle initialTransitionStyle,
+                                    UINT initialTransitionDurationMs,
+                                    UINT* slideshowDurationMs,
+                                    hyperbrowse::viewer::TransitionStyle* transitionStyle,
+                                    UINT* transitionDurationMs)
+    {
+        if (!slideshowDurationMs || !transitionStyle || !transitionDurationMs)
+        {
+            return false;
+        }
+
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance, kSlideshowSettingsDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &SlideshowSettingsDialogProc;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = kSlideshowSettingsDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return false;
+            }
+        }
+
+        SlideshowSettingsDialogState state;
+        state.ownerWindow = ownerWindow;
+        state.title = L"Slideshow Settings";
+        state.instruction = L"Choose transition style and precise slideshow timing.";
+        state.footnote = L"Random selects from the animated transition styles for each transition. None uses hard cuts.";
+        state.slideshowDurationMs = std::clamp<UINT>(initialSlideshowDurationMs,
+                                 kSlideshowMinimumDurationMs,
+                                 kSlideshowMaximumDurationMs);
+        state.transitionDurationMs = std::clamp<UINT>(initialTransitionDurationMs,
+                                  kSlideshowMinimumTransitionDurationMs,
+                                  kSlideshowMaximumTransitionDurationMs);
+        state.transitionStyle = initialTransitionStyle;
+
+        RECT windowRect{0, 0, kSlideshowSettingsDialogWidth, kSlideshowSettingsDialogHeight};
+        AdjustWindowRectEx(&windowRect,
+                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                           FALSE,
+                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, FALSE);
+        }
+
+        HWND dialogWindow = CreateWindowExW(
+            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+            kSlideshowSettingsDialogClassName,
+            state.title.c_str(),
+            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            ownerWindow,
+            nullptr,
+            instance,
+            &state);
+
+        if (!dialogWindow)
+        {
+            if (ownerWindow)
+            {
+                EnableWindow(ownerWindow, TRUE);
+            }
+            return false;
+        }
+
+        SetWindowTextW(dialogWindow, state.title.c_str());
+
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+
+        MSG message{};
+        while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            if (!IsDialogMessageW(dialogWindow, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, TRUE);
+            SetForegroundWindow(ownerWindow);
+            SetActiveWindow(ownerWindow);
+        }
+
+        if (!state.accepted)
+        {
+            return false;
+        }
+
+        *slideshowDurationMs = state.slideshowDurationMs;
+        *transitionStyle = state.transitionStyle;
+        *transitionDurationMs = state.transitionDurationMs;
+        return true;
+    }
+
     bool PromptForSingleLineText(HWND ownerWindow,
                                  HINSTANCE instance,
                                  const std::wstring& title,
@@ -4413,140 +5107,6 @@ namespace
         }
     }
 
-    hyperbrowse::viewer::TransitionStyle TransitionStyleFromCommandId(UINT commandId)
-    {
-        switch (commandId)
-        {
-        case ID_VIEW_SLIDESHOW_TRANSITION_CUT:
-            return hyperbrowse::viewer::TransitionStyle::Cut;
-        case ID_VIEW_SLIDESHOW_TRANSITION_SLIDE:
-            return hyperbrowse::viewer::TransitionStyle::Slide;
-        case ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS:
-            return hyperbrowse::viewer::TransitionStyle::KenBurns;
-        case ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE:
-        default:
-            return hyperbrowse::viewer::TransitionStyle::Crossfade;
-        }
-    }
-
-    UINT CommandIdFromTransitionStyle(hyperbrowse::viewer::TransitionStyle style)
-    {
-        switch (style)
-        {
-        case hyperbrowse::viewer::TransitionStyle::Cut:
-            return ID_VIEW_SLIDESHOW_TRANSITION_CUT;
-        case hyperbrowse::viewer::TransitionStyle::Slide:
-            return ID_VIEW_SLIDESHOW_TRANSITION_SLIDE;
-        case hyperbrowse::viewer::TransitionStyle::KenBurns:
-            return ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS;
-        case hyperbrowse::viewer::TransitionStyle::Crossfade:
-        default:
-            return ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE;
-        }
-    }
-
-    bool IsTransitionStyleCommand(UINT commandId)
-    {
-        return commandId >= ID_VIEW_SLIDESHOW_TRANSITION_CUT
-            && commandId <= ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS;
-    }
-
-    UINT SlideshowIntervalFromCommandId(UINT commandId)
-    {
-        switch (commandId)
-        {
-        case ID_VIEW_SLIDESHOW_DURATION_1000:
-            return 1000;
-        case ID_VIEW_SLIDESHOW_DURATION_2000:
-            return 2000;
-        case ID_VIEW_SLIDESHOW_DURATION_5000:
-            return 5000;
-        case ID_VIEW_SLIDESHOW_DURATION_10000:
-            return 10000;
-        case ID_VIEW_SLIDESHOW_DURATION_3000:
-        default:
-            return 3000;
-        }
-    }
-
-    UINT CommandIdFromSlideshowInterval(UINT intervalMs)
-    {
-        if (intervalMs <= 1000)
-        {
-            return ID_VIEW_SLIDESHOW_DURATION_1000;
-        }
-        if (intervalMs <= 2000)
-        {
-            return ID_VIEW_SLIDESHOW_DURATION_2000;
-        }
-        if (intervalMs <= 3000)
-        {
-            return ID_VIEW_SLIDESHOW_DURATION_3000;
-        }
-        if (intervalMs <= 5000)
-        {
-            return ID_VIEW_SLIDESHOW_DURATION_5000;
-        }
-        return ID_VIEW_SLIDESHOW_DURATION_10000;
-    }
-
-    bool IsSlideshowIntervalCommand(UINT commandId)
-    {
-        return commandId >= ID_VIEW_SLIDESHOW_DURATION_1000
-            && commandId <= ID_VIEW_SLIDESHOW_DURATION_10000;
-    }
-
-    UINT TransitionDurationFromCommandId(UINT commandId)
-    {
-        switch (commandId)
-        {
-        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200:
-            return 200;
-        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500:
-            return 500;
-        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800:
-            return 800;
-        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200:
-            return 1200;
-        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000:
-            return 2000;
-        case ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350:
-        default:
-            return 350;
-        }
-    }
-
-    UINT CommandIdFromTransitionDuration(UINT durationMs)
-    {
-        if (durationMs <= 275)
-        {
-            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200;
-        }
-        if (durationMs <= 425)
-        {
-            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350;
-        }
-        if (durationMs <= 650)
-        {
-            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500;
-        }
-        if (durationMs <= 1000)
-        {
-            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800;
-        }
-        if (durationMs <= 1600)
-        {
-            return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200;
-        }
-        return ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000;
-    }
-
-    bool IsTransitionDurationCommand(UINT commandId)
-    {
-        return commandId >= ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200
-            && commandId <= ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000;
-    }
-
     hyperbrowse::viewer::MouseWheelBehavior ViewerMouseWheelBehaviorFromCommandId(UINT commandId)
     {
         switch (commandId)
@@ -5167,6 +5727,7 @@ namespace hyperbrowse::ui
             {FVIRTKEY | FCONTROL, static_cast<WORD>('R'), ID_VIEW_RECURSIVE},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('S'), ID_VIEW_SLIDESHOW_SELECTION},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('F'), ID_VIEW_SLIDESHOW_FOLDER},
+            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('T'), ID_VIEW_SLIDESHOW_SETTINGS},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('D'), ID_HELP_DIAGNOSTICS_SNAPSHOT},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('X'), ID_HELP_DIAGNOSTICS_RESET},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('L'), ID_VIEW_THEME_LIGHT},
@@ -5196,9 +5757,6 @@ namespace hyperbrowse::ui
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
         HMENU slideshowMenu = CreatePopupMenu();
-        HMENU slideshowDurationMenu = CreatePopupMenu();
-        HMENU slideshowTransitionMenu = CreatePopupMenu();
-        HMENU slideshowTransitionDurationMenu = CreatePopupMenu();
         HMENU viewerMenu = CreatePopupMenu();
         HMENU viewerMouseWheelMenu = CreatePopupMenu();
         HMENU viewerOverlayTextSizeMenu = CreatePopupMenu();
@@ -5210,7 +5768,7 @@ namespace hyperbrowse::ui
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !slideshowDurationMenu || !slideshowTransitionMenu || !slideshowTransitionDurationMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -5300,28 +5858,10 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel\tCtrl+3");
-        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_1000, L"&1 second");
-        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_2000, L"&2 seconds");
-        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_3000, L"&3 seconds");
-        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_5000, L"&5 seconds");
-        AppendMenuW(slideshowDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_DURATION_10000, L"1&0 seconds");
-        AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CUT, L"&Cut");
-        AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_CROSSFADE, L"&Crossfade");
-        AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_SLIDE, L"S&lide");
-        AppendMenuW(slideshowTransitionMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS, L"&Ken Burns");
-        AppendMenuW(slideshowTransitionMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200, L"&200 ms");
-        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_350, L"&350 ms");
-        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_500, L"&500 ms");
-        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_800, L"&800 ms");
-        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_1200, L"1&200 ms");
-        AppendMenuW(slideshowTransitionDurationMenu, MF_STRING, ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000, L"2&000 ms");
-        AppendMenuW(slideshowTransitionMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionDurationMenu), L"&Duration");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"From &Selection\tCtrl+Shift+S");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"From &Folder\tCtrl+Shift+F");
         AppendMenuW(slideshowMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(slideshowMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowDurationMenu), L"&Duration");
-        AppendMenuW(slideshowMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowTransitionMenu), L"&Transition");
+        AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SETTINGS, L"&Settings...	Ctrl+Shift+T");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowMenu), L"S&lideshow");
 
@@ -10587,6 +11127,7 @@ namespace hyperbrowse::ui
                        MF_BYCOMMAND | (hasFolder && !batchConvertActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_FOLDER, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_SETTINGS, MF_BYCOMMAND | MF_ENABLED);
 
         CheckMenuRadioItem(
             menu_,
@@ -10665,24 +11206,6 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_DETAILS_STRIP,
             MF_BYCOMMAND | (detailsStripVisible_ ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuRadioItem(
-            menu_,
-            ID_VIEW_SLIDESHOW_DURATION_1000,
-            ID_VIEW_SLIDESHOW_DURATION_10000,
-            CommandIdFromSlideshowInterval(slideshowIntervalMs_),
-            MF_BYCOMMAND);
-        CheckMenuRadioItem(
-            menu_,
-            ID_VIEW_SLIDESHOW_TRANSITION_CUT,
-            ID_VIEW_SLIDESHOW_TRANSITION_KEN_BURNS,
-            CommandIdFromTransitionStyle(slideshowTransitionStyle_),
-            MF_BYCOMMAND);
-        CheckMenuRadioItem(
-            menu_,
-            ID_VIEW_SLIDESHOW_TRANSITION_DURATION_200,
-            ID_VIEW_SLIDESHOW_TRANSITION_DURATION_2000,
-            CommandIdFromTransitionDuration(slideshowTransitionDurationMs_),
-            MF_BYCOMMAND);
         CheckMenuRadioItem(
             menu_,
             ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM,
@@ -11137,6 +11660,42 @@ namespace hyperbrowse::ui
         browserPaneController_->SetRawJpegStackingEnabled(rawJpegPairedOperationsEnabled_);
     }
 
+    void MainWindow::ShowSlideshowSettingsDialog()
+    {
+        UINT slideshowDurationMs = slideshowIntervalMs_;
+        viewer::TransitionStyle transitionStyle = slideshowTransitionStyle_;
+        UINT transitionDurationMs = slideshowTransitionDurationMs_;
+        if (!PromptForSlideshowSettings(hwnd_,
+                                        instance_,
+                                        slideshowIntervalMs_,
+                                        slideshowTransitionStyle_,
+                                        slideshowTransitionDurationMs_,
+                                        &slideshowDurationMs,
+                                        &transitionStyle,
+                                        &transitionDurationMs))
+        {
+            return;
+        }
+
+        const bool slideshowDurationChanged = slideshowIntervalMs_ != slideshowDurationMs;
+        const bool transitionStyleChanged = slideshowTransitionStyle_ != transitionStyle;
+        const bool transitionDurationChanged = slideshowTransitionDurationMs_ != transitionDurationMs;
+        if (!slideshowDurationChanged && !transitionStyleChanged && !transitionDurationChanged)
+        {
+            return;
+        }
+
+        slideshowIntervalMs_ = slideshowDurationMs;
+        slideshowTransitionStyle_ = transitionStyle;
+        slideshowTransitionDurationMs_ = transitionDurationMs;
+        ApplyViewerTransitionSettings();
+        if (slideshowDurationChanged && viewerWindow_ && viewerWindow_->IsSlideshowActive())
+        {
+            viewerWindow_->StartSlideshow(slideshowIntervalMs_);
+        }
+        UpdateMenuState();
+    }
+
     void MainWindow::ShowPerformanceSettingsDialog()
     {
         const std::size_t currentThumbnailCacheCapacityBytes = browserPaneController_
@@ -11261,20 +11820,22 @@ namespace hyperbrowse::ui
                 sortAscending_ = value != 0;
             }
 
-            if (TryReadDwordValue(key, kRegistryValueSlideshowInterval, &value) && value >= 1000 && value <= 60000)
+            if (TryReadDwordValue(key, kRegistryValueSlideshowInterval, &value)
+                && value >= kSlideshowMinimumDurationMs
+                && value <= kSlideshowMaximumDurationMs)
             {
                 slideshowIntervalMs_ = static_cast<UINT>(value);
             }
 
             if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionStyle, &value)
-                && value <= static_cast<DWORD>(viewer::TransitionStyle::KenBurns))
+                && value <= static_cast<DWORD>(viewer::TransitionStyle::ZoomFade))
             {
                 slideshowTransitionStyle_ = static_cast<viewer::TransitionStyle>(value);
             }
 
             if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionDuration, &value)
-                && value >= 120
-                && value <= 5000)
+                && value >= kSlideshowMinimumTransitionDurationMs
+                && value <= kSlideshowMaximumTransitionDurationMs)
             {
                 slideshowTransitionDurationMs_ = static_cast<UINT>(value);
             }
@@ -11987,33 +12548,6 @@ namespace hyperbrowse::ui
             return true;
         }
 
-        if (IsTransitionStyleCommand(commandId))
-        {
-            slideshowTransitionStyle_ = TransitionStyleFromCommandId(commandId);
-            ApplyViewerTransitionSettings();
-            UpdateMenuState();
-            return true;
-        }
-
-        if (IsSlideshowIntervalCommand(commandId))
-        {
-            slideshowIntervalMs_ = SlideshowIntervalFromCommandId(commandId);
-            if (viewerWindow_ && viewerWindow_->IsSlideshowActive())
-            {
-                viewerWindow_->StartSlideshow(slideshowIntervalMs_);
-            }
-            UpdateMenuState();
-            return true;
-        }
-
-        if (IsTransitionDurationCommand(commandId))
-        {
-            slideshowTransitionDurationMs_ = TransitionDurationFromCommandId(commandId);
-            ApplyViewerTransitionSettings();
-            UpdateMenuState();
-            return true;
-        }
-
         switch (commandId)
         {
         case ID_FILE_OPEN_FOLDER:
@@ -12167,6 +12701,9 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_RECURSIVE:
             ToggleRecursiveBrowsing();
+            return true;
+        case ID_VIEW_SLIDESHOW_SETTINGS:
+            ShowSlideshowSettingsDialog();
             return true;
         case ID_VIEW_NVJPEG_ACCELERATION:
             if (HasNvJpegCapability())
