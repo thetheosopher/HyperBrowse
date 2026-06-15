@@ -489,7 +489,10 @@ namespace
 
     struct TextInputDialogLayoutMetrics
     {
+        int clientWidth{};
         int contentWidth{};
+        int okButtonWidth{};
+        int cancelButtonWidth{};
         int instructionHeight{};
         int editTop{};
         int dividerTop{};
@@ -1135,7 +1138,46 @@ namespace
     TextInputDialogLayoutMetrics BuildTextInputDialogLayoutMetrics(const TextInputDialogState& state)
     {
         TextInputDialogLayoutMetrics metrics;
-        metrics.contentWidth = kTextInputDialogWidth - (kTextInputDialogMargin * 2);
+        metrics.clientWidth = kTextInputDialogWidth;
+
+        const auto measureButtonWidth = [](std::wstring_view label) -> int
+        {
+            if (label.empty())
+            {
+                return kTextInputButtonWidth;
+            }
+
+            std::wstring localText(label);
+            HDC screenDc = GetDC(nullptr);
+            if (!screenDc)
+            {
+                return kTextInputButtonWidth;
+            }
+
+            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HGDIOBJ oldFont = font ? SelectObject(screenDc, font) : nullptr;
+            SIZE size{};
+            GetTextExtentPoint32W(screenDc,
+                                  localText.c_str(),
+                                  static_cast<int>(localText.size()),
+                                  &size);
+            if (oldFont)
+            {
+                SelectObject(screenDc, oldFont);
+            }
+            ReleaseDC(nullptr, screenDc);
+
+            return std::max(kTextInputButtonWidth, static_cast<int>(size.cx) + 24);
+        };
+
+        metrics.okButtonWidth = measureButtonWidth(state.confirmLabel);
+        metrics.cancelButtonWidth = measureButtonWidth(L"Cancel");
+
+        const int buttonRowWidth = metrics.okButtonWidth + 8 + metrics.cancelButtonWidth;
+        const int minimumClientWidthForButtons = (kTextInputDialogMargin * 2) + buttonRowWidth;
+        metrics.clientWidth = std::max(metrics.clientWidth, minimumClientWidthForButtons);
+
+        metrics.contentWidth = metrics.clientWidth - (kTextInputDialogMargin * 2);
         metrics.instructionHeight = MeasureTextBlockHeight(static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
                                                            state.instruction,
                                                            metrics.contentWidth,
@@ -2596,12 +2638,12 @@ namespace
             }
 
             const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-            const int clientWidth = kTextInputDialogWidth;
             const TextInputDialogLayoutMetrics metrics = BuildTextInputDialogLayoutMetrics(*state);
+            const int clientWidth = metrics.clientWidth;
             const int contentWidth = metrics.contentWidth;
             const int buttonTop = metrics.buttonTop;
-            const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
-            const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
+            const int cancelLeft = clientWidth - kTextInputDialogMargin - metrics.cancelButtonWidth;
+            const int okLeft = cancelLeft - 8 - metrics.okButtonWidth;
 
             HWND instructionWindow = CreateWindowExW(
                 0,
@@ -2649,7 +2691,7 @@ namespace
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
                 okLeft,
                 buttonTop,
-                kTextInputButtonWidth,
+                metrics.okButtonWidth,
                 kTextInputButtonHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
@@ -2662,7 +2704,7 @@ namespace
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                 cancelLeft,
                 buttonTop,
-                kTextInputButtonWidth,
+                metrics.cancelButtonWidth,
                 kTextInputButtonHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
@@ -4283,7 +4325,7 @@ namespace
         state.selectionEnd = selectionEnd;
 
         const TextInputDialogLayoutMetrics layoutMetrics = BuildTextInputDialogLayoutMetrics(state);
-        RECT windowRect{0, 0, kTextInputDialogWidth, std::max(kTextInputDialogHeight, layoutMetrics.clientHeight)};
+        RECT windowRect{0, 0, layoutMetrics.clientWidth, std::max(kTextInputDialogHeight, layoutMetrics.clientHeight)};
         AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
 
         if (ownerWindow)
@@ -9758,7 +9800,7 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
             if (hasBatchRenameSelection)
             {
-                AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER, L"Move to new child &folder...");
+                AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER, L"Move to New Child &Folder...");
             }
             AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete");
             AppendMenuW(menu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently");
