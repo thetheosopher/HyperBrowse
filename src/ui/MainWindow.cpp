@@ -125,6 +125,7 @@ namespace
     constexpr UINT ID_FILE_CLEAR_RECENT_FOLDERS = 1029;
     constexpr UINT ID_FILE_CLEAR_RECENT_DESTINATIONS = 1038;
     constexpr UINT ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER = 1039;
+    constexpr UINT ID_VIEW_NAVIGATE_BACK_FOLDER = 1049;
     constexpr UINT ID_FILE_SET_RATING_0 = 1080;
     constexpr UINT ID_FILE_SET_RATING_1 = 1081;
     constexpr UINT ID_FILE_SET_RATING_2 = 1082;
@@ -218,6 +219,8 @@ namespace
     constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
     constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
     constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
+    constexpr std::size_t kOpenedFolderHistoryLimit = 256;
+    constexpr std::size_t kInvalidHistoryIndex = static_cast<std::size_t>(-1);
     constexpr UINT_PTR kMemoryPressureTimerId = 9101;
     constexpr UINT kMemoryPressureIntervalMs = 1500;
     constexpr std::uint64_t kMemoryPressureAvailableBytesThreshold = 1024ULL * 1024ULL * 1024ULL;
@@ -1870,27 +1873,27 @@ namespace
     }
 
     constexpr std::array<SlideshowTransitionOption, 21> kSlideshowTransitionOptions = {{
-        {hyperbrowse::viewer::TransitionStyle::Cut, L"None (Cut)"},
-        {hyperbrowse::viewer::TransitionStyle::Crossfade, L"Crossfade"},
-        {hyperbrowse::viewer::TransitionStyle::Slide, L"Slide"},
-        {hyperbrowse::viewer::TransitionStyle::KenBurns, L"Ken Burns"},
         {hyperbrowse::viewer::TransitionStyle::Random, L"Random (All animated styles)"},
-        {hyperbrowse::viewer::TransitionStyle::FadeToBlack, L"Fade to Black"},
-        {hyperbrowse::viewer::TransitionStyle::DiagonalSlide, L"Diagonal Slide"},
-        {hyperbrowse::viewer::TransitionStyle::Push, L"Push"},
-        {hyperbrowse::viewer::TransitionStyle::CenterWipe, L"Center Wipe"},
-        {hyperbrowse::viewer::TransitionStyle::VenetianBlinds, L"Venetian Blinds"},
-        {hyperbrowse::viewer::TransitionStyle::SplitWipe, L"Split Wipe"},
-        {hyperbrowse::viewer::TransitionStyle::HorizontalBlinds, L"Horizontal Blinds"},
-        {hyperbrowse::viewer::TransitionStyle::CheckerboardWipe, L"Checkerboard Wipe"},
-        {hyperbrowse::viewer::TransitionStyle::ZoomFade, L"Zoom Fade"},
         {hyperbrowse::viewer::TransitionStyle::BlurCrossfade, L"Blur Crossfade"},
-        {hyperbrowse::viewer::TransitionStyle::MotionBlur, L"Motion Blur"},
+        {hyperbrowse::viewer::TransitionStyle::CenterWipe, L"Center Wipe"},
+        {hyperbrowse::viewer::TransitionStyle::CheckerboardWipe, L"Checkerboard Wipe"},
         {hyperbrowse::viewer::TransitionStyle::ColorWash, L"Color Wash"},
-        {hyperbrowse::viewer::TransitionStyle::SepiaDrift, L"Sepia Drift"},
+        {hyperbrowse::viewer::TransitionStyle::Crossfade, L"Crossfade"},
+        {hyperbrowse::viewer::TransitionStyle::DiagonalSlide, L"Diagonal Slide"},
+        {hyperbrowse::viewer::TransitionStyle::FadeToBlack, L"Fade to Black"},
         {hyperbrowse::viewer::TransitionStyle::Flashbulb, L"Flashbulb"},
-        {hyperbrowse::viewer::TransitionStyle::Prism, L"Prism"},
+        {hyperbrowse::viewer::TransitionStyle::HorizontalBlinds, L"Horizontal Blinds"},
+        {hyperbrowse::viewer::TransitionStyle::KenBurns, L"Ken Burns"},
         {hyperbrowse::viewer::TransitionStyle::MonochromeReveal, L"Monochrome Reveal"},
+        {hyperbrowse::viewer::TransitionStyle::MotionBlur, L"Motion Blur"},
+        {hyperbrowse::viewer::TransitionStyle::Cut, L"None (Cut)"},
+        {hyperbrowse::viewer::TransitionStyle::Prism, L"Prism"},
+        {hyperbrowse::viewer::TransitionStyle::Push, L"Push"},
+        {hyperbrowse::viewer::TransitionStyle::SepiaDrift, L"Sepia Drift"},
+        {hyperbrowse::viewer::TransitionStyle::Slide, L"Slide"},
+        {hyperbrowse::viewer::TransitionStyle::SplitWipe, L"Split Wipe"},
+        {hyperbrowse::viewer::TransitionStyle::VenetianBlinds, L"Venetian Blinds"},
+        {hyperbrowse::viewer::TransitionStyle::ZoomFade, L"Zoom Fade"},
     }};
 
     int SlideshowTransitionComboIndex(hyperbrowse::viewer::TransitionStyle style)
@@ -1903,7 +1906,7 @@ namespace
             }
         }
 
-        return 1;
+        return SlideshowTransitionComboIndex(hyperbrowse::viewer::TransitionStyle::Crossfade);
     }
 
     bool TryReadDialogUInt(HWND window, UINT minimum, UINT maximum, UINT* value)
@@ -4481,6 +4484,25 @@ namespace
         return fs::is_directory(fs::path(folderPath), error) && !error;
     }
 
+    bool IsTextInputControlWindow(HWND window)
+    {
+        if (!window)
+        {
+            return false;
+        }
+
+        wchar_t className[64] = {};
+        if (GetClassNameW(window, className, static_cast<int>(std::size(className))) == 0)
+        {
+            return false;
+        }
+
+        return _wcsicmp(className, L"Edit") == 0
+            || _wcsicmp(className, L"RichEdit20W") == 0
+            || _wcsicmp(className, L"RichEdit50W") == 0
+            || _wcsicmp(className, MSFTEDIT_CLASS) == 0;
+    }
+
     bool AreFoldersOnSameDrive(std::wstring_view lhs, std::wstring_view rhs)
     {
         if (lhs.empty() || rhs.empty())
@@ -4553,6 +4575,20 @@ namespace
         return allSourcesOnSameDrive
             ? hyperbrowse::services::FileOperationType::Move
             : hyperbrowse::services::FileOperationType::Copy;
+    }
+
+    bool AreAllSourcePathsOnSameDrive(const std::vector<std::wstring>& sourcePaths,
+                                      std::wstring_view destinationFolder)
+    {
+        if (destinationFolder.empty() || sourcePaths.empty())
+        {
+            return false;
+        }
+
+        return std::all_of(sourcePaths.begin(), sourcePaths.end(), [&](const std::wstring& sourcePath)
+        {
+            return !sourcePath.empty() && AreFoldersOnSameDrive(sourcePath, destinationFolder);
+        });
     }
 
     bool IsValidFolderName(const std::wstring& name, std::wstring* errorMessage)
@@ -4944,6 +4980,51 @@ namespace
         const std::wstring path(target);
         const HINSTANCE result = ShellExecuteW(ownerWindow, verb, path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         return reinterpret_cast<INT_PTR>(result) > 32;
+    }
+
+    bool PromptForCrossDriveDropOperation(HWND ownerWindow,
+                                          std::wstring_view destinationFolder,
+                                          hyperbrowse::services::FileOperationType* operationType)
+    {
+        if (!operationType)
+        {
+            return false;
+        }
+
+        TASKDIALOG_BUTTON buttons[] = {
+            {1001, L"Copy files\nLeave the original files where they are and copy them into the target folder."},
+            {1002, L"Move files\nTransfer the files into the target folder and remove them from the original drive."},
+        };
+
+        const std::wstring destinationLabel = GetFolderDisplayName(destinationFolder);
+        const std::wstring content = L"The destination folder \""
+            + destinationLabel
+            + L"\" is on a different drive. Choose whether to copy the dropped files or move them.";
+
+        TASKDIALOGCONFIG config{};
+        config.cbSize = sizeof(config);
+        config.hwndParent = ownerWindow;
+        config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+        config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+        config.pszWindowTitle = L"Drop Images";
+        config.pszMainIcon = TD_INFORMATION_ICON;
+        config.pszMainInstruction = L"Choose how to handle the dropped files.";
+        config.pszContent = content.c_str();
+        config.cButtons = static_cast<UINT>(std::size(buttons));
+        config.pButtons = buttons;
+        config.nDefaultButton = 1001;
+
+        int clickedButton = 0;
+        const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
+        if (FAILED(dialogResult) || clickedButton == IDCANCEL)
+        {
+            return false;
+        }
+
+        *operationType = clickedButton == 1002
+            ? hyperbrowse::services::FileOperationType::Move
+            : hyperbrowse::services::FileOperationType::Copy;
+        return true;
     }
 
     bool RevealPathsInExplorer(const std::vector<std::wstring>& selectedPaths)
@@ -5885,6 +5966,14 @@ namespace hyperbrowse::ui
             return false;
         }
 
+        // Preserve text-edit backspace behavior in edit/rich-edit controls.
+        if (message->message == WM_KEYDOWN
+            && message->wParam == VK_BACK
+            && IsTextInputControlWindow(message->hwnd))
+        {
+            return false;
+        }
+
         return TranslateAcceleratorW(hwnd_, accelerators_, message) != 0;
     }
 
@@ -5917,6 +6006,7 @@ namespace hyperbrowse::ui
 
         ACCEL accelerators[] = {
             {FVIRTKEY | FCONTROL, static_cast<WORD>('O'), ID_FILE_OPEN_FOLDER},
+            {FVIRTKEY, VK_BACK, ID_VIEW_NAVIGATE_BACK_FOLDER},
             {FVIRTKEY, VK_ESCAPE, ID_FILE_EXIT},
             {FVIRTKEY, VK_F5, ID_FILE_REFRESH_TREE},
             {FVIRTKEY, VK_F2, ID_FILE_RENAME_SELECTED},
@@ -7054,6 +7144,140 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::UpdateInternalSelectionDrag(POINT windowPoint)
+    {
+        if (dragMode_ != DragMode::QuickAccessInternal)
+        {
+            return;
+        }
+
+        const int previousQuickAccessRow = quickAccessHotRowIndex_;
+        const int previousQuickAccessButton = quickAccessHotButtonIndex_;
+        HTREEITEM nextTreeDropItem = nullptr;
+        std::wstring nextTreeDropPath;
+
+        quickAccessHotRowIndex_ = HitTestQuickAccessDestinationRow(windowPoint.x, windowPoint.y);
+        quickAccessHotButtonIndex_ = -1;
+
+        if (treePane_)
+        {
+            RECT treeRect{};
+            GetWindowRect(treePane_, &treeRect);
+
+            POINT screenPoint = windowPoint;
+            ClientToScreen(hwnd_, &screenPoint);
+            if (PtInRect(&treeRect, screenPoint) != FALSE)
+            {
+                POINT treePoint = screenPoint;
+                ScreenToClient(treePane_, &treePoint);
+
+                TVHITTESTINFO hitTest{};
+                hitTest.pt = treePoint;
+                const HTREEITEM item = TreeView_HitTest(treePane_, &hitTest);
+                if (item && (hitTest.flags & TVHT_ONITEM) != 0)
+                {
+                    const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+                    if (nodeData && !nodeData->path.empty())
+                    {
+                        const std::wstring normalizedDestinationPath = NormalizeFolderPath(nodeData->path);
+                        if (IsExistingDirectory(normalizedDestinationPath)
+                            && !IsQuickAccessDestinationCurrentFolder(normalizedDestinationPath))
+                        {
+                            nextTreeDropItem = item;
+                            nextTreeDropPath = normalizedDestinationPath;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (internalSelectionTreeDropItem_ != nextTreeDropItem)
+        {
+            internalSelectionTreeDropItem_ = nextTreeDropItem;
+            if (treePane_)
+            {
+                TreeView_SelectDropTarget(treePane_, internalSelectionTreeDropItem_);
+            }
+        }
+        internalSelectionTreeDropPath_ = std::move(nextTreeDropPath);
+
+        if ((previousQuickAccessRow != quickAccessHotRowIndex_
+             || previousQuickAccessButton != quickAccessHotButtonIndex_)
+            && !IsRectEmpty(&quickAccessDestinationPanelRect_))
+        {
+            InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+        }
+
+        SetCursor(LoadCursorW(nullptr,
+                              (quickAccessHotRowIndex_ >= 0 || internalSelectionTreeDropItem_ != nullptr)
+                                  ? IDC_HAND
+                                  : IDC_NO));
+    }
+
+    void MainWindow::FinishInternalSelectionDrag(bool commitDrop)
+    {
+        if (dragMode_ != DragMode::QuickAccessInternal)
+        {
+            return;
+        }
+
+        const int quickAccessRow = (commitDrop && quickAccessHotRowIndex_ >= 0)
+            ? quickAccessHotRowIndex_
+            : -1;
+        const std::wstring treeDropPath = (commitDrop && !internalSelectionTreeDropPath_.empty())
+            ? internalSelectionTreeDropPath_
+            : std::wstring{};
+
+        dragMode_ = DragMode::None;
+        if (GetCapture() == hwnd_)
+        {
+            ReleaseCapture();
+        }
+
+        quickAccessHotRowIndex_ = -1;
+        quickAccessHotButtonIndex_ = -1;
+        internalSelectionTreeDropPath_.clear();
+        internalSelectionTreeDropItem_ = nullptr;
+        if (treePane_)
+        {
+            TreeView_SelectDropTarget(treePane_, nullptr);
+        }
+        if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+        {
+            InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+        }
+
+        if (quickAccessRow >= 0 && quickAccessRow < static_cast<int>(quickAccessDestinationRows_.size()))
+        {
+            const services::FileOperationType type = ResolveQuickAccessDropOperationType(
+                browserPaneController_->SelectedFilePathsSnapshot(),
+                quickAccessDestinationRows_[static_cast<std::size_t>(quickAccessRow)].destinationPath);
+            StartSelectionFileOperationToDestination(type,
+                                                     quickAccessDestinationRows_[static_cast<std::size_t>(quickAccessRow)].destinationPath);
+            return;
+        }
+
+        if (!treeDropPath.empty())
+        {
+            const std::vector<std::wstring> sourcePaths = SelectedFileOperationPathsSnapshot();
+            if (sourcePaths.empty())
+            {
+                return;
+            }
+
+            services::FileOperationType type = services::FileOperationType::Move;
+            if (!AreAllSourcePathsOnSameDrive(sourcePaths, treeDropPath))
+            {
+                if (!PromptForCrossDriveDropOperation(hwnd_, treeDropPath, &type))
+                {
+                    return;
+                }
+            }
+
+            StartSelectionFileOperationToDestination(type, treeDropPath);
+        }
+    }
+
     void MainWindow::LayoutChildren()
     {
         if (!hwnd_ || !treePane_ || !browserPane_ || !statusBar_)
@@ -7722,6 +7946,89 @@ namespace hyperbrowse::ui
         {
             UpdateMenuState();
         }
+    }
+
+    void MainWindow::RecordOpenedFolderHistory(std::wstring folderPath)
+    {
+        folderPath = NormalizeFolderPath(std::move(folderPath));
+        if (folderPath.empty())
+        {
+            return;
+        }
+
+        if (backNavigationPending_)
+        {
+            const std::size_t targetIndex = backNavigationTargetHistoryIndex_;
+            backNavigationPending_ = false;
+            backNavigationTargetHistoryIndex_ = kInvalidHistoryIndex;
+
+            if (targetIndex < openedFolderHistory_.size())
+            {
+                openedFolderHistory_[targetIndex] = folderPath;
+                openedFolderHistoryIndex_ = targetIndex;
+                return;
+            }
+        }
+
+        if (openedFolderHistoryIndex_ != kInvalidHistoryIndex
+            && openedFolderHistoryIndex_ + 1 < openedFolderHistory_.size())
+        {
+            openedFolderHistory_.erase(openedFolderHistory_.begin() + static_cast<std::ptrdiff_t>(openedFolderHistoryIndex_ + 1),
+                                       openedFolderHistory_.end());
+        }
+
+        if (openedFolderHistory_.empty() || !FolderPathsEqual(openedFolderHistory_.back(), folderPath))
+        {
+            openedFolderHistory_.push_back(std::move(folderPath));
+        }
+
+        while (openedFolderHistory_.size() > kOpenedFolderHistoryLimit)
+        {
+            openedFolderHistory_.erase(openedFolderHistory_.begin());
+        }
+
+        openedFolderHistoryIndex_ = openedFolderHistory_.empty()
+            ? kInvalidHistoryIndex
+            : openedFolderHistory_.size() - 1;
+    }
+
+    bool MainWindow::NavigateBackToLastOpenedFolder()
+    {
+        if (!browserModel_ || openedFolderHistory_.empty() || openedFolderHistoryIndex_ == kInvalidHistoryIndex)
+        {
+            return false;
+        }
+
+        if (openedFolderHistoryIndex_ == 0)
+        {
+            return false;
+        }
+
+        const std::wstring currentFolderPath = NormalizeFolderPath(browserModel_->FolderPath());
+        std::size_t candidateIndex = openedFolderHistoryIndex_;
+        while (candidateIndex > 0)
+        {
+            --candidateIndex;
+            const std::wstring& candidate = openedFolderHistory_[candidateIndex];
+
+            const std::wstring resolvedFolderPath = FindExistingFolderAncestor(fs::path(candidate));
+            if (resolvedFolderPath.empty())
+            {
+                continue;
+            }
+
+            if (!currentFolderPath.empty() && FolderPathsEqual(currentFolderPath, resolvedFolderPath))
+            {
+                continue;
+            }
+
+            backNavigationPending_ = true;
+            backNavigationTargetHistoryIndex_ = candidateIndex;
+            LoadFolderAsync(resolvedFolderPath);
+            return true;
+        }
+
+        return false;
     }
 
     void MainWindow::RecordRecentDestination(std::wstring folderPath)
@@ -12938,6 +13245,7 @@ namespace hyperbrowse::ui
             browserModel_->Complete();
             folderEnumerationActive_ = false;
             util::LogInfo(L"Completed folder enumeration for " + update->folderPath);
+            RecordOpenedFolderHistory(update->folderPath);
             if (update->totalCount > 0)
             {
                 RecordRecentFolder(update->folderPath);
@@ -12950,6 +13258,8 @@ namespace hyperbrowse::ui
         case services::FolderEnumerationUpdateKind::Failed:
             browserModel_->Fail(update->message);
             folderEnumerationActive_ = false;
+            backNavigationPending_ = false;
+            backNavigationTargetHistoryIndex_ = kInvalidHistoryIndex;
             util::LogError(update->message);
             break;
         default:
@@ -13087,8 +13397,6 @@ namespace hyperbrowse::ui
 
         if (reinterpret_cast<HWND>(wParam) != browserPane_
             || dragMode_ != DragMode::None
-            || !detailsStripVisible_
-            || activeRightPaneTab_ != RightPaneTab::QuickSend
             || !browserPaneController_
             || browserPaneController_->SelectedCount() == 0
             || fileOperationActive_)
@@ -13096,34 +13404,18 @@ namespace hyperbrowse::ui
             return 0;
         }
 
-        const bool hasQuickAccessTarget = std::any_of(quickAccessDestinationRows_.begin(),
-                                                      quickAccessDestinationRows_.end(),
-                                                      [&](const QuickAccessDestinationRow& row)
-        {
-            return CanNavigateToQuickAccessDestination(row.destinationPath);
-        });
-        if (!hasQuickAccessTarget)
-        {
-            return 0;
-        }
-
         dragMode_ = DragMode::QuickAccessInternal;
         quickAccessPressedRowIndex_ = -1;
         quickAccessPressedButtonIndex_ = -1;
+        internalSelectionTreeDropItem_ = nullptr;
+        internalSelectionTreeDropPath_.clear();
 
         POINT point{};
         GetCursorPos(&point);
         ScreenToClient(hwnd_, &point);
-        quickAccessHotRowIndex_ = HitTestQuickAccessDestinationRow(point.x, point.y);
-        quickAccessHotButtonIndex_ = -1;
         SetCapture(hwnd_);
 
-        if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
-        {
-            InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
-        }
-
-        SetCursor(LoadCursorW(nullptr, quickAccessHotRowIndex_ >= 0 ? IDC_HAND : IDC_NO));
+        UpdateInternalSelectionDrag(point);
         return TRUE;
     }
 
@@ -13432,6 +13724,9 @@ namespace hyperbrowse::ui
         {
         case ID_FILE_OPEN_FOLDER:
             OpenFolder();
+            return true;
+        case ID_VIEW_NAVIGATE_BACK_FOLDER:
+            NavigateBackToLastOpenedFolder();
             return true;
         case ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION:
             ToggleCurrentFolderFavoriteDestination();
@@ -14670,31 +14965,11 @@ namespace hyperbrowse::ui
 
         if (dragMode_ == DragMode::QuickAccessInternal)
         {
-            dragMode_ = DragMode::None;
-            if (GetCapture() == hwnd_)
-            {
-                ReleaseCapture();
-            }
-
             POINT point{};
             GetCursorPos(&point);
             ScreenToClient(hwnd_, &point);
-            const int hitRow = HitTestQuickAccessDestinationRow(point.x, point.y);
-            quickAccessHotRowIndex_ = hitRow;
-            quickAccessHotButtonIndex_ = -1;
-            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
-            {
-                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
-            }
-
-            if (hitRow >= 0 && hitRow < static_cast<int>(quickAccessDestinationRows_.size()))
-            {
-                const services::FileOperationType type = ResolveQuickAccessDropOperationType(
-                    browserPaneController_->SelectedFilePathsSnapshot(),
-                    quickAccessDestinationRows_[static_cast<std::size_t>(hitRow)].destinationPath);
-                StartSelectionFileOperationToDestination(type,
-                                                         quickAccessDestinationRows_[static_cast<std::size_t>(hitRow)].destinationPath);
-            }
+            UpdateInternalSelectionDrag(point);
+            FinishInternalSelectionDrag(true);
             return;
         }
 
@@ -14710,6 +14985,12 @@ namespace hyperbrowse::ui
         if (treeFolderDragActive_)
         {
             UpdateFolderTreeDrag(POINT{x, y});
+            return;
+        }
+
+        if (dragMode_ == DragMode::QuickAccessInternal)
+        {
+            UpdateInternalSelectionDrag(POINT{x, y});
             return;
         }
 
@@ -14829,9 +15110,7 @@ namespace hyperbrowse::ui
         }
 
         const int quickAccessRowHit = HitTestQuickAccessDestinationRow(x, y);
-        const int quickAccessHit = dragMode_ == DragMode::QuickAccessInternal
-            ? -1
-            : HitTestQuickAccessDestinationButton(x, y);
+        const int quickAccessHit = HitTestQuickAccessDestinationButton(x, y);
         if (quickAccessRowHit != quickAccessHotRowIndex_ || quickAccessHit != quickAccessHotButtonIndex_)
         {
             quickAccessHotRowIndex_ = quickAccessRowHit;
@@ -14861,10 +15140,6 @@ namespace hyperbrowse::ui
                                             minDetailsPanelWidth,
                                             maxDetailsPanelWidth);
             LayoutChildren();
-        }
-        else if (dragMode_ == DragMode::QuickAccessInternal)
-        {
-            SetCursor(LoadCursorW(nullptr, quickAccessRowHit >= 0 ? IDC_HAND : IDC_NO));
         }
         else
         {
@@ -14955,6 +15230,13 @@ namespace hyperbrowse::ui
                 FinishFolderTreeDrag(false);
                 return 0;
             }
+            if (dragMode_ == DragMode::QuickAccessInternal
+                && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+                && wParam == VK_ESCAPE)
+            {
+                FinishInternalSelectionDrag(false);
+                return 0;
+            }
             if (HandleCommandBarKeyboardInput(message, wParam, lParam))
             {
                 return 0;
@@ -14994,11 +15276,21 @@ namespace hyperbrowse::ui
                 FinishFolderTreeDrag(false);
                 return 0;
             }
+            if (dragMode_ == DragMode::QuickAccessInternal)
+            {
+                FinishInternalSelectionDrag(false);
+                return 0;
+            }
             break;
         case WM_CANCELMODE:
             if (treeFolderDragActive_)
             {
                 FinishFolderTreeDrag(false);
+                return 0;
+            }
+            if (dragMode_ == DragMode::QuickAccessInternal)
+            {
+                FinishInternalSelectionDrag(false);
                 return 0;
             }
             break;
@@ -15017,7 +15309,9 @@ namespace hyperbrowse::ui
             if (dragMode_ == DragMode::QuickAccessInternal)
             {
                 SetCursor(LoadCursorW(nullptr,
-                                      HitTestQuickAccessDestinationRow(point.x, point.y) >= 0 ? IDC_HAND : IDC_NO));
+                                      (quickAccessHotRowIndex_ >= 0 || internalSelectionTreeDropItem_ != nullptr)
+                                          ? IDC_HAND
+                                          : IDC_NO));
                 return TRUE;
             }
             if (dragMode_ == DragMode::LeftSplitter || dragMode_ == DragMode::DetailsSplitter || IsOverSplitter(point.x, point.y))

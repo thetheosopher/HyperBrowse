@@ -305,6 +305,8 @@ namespace hyperbrowse::ui
         LRESULT OnFolderTreeRightClick();
         void UpdateFolderTreeDrag(POINT windowPoint);
         void FinishFolderTreeDrag(bool commitDrop);
+        void UpdateInternalSelectionDrag(POINT windowPoint);
+        void FinishInternalSelectionDrag(bool commitDrop);
         LRESULT OnDropFiles(HDROP dropHandle);
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
@@ -336,6 +338,8 @@ namespace hyperbrowse::ui
         void ClearRecentDestinations();
         void RecordRecentFolder(std::wstring folderPath);
         void RecordRecentDestination(std::wstring folderPath);
+        void RecordOpenedFolderHistory(std::wstring folderPath);
+        bool NavigateBackToLastOpenedFolder();
         void RefreshQuickAccessMenus();
         void RefreshPersistentMenuOwnerDraw();
         void PrepareMenuForOwnerDraw(HMENU menu,
@@ -433,6 +437,10 @@ namespace hyperbrowse::ui
         std::wstring startupLaunchPathOverride_;
         std::wstring startupFolderPath_;
         std::wstring pendingStartupViewerPath_;
+        std::vector<std::wstring> openedFolderHistory_;
+        std::size_t openedFolderHistoryIndex_{static_cast<std::size_t>(-1)};
+        bool backNavigationPending_{};
+        std::size_t backNavigationTargetHistoryIndex_{static_cast<std::size_t>(-1)};
         std::vector<std::wstring> recentFolders_;
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
@@ -456,6 +464,8 @@ namespace hyperbrowse::ui
         HTREEITEM treeDragHoverItem_{};
         std::wstring treeDragSourcePath_;
         std::wstring treeDragDestinationPath_;
+        HTREEITEM internalSelectionTreeDropItem_{};
+        std::wstring internalSelectionTreeDropPath_;
         RECT detailsPanelRect_{};
         RECT persistedWindowBounds_{};
         RECT detailsPanelTabStripRect_{};
