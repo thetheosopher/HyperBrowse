@@ -4526,6 +4526,35 @@ namespace
         return true;
     }
 
+    hyperbrowse::services::FileOperationType ResolveQuickAccessDropOperationType(
+        const std::vector<std::wstring>& sourcePaths,
+        std::wstring_view destinationFolder)
+    {
+        if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0)
+        {
+            return hyperbrowse::services::FileOperationType::Copy;
+        }
+
+        if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0)
+        {
+            return hyperbrowse::services::FileOperationType::Move;
+        }
+
+        if (destinationFolder.empty() || sourcePaths.empty())
+        {
+            return hyperbrowse::services::FileOperationType::Copy;
+        }
+
+        const bool allSourcesOnSameDrive = std::all_of(sourcePaths.begin(), sourcePaths.end(), [&](const std::wstring& sourcePath)
+        {
+            return !sourcePath.empty() && AreFoldersOnSameDrive(sourcePath, destinationFolder);
+        });
+
+        return allSourcesOnSameDrive
+            ? hyperbrowse::services::FileOperationType::Move
+            : hyperbrowse::services::FileOperationType::Copy;
+    }
+
     bool IsValidFolderName(const std::wstring& name, std::wstring* errorMessage)
     {
         if (name.empty())
@@ -8179,8 +8208,9 @@ namespace hyperbrowse::ui
         const auto& items = browserModel_->Items();
         std::vector<browser::BrowserItem> selectedItems;
         selectedItems.reserve(selectedModelIndices.size());
+        constexpr std::size_t kMaxSharedMetadataItems = 100;
         std::vector<std::shared_ptr<const services::ImageMetadata>> metadataList;
-        metadataList.reserve(selectedModelIndices.size());
+        metadataList.reserve(std::min(selectedModelIndices.size(), kMaxSharedMetadataItems));
         bool allMetadataLoaded = true;
         std::uint64_t selectedBytes = 0;
 
@@ -8193,9 +8223,12 @@ namespace hyperbrowse::ui
 
             selectedItems.push_back(items[static_cast<std::size_t>(modelIndex)]);
             selectedBytes += items[static_cast<std::size_t>(modelIndex)].fileSizeBytes;
-            const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex);
-            metadataList.push_back(metadata);
-            allMetadataLoaded = allMetadataLoaded && static_cast<bool>(metadata);
+            if (metadataList.size() < kMaxSharedMetadataItems)
+            {
+                const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex);
+                metadataList.push_back(metadata);
+                allMetadataLoaded = allMetadataLoaded && static_cast<bool>(metadata);
+            }
         }
 
         browserPaneController_->RequestMetadataForModelIndices(selectedModelIndices);
@@ -8246,18 +8279,23 @@ namespace hyperbrowse::ui
             return;
         }
 
+        const bool analysisTruncated = selectedItems.size() > metadataList.size();
+        const std::vector<browser::BrowserItem> analysisItems(
+            selectedItems.begin(),
+            selectedItems.begin() + static_cast<std::ptrdiff_t>(metadataList.size()));
+
         std::wstring body;
         body.reserve(2048);
         body.append(L"Common Attributes\r\n");
         bool hasCommonAttributes = false;
 
         std::wstring commonValue;
-        if (TryGetCommonItemString(selectedItems, [](const browser::BrowserItem& item) { return item.fileType; }, &commonValue))
+        if (TryGetCommonItemString(analysisItems, [](const browser::BrowserItem& item) { return item.fileType; }, &commonValue))
         {
             AppendLabeledLine(&body, L"Type: ", commonValue);
             hasCommonAttributes = true;
         }
-        if (TryGetCommonDimensions(selectedItems, &commonValue))
+        if (TryGetCommonDimensions(analysisItems, &commonValue))
         {
             AppendLabeledLine(&body, L"Dimensions: ", commonValue);
             hasCommonAttributes = true;
@@ -8399,6 +8437,15 @@ namespace hyperbrowse::ui
         if (!hasCommonAttributes && !wroteSelectionMetadataHeader)
         {
             body.append(L"No common file or metadata attributes are shared by the current selection.");
+        }
+
+        if (analysisTruncated)
+        {
+            body.append(L"\r\nNote: Shared attributes are based on the first ");
+            body.append(std::to_wstring(kMaxSharedMetadataItems));
+            body.append(L" of ");
+            body.append(std::to_wstring(selectedItems.size()));
+            body.append(L" selected files.");
         }
 
         ApplyDetailsPanelText(std::to_wstring(selectedItems.size()) + L" Files Selected",
@@ -12870,6 +12917,7 @@ namespace hyperbrowse::ui
         UpdateStatusText();
         UpdateWindowTitle();
         activeEnumerationRequestId_ = folderEnumerationService_->EnumerateFolderAsync(hwnd_, std::move(folderPath), recursiveBrowsingEnabled_);
+        folderEnumerationActive_ = true;
     }
 
     LRESULT MainWindow::OnFolderEnumerationMessage(LPARAM lParam)
@@ -12888,6 +12936,7 @@ namespace hyperbrowse::ui
             break;
         case services::FolderEnumerationUpdateKind::Completed:
             browserModel_->Complete();
+            folderEnumerationActive_ = false;
             util::LogInfo(L"Completed folder enumeration for " + update->folderPath);
             if (update->totalCount > 0)
             {
@@ -12900,6 +12949,7 @@ namespace hyperbrowse::ui
             break;
         case services::FolderEnumerationUpdateKind::Failed:
             browserModel_->Fail(update->message);
+            folderEnumerationActive_ = false;
             util::LogError(update->message);
             break;
         default:
@@ -14639,9 +14689,9 @@ namespace hyperbrowse::ui
 
             if (hitRow >= 0 && hitRow < static_cast<int>(quickAccessDestinationRows_.size()))
             {
-                const services::FileOperationType type = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
-                    ? services::FileOperationType::Move
-                    : services::FileOperationType::Copy;
+                const services::FileOperationType type = ResolveQuickAccessDropOperationType(
+                    browserPaneController_->SelectedFilePathsSnapshot(),
+                    quickAccessDestinationRows_[static_cast<std::size_t>(hitRow)].destinationPath);
                 StartSelectionFileOperationToDestination(type,
                                                          quickAccessDestinationRows_[static_cast<std::size_t>(hitRow)].destinationPath);
             }
@@ -14858,9 +14908,7 @@ namespace hyperbrowse::ui
             return 0;
         }
 
-        const services::FileOperationType type = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
-            ? services::FileOperationType::Move
-            : services::FileOperationType::Copy;
+        const services::FileOperationType type = ResolveQuickAccessDropOperationType(sourcePaths, destinationFolder);
         StartFileOperation(type,
                            std::move(sourcePaths),
                            std::move(destinationFolder),
@@ -14985,6 +15033,11 @@ namespace hyperbrowse::ui
             if (HitTestQuickAccessDestinationButton(point.x, point.y) >= 0)
             {
                 SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
+            if (folderEnumerationActive_)
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_APPSTARTING));
                 return TRUE;
             }
             break;

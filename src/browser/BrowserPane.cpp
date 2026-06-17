@@ -2511,10 +2511,17 @@ namespace hyperbrowse::browser
             return;
         }
 
+        const auto& items = model_->Items();
         selectedModelIndices_.clear();
+        selectedModelIndices_.reserve(orderedModelIndices_.size());
+        selectedBytes_ = 0;
         for (const int modelIndex : orderedModelIndices_)
         {
             selectedModelIndices_.insert(modelIndex);
+            if (modelIndex >= 0 && modelIndex < static_cast<int>(items.size()))
+            {
+                selectedBytes_ += items[static_cast<std::size_t>(modelIndex)].fileSizeBytes;
+            }
         }
 
         if (focusedModelIndex_ < 0 || !selectedModelIndices_.contains(focusedModelIndex_))
@@ -2526,8 +2533,28 @@ namespace hyperbrowse::browser
             anchorModelIndex_ = focusedModelIndex_;
         }
 
-        UpdateSelectionBytes();
-        SyncDetailsListSelectionFromModel();
+        if (detailsList_ && viewMode_ == BrowserViewMode::Details)
+        {
+            syncingDetailsSelection_ = true;
+            SendMessageW(detailsList_, WM_SETREDRAW, FALSE, 0);
+            ListView_SetItemState(detailsList_, -1, LVIS_SELECTED, LVIS_SELECTED);
+            ListView_SetItemState(detailsList_, -1, 0, LVIS_FOCUSED);
+
+            const int focusedViewIndex = ViewIndexFromModelIndex(focusedModelIndex_);
+            if (focusedViewIndex >= 0)
+            {
+                ListView_SetItemState(detailsList_, focusedViewIndex, LVIS_FOCUSED, LVIS_FOCUSED);
+            }
+
+            SendMessageW(detailsList_, WM_SETREDRAW, TRUE, 0);
+            syncingDetailsSelection_ = false;
+            InvalidateRect(detailsList_, nullptr, FALSE);
+        }
+        else
+        {
+            SyncDetailsListSelectionFromModel();
+        }
+
         NotifyStateChanged();
         InvalidateRect(hwnd_, nullptr, TRUE);
     }

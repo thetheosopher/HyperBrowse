@@ -495,6 +495,7 @@ namespace hyperbrowse::ui
         std::uint64_t activeFileOperationRequestId_{};
         bool batchConvertActive_{};
         bool fileOperationActive_{};
+        bool folderEnumerationActive_{};
         std::size_t batchConvertCompleted_{};
         std::size_t batchConvertTotal_{};
         std::size_t batchConvertFailed_{};
