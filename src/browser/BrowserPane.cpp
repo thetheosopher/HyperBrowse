@@ -2047,6 +2047,10 @@ namespace hyperbrowse::browser
 
         if (currentViewIndex < 0)
         {
+            if (keyCode == VK_END)
+            {
+                return itemCount - 1;
+            }
             return 0;
         }
 
@@ -2056,6 +2060,10 @@ namespace hyperbrowse::browser
             return currentViewIndex > 0 ? currentViewIndex - 1 : currentViewIndex;
         case VK_RIGHT:
             return currentViewIndex + 1 < itemCount ? currentViewIndex + 1 : currentViewIndex;
+        case VK_HOME:
+            return 0;
+        case VK_END:
+            return itemCount - 1;
         case VK_UP:
         case VK_DOWN:
         {
@@ -2071,6 +2079,26 @@ namespace hyperbrowse::browser
                 return currentViewIndex;
             }
 
+            const int targetRowStart = targetRow * columns;
+            const int targetRowLast = std::min(itemCount - 1, targetRowStart + columns - 1);
+            return std::min(targetRowStart + currentColumn, targetRowLast);
+        }
+        case VK_PRIOR:
+        case VK_NEXT:
+        {
+            RECT clientRect{};
+            GetClientRect(hwnd_, &clientRect);
+            const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+            const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
+            const int clientHeight = clientRect.bottom - clientRect.top;
+            const int rowStride = layout.itemHeight + layout.cellPadding;
+            const int pageRows = std::max(1, clientHeight / rowStride);
+            const int currentRow = currentViewIndex / columns;
+            const int currentColumn = currentViewIndex % columns;
+            const int lastRow = (itemCount - 1) / columns;
+            const int targetRow = keyCode == VK_PRIOR
+                ? std::max(0, currentRow - pageRows)
+                : std::min(lastRow, currentRow + pageRows);
             const int targetRowStart = targetRow * columns;
             const int targetRowLast = std::min(itemCount - 1, targetRowStart + columns - 1);
             return std::min(targetRowStart + currentColumn, targetRowLast);
@@ -4460,7 +4488,9 @@ namespace hyperbrowse::browser
                     ShowContextMenu(ContextMenuAnchorScreenPoint());
                     return 0;
                 }
-                if (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_UP || wParam == VK_DOWN)
+                if (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_UP || wParam == VK_DOWN
+                    || wParam == VK_PRIOR || wParam == VK_NEXT
+                    || wParam == VK_HOME || wParam == VK_END)
                 {
                     if (HandleThumbnailNavigationKey(wParam, shiftPressed))
                     {
