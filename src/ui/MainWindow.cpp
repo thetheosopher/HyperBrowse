@@ -11951,7 +11951,16 @@ namespace hyperbrowse::ui
 
             if (browserModelChanged)
             {
-                RefreshBrowserPane();
+                // For viewer deletes: the file watcher will update the browser model
+                // asynchronously, so skip the expensive RefreshBrowserPane() call.
+                // The viewer already advanced optimistically via AdvanceAfterDeleteCurrent(),
+                // so we don't need to sync here.
+                if (update.type != services::FileOperationType::DeleteRecycleBin
+                    && update.type != services::FileOperationType::DeletePermanent)
+                {
+                    util::ScopedTimer refreshTimer(L"ApplyCompletedFileOperation RefreshBrowserPane");
+                    RefreshBrowserPane();
+                }
                 UpdateWindowTitle();
             }
 
@@ -11965,13 +11974,20 @@ namespace hyperbrowse::ui
                         PostMessageW(viewerHwnd, WM_CLOSE, 0, 0);
                     }
                 }
-                else
+                else if (!viewerDeleteSucceeded)
                 {
-                    const std::wstring preferredViewerPath = viewerDeleteSucceeded
-                        ? viewerDeletePreferredFocusPath
-                        : viewerDeleteSourcePath;
-                    SyncViewerToBrowserModel(preferredViewerPath);
+                    // The delete failed (or the file no longer exists for another
+                    // reason); resync the viewer to the actual model state since
+                    // AdvanceAfterDeleteCurrent optimistically advanced past an item
+                    // that, in fact, was never removed.
+                    SyncViewerToBrowserModel(viewerDeleteSourcePath);
                 }
+                // else: the delete succeeded and the viewer already advanced past the
+                // deleted item locally (see AdvanceAfterDeleteCurrent, called at
+                // keypress time). Calling SyncViewerToBrowserModel here would rebuild
+                // the viewer's item list and force ReplaceItems() to blank the display
+                // and fully re-decode the already-visible image — visible as a
+                // delayed flash every time a delete completes. Skip it.
             }
             else if (!viewerDeleteSucceeded && browserModel_)
             {
@@ -11998,7 +12014,13 @@ namespace hyperbrowse::ui
         }
         else if (reloadCurrentFolder && browserModel_ && !browserModel_->FolderPath().empty())
         {
-            LoadFolderAsync(browserModel_->FolderPath());
+            // For viewer deletes: skip the expensive LoadFolderAsync (2s re-enumeration)
+            // since the file watcher will update incrementally anyway.
+            if (update.type != services::FileOperationType::DeleteRecycleBin
+                && update.type != services::FileOperationType::DeletePermanent)
+            {
+                LoadFolderAsync(browserModel_->FolderPath());
+            }
         }
 
         UpdateStatusText();
@@ -12007,6 +12029,28 @@ namespace hyperbrowse::ui
         if (!update.message.empty() && update.failedCount > 0)
         {
             MessageBoxW(hwnd_, update.message.c_str(), L"File Operation", MB_OK | MB_ICONWARNING);
+        }
+
+        // Dispatch the next queued viewer delete, if any, now that the file
+        // operation slot is free.  Use the viewer's current path as the sync
+        // target so we never navigate the viewer back to an image it has already
+        // advanced past.
+        if (!pendingViewerDeletes_.empty())
+        {
+            PendingViewerDelete next = std::move(pendingViewerDeletes_.front());
+            pendingViewerDeletes_.pop_front();
+            pendingViewerDeleteSourcePath_ = next.sourcePath;
+            pendingViewerDeleteSourcePaths_ = next.sourcePaths;
+            pendingViewerDeletePreferredFocusPath_ = viewerWindow_ && viewerWindow_->IsOpen()
+                ? viewerWindow_->CurrentFilePath()
+                : next.preferredFocusPath;
+            StartFileOperation(
+                next.permanent ? services::FileOperationType::DeletePermanent
+                               : services::FileOperationType::DeleteRecycleBin,
+                std::move(next.sourcePaths),
+                {},
+                services::FileConflictPolicy::PromptShell,
+                {});
         }
     }
 
@@ -13529,7 +13573,9 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnViewerDeleteRequested(WPARAM wParam)
     {
-        if (!viewerWindow_ || !viewerWindow_->IsOpen() || !fileOperationService_ || fileOperationActive_)
+        util::LogInfo(L"MainWindow::OnViewerDeleteRequested entered");
+        util::ScopedTimer functionTimer(L"MainWindow::OnViewerDeleteRequested");
+        if (!viewerWindow_ || !viewerWindow_->IsOpen() || !fileOperationService_)
         {
             return 0;
         }
@@ -13541,33 +13587,56 @@ namespace hyperbrowse::ui
             return 0;
         }
 
-        const std::vector<std::wstring> sourcePaths = ExpandRawJpegPairedPaths({sourcePath});
+        std::vector<std::wstring> sourcePaths;
+        {
+            util::ScopedTimer expandTimer(L"MainWindow::OnViewerDeleteRequested ExpandRawJpegPairedPaths");
+            sourcePaths = ExpandRawJpegPairedPaths({sourcePath});
+        }
         if (sourcePaths.empty())
         {
             return 0;
         }
 
-        pendingViewerDeleteSourcePath_ = sourcePath;
-        pendingViewerDeleteSourcePaths_ = sourcePaths;
-        pendingViewerDeletePreferredFocusPath_ = preferredFocusPath;
         const bool permanentDelete = (wParam & viewer::ViewerWindow::kDeleteRequestPermanent) != 0;
-        if (ShouldConfirmDeletion(permanentDelete)
-            && !ConfirmFileDeletion(hwnd_, sourcePaths.size(), permanentDelete))
         {
-            pendingViewerDeleteSourcePath_.clear();
-            pendingViewerDeleteSourcePaths_.clear();
-            pendingViewerDeletePreferredFocusPath_.clear();
+            util::ScopedTimer confirmTimer(L"MainWindow::OnViewerDeleteRequested ConfirmFileDeletion");
+            if (ShouldConfirmDeletion(permanentDelete)
+                && !ConfirmFileDeletion(hwnd_, sourcePaths.size(), permanentDelete))
+            {
+                return 0;
+            }
+        }
+
+        // Advance the viewer immediately so the next image is visible at once,
+        // regardless of how long the file operation takes.
+        viewerWindow_->AdvanceAfterDeleteCurrent();
+
+        if (fileOperationActive_)
+        {
+            util::LogInfo(L"MainWindow::OnViewerDeleteRequested queuing delete (file operation already active)");
+            // A file operation is already running. Queue this delete so it is
+            // dispatched as soon as the current operation completes.
+            PendingViewerDelete queued;
+            queued.sourcePath = sourcePath;
+            queued.sourcePaths = sourcePaths;
+            queued.preferredFocusPath = preferredFocusPath;
+            queued.permanent = permanentDelete;
+            pendingViewerDeletes_.push_back(std::move(queued));
             return 0;
         }
 
-        StartFileOperation(permanentDelete ? services::FileOperationType::DeletePermanent : services::FileOperationType::DeleteRecycleBin,
-                           sourcePaths,
-                           {},
-                           services::FileConflictPolicy::PromptShell,
-                           {});
-        if (fileOperationActive_)
+        pendingViewerDeleteSourcePath_ = std::move(sourcePath);
+        pendingViewerDeleteSourcePaths_ = sourcePaths;
+        pendingViewerDeletePreferredFocusPath_ = std::move(preferredFocusPath);
         {
-            viewerWindow_->AdvanceAfterDeleteCurrent();
+            util::ScopedTimer fileOpTimer(L"MainWindow::OnViewerDeleteRequested StartFileOperation");
+            StartFileOperation(
+                permanentDelete ? services::FileOperationType::DeletePermanent
+                                : services::FileOperationType::DeleteRecycleBin,
+                sourcePaths,
+                {},
+                services::FileConflictPolicy::PromptShell,
+                {});
         }
         return 0;
     }

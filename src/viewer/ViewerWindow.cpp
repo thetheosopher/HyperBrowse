@@ -21,6 +21,7 @@
 #include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
+#include "util/Timing.h"
 
 namespace
 {
@@ -637,10 +638,10 @@ namespace hyperbrowse::viewer
                                                  IDB_HYPERBROWSE_BRAND_PNG,
                                                  kPlaceholderBrandArtSize,
                                                  kPlaceholderBrandArtSize);
-        // Two workers cover the common case (one for the foreground decode, one for
-        // a single adjacent prefetch). Bursty navigation cannot exceed two concurrent
-        // OS threads, in contrast to the prior std::async approach.
-        backgroundExecutor_ = std::make_unique<util::BackgroundExecutor>(2);
+        // Six workers: one for foreground image decode, up to four for adjacent prefetches,
+        // one spare. This allows prefetch to degrade gracefully without starving the main
+        // image load when many adjacent images need decoding during rapid delete sequences.
+        backgroundExecutor_ = std::make_unique<util::BackgroundExecutor>(6);
     }
 
     ViewerWindow::~ViewerWindow()
@@ -1117,10 +1118,23 @@ namespace hyperbrowse::viewer
 
     bool ViewerWindow::AdvanceAfterDeleteCurrent()
     {
+        util::ScopedTimer functionTimer(L"ViewerWindow::AdvanceAfterDeleteCurrent");
         if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
         {
             return false;
         }
+
+        // Capture whether adjacent prefetch slots already hold the images that
+        // will become the new current item after the erase, so we can reuse them
+        // and avoid a redundant full decode.
+        const int nextIndexOld = currentIndex_ + 1;
+        const int prevIndexOld = currentIndex_ - 1;
+        const bool canReuseNext = nextIndexOld < static_cast<int>(items_.size())
+            && nextSlot_.index == nextIndexOld
+            && nextSlot_.image;
+        const bool canReusePrev = prevIndexOld >= 0
+            && previousSlot_.index == prevIndexOld
+            && previousSlot_.image;
 
         items_.erase(items_.begin() + currentIndex_);
         if (items_.empty())
@@ -1133,7 +1147,8 @@ namespace hyperbrowse::viewer
             return true;
         }
 
-        if (currentIndex_ >= static_cast<int>(items_.size()))
+        const bool wentBackward = currentIndex_ >= static_cast<int>(items_.size());
+        if (wentBackward)
         {
             currentIndex_ = static_cast<int>(items_.size()) - 1;
         }
@@ -1148,7 +1163,64 @@ namespace hyperbrowse::viewer
         }
 
         StopTransition();
-        ResetCachedImageSlots();
+
+        // The paint-time bitmap cache is keyed on currentIndex_ (see
+        // ensureCurrentBitmap / BeginTransitionFromPending). Deleting an item
+        // shifts every subsequent item down by one, so currentIndex_ can end up
+        // numerically unchanged even though the image *at* that index is now a
+        // completely different file. That produces a false-positive cache hit
+        // that skips re-uploading the D2D bitmap, leaving the stale (deleted)
+        // image on screen until some other navigation forces a refresh. Force
+        // invalidation here so the next paint always re-uploads.
+        d2dCurrentImageBitmap_.Reset();
+        d2dCurrentImageIndex_ = -1;
+
+        // Fast path: reuse the prefetched image that is now the current item.
+        const bool reusePrefetch = (!wentBackward && canReuseNext)
+                                || ( wentBackward && canReusePrev);
+        util::LogInfo(L"ViewerWindow::AdvanceAfterDeleteCurrent path="
+            + std::wstring(reusePrefetch ? L"FAST(prefetch-reuse)" : L"SLOW(needs-decode)")
+            + L", newCurrentIndex=" + std::to_wstring(currentIndex_)
+            + L", itemCount=" + std::to_wstring(items_.size()));
+        if (reusePrefetch)
+        {
+            // Extract the image before touching the slots — sourceSlot is an alias
+            // into nextSlot_/previousSlot_ and would be invalidated by clearing them.
+            auto reusedImage = (!wentBackward) ? nextSlot_.image : previousSlot_.image;
+
+            // Cancel any in-flight decode so stale results are not applied.
+            asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
+
+            previousSlot_ = {};
+            nextSlot_ = {};
+            SetCurrentImageSlot(currentIndex_, std::move(reusedImage), true);
+            prefetchHitCount_.fetch_add(1, std::memory_order_acq_rel);
+            util::IncrementCounter(L"viewer.prefetch.hit");
+            util::RecordTiming(L"viewer.navigation", 0.0);
+            PrepareForImageChange();
+            loading_ = false;
+            errorMessage_.clear();
+            currentImage_ = currentSlot_.image;
+            BeginTransitionFromPending();
+            const std::uint64_t navigationGeneration =
+                asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+            ScheduleAdjacentPrefetch(navigationGeneration);
+            if (hwnd_)
+            {
+                RequestRepaint();
+            }
+            return true;
+        }
+
+        // Slow path: no prefetched image is available yet. Mirror Navigate()'s
+        // cache-miss behavior by leaving currentImage_/currentSlot_ untouched so the
+        // last-displayed image keeps showing (instead of blanking to a "loading"
+        // placeholder) while the new current image decodes in the background.
+        // Only the now-stale adjacent prefetch slots need to be dropped.
+        previousSlot_ = {};
+        nextSlot_ = {};
+        d2dCompareImageBitmap_.Reset();
+        d2dCompareImageIndex_ = -1;
         ResetPrefetchStatistics();
         ReapCompletedBackgroundTasks();
         UpdateWindowTitle();
@@ -1436,7 +1508,7 @@ namespace hyperbrowse::viewer
             return 3;
         case util::ResourceProfile::Balanced:
         default:
-            return 2;
+            return 3;  // Increased from 2 to 3 for better rapid-delete performance
         }
     }
 
@@ -2808,7 +2880,12 @@ namespace hyperbrowse::viewer
                     const WPARAM deleteRequestFlags = (GetKeyState(VK_SHIFT) & 0x8000) != 0
                         ? kDeleteRequestPermanent
                         : 0;
-                    SendMessageW(owner_, kDeleteRequestedMessage, deleteRequestFlags, 0);
+                    util::LogInfo(L"ViewerWindow VK_DELETE dispatch starting, currentIndex=" + std::to_wstring(currentIndex_));
+                    {
+                        util::ScopedTimer timer(L"ViewerWindow VK_DELETE SendMessageW round-trip");
+                        SendMessageW(owner_, kDeleteRequestedMessage, deleteRequestFlags, 0);
+                    }
+                    util::LogInfo(L"ViewerWindow VK_DELETE dispatch returned, currentIndex=" + std::to_wstring(currentIndex_));
                 }
                 return 0;
             case VK_RIGHT:

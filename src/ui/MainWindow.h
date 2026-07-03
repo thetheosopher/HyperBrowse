@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -513,9 +514,17 @@ namespace hyperbrowse::ui
         std::wstring batchConvertCurrentFile_;
         std::wstring activeTreeFolderOperationPath_;
         std::wstring activeTreeFolderRenamePath_;
+        struct PendingViewerDelete
+        {
+            std::wstring sourcePath;
+            std::vector<std::wstring> sourcePaths;
+            std::wstring preferredFocusPath;
+            bool permanent{};
+        };
         std::wstring pendingViewerDeleteSourcePath_;
         std::vector<std::wstring> pendingViewerDeleteSourcePaths_;
         std::wstring pendingViewerDeletePreferredFocusPath_;
+        std::deque<PendingViewerDelete> pendingViewerDeletes_;
         std::wstring pendingFolderWatchReloadPath_;
         bool pendingFolderWatchTreeRefresh_{};
         std::wstring activeFileOperationLabel_;
