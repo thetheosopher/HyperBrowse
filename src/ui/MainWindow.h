@@ -549,6 +549,7 @@ namespace hyperbrowse::ui
         UINT slideshowIntervalMs_{3000};
         viewer::TransitionStyle slideshowTransitionStyle_{};
         UINT slideshowTransitionDurationMs_{350};
+        bool useSlideshowTransition_{};
         bool detailsStripVisible_{true};
         viewer::MouseWheelBehavior viewerMouseWheelBehavior_{};
         UINT_PTR memoryPressureTimerId_{};
