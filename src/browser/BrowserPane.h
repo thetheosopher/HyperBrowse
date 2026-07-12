@@ -148,6 +148,7 @@ namespace hyperbrowse::browser
         std::vector<std::wstring> SelectedFilePathsSnapshot() const;
         std::wstring FocusedFilePathSnapshot() const;
         void RestoreSelectionByFilePaths(const std::vector<std::wstring>& filePaths, const std::wstring& focusedFilePath);
+        void EnsureFocusedItemVisible();
         void InvalidateMediaCacheForPaths(const std::vector<std::wstring>& filePaths);
         std::shared_ptr<const hyperbrowse::services::ImageMetadata> FindCachedMetadataForModelIndex(int modelIndex) const;
         void RequestMetadataForModelIndices(const std::vector<int>& modelIndices) const;

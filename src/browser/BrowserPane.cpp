@@ -1292,6 +1292,42 @@ namespace hyperbrowse::browser
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
+    void BrowserPane::EnsureFocusedItemVisible()
+    {
+        if (!hwnd_ || !model_)
+        {
+            return;
+        }
+
+        int targetModelIndex = focusedModelIndex_;
+        if (targetModelIndex < 0 && !selectedModelIndices_.empty())
+        {
+            targetModelIndex = *selectedModelIndices_.begin();
+        }
+
+        if (targetModelIndex < 0)
+        {
+            return;
+        }
+
+        const int viewIndex = ViewIndexFromModelIndex(targetModelIndex);
+        if (viewIndex < 0)
+        {
+            return;
+        }
+
+        if (viewMode_ == BrowserViewMode::Thumbnails)
+        {
+            EnsureThumbnailViewIndexVisible(viewIndex);
+            return;
+        }
+
+        if (viewMode_ == BrowserViewMode::Details && detailsList_)
+        {
+            ListView_EnsureVisible(detailsList_, viewIndex, FALSE);
+        }
+    }
+
     void BrowserPane::InvalidateMediaCacheForPaths(const std::vector<std::wstring>& filePaths)
     {
         if (filePaths.empty())
@@ -4991,7 +5027,8 @@ namespace hyperbrowse::browser
                 }
 
                 const HRESULT hr = d2dRenderTarget_->EndDraw();
-                if (hr == D2DERR_RECREATE_TARGET)
+                const bool recreateTarget = hr == D2DERR_RECREATE_TARGET;
+                if (recreateTarget)
                 {
                     ReleaseD2DResources();
                 }
@@ -5002,6 +5039,10 @@ namespace hyperbrowse::browser
                 }
 
                 EndPaint(hwnd_, &paintStruct);
+                if (recreateTarget)
+                {
+                    InvalidateRect(hwnd_, nullptr, FALSE);
+                }
                 return 0;
             }
 

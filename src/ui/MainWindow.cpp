@@ -63,6 +63,7 @@ namespace
     constexpr wchar_t kRegistryValueCompactThumbnailLayout[] = L"CompactThumbnailLayout";
     constexpr wchar_t kRegistryValueThumbnailDetailsVisible[] = L"ThumbnailDetailsVisible";
     constexpr wchar_t kRegistryValueSelectedFolderPath[] = L"SelectedFolderPath";
+    constexpr wchar_t kRegistryValueSelectedImagePath[] = L"SelectedImagePath";
     constexpr wchar_t kRegistryValueWindowLeft[] = L"WindowLeft";
     constexpr wchar_t kRegistryValueWindowTop[] = L"WindowTop";
     constexpr wchar_t kRegistryValueWindowWidth[] = L"WindowWidth";
@@ -6401,6 +6402,16 @@ namespace hyperbrowse::ui
             std::error_code error;
             if (fs::is_directory(fs::path(startupFolderPath_), error) && !error)
             {
+                pendingStartupSelectionPath_.clear();
+                if (pendingStartupViewerPath_.empty() && !startupSelectedImagePath_.empty())
+                {
+                    const std::wstring startupImageParentPath = NormalizeFolderPath(fs::path(startupSelectedImagePath_).parent_path().wstring());
+                    if (!startupImageParentPath.empty() && FolderPathsEqual(startupImageParentPath, startupFolderPath_))
+                    {
+                        pendingStartupSelectionPath_ = startupSelectedImagePath_;
+                    }
+                }
+
                 LoadFolderAsync(startupFolderPath_);
             }
         }
@@ -13022,6 +13033,7 @@ namespace hyperbrowse::ui
             }
 
             TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
+            TryReadStringValue(key, kRegistryValueSelectedImagePath, &startupSelectedImagePath_);
 
             RECT persistedWindowBounds{};
             if (TryReadPersistedWindowBounds(key, &persistedWindowBounds)
@@ -13146,11 +13158,13 @@ namespace hyperbrowse::ui
         leftPaneWidth_ = std::max(leftPaneWidth_, kMinLeftPaneWidth);
         detailsPanelWidth_ = std::max(detailsPanelWidth_, kDetailsPanelMinWidth);
         startupFolderPath_ = NormalizeFolderPath(std::move(startupFolderPath_));
+        startupSelectedImagePath_ = NormalizeFolderPath(std::move(startupSelectedImagePath_));
     }
 
     void MainWindow::ApplyStartupLaunchPathOverride()
     {
         pendingStartupViewerPath_.clear();
+        pendingStartupSelectionPath_.clear();
         if (startupLaunchPathOverride_.empty())
         {
             return;
@@ -13201,6 +13215,15 @@ namespace hyperbrowse::ui
             const std::wstring selectedFolderPath = browserModel_ && !browserModel_->FolderPath().empty()
                 ? NormalizeFolderPath(browserModel_->FolderPath())
                 : GetSelectedFolderTreePath();
+            std::wstring selectedImagePath;
+            if (viewerWindow_ && viewerWindow_->IsOpen())
+            {
+                selectedImagePath = NormalizeFolderPath(viewerWindow_->CurrentFilePath());
+            }
+            else if (browserPaneController_)
+            {
+                selectedImagePath = NormalizeFolderPath(browserPaneController_->FocusedFilePathSnapshot());
+            }
 
             WINDOWPLACEMENT placement{};
             placement.length = sizeof(placement);
@@ -13230,6 +13253,14 @@ namespace hyperbrowse::ui
             if (!selectedFolderPath.empty())
             {
                 WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
+            }
+            if (!selectedImagePath.empty())
+            {
+                WriteStringValue(key, kRegistryValueSelectedImagePath, selectedImagePath);
+            }
+            else
+            {
+                RegDeleteValueW(key, kRegistryValueSelectedImagePath);
             }
             WriteStringValue(key, kRegistryValueRecentFolders, SerializeFolderPathList(recentFolders_));
             WriteStringValue(key, kRegistryValueRecentDestinationFolders, SerializeFolderPathList(recentDestinationFolders_));
@@ -13326,10 +13357,35 @@ namespace hyperbrowse::ui
         }
 
         RefreshBrowserPane();
+        TryRestorePendingStartupSelectionPath(update->kind != services::FolderEnumerationUpdateKind::Batch);
         TryOpenPendingStartupViewerPath(update->kind != services::FolderEnumerationUpdateKind::Batch);
         UpdateStatusText();
         UpdateWindowTitle();
         return 0;
+    }
+
+    void MainWindow::TryRestorePendingStartupSelectionPath(bool clearIfNotFound)
+    {
+        if (pendingStartupSelectionPath_.empty() || !browserModel_ || !browserPaneController_ || !pendingStartupViewerPath_.empty())
+        {
+            return;
+        }
+
+        const int modelIndex = browserModel_->FindItemIndexByPath(pendingStartupSelectionPath_);
+        if (modelIndex < 0)
+        {
+            if (clearIfNotFound)
+            {
+                util::LogInfo(L"Startup selected image was not found in the enumerated folder: " + pendingStartupSelectionPath_);
+                pendingStartupSelectionPath_.clear();
+            }
+            return;
+        }
+
+        const std::wstring startupSelectionPath = pendingStartupSelectionPath_;
+        pendingStartupSelectionPath_.clear();
+        browserPaneController_->RestoreSelectionByFilePaths({startupSelectionPath}, startupSelectionPath);
+        browserPaneController_->EnsureFocusedItemVisible();
     }
 
     void MainWindow::TryOpenPendingStartupViewerPath(bool clearIfNotFound)
@@ -13674,6 +13730,13 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnViewerClosedMessage()
     {
+        const std::wstring viewerPath = viewerWindow_ ? NormalizeFolderPath(viewerWindow_->CurrentFilePath()) : std::wstring{};
+        if (!viewerPath.empty() && browserPaneController_)
+        {
+            browserPaneController_->RestoreSelectionByFilePaths({viewerPath}, viewerPath);
+            browserPaneController_->EnsureFocusedItemVisible();
+        }
+
         viewerWindowActive_ = false;
         viewerZoomPercent_ = 0;
         UpdateStatusText();
@@ -15289,7 +15352,10 @@ namespace hyperbrowse::ui
             OnGetMinMaxInfo(reinterpret_cast<MINMAXINFO*>(lParam));
             return 0;
         case WM_SIZE:
-            OnSize();
+            if (wParam != SIZE_MINIMIZED)
+            {
+                OnSize();
+            }
             return 0;
         case WM_APP + 1:
             LayoutChildren();
@@ -15310,6 +15376,11 @@ namespace hyperbrowse::ui
             {
                 DeactivateCommandBarKeyboardMode(false);
             }
+            if (LOWORD(wParam) != WA_INACTIVE && !IsIconic(hwnd_))
+            {
+                LayoutChildren();
+            }
+            RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
             break;
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:

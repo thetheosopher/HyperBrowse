@@ -323,6 +323,7 @@ namespace hyperbrowse::ui
         LRESULT OnViewerClosedMessage();
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
         void TryOpenPendingStartupViewerPath(bool clearIfNotFound);
+        void TryRestorePendingStartupSelectionPath(bool clearIfNotFound);
 
         void SetBrowserMode(BrowserMode mode);
         void ToggleRecursiveBrowsing();
@@ -437,6 +438,8 @@ namespace hyperbrowse::ui
         HFONT detailsPanelBodyFont_{};
         std::wstring startupLaunchPathOverride_;
         std::wstring startupFolderPath_;
+        std::wstring startupSelectedImagePath_;
+        std::wstring pendingStartupSelectionPath_;
         std::wstring pendingStartupViewerPath_;
         std::vector<std::wstring> openedFolderHistory_;
         std::size_t openedFolderHistoryIndex_{static_cast<std::size_t>(-1)};

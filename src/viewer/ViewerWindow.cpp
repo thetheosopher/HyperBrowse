@@ -2842,6 +2842,11 @@ namespace hyperbrowse::viewer
         switch (message)
         {
         case WM_SIZE:
+            if (wParam == SIZE_MINIMIZED)
+            {
+                ReleaseD2DResources();
+                return 0;
+            }
             RequestRepaint();
             return 0;
         case WM_DPICHANGED:
@@ -2859,6 +2864,11 @@ namespace hyperbrowse::viewer
             return 1;
         case WM_ACTIVATE:
             NotifyActivityChanged(LOWORD(wParam) != WA_INACTIVE);
+            RequestRepaint();
+            return 0;
+        case WM_SETFOCUS:
+        case WM_KILLFOCUS:
+            RequestRepaint();
             return 0;
         case WM_KEYDOWN:
             if (wParam == static_cast<WPARAM>('F')
@@ -4477,12 +4487,17 @@ namespace hyperbrowse::viewer
                 }
 
                 const HRESULT hr = d2dRenderTarget_->EndDraw();
-                if (hr == D2DERR_RECREATE_TARGET)
+                const bool recreateTarget = hr == D2DERR_RECREATE_TARGET;
+                if (recreateTarget)
                 {
                     ReleaseD2DResources();
                 }
 
                 EndPaint(hwnd_, &paintStruct);
+                if (recreateTarget)
+                {
+                    RequestRepaint();
+                }
                 return 0;
             }
 
