@@ -196,6 +196,8 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 Current release: **1.2.4**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.4-portable-win64.zip` and `HyperBrowse-1.2.4-installer.exe`).
 
+Release **1.2.4** focuses on delete-flow reliability and responsiveness: browser thumbnails now stay in sync when deleting selections, delete completion no longer stalls the UI, and viewer keyboard control remains active immediately after delete operations.
+
 ## Version History
 
 ### 1.2.4
