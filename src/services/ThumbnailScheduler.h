@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -111,6 +112,7 @@ namespace hyperbrowse::services
 
         bool HasDispatchableWorkLocked(WorkerKind kind) const;
         void WorkerLoop(WorkerKind kind);
+        void DiskInvalidationLoop();
         void PostReady(std::uint64_t sessionId,
                        std::uint64_t requestEpoch,
                        int modelIndex,
@@ -139,5 +141,15 @@ namespace hyperbrowse::services
         cache::DiskThumbnailCache diskCache_;
         bool diskCacheEnabled_{true};
         bool pressureModeEnabled_{};
+
+        // Persistent-cache invalidation is serialized behind a process-wide filesystem
+        // mutex and rewrites the whole on-disk index, so it can block for seconds while
+        // thumbnail workers are storing entries. It is queued here and drained by a
+        // dedicated thread so callers (notably the UI thread) never wait on it.
+        mutable std::mutex diskInvalidationMutex_;
+        std::condition_variable diskInvalidationAvailable_;
+        std::deque<std::vector<std::wstring>> pendingDiskInvalidations_;
+        bool diskInvalidationShuttingDown_{};
+        std::thread diskInvalidationWorker_;
     };
 }

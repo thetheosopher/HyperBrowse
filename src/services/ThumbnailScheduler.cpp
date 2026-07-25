@@ -203,10 +203,26 @@ namespace hyperbrowse::services
                 WorkerLoop(WorkerKind::Raw);
             });
         }
+
+        diskInvalidationWorker_ = std::thread([this]()
+        {
+            DiskInvalidationLoop();
+        });
     }
 
     ThumbnailScheduler::~ThumbnailScheduler()
     {
+        {
+            std::scoped_lock lock(diskInvalidationMutex_);
+            diskInvalidationShuttingDown_ = true;
+            pendingDiskInvalidations_.clear();
+        }
+        diskInvalidationAvailable_.notify_all();
+        if (diskInvalidationWorker_.joinable())
+        {
+            diskInvalidationWorker_.join();
+        }
+
         {
             std::scoped_lock lock(mutex_);
             shuttingDown_ = true;
@@ -313,12 +329,24 @@ namespace hyperbrowse::services
     void ThumbnailScheduler::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
     {
         cache_.InvalidateFilePaths(filePaths);
-        diskCache_.InvalidateFilePaths(filePaths);
 
         if (filePaths.empty())
         {
             return;
         }
+
+        // Never invalidate the persistent cache inline: it holds a process-wide
+        // filesystem mutex and rewrites the entire on-disk index, which routinely
+        // blocks for seconds behind concurrent thumbnail stores. Callers include the
+        // UI thread, which must not stall on disk I/O.
+        {
+            std::scoped_lock diskLock(diskInvalidationMutex_);
+            if (!diskInvalidationShuttingDown_)
+            {
+                pendingDiskInvalidations_.push_back(filePaths);
+            }
+        }
+        diskInvalidationAvailable_.notify_one();
 
         std::vector<std::wstring> normalizedPaths;
         normalizedPaths.reserve(filePaths.size());
@@ -338,6 +366,34 @@ namespace hyperbrowse::services
             }
 
             iterator = failedKeys_.erase(iterator);
+        }
+    }
+
+    void ThumbnailScheduler::DiskInvalidationLoop()
+    {
+        for (;;)
+        {
+            std::vector<std::wstring> filePaths;
+            {
+                std::unique_lock lock(diskInvalidationMutex_);
+                diskInvalidationAvailable_.wait(lock, [this]()
+                {
+                    return diskInvalidationShuttingDown_ || !pendingDiskInvalidations_.empty();
+                });
+
+                if (diskInvalidationShuttingDown_)
+                {
+                    // Pending invalidations are dropped on shutdown; stale entries are
+                    // keyed by path plus modified timestamp, so they can never produce a
+                    // wrong thumbnail, and cache compaction reclaims their disk space.
+                    return;
+                }
+
+                filePaths = std::move(pendingDiskInvalidations_.front());
+                pendingDiskInvalidations_.pop_front();
+            }
+
+            diskCache_.InvalidateFilePaths(filePaths);
         }
     }
 

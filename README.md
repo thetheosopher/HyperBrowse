@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.2.3-2EA043)
+![Version](https://img.shields.io/badge/Version-1.2.4-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -127,13 +127,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.3-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.4-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.3-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.4-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -194,9 +194,15 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.2.3**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.3-portable-win64.zip` and `HyperBrowse-1.2.3-installer.exe`).
+Current release: **1.2.4**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.4-portable-win64.zip` and `HyperBrowse-1.2.4-installer.exe`).
 
 ## Version History
+
+### 1.2.4
+
+- Fixed browser delete refresh anomalies where deleted selections could leave stale thumbnails visible until a manual refresh.
+- Removed a UI-thread stall path during delete completion by moving persistent thumbnail-cache invalidation off the main thread.
+- Restored viewer keyboard focus after delete operations so navigation and escape handling continue working without an extra click.
 
 ### 1.2.3
 
@@ -255,7 +261,7 @@ Current release: **1.2.3**. The version is defined by the top-level `project(Hyp
 
 ## Next Features
 
-Planned near-term areas after 1.2.3 include:
+Planned near-term areas after 1.2.4 include:
 
 - Viewer polish and workflow depth improvements that keep navigation fast while expanding compare/cull ergonomics.
 - Additional browser workflow refinements for high-volume folder organization.

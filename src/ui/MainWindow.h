@@ -507,6 +507,7 @@ namespace hyperbrowse::ui
         std::uint64_t activeFolderWatchRequestId_{};
         std::uint64_t activeBatchConvertRequestId_{};
         std::uint64_t activeFileOperationRequestId_{};
+        HWND foregroundWindowAtFileOperationStart_{};
         bool batchConvertActive_{};
         bool fileOperationActive_{};
         bool folderEnumerationActive_{};

@@ -11228,6 +11228,11 @@ namespace hyperbrowse::ui
         activeFileOperationLabel_.append(std::to_wstring(sourcePaths.size()));
         activeFileOperationLabel_.append(L" item(s)");
         fileOperationActive_ = true;
+        // IFileOperation's progress dialog is owned by the main window, so tearing it
+        // down reactivates the main window. Remember who was active first, so the
+        // completion handler can hand activation back; otherwise a delete issued from
+        // the viewer silently leaves the viewer without keyboard focus.
+        foregroundWindowAtFileOperationStart_ = GetForegroundWindow();
         activeFileOperationRequestId_ = fileOperationService_->Start(
             hwnd_,
             hwnd_,
@@ -11635,8 +11640,13 @@ namespace hyperbrowse::ui
 
     void MainWindow::ApplyCompletedFileOperation(const services::FileOperationUpdate& update)
     {
+        util::ScopedTimer applyTimer(L"MainWindow::ApplyCompletedFileOperation");
         fileOperationActive_ = false;
         activeFileOperationLabel_.clear();
+
+        const HWND activationRestoreWindow = foregroundWindowAtFileOperationStart_;
+        foregroundWindowAtFileOperationStart_ = nullptr;
+        bool viewerCloseRequested = false;
 
         const std::wstring viewerDeleteSourcePath = pendingViewerDeleteSourcePath_;
         const std::vector<std::wstring> viewerDeleteSourcePaths = pendingViewerDeleteSourcePaths_;
@@ -11644,6 +11654,12 @@ namespace hyperbrowse::ui
         pendingViewerDeleteSourcePath_.clear();
         pendingViewerDeleteSourcePaths_.clear();
         pendingViewerDeletePreferredFocusPath_.clear();
+
+        // Only deletes that originated in the viewer get the "do not re-enumerate"
+        // treatment below; browser-initiated deletes must still update the model.
+        const bool viewerDeleteOperation = !viewerDeleteSourcePath.empty()
+            && (update.type == services::FileOperationType::DeleteRecycleBin
+                || update.type == services::FileOperationType::DeletePermanent);
 
         const std::wstring deferredFolderWatchReloadPath = pendingFolderWatchReloadPath_;
         const bool deferredFolderWatchTreeRefresh = pendingFolderWatchTreeRefresh_;
@@ -11792,11 +11808,87 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (viewerDeleteOperation)
+        {
+            // Viewer deletes are applied incrementally below and the viewer has
+            // already advanced locally; a full folder re-enumeration would blank
+            // the viewer and re-decode the visible image for no benefit.
+            reloadCurrentFolder = false;
+        }
+
         bool modelChanged = false;
         if (!reloadCurrentFolder && browserModel_ && browserPaneController_)
         {
             std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
             std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
+
+            // Deleting the whole selection leaves nothing selected, which drops
+            // keyboard focus entirely. Remember the nearest surviving neighbour so
+            // focus can land there once the removed items are gone.
+            std::wstring deleteFallbackFocusPath;
+            if (!viewerDeleteOperation
+                && (update.type == services::FileOperationType::DeleteRecycleBin
+                    || update.type == services::FileOperationType::DeletePermanent))
+            {
+                const auto& itemsBeforeDelete = browserModel_->Items();
+                const std::vector<int> orderedModelIndices = browserPaneController_->OrderedModelIndicesSnapshot();
+                const auto pathAtOrdinal = [&](int ordinal) -> const std::wstring*
+                {
+                    if (ordinal < 0 || ordinal >= static_cast<int>(orderedModelIndices.size()))
+                    {
+                        return nullptr;
+                    }
+
+                    const int modelIndex = orderedModelIndices[static_cast<std::size_t>(ordinal)];
+                    if (modelIndex < 0 || modelIndex >= static_cast<int>(itemsBeforeDelete.size()))
+                    {
+                        return nullptr;
+                    }
+
+                    return &itemsBeforeDelete[static_cast<std::size_t>(modelIndex)].filePath;
+                };
+                const auto isDeletedPath = [&](const std::wstring& path)
+                {
+                    return std::any_of(
+                        update.succeededSourcePaths.begin(),
+                        update.succeededSourcePaths.end(),
+                        [&](const std::wstring& deletedPath)
+                        {
+                            return browser::FilePathsEqual(deletedPath, path);
+                        });
+                };
+
+                const int ordinalCount = static_cast<int>(orderedModelIndices.size());
+                int lastDeletedOrdinal = -1;
+                for (int ordinal = 0; ordinal < ordinalCount; ++ordinal)
+                {
+                    const std::wstring* path = pathAtOrdinal(ordinal);
+                    if (path && isDeletedPath(*path))
+                    {
+                        lastDeletedOrdinal = ordinal;
+                    }
+                }
+
+                for (int ordinal = lastDeletedOrdinal + 1; lastDeletedOrdinal >= 0 && ordinal < ordinalCount; ++ordinal)
+                {
+                    const std::wstring* path = pathAtOrdinal(ordinal);
+                    if (path && !isDeletedPath(*path))
+                    {
+                        deleteFallbackFocusPath = *path;
+                        break;
+                    }
+                }
+
+                for (int ordinal = lastDeletedOrdinal - 1; deleteFallbackFocusPath.empty() && ordinal >= 0; --ordinal)
+                {
+                    const std::wstring* path = pathAtOrdinal(ordinal);
+                    if (path && !isDeletedPath(*path))
+                    {
+                        deleteFallbackFocusPath = *path;
+                        break;
+                    }
+                }
+            }
 
             if (update.type == services::FileOperationType::Rename)
             {
@@ -11897,14 +11989,30 @@ namespace hyperbrowse::ui
             affectedPaths.insert(affectedPaths.end(), update.createdPaths.begin(), update.createdPaths.end());
             if (!affectedPaths.empty())
             {
+                util::ScopedTimer invalidateTimer(L"ApplyCompletedFileOperation InvalidateMediaCacheForPaths");
                 browserPaneController_->InvalidateMediaCacheForPaths(affectedPaths);
             }
 
             if (modelChanged && fallbackFolderPath.empty())
             {
+                util::ScopedTimer refreshTimer(L"ApplyCompletedFileOperation RefreshBrowserPane");
                 RefreshBrowserPane();
                 browserPaneController_->RestoreSelectionByFilePaths(selectedPaths, focusedPath);
+                if (!deleteFallbackFocusPath.empty() && browserPaneController_->SelectedCount() == 0)
+                {
+                    browserPaneController_->RestoreSelectionByFilePaths({deleteFallbackFocusPath}, deleteFallbackFocusPath);
+                    browserPaneController_->EnsureFocusedItemVisible();
+                }
                 UpdateWindowTitle();
+
+                // Keep an open viewer consistent with the browser model after a
+                // browser-initiated operation. Viewer deletes are excluded: the
+                // viewer already advanced locally and re-syncing it here would
+                // blank and re-decode the image that is already on screen.
+                if (!viewerDeleteOperation && viewerWindow_ && viewerWindow_->IsOpen())
+                {
+                    SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
+                }
             }
         }
 
@@ -11922,9 +12030,7 @@ namespace hyperbrowse::ui
             }
         }
 
-        if (!viewerDeleteSourcePath.empty()
-            && (update.type == services::FileOperationType::DeleteRecycleBin
-                || update.type == services::FileOperationType::DeletePermanent))
+        if (viewerDeleteOperation)
         {
             const auto deletePathSucceeded = [&](const std::wstring& sourcePath)
             {
@@ -11965,16 +12071,9 @@ namespace hyperbrowse::ui
 
             if (browserModelChanged)
             {
-                // For viewer deletes: the file watcher will update the browser model
-                // asynchronously, so skip the expensive RefreshBrowserPane() call.
-                // The viewer already advanced optimistically via AdvanceAfterDeleteCurrent(),
-                // so we don't need to sync here.
-                if (update.type != services::FileOperationType::DeleteRecycleBin
-                    && update.type != services::FileOperationType::DeletePermanent)
-                {
-                    util::ScopedTimer refreshTimer(L"ApplyCompletedFileOperation RefreshBrowserPane");
-                    RefreshBrowserPane();
-                }
+                // The incremental update above already refreshed the browser pane
+                // for anything it removed; this only covers items it could not see
+                // (e.g. no browser pane controller), so just refresh the title.
                 UpdateWindowTitle();
             }
 
@@ -11985,6 +12084,7 @@ namespace hyperbrowse::ui
                     const HWND viewerHwnd = viewerWindow_->Hwnd();
                     if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
                     {
+                        viewerCloseRequested = true;
                         PostMessageW(viewerHwnd, WM_CLOSE, 0, 0);
                     }
                 }
@@ -12028,13 +12128,7 @@ namespace hyperbrowse::ui
         }
         else if (reloadCurrentFolder && browserModel_ && !browserModel_->FolderPath().empty())
         {
-            // For viewer deletes: skip the expensive LoadFolderAsync (2s re-enumeration)
-            // since the file watcher will update incrementally anyway.
-            if (update.type != services::FileOperationType::DeleteRecycleBin
-                && update.type != services::FileOperationType::DeletePermanent)
-            {
-                LoadFolderAsync(browserModel_->FolderPath());
-            }
+            LoadFolderAsync(browserModel_->FolderPath());
         }
 
         UpdateStatusText();
@@ -12043,6 +12137,24 @@ namespace hyperbrowse::ui
         if (!update.message.empty() && update.failedCount > 0)
         {
             MessageBoxW(hwnd_, update.message.c_str(), L"File Operation", MB_OK | MB_ICONWARNING);
+        }
+
+        // Hand activation back to whichever of our windows the user was working in when
+        // the operation began. Without this a viewer-initiated delete leaves the main
+        // window active and the viewer stops responding to the keyboard until clicked.
+        if (activationRestoreWindow
+            && !viewerCloseRequested
+            && activationRestoreWindow != hwnd_
+            && IsWindow(activationRestoreWindow) != FALSE
+            && IsWindowVisible(activationRestoreWindow) != FALSE
+            && viewerWindow_
+            && viewerWindow_->IsOpen()
+            && viewerWindow_->Hwnd() == activationRestoreWindow
+            && GetForegroundWindow() != activationRestoreWindow)
+        {
+            util::LogInfo(L"ApplyCompletedFileOperation restoring viewer activation");
+            SetForegroundWindow(activationRestoreWindow);
+            SetFocus(activationRestoreWindow);
         }
 
         // Dispatch the next queued viewer delete, if any, now that the file
@@ -12092,7 +12204,16 @@ namespace hyperbrowse::ui
 
         if (fileOperationActive_)
         {
-            pendingFolderWatchReloadPath_ = update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath;
+            // Watch notifications raised while our own file operation is running are
+            // normally just echoes of that operation, and ApplyCompletedFileOperation
+            // applies those changes incrementally from the operation result. Deferring
+            // a full folder reload for them would discard the selection and re-enumerate
+            // the folder for nothing, so only escalate when the burst is too large (or
+            // too ambiguous) to reconstruct from the operation result.
+            if (update.requiresFullReload || update.events.size() >= kIncrementalFolderWatchEventLimit)
+            {
+                pendingFolderWatchReloadPath_ = update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath;
+            }
 
             const auto treeRefreshNeededForPath = [&](const std::wstring& path)
             {
