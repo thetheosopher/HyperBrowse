@@ -13598,6 +13598,12 @@ namespace hyperbrowse::ui
             return 0;
         }
 
+        if (browserPaneController_)
+        {
+            sortMode_ = browserPaneController_->GetSortMode();
+            sortAscending_ = browserPaneController_->IsSortAscending();
+        }
+
         UpdateStatusText();
         UpdateMenuState();
         UpdateDetailsPanel();
@@ -14238,7 +14244,8 @@ namespace hyperbrowse::ui
         case ID_VIEW_SORT_RANDOM:
             if (browserPaneController_)
             {
-                browserPaneController_->SetSortMode(SortModeFromCommandId(commandId));
+                sortMode_ = SortModeFromCommandId(commandId);
+                browserPaneController_->SetSortMode(sortMode_);
                 UpdateStatusText();
                 UpdateMenuState();
             }
@@ -14246,7 +14253,8 @@ namespace hyperbrowse::ui
         case ID_VIEW_SORT_DIRECTION:
             if (browserPaneController_)
             {
-                browserPaneController_->SetSortAscending(!browserPaneController_->IsSortAscending());
+                sortAscending_ = !browserPaneController_->IsSortAscending();
+                browserPaneController_->SetSortAscending(sortAscending_);
                 UpdateStatusText();
                 UpdateMenuState();
             }
