@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.2.4-2EA043)
+![Version](https://img.shields.io/badge/Version-1.2.5-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -127,13 +127,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.4-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.5-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.4-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.5-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -194,11 +194,17 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.2.4**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.4-portable-win64.zip` and `HyperBrowse-1.2.4-installer.exe`).
+Current release: **1.2.5**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.5-portable-win64.zip` and `HyperBrowse-1.2.5-installer.exe`).
 
-Release **1.2.4** focuses on delete-flow reliability and responsiveness: browser thumbnails now stay in sync when deleting selections, delete completion no longer stalls the UI, and viewer keyboard control remains active immediately after delete operations.
+Release **1.2.5** hardens recovery from malformed persistent thumbnail files and preserves folder rename events when Windows splits notifications across asynchronous completions.
 
 ## Version History
+
+### 1.2.5
+
+- Hardened persistent thumbnail-cache loading with checked dimensions, exact BGRA payload validation, truncated-file detection, and corrupt-entry cleanup.
+- Added regression coverage for malformed cache headers, invalid byte counts, truncated payloads, and valid cache round trips.
+- Preserved folder rename state across `ReadDirectoryChangesW` completions and added deterministic fallback behavior for orphaned or malformed notifications.
 
 ### 1.2.4
 
@@ -263,7 +269,7 @@ Release **1.2.4** focuses on delete-flow reliability and responsiveness: browser
 
 ## Next Features
 
-Planned near-term areas after 1.2.4 include:
+Planned near-term areas after 1.2.5 include:
 
 - Viewer polish and workflow depth improvements that keep navigation fast while expanding compare/cull ergonomics.
 - Additional browser workflow refinements for high-volume folder organization.
