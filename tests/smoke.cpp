@@ -26,6 +26,7 @@
 
 #include "browser/BrowserModel.h"
 #include "browser/BrowserPane.h"
+#include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
 #include "decode/WicThumbnailDecoder.h"
 #include "services/BatchConvertService.h"
@@ -870,6 +871,103 @@ namespace
         }
     }
 
+        void AppendFolderWatchRecord(std::vector<BYTE>* buffer, DWORD action, const std::wstring& relativePath)
+        {
+         Expect(buffer != nullptr, "Folder watch test buffer was null");
+         const std::size_t headerBytes = offsetof(FILE_NOTIFY_INFORMATION, FileName);
+         const std::size_t recordBytes = headerBytes + relativePath.size() * sizeof(WCHAR);
+         const std::size_t alignedRecordBytes = (recordBytes + sizeof(DWORD) - 1) & ~(sizeof(DWORD) - 1);
+         const std::size_t recordOffset = buffer->size();
+         buffer->resize(recordOffset + alignedRecordBytes);
+         std::memset(buffer->data() + recordOffset, 0, alignedRecordBytes);
+
+         if (recordOffset != 0)
+         {
+             std::size_t previousOffset = 0;
+             while (true)
+             {
+              auto* previous = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer->data() + previousOffset);
+              if (previous->NextEntryOffset == 0)
+              {
+                  previous->NextEntryOffset = static_cast<DWORD>(recordOffset - previousOffset);
+                  break;
+              }
+              previousOffset += previous->NextEntryOffset;
+             }
+         }
+
+         auto* record = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer->data() + recordOffset);
+         record->Action = action;
+         record->FileNameLength = static_cast<DWORD>(relativePath.size() * sizeof(WCHAR));
+         std::memcpy(record->FileName, relativePath.data(), record->FileNameLength);
+        }
+
+        void RunFolderWatchNotificationParserScenario()
+        {
+         constexpr wchar_t folderPath[] = L"C:\\HyperBrowseWatchTest";
+         hyperbrowse::services::FolderWatchNotificationParser parser;
+
+         std::vector<BYTE> oldNameBuffer;
+         AppendFolderWatchRecord(&oldNameBuffer, FILE_ACTION_RENAMED_OLD_NAME, L"old-name.jpg");
+         hyperbrowse::services::FolderWatchUpdate oldNameUpdate;
+         parser.Append(oldNameBuffer.data(), static_cast<DWORD>(oldNameBuffer.size()), folderPath, &oldNameUpdate);
+         Expect(oldNameUpdate.events.empty() && !oldNameUpdate.requiresFullReload,
+             "Folder watcher did not retain the first half of a rename");
+
+         std::vector<BYTE> newNameBuffer;
+         AppendFolderWatchRecord(&newNameBuffer, FILE_ACTION_RENAMED_NEW_NAME, L"new-name.jpg");
+         hyperbrowse::services::FolderWatchUpdate splitRenameUpdate;
+         parser.Append(newNameBuffer.data(), static_cast<DWORD>(newNameBuffer.size()), folderPath, &splitRenameUpdate);
+         Expect(splitRenameUpdate.events.size() == 1,
+             "Folder watcher did not pair rename records split across completions");
+         Expect(splitRenameUpdate.events.front().kind == hyperbrowse::services::FolderWatchEventKind::Renamed
+                 && fs::path(splitRenameUpdate.events.front().oldPath).filename() == L"old-name.jpg"
+                 && fs::path(splitRenameUpdate.events.front().path).filename() == L"new-name.jpg",
+             "Folder watcher paired split rename records incorrectly");
+
+         parser.Reset();
+         std::vector<BYTE> sameBuffer;
+         AppendFolderWatchRecord(&sameBuffer, FILE_ACTION_RENAMED_OLD_NAME, L"first.jpg");
+         AppendFolderWatchRecord(&sameBuffer, FILE_ACTION_RENAMED_NEW_NAME, L"second.jpg");
+         hyperbrowse::services::FolderWatchUpdate sameBufferUpdate;
+         parser.Append(sameBuffer.data(), static_cast<DWORD>(sameBuffer.size()), folderPath, &sameBufferUpdate);
+         Expect(sameBufferUpdate.events.size() == 1 && !sameBufferUpdate.requiresFullReload,
+             "Folder watcher did not pair rename records in one completion");
+
+         parser.Reset();
+         hyperbrowse::services::FolderWatchUpdate orphanNewUpdate;
+         parser.Append(newNameBuffer.data(), static_cast<DWORD>(newNameBuffer.size()), folderPath, &orphanNewUpdate);
+         Expect(orphanNewUpdate.requiresFullReload,
+             "Folder watcher did not request a full reload for an orphan new-name record");
+
+         parser.Reset();
+         hyperbrowse::services::FolderWatchUpdate pendingOldUpdate;
+         parser.Append(oldNameBuffer.data(), static_cast<DWORD>(oldNameBuffer.size()), folderPath, &pendingOldUpdate);
+         std::vector<BYTE> addedBuffer;
+         AppendFolderWatchRecord(&addedBuffer, FILE_ACTION_ADDED, L"added.jpg");
+         hyperbrowse::services::FolderWatchUpdate orphanOldUpdate;
+         parser.Append(addedBuffer.data(), static_cast<DWORD>(addedBuffer.size()), folderPath, &orphanOldUpdate);
+         Expect(orphanOldUpdate.requiresFullReload,
+             "Folder watcher did not request a full reload for an orphan old-name record");
+
+         parser.Reset();
+         hyperbrowse::services::FolderWatchUpdate resetOldUpdate;
+         parser.Append(oldNameBuffer.data(), static_cast<DWORD>(oldNameBuffer.size()), folderPath, &resetOldUpdate);
+         parser.Reset();
+         hyperbrowse::services::FolderWatchUpdate resetNewUpdate;
+         parser.Append(newNameBuffer.data(), static_cast<DWORD>(newNameBuffer.size()), folderPath, &resetNewUpdate);
+         Expect(resetNewUpdate.requiresFullReload,
+             "Folder watcher did not clear rename state after reset");
+
+         std::vector<BYTE> malformedBuffer(offsetof(FILE_NOTIFY_INFORMATION, FileName));
+         auto* malformedRecord = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(malformedBuffer.data());
+         malformedRecord->NextEntryOffset = 1;
+         hyperbrowse::services::FolderWatchUpdate malformedUpdate;
+         parser.Append(malformedBuffer.data(), static_cast<DWORD>(malformedBuffer.size()), folderPath, &malformedUpdate);
+         Expect(malformedUpdate.requiresFullReload,
+             "Folder watcher did not request a full reload for a malformed notification");
+        }
+
     void RunThumbnailCacheNormalizationScenario()
     {
         TempFolder root(L"HyperBrowseThumbnailCacheNormalization");
@@ -896,6 +994,82 @@ namespace
 
         cache.InvalidateFilePaths({lookupKey.filePath});
         Expect(cache.Find(insertedKey) == nullptr, "Thumbnail cache invalidation did not normalize the supplied file path");
+    }
+
+    void RunDiskThumbnailCacheCorruptionScenario()
+    {
+        TempFolder root(L"HyperBrowseDiskThumbnailCacheCorruption");
+        const fs::path imagePath = root.Root() / L"sample.png";
+        const fs::path cacheRoot = root.Root() / L"cache";
+        fs::create_directories(cacheRoot);
+        WriteTestImage(imagePath, TestImageFormat::Png, 32, 16);
+
+        hyperbrowse::decode::WicThumbnailDecoder decoder;
+        const auto key = MakeCacheKey(imagePath, 29);
+        const auto thumbnail = decoder.Decode(key);
+        Expect(thumbnail != nullptr, "Failed to create the thumbnail used for persistent-cache testing");
+
+        hyperbrowse::cache::DiskThumbnailCache cache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
+        cache.Store(key, thumbnail);
+        Expect(cache.TryLoad(key) != nullptr, "Persistent thumbnail cache did not round-trip a valid entry");
+
+#pragma pack(push, 1)
+        struct TestDiskThumbnailHeader
+        {
+            char magic[8];
+            std::uint32_t width{};
+            std::uint32_t height{};
+            std::uint32_t sourceWidth{};
+            std::uint32_t sourceHeight{};
+            std::uint64_t pixelBytes{};
+        };
+#pragma pack(pop)
+
+        const auto corruptEntry = [&](TestDiskThumbnailHeader header, std::size_t payloadBytes, const char* message)
+        {
+            cache.Store(key, thumbnail);
+            fs::path cacheFile;
+            for (const fs::directory_entry& entry : fs::directory_iterator(cacheRoot))
+            {
+                if (entry.path().extension() == L".thumb")
+                {
+                    cacheFile = entry.path();
+                    break;
+                }
+            }
+            Expect(!cacheFile.empty(), "Persistent thumbnail cache did not create an entry file");
+
+            std::ofstream stream(cacheFile, std::ios::binary | std::ios::trunc);
+            stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
+            std::vector<char> payload(payloadBytes, '\0');
+            stream.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+            stream.close();
+
+            Expect(cache.TryLoad(key) == nullptr, message);
+            Expect(!fs::exists(cacheFile), "Persistent thumbnail cache did not remove the corrupt entry");
+        };
+
+        TestDiskThumbnailHeader validHeader{};
+        std::memcpy(validHeader.magic, "HBTHMB01", sizeof(validHeader.magic));
+        validHeader.width = 32;
+        validHeader.height = 16;
+        validHeader.sourceWidth = 32;
+        validHeader.sourceHeight = 16;
+        validHeader.pixelBytes = 32ULL * 16ULL * 4ULL;
+
+        TestDiskThumbnailHeader wrongMagic = validHeader;
+        wrongMagic.magic[0] = 'X';
+        corruptEntry(wrongMagic, static_cast<std::size_t>(wrongMagic.pixelBytes), "Persistent thumbnail cache accepted an invalid magic value");
+
+        TestDiskThumbnailHeader oversizedDimensions = validHeader;
+        oversizedDimensions.width = UINT32_MAX;
+        corruptEntry(oversizedDimensions, 0, "Persistent thumbnail cache accepted oversized dimensions");
+
+        TestDiskThumbnailHeader wrongByteCount = validHeader;
+        wrongByteCount.pixelBytes += 4;
+        corruptEntry(wrongByteCount, static_cast<std::size_t>(wrongByteCount.pixelBytes), "Persistent thumbnail cache accepted a mismatched pixel byte count");
+
+        corruptEntry(validHeader, static_cast<std::size_t>(validHeader.pixelBytes - 1), "Persistent thumbnail cache accepted a truncated payload");
     }
 
     void RunWicDecoderScenario()
@@ -1823,7 +1997,9 @@ int main()
         RunEnumerationScenario(hwnd, &state);
         RunFolderTreeEnumerationScenario(hwnd, &state);
         RunFolderWatchStartStopScenario(hwnd);
+        RunFolderWatchNotificationParserScenario();
         RunThumbnailCacheNormalizationScenario();
+        RunDiskThumbnailCacheCorruptionScenario();
         RunWicDecoderScenario();
         RunJpegOrientationAdjustmentScenario();
         RunBatchConvertCancellationScenario(hwnd);

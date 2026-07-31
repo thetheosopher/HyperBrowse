@@ -7,6 +7,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -19,6 +20,9 @@ namespace
     namespace fs = std::filesystem;
 
     constexpr std::size_t kDefaultDiskThumbnailCacheCapacityBytes = 512ULL * 1024ULL * 1024ULL;
+    constexpr std::uint32_t kMaximumThumbnailDimension = 4096;
+    constexpr std::uint64_t kMaximumThumbnailPixelBytes = static_cast<std::uint64_t>(kMaximumThumbnailDimension)
+        * kMaximumThumbnailDimension * 4U;
     constexpr std::wstring_view kCacheRootFolder = L"HyperBrowse\\thumbnail-cache";
     constexpr std::wstring_view kIndexFileName = L"index.tsv";
 
@@ -319,8 +323,9 @@ namespace
 
 namespace hyperbrowse::cache
 {
-    DiskThumbnailCache::DiskThumbnailCache(std::size_t capacityBytes)
+    DiskThumbnailCache::DiskThumbnailCache(std::size_t capacityBytes, std::wstring cacheDirectory)
         : capacityBytes_(capacityBytes == 0 ? kDefaultDiskThumbnailCacheCapacityBytes : capacityBytes)
+        , cacheDirectory_(std::move(cacheDirectory))
     {
     }
 
@@ -347,17 +352,30 @@ namespace hyperbrowse::cache
         }
 
         std::ifstream stream(fs::path(cachePath), std::ios::binary);
+        const auto removeInvalidEntry = [&]()
+        {
+            stream.close();
+            {
+                std::scoped_lock lock(mutex_);
+                ReloadIndexLocked();
+                const auto iterator = entries_.find(normalizedKey);
+                if (iterator != entries_.end())
+                {
+                    currentBytes_ = iterator->second.fileBytes > currentBytes_
+                        ? 0
+                        : currentBytes_ - iterator->second.fileBytes;
+                    entries_.erase(iterator);
+                    SaveIndexLocked();
+                }
+            }
+
+            std::error_code error;
+            fs::remove(fs::path(cachePath), error);
+        };
+
         if (!stream)
         {
-            std::scoped_lock lock(mutex_);
-            ReloadIndexLocked();
-            const auto iterator = entries_.find(normalizedKey);
-            if (iterator != entries_.end())
-            {
-                currentBytes_ -= iterator->second.fileBytes;
-                entries_.erase(iterator);
-                SaveIndexLocked();
-            }
+            removeInvalidEntry();
             return {};
         }
 
@@ -365,24 +383,64 @@ namespace hyperbrowse::cache
         stream.read(reinterpret_cast<char*>(&header), sizeof(header));
         if (!stream || !std::equal(std::begin(header.magic), std::end(header.magic), kDiskThumbnailMagic.begin(), kDiskThumbnailMagic.end()))
         {
+            removeInvalidEntry();
             return {};
         }
 
-        if (header.width == 0 || header.height == 0 || header.pixelBytes == 0)
+        if (header.width == 0
+            || header.height == 0
+            || header.width > kMaximumThumbnailDimension
+            || header.height > kMaximumThumbnailDimension
+            || header.sourceWidth > static_cast<std::uint32_t>(std::numeric_limits<int>::max())
+            || header.sourceHeight > static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
         {
+            removeInvalidEntry();
             return {};
         }
 
-        std::vector<unsigned char> pixels(static_cast<std::size_t>(header.pixelBytes));
+        const std::uint64_t expectedPixelBytes = static_cast<std::uint64_t>(header.width)
+            * static_cast<std::uint64_t>(header.height) * 4U;
+        if (expectedPixelBytes == 0
+            || expectedPixelBytes > kMaximumThumbnailPixelBytes
+            || header.pixelBytes != expectedPixelBytes
+            || header.pixelBytes > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            || header.pixelBytes > static_cast<std::uint64_t>(std::numeric_limits<std::streamsize>::max()))
+        {
+            removeInvalidEntry();
+            return {};
+        }
+
+        std::error_code fileSizeError;
+        const std::uintmax_t fileSize = fs::file_size(fs::path(cachePath), fileSizeError);
+        if (fileSizeError
+            || fileSize != sizeof(DiskThumbnailHeader) + header.pixelBytes)
+        {
+            removeInvalidEntry();
+            return {};
+        }
+
+        std::vector<unsigned char> pixels;
+        try
+        {
+            pixels.resize(static_cast<std::size_t>(header.pixelBytes));
+        }
+        catch (const std::exception&)
+        {
+            removeInvalidEntry();
+            return {};
+        }
+
         stream.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
         if (!stream)
         {
+            removeInvalidEntry();
             return {};
         }
 
         HBITMAP bitmap = CreateBitmapFromPixels(static_cast<int>(header.width), static_cast<int>(header.height), pixels);
         if (!bitmap)
         {
+            removeInvalidEntry();
             return {};
         }
 

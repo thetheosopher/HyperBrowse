@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <filesystem>
 
 #include "util/Log.h"
@@ -170,6 +171,7 @@ namespace
             | FILE_NOTIFY_CHANGE_SIZE
             | FILE_NOTIFY_CHANGE_CREATION;
         std::array<BYTE, 64 * 1024> buffer{};
+        hyperbrowse::services::FolderWatchNotificationParser notificationParser;
 
         while (!ShouldStop(sharedState, requestId))
         {
@@ -192,6 +194,7 @@ namespace
             if (!started)
             {
                 CloseHandle(overlapped.hEvent);
+                notificationParser.Reset();
                 auto update = std::make_unique<hyperbrowse::services::FolderWatchUpdate>();
                 update->requestId = requestId;
                 update->folderPath = folderPath;
@@ -207,6 +210,7 @@ namespace
             {
                 CancelIoEx(directoryHandle, &overlapped);
                 CloseHandle(overlapped.hEvent);
+                notificationParser.Reset();
                 break;
             }
 
@@ -218,9 +222,11 @@ namespace
                 const DWORD error = GetLastError();
                 if (error == ERROR_OPERATION_ABORTED && ShouldStop(sharedState, requestId))
                 {
+                    notificationParser.Reset();
                     break;
                 }
 
+                notificationParser.Reset();
                 auto update = std::make_unique<hyperbrowse::services::FolderWatchUpdate>();
                 update->requestId = requestId;
                 update->folderPath = folderPath;
@@ -240,46 +246,9 @@ namespace
             auto update = std::make_unique<hyperbrowse::services::FolderWatchUpdate>();
             update->requestId = requestId;
             update->folderPath = folderPath;
+            notificationParser.Append(buffer.data(), bytesTransferred, folderPath, update.get());
 
-            std::wstring pendingRenameOldPath;
-            BYTE* current = buffer.data();
-            while (current)
-            {
-                const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(current);
-                const std::wstring relativePath(info->FileName, info->FileNameLength / sizeof(WCHAR));
-                const std::wstring fullPath = CombinePath(folderPath, relativePath);
-
-                switch (info->Action)
-                {
-                case FILE_ACTION_ADDED:
-                    update->events.push_back({hyperbrowse::services::FolderWatchEventKind::Added, fullPath, {}});
-                    break;
-                case FILE_ACTION_REMOVED:
-                    update->events.push_back({hyperbrowse::services::FolderWatchEventKind::Removed, fullPath, {}});
-                    break;
-                case FILE_ACTION_MODIFIED:
-                    update->events.push_back({hyperbrowse::services::FolderWatchEventKind::Modified, fullPath, {}});
-                    break;
-                case FILE_ACTION_RENAMED_OLD_NAME:
-                    pendingRenameOldPath = fullPath;
-                    break;
-                case FILE_ACTION_RENAMED_NEW_NAME:
-                    update->events.push_back({hyperbrowse::services::FolderWatchEventKind::Renamed, fullPath, pendingRenameOldPath});
-                    pendingRenameOldPath.clear();
-                    break;
-                default:
-                    break;
-                }
-
-                if (info->NextEntryOffset == 0)
-                {
-                    break;
-                }
-
-                current += info->NextEntryOffset;
-            }
-
-            if (!update->events.empty())
+            if (!update->events.empty() || update->requiresFullReload)
             {
                 QueueUpdate(sharedState, targetWindow, std::move(update));
             }
@@ -291,6 +260,104 @@ namespace
 
 namespace hyperbrowse::services
 {
+    void FolderWatchNotificationParser::Append(const BYTE* buffer,
+                                               DWORD bufferSize,
+                                               const std::wstring& folderPath,
+                                               FolderWatchUpdate* update)
+    {
+        if (!buffer || bufferSize < offsetof(FILE_NOTIFY_INFORMATION, FileName) || !update)
+        {
+            if (update)
+            {
+                update->requiresFullReload = true;
+                update->message = L"Folder watcher received a malformed filesystem notification.";
+            }
+            Reset();
+            return;
+        }
+
+        DWORD offset = 0;
+        while (offset < bufferSize)
+        {
+            const DWORD remainingBytes = bufferSize - offset;
+            if (remainingBytes < offsetof(FILE_NOTIFY_INFORMATION, FileName))
+            {
+                update->requiresFullReload = true;
+                update->message = L"Folder watcher received a malformed filesystem notification.";
+                Reset();
+                return;
+            }
+
+            const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buffer + offset);
+            const DWORD recordBytes = info->NextEntryOffset == 0 ? remainingBytes : info->NextEntryOffset;
+            if (recordBytes < offsetof(FILE_NOTIFY_INFORMATION, FileName)
+                || recordBytes > remainingBytes
+                || info->FileNameLength > recordBytes - offsetof(FILE_NOTIFY_INFORMATION, FileName)
+                || info->FileNameLength % sizeof(WCHAR) != 0)
+            {
+                update->requiresFullReload = true;
+                update->message = L"Folder watcher received a malformed filesystem notification.";
+                Reset();
+                return;
+            }
+
+            const std::wstring relativePath(info->FileName, info->FileNameLength / sizeof(WCHAR));
+            const std::wstring fullPath = CombinePath(folderPath, relativePath);
+            if (info->Action != FILE_ACTION_RENAMED_NEW_NAME && !pendingRenameOldPath_.empty())
+            {
+                update->requiresFullReload = true;
+                update->message = L"Folder watcher received an unpaired rename notification.";
+                pendingRenameOldPath_.clear();
+            }
+
+            switch (info->Action)
+            {
+            case FILE_ACTION_ADDED:
+                update->events.push_back({FolderWatchEventKind::Added, fullPath, {}});
+                break;
+            case FILE_ACTION_REMOVED:
+                update->events.push_back({FolderWatchEventKind::Removed, fullPath, {}});
+                break;
+            case FILE_ACTION_MODIFIED:
+                update->events.push_back({FolderWatchEventKind::Modified, fullPath, {}});
+                break;
+            case FILE_ACTION_RENAMED_OLD_NAME:
+                if (!pendingRenameOldPath_.empty())
+                {
+                    update->requiresFullReload = true;
+                    update->message = L"Folder watcher received an unpaired rename notification.";
+                }
+                pendingRenameOldPath_ = fullPath;
+                break;
+            case FILE_ACTION_RENAMED_NEW_NAME:
+                if (pendingRenameOldPath_.empty())
+                {
+                    update->requiresFullReload = true;
+                    update->message = L"Folder watcher received an unpaired rename notification.";
+                }
+                else
+                {
+                    update->events.push_back({FolderWatchEventKind::Renamed, fullPath, std::move(pendingRenameOldPath_)});
+                    pendingRenameOldPath_.clear();
+                }
+                break;
+            default:
+                break;
+            }
+
+            if (info->NextEntryOffset == 0)
+            {
+                return;
+            }
+            offset += info->NextEntryOffset;
+        }
+    }
+
+    void FolderWatchNotificationParser::Reset()
+    {
+        pendingRenameOldPath_.clear();
+    }
+
     FolderWatchService::FolderWatchService()
         : sharedState_(std::make_shared<SharedState>())
     {

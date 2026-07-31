@@ -36,6 +36,19 @@ namespace hyperbrowse::services
         std::wstring message;
     };
 
+    class FolderWatchNotificationParser
+    {
+    public:
+        void Append(const BYTE* buffer,
+                    DWORD bufferSize,
+                    const std::wstring& folderPath,
+                    FolderWatchUpdate* update);
+        void Reset();
+
+    private:
+        std::wstring pendingRenameOldPath_;
+    };
+
     class FolderWatchService
     {
     public:

@@ -29,7 +29,7 @@ namespace hyperbrowse::cache
             std::size_t missingFileCount{};
         };
 
-        explicit DiskThumbnailCache(std::size_t capacityBytes = 0);
+        explicit DiskThumbnailCache(std::size_t capacityBytes = 0, std::wstring cacheDirectory = {});
 
         std::shared_ptr<const CachedThumbnail> TryLoad(const ThumbnailCacheKey& key);
         void Store(const ThumbnailCacheKey& key, std::shared_ptr<const CachedThumbnail> thumbnail);
