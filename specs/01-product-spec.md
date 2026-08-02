@@ -79,7 +79,7 @@ The application is intentionally scoped as a **pure viewer/browser** rather than
 - Animated GIF thumbnails
 - Multipage TIFF navigation
 - Per-image zoom/pan persistence
-- Drag-and-drop file operations
+- Drag-and-drop file operations into HyperBrowse
 
 Note: Compare/cull, ratings and tags, persistent disk thumbnail cache, sort direction toggle, configurable viewer mouse wheel behavior, in-app rename (F2), batch rename, and RAW+JPEG paired operations were originally deferred but are now implemented. See [14-todo.md](14-todo.md) for the current backlog.
 

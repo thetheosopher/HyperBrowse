@@ -254,8 +254,10 @@ and browser focus is restored if the delete fails.
 
 ### `B1` Drag-and-Drop File Operations (P0)
 
-- **Drag out:** thumbnails as `CFSTR_FILECONTENTS` / `CF_HDROP` so users
-  can drop into Explorer, mail clients, or chat apps.
+- **Drag out (implemented):** selected thumbnails or image rows are exposed as
+  a shell data object so users can drag them into Explorer, mail clients, or
+  other shell-aware apps. The external drag begins when the pointer leaves
+  the HyperBrowse window, preserving the existing in-app destination drag.
 - **Drag in:** drop folders or files onto the browser pane to navigate or
   copy into the current folder.
 - Holding `Ctrl` forces copy, `Shift` forces move; default mirrors Explorer

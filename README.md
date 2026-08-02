@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.2.5-2EA043)
+![Version](https://img.shields.io/badge/Version-1.2.6-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -25,14 +25,15 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
-- Folder tree workflow upgrades with validated folder moves, inline folder creation, favorite destinations, back-navigation history, and image drag-and-drop from the browser into tree folders.
+- Folder tree workflow upgrades with validated folder moves, inline folder creation, favorite destinations, back-navigation history, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
+- Selected thumbnails and details rows can be dragged to File Explorer, mail clients, and other shell-aware applications using native Windows file-drop data.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 
 ## Current Capabilities
 
 | Area | Included today |
 | --- | --- |
-| Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, and image drag-drop into tree folders |
+| Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
 | Viewer | Separate viewer window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
@@ -127,13 +128,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.5-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.6-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.5-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.6-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -186,7 +187,7 @@ The `specs/` directory tracks both design intent and implementation follow-up. U
 HyperBrowse is already a capable browser/viewer, but it is still deliberately scoped. Current non-goals or deferred items include:
 
 - Heavy image editing, annotations, cropping, and organizer-style database features.
-- Drag-and-drop file operations between multiple HyperBrowse instances or between HyperBrowse and external apps like Explorer.
+- Drag-and-drop file operations between multiple HyperBrowse instances, or dropping files into HyperBrowse to navigate or copy them into the current folder.
 - Multipage TIFF navigation and animated GIF thumbnails.
 - Plugin ecosystems, duplicate finders, face detection, and library/database back ends.
 
@@ -194,11 +195,17 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.2.5**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.5-portable-win64.zip` and `HyperBrowse-1.2.5-installer.exe`).
+Current release: **1.2.6**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.6-portable-win64.zip` and `HyperBrowse-1.2.6-installer.exe`).
 
-Release **1.2.5** hardens recovery from malformed persistent thumbnail files and preserves folder rename events when Windows splits notifications across asynchronous completions.
+Release **1.2.6** adds native drag-out of selected files to File Explorer and other shell-aware applications, with OLE initialization required for reliable Windows drag feedback.
 
 ## Version History
+
+### 1.2.6
+
+- Added native drag-out for selected thumbnails and details rows to File Explorer, mail clients, and other shell-aware applications.
+- Preserved existing in-app browser-to-tree and Quick Send drag workflows while starting external shell drags when the pointer leaves HyperBrowse.
+- Initialized OLE on the application thread so Windows `DoDragDrop` provides normal drag feedback and drop effects.
 
 ### 1.2.5
 
@@ -269,7 +276,7 @@ Release **1.2.5** hardens recovery from malformed persistent thumbnail files and
 
 ## Next Features
 
-Planned near-term areas after 1.2.5 include:
+Planned near-term areas after 1.2.6 include:
 
 - Viewer polish and workflow depth improvements that keep navigation fast while expanding compare/cull ergonomics.
 - Additional browser workflow refinements for high-volume folder organization.

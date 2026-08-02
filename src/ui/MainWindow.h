@@ -308,6 +308,7 @@ namespace hyperbrowse::ui
         void FinishFolderTreeDrag(bool commitDrop);
         void UpdateInternalSelectionDrag(POINT windowPoint);
         void FinishInternalSelectionDrag(bool commitDrop);
+        void StartExternalSelectionDrag();
         LRESULT OnDropFiles(HDROP dropHandle);
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);

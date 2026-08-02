@@ -94,11 +94,11 @@ namespace hyperbrowse::app
             util::LogInfo(L"Startup benchmark capture enabled.");
         }
 
-        const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-        const bool shouldUninitializeCom = SUCCEEDED(comResult) || comResult == S_FALSE;
-        if (FAILED(comResult) && comResult != RPC_E_CHANGED_MODE)
+        const HRESULT oleResult = OleInitialize(nullptr);
+        const bool shouldUninitializeOle = SUCCEEDED(oleResult) || oleResult == S_FALSE;
+        if (FAILED(oleResult) && oleResult != RPC_E_CHANGED_MODE)
         {
-            util::LogError(L"Failed to initialize COM for the application shell");
+            util::LogError(L"Failed to initialize OLE for the application shell");
             return -1;
         }
 
@@ -110,9 +110,9 @@ namespace hyperbrowse::app
         if (!mainWindow_->Create())
         {
             util::LogError(L"Failed to create main window");
-            if (shouldUninitializeCom)
+            if (shouldUninitializeOle)
             {
-                CoUninitialize();
+                OleUninitialize();
             }
             return -1;
         }
@@ -146,9 +146,9 @@ namespace hyperbrowse::app
                 util::LogError(L"Failed to write startup benchmark snapshot.");
             }
         }
-        if (shouldUninitializeCom)
+        if (shouldUninitializeOle)
         {
-            CoUninitialize();
+            OleUninitialize();
         }
         return static_cast<int>(msg.wParam);
     }
