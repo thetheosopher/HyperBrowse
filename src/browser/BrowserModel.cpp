@@ -7,6 +7,7 @@
 #include <cwctype>
 #include <cwchar>
 #include <iterator>
+#include <unordered_set>
 
 #include <windows.h>
 
@@ -176,6 +177,42 @@ namespace hyperbrowse::browser
 
         totalBytes_ -= items_[static_cast<std::size_t>(existingIndex)].fileSizeBytes;
         items_.erase(items_.begin() + existingIndex);
+        totalCount_ = static_cast<std::uint64_t>(items_.size());
+        return true;
+    }
+
+    bool BrowserModel::RemoveItemsByPath(const std::vector<std::wstring>& filePaths)
+    {
+        if (filePaths.empty() || items_.empty())
+        {
+            return false;
+        }
+
+        std::unordered_set<std::wstring> normalizedPaths;
+        normalizedPaths.reserve(filePaths.size());
+        for (const std::wstring& filePath : filePaths)
+        {
+            normalizedPaths.insert(NormalizePathForComparison(filePath));
+        }
+
+        std::uint64_t removedBytes = 0;
+        const auto iterator = std::remove_if(items_.begin(), items_.end(), [&](const BrowserItem& item)
+        {
+            if (!normalizedPaths.contains(NormalizePathForComparison(item.filePath)))
+            {
+                return false;
+            }
+
+            removedBytes += item.fileSizeBytes;
+            return true;
+        });
+        if (iterator == items_.end())
+        {
+            return false;
+        }
+
+        items_.erase(iterator, items_.end());
+        totalBytes_ -= removedBytes;
         totalCount_ = static_cast<std::uint64_t>(items_.size());
         return true;
     }

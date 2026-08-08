@@ -4,6 +4,7 @@
 #include <limits>
 #include <cwctype>
 #include <filesystem>
+#include <unordered_set>
 
 #include "decode/ImageDecoder.h"
 #include "util/Diagnostics.h"
@@ -348,18 +349,17 @@ namespace hyperbrowse::services
         }
         diskInvalidationAvailable_.notify_one();
 
-        std::vector<std::wstring> normalizedPaths;
+        std::unordered_set<std::wstring> normalizedPaths;
         normalizedPaths.reserve(filePaths.size());
         for (const std::wstring& filePath : filePaths)
         {
-            normalizedPaths.push_back(util::NormalizePathForComparison(filePath));
+            normalizedPaths.insert(util::NormalizePathForComparison(filePath));
         }
 
         std::scoped_lock lock(mutex_);
         for (auto iterator = failedKeys_.begin(); iterator != failedKeys_.end();)
         {
-            if (std::find(normalizedPaths.begin(), normalizedPaths.end(), util::NormalizePathForComparison(iterator->first.filePath))
-                == normalizedPaths.end())
+            if (!normalizedPaths.contains(util::NormalizePathForComparison(iterator->first.filePath)))
             {
                 ++iterator;
                 continue;

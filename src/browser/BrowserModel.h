@@ -41,6 +41,7 @@ namespace hyperbrowse::browser
         int FindItemIndexByPath(std::wstring_view filePath) const noexcept;
         bool UpsertItem(BrowserItem item);
         bool RemoveItemByPath(std::wstring_view filePath);
+        bool RemoveItemsByPath(const std::vector<std::wstring>& filePaths);
         bool RemoveItemsByPathPrefix(std::wstring_view pathPrefix);
         bool ReplacePathPrefix(std::wstring_view oldPrefix, std::wstring_view newPrefix);
 

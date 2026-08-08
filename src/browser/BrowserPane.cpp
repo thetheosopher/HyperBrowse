@@ -1292,6 +1292,11 @@ namespace hyperbrowse::browser
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
+    void BrowserPane::AcknowledgeStateChangedMessage() noexcept
+    {
+        stateChangedMessagePending_ = false;
+    }
+
     void BrowserPane::EnsureFocusedItemVisible()
     {
         if (!hwnd_ || !model_)
@@ -2444,11 +2449,15 @@ namespace hyperbrowse::browser
         placeholderBodyFont_ = nullptr;
     }
 
-    void BrowserPane::NotifyStateChanged() const
+    void BrowserPane::NotifyStateChanged()
     {
-        if (parent_)
+        if (parent_ && !stateChangedMessagePending_)
         {
-            PostMessageW(parent_, kStateChangedMessage, reinterpret_cast<WPARAM>(hwnd_), 0);
+            stateChangedMessagePending_ = true;
+            if (!PostMessageW(parent_, kStateChangedMessage, reinterpret_cast<WPARAM>(hwnd_), 0))
+            {
+                stateChangedMessagePending_ = false;
+            }
         }
     }
 

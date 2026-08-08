@@ -1,8 +1,11 @@
 #pragma once
 
+#include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -19,7 +22,11 @@ namespace hyperbrowse::services
     class UserMetadataStore
     {
     public:
-        UserMetadataStore() = default;
+        UserMetadataStore();
+        ~UserMetadataStore();
+
+        UserMetadataStore(const UserMetadataStore&) = delete;
+        UserMetadataStore& operator=(const UserMetadataStore&) = delete;
 
         UserMetadataEntry EntryForPath(std::wstring_view filePath) const;
         void SetRating(const std::vector<std::wstring>& filePaths, int rating);
@@ -31,12 +38,19 @@ namespace hyperbrowse::services
     private:
         void EnsureLoadedLocked() const;
         bool LoadLocked() const;
-        void SaveLocked() const;
+        void QueueSaveLocked();
+        void SaveWorkerLoop();
         static std::wstring NormalizeTags(std::wstring_view tags);
         static bool IsEmptyEntry(const UserMetadataEntry& entry) noexcept;
 
         mutable std::mutex mutex_;
         mutable bool loaded_{};
         mutable std::unordered_map<std::wstring, UserMetadataEntry> entries_;
+        std::mutex saveMutex_;
+        std::condition_variable saveAvailable_;
+        std::thread saveWorker_;
+        std::uint64_t requestedSaveGeneration_{};
+        std::uint64_t completedSaveGeneration_{};
+        bool saveShuttingDown_{};
     };
 }

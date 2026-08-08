@@ -1782,6 +1782,26 @@ namespace
         DestroyWindow(hostWindow);
     }
 
+    void RunBrowserModelBulkRemovalScenario()
+    {
+        hyperbrowse::browser::BrowserModel model;
+        std::vector<hyperbrowse::browser::BrowserItem> items;
+        items.push_back(hyperbrowse::browser::BrowserItem{L"alpha.jpg", L"C:\\Alpha\\alpha.jpg", L"JPG", L"", 1, 10});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"beta.jpg", L"C:\\Alpha\\beta.jpg", L"JPG", L"", 2, 20});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"gamma.jpg", L"C:\\Alpha\\gamma.jpg", L"JPG", L"", 3, 30});
+        model.Reset(L"C:\\Alpha", false);
+        model.AppendItems(std::move(items), 3, 60);
+        model.Complete();
+
+        Expect(model.RemoveItemsByPath({L"c:/alpha/BETA.jpg", L"C:\\Alpha\\missing.jpg"}),
+               "Bulk model removal did not match normalized file paths");
+        Expect(model.Items().size() == 2, "Bulk model removal removed the wrong number of items");
+        Expect(model.TotalCount() == 2, "Bulk model removal did not update the item count");
+        Expect(model.TotalBytes() == 40, "Bulk model removal did not update total bytes");
+        Expect(model.FindItemIndexByPath(L"C:\\Alpha\\beta.jpg") < 0,
+               "Bulk model removal left the requested item in the model");
+    }
+
     void RunViewerWindowScenario(HINSTANCE instance, HWND ownerWindow)
     {
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
@@ -2014,6 +2034,7 @@ int main()
         RunRawFormatAllowlistScenario();
         RunRawDecoderScenario();
         RunBrowserPaneScenario(instance);
+        RunBrowserModelBulkRemovalScenario();
         RunViewerWindowScenario(instance, hwnd);
         RunMainWindowFolderTreeScenario(instance);
 

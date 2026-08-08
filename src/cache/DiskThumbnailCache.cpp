@@ -533,11 +533,11 @@ namespace hyperbrowse::cache
 
         std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
 
-        std::vector<std::wstring> normalizedPaths;
+        std::unordered_set<std::wstring> normalizedPaths;
         normalizedPaths.reserve(filePaths.size());
         for (const std::wstring& filePath : filePaths)
         {
-            normalizedPaths.push_back(util::NormalizePathForComparison(filePath));
+            normalizedPaths.insert(util::NormalizePathForComparison(filePath));
         }
 
         std::vector<std::wstring> cacheFilesToDelete;
@@ -546,7 +546,7 @@ namespace hyperbrowse::cache
             ReloadIndexLocked();
             for (auto iterator = entries_.begin(); iterator != entries_.end();)
             {
-                const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), iterator->first.filePath) != normalizedPaths.end();
+                const bool shouldErase = normalizedPaths.contains(iterator->first.filePath);
                 if (!shouldErase)
                 {
                     ++iterator;

@@ -180,10 +180,56 @@ namespace
 
         return metadataDirectory / kMetadataFileName;
     }
+
+    void SaveEntries(const std::unordered_map<std::wstring, hyperbrowse::services::UserMetadataEntry>& entries)
+    {
+        const fs::path metadataPath = MetadataFilePath();
+        if (metadataPath.empty())
+        {
+            return;
+        }
+
+        std::wofstream stream(metadataPath, std::ios::trunc);
+        if (!stream)
+        {
+            return;
+        }
+
+        for (const auto& [path, entry] : entries)
+        {
+            if (entry.rating == 0 && entry.tags.empty())
+            {
+                continue;
+            }
+
+            stream << EscapeField(path)
+                   << L'\t' << entry.rating
+                   << L'\t' << EscapeField(entry.tags)
+                   << L'\n';
+        }
+    }
 }
 
 namespace hyperbrowse::services
 {
+    UserMetadataStore::UserMetadataStore()
+        : saveWorker_(&UserMetadataStore::SaveWorkerLoop, this)
+    {
+    }
+
+    UserMetadataStore::~UserMetadataStore()
+    {
+        {
+            std::scoped_lock lock(saveMutex_);
+            saveShuttingDown_ = true;
+        }
+        saveAvailable_.notify_one();
+        if (saveWorker_.joinable())
+        {
+            saveWorker_.join();
+        }
+    }
+
     UserMetadataEntry UserMetadataStore::EntryForPath(std::wstring_view filePath) const
     {
         const std::wstring normalizedPath = util::NormalizePathForComparison(filePath);
@@ -213,7 +259,7 @@ namespace hyperbrowse::services
                 entries_.erase(normalizedPath);
             }
         }
-        SaveLocked();
+        QueueSaveLocked();
     }
 
     void UserMetadataStore::SetTags(const std::vector<std::wstring>& filePaths, std::wstring_view tags)
@@ -236,7 +282,7 @@ namespace hyperbrowse::services
                 entries_.erase(normalizedPath);
             }
         }
-        SaveLocked();
+        QueueSaveLocked();
     }
 
     void UserMetadataStore::ApplyFileOperationUpdate(FileOperationType type,
@@ -278,7 +324,7 @@ namespace hyperbrowse::services
 
         if (changed)
         {
-            SaveLocked();
+            QueueSaveLocked();
         }
     }
 
@@ -334,31 +380,51 @@ namespace hyperbrowse::services
         return true;
     }
 
-    void UserMetadataStore::SaveLocked() const
+    void UserMetadataStore::QueueSaveLocked()
     {
-        const fs::path metadataPath = MetadataFilePath();
-        if (metadataPath.empty())
         {
-            return;
+            std::scoped_lock lock(saveMutex_);
+            ++requestedSaveGeneration_;
         }
+        saveAvailable_.notify_one();
+    }
 
-        std::wofstream stream(metadataPath, std::ios::trunc);
-        if (!stream)
+    void UserMetadataStore::SaveWorkerLoop()
+    {
+        for (;;)
         {
-            return;
-        }
-
-        for (const auto& [path, entry] : entries_)
-        {
-            if (IsEmptyEntry(entry))
+            std::uint64_t generation = 0;
             {
-                continue;
+                std::unique_lock lock(saveMutex_);
+                saveAvailable_.wait(lock, [this]()
+                {
+                    return saveShuttingDown_ || requestedSaveGeneration_ != completedSaveGeneration_;
+                });
+
+                if (saveShuttingDown_ && requestedSaveGeneration_ == completedSaveGeneration_)
+                {
+                    return;
+                }
+                generation = requestedSaveGeneration_;
             }
 
-            stream << EscapeField(path)
-                   << L'\t' << entry.rating
-                   << L'\t' << EscapeField(entry.tags)
-                   << L'\n';
+            {
+                std::unordered_map<std::wstring, UserMetadataEntry> entriesSnapshot;
+                {
+                    std::scoped_lock lock(mutex_);
+                    entriesSnapshot = entries_;
+                }
+                SaveEntries(entriesSnapshot);
+            }
+
+            {
+                std::scoped_lock lock(saveMutex_);
+                completedSaveGeneration_ = generation;
+                if (saveShuttingDown_ && requestedSaveGeneration_ == completedSaveGeneration_)
+                {
+                    return;
+                }
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 #include "cache/ThumbnailCache.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 #include "util/HashUtils.h"
 
@@ -123,17 +124,17 @@ namespace hyperbrowse::cache
             return;
         }
 
-        std::vector<std::wstring> normalizedPaths;
+        std::unordered_set<std::wstring> normalizedPaths;
         normalizedPaths.reserve(filePaths.size());
         for (const std::wstring& filePath : filePaths)
         {
-            normalizedPaths.push_back(util::NormalizePathForComparison(filePath));
+            normalizedPaths.insert(util::NormalizePathForComparison(filePath));
         }
 
         std::scoped_lock lock(mutex_);
         for (auto iterator = entries_.begin(); iterator != entries_.end();)
         {
-            const bool shouldErase = std::find(normalizedPaths.begin(), normalizedPaths.end(), iterator->first.filePath) != normalizedPaths.end();
+            const bool shouldErase = normalizedPaths.contains(iterator->first.filePath);
             if (!shouldErase)
             {
                 ++iterator;

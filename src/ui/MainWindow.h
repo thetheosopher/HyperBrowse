@@ -86,7 +86,7 @@ namespace hyperbrowse::ui
 
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
         static constexpr int kActionStripHeight = 44;
-        static constexpr int kMinLeftPaneWidth = 180;
+        static constexpr int kMinLeftPaneWidth = 250;
         static constexpr int kMinRightPaneWidth = 240;
         static constexpr int kSplitterWidth = 6;
         static constexpr int kDefaultLeftPaneWidth = 280;
@@ -296,6 +296,8 @@ namespace hyperbrowse::ui
         void ApplyCompletedFileOperation(const services::FileOperationUpdate& update);
         bool IsPathInCurrentScope(std::wstring_view path) const;
         void ApplyFolderWatchChanges(const services::FolderWatchUpdate& update);
+        void ScheduleFolderEnumerationPresentation();
+        void FlushFolderEnumerationPresentation(bool clearStartupPathsIfNotFound);
         LRESULT OnFolderEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderTreeEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderWatchMessage(LPARAM lParam);
@@ -512,6 +514,8 @@ namespace hyperbrowse::ui
         bool batchConvertActive_{};
         bool fileOperationActive_{};
         bool folderEnumerationActive_{};
+        bool folderEnumerationPresentationPending_{};
+        UINT_PTR folderEnumerationPresentationTimerId_{};
         std::size_t batchConvertCompleted_{};
         std::size_t batchConvertTotal_{};
         std::size_t batchConvertFailed_{};

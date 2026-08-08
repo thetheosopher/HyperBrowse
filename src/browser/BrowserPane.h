@@ -148,6 +148,7 @@ namespace hyperbrowse::browser
         std::vector<std::wstring> SelectedFilePathsSnapshot() const;
         std::wstring FocusedFilePathSnapshot() const;
         void RestoreSelectionByFilePaths(const std::vector<std::wstring>& filePaths, const std::wstring& focusedFilePath);
+        void AcknowledgeStateChangedMessage() noexcept;
         void EnsureFocusedItemVisible();
         void InvalidateMediaCacheForPaths(const std::vector<std::wstring>& filePaths);
         std::shared_ptr<const hyperbrowse::services::ImageMetadata> FindCachedMetadataForModelIndex(int modelIndex) const;
@@ -201,7 +202,7 @@ namespace hyperbrowse::browser
         int ViewIndexFromModelIndex(int modelIndex) const;
         int ModelIndexFromViewIndex(int viewIndex) const;
         const BrowserItem* ItemFromViewIndex(int viewIndex) const;
-        void NotifyStateChanged() const;
+        void NotifyStateChanged();
         void ApplyThemeToDetailsList() const;
         void RebuildThemeResources();
         void ReleaseThemeResources();
@@ -333,6 +334,7 @@ namespace hyperbrowse::browser
         std::uint64_t thumbnailSessionId_{1};
         std::uint64_t metadataSessionId_{1};
         std::uint64_t thumbnailRequestEpoch_{};
+        bool stateChangedMessagePending_{};
         mutable std::wstring listViewTextBuffer_;
         mutable std::wstring tooltipTextBuffer_;
 
