@@ -107,6 +107,7 @@ namespace hyperbrowse::browser
         HWND Hwnd() const noexcept;
 
         void SetModel(BrowserModel* model);
+        void BeginFolderLoad();
         void RefreshFromModel();
         void SetViewMode(BrowserViewMode mode);
         BrowserViewMode GetViewMode() const noexcept;

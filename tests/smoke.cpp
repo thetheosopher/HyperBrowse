@@ -56,6 +56,9 @@ namespace
     {
         std::uint64_t totalCount{};
         std::uint64_t totalBytes{};
+        std::size_t firstBatchSize{};
+        std::size_t secondBatchSize{};
+        std::size_t batchCount{};
         std::vector<hyperbrowse::browser::BrowserItem> items;
         std::wstring errorMessage;
         bool completed{};
@@ -425,6 +428,15 @@ namespace
             switch (update->kind)
             {
             case hyperbrowse::services::FolderEnumerationUpdateKind::Batch:
+                if (state->enumerationResult.batchCount == 0)
+                {
+                    state->enumerationResult.firstBatchSize = update->items.size();
+                }
+                else if (state->enumerationResult.batchCount == 1)
+                {
+                    state->enumerationResult.secondBatchSize = update->items.size();
+                }
+                ++state->enumerationResult.batchCount;
                 state->enumerationResult.totalCount = update->totalCount;
                 state->enumerationResult.totalBytes = update->totalBytes;
                 state->enumerationResult.items.insert(state->enumerationResult.items.end(),
@@ -799,6 +811,22 @@ namespace
          Expect(state->enumerationResult.items.size() == 9, "Non-recursive enumeration returned the wrong batch item count");
         Expect(state->enumerationResult.items.front().placeholderWidth == 256, "Placeholder width was not collected");
         Expect(state->enumerationResult.items.front().placeholderHeight == 256, "Placeholder height was not collected");
+
+         TempFolder firstPage(L"HyperBrowseFirstPageEnumeration");
+        for (int index = 0; index < 40; ++index)
+         {
+             firstPage.WriteFile(L"image_" + std::to_wstring(index) + L".jpg", 1);
+         }
+         ResetEnumerationResult(state);
+         state->expectedRequestId = service.EnumerateFolderAsync(hwnd, firstPage.Root().wstring(), false);
+         Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
+             "First-page enumeration timed out or failed");
+         Expect(state->enumerationResult.firstBatchSize == 16,
+             "Folder enumeration did not publish the optimized first-page batch");
+         Expect(state->enumerationResult.secondBatchSize == 16,
+             "Folder enumeration did not publish the optimized second-page batch");
+         Expect(state->enumerationResult.batchCount == 3,
+             "Folder enumeration did not flush the remaining items after the priority batches");
 
         ResetEnumerationResult(state);
         state->expectedRequestId = service.EnumerateFolderAsync(hwnd, root.Root().wstring(), true);

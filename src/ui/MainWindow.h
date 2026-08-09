@@ -514,6 +514,7 @@ namespace hyperbrowse::ui
         bool batchConvertActive_{};
         bool fileOperationActive_{};
         bool folderEnumerationActive_{};
+        bool folderEnumerationFirstBatchPresented_{};
         bool folderEnumerationPresentationPending_{};
         UINT_PTR folderEnumerationPresentationTimerId_{};
         std::size_t batchConvertCompleted_{};

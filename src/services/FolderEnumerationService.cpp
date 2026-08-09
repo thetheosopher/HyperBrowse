@@ -22,6 +22,8 @@ namespace hyperbrowse::services
 
 namespace
 {
+    constexpr std::size_t kInitialBatchSize = 16;
+    constexpr std::size_t kInitialBatchItemLimit = kInitialBatchSize * 2;
     constexpr std::size_t kBatchSize = 64;
 
     struct EnumerationSharedStateView
@@ -136,7 +138,8 @@ namespace
         ++(*totalCount);
         batch->push_back(std::move(item));
 
-        if (batch->size() >= kBatchSize)
+        const std::size_t batchSize = *totalCount <= kInitialBatchItemLimit ? kInitialBatchSize : kBatchSize;
+        if (batch->size() >= batchSize)
         {
             FlushBatch(stateView, folderPath, batch, *totalCount, *totalBytes);
         }

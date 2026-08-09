@@ -13580,6 +13580,7 @@ namespace hyperbrowse::ui
             folderEnumerationPresentationTimerId_ = 0;
         }
         folderEnumerationPresentationPending_ = false;
+        folderEnumerationFirstBatchPresented_ = false;
         if (folderWatchService_)
         {
             folderWatchService_->Stop();
@@ -13588,14 +13589,16 @@ namespace hyperbrowse::ui
         browserModel_->Reset(folderPath, recursiveBrowsingEnabled_);
         if (browserPaneController_)
         {
+            browserPaneController_->BeginFolderLoad();
             browserPaneController_->ClearSelection();
         }
-        ShowSelectedFolderInTree();
         RefreshBrowserPane();
         UpdateStatusText();
         UpdateWindowTitle();
+        UpdateWindow(browserPane_);
         activeEnumerationRequestId_ = folderEnumerationService_->EnumerateFolderAsync(hwnd_, std::move(folderPath), recursiveBrowsingEnabled_);
         folderEnumerationActive_ = true;
+        ShowSelectedFolderInTree();
     }
 
     void MainWindow::ScheduleFolderEnumerationPresentation()
@@ -13646,6 +13649,13 @@ namespace hyperbrowse::ui
         {
         case services::FolderEnumerationUpdateKind::Batch:
             browserModel_->AppendItems(std::move(update->items), update->totalCount, update->totalBytes);
+            if (!folderEnumerationFirstBatchPresented_)
+            {
+                folderEnumerationFirstBatchPresented_ = true;
+                folderEnumerationPresentationPending_ = true;
+                FlushFolderEnumerationPresentation(false);
+                return 0;
+            }
             ScheduleFolderEnumerationPresentation();
             return 0;
         case services::FolderEnumerationUpdateKind::Completed:

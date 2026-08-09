@@ -772,6 +772,19 @@ namespace hyperbrowse::browser
         }
     }
 
+    void BrowserPane::BeginFolderLoad()
+    {
+        ++thumbnailSessionId_;
+        ++metadataSessionId_;
+        ++thumbnailRequestEpoch_;
+        HideThumbnailTooltip();
+        CancelThumbnailWork();
+        if (metadataService_)
+        {
+            metadataService_->CancelOutstanding();
+        }
+    }
+
     void BrowserPane::RefreshFromModel()
     {
         HideThumbnailTooltip();
