@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <objidl.h>
 
 #include <array>
 #include <cstddef>
@@ -63,6 +64,7 @@ namespace hyperbrowse::ui
 {
     class DiagnosticsWindow;
     class ToolbarIconLibrary;
+    class HyperBrowseExternalDropTarget;
 
     class MainWindow
     {
@@ -71,6 +73,7 @@ namespace hyperbrowse::ui
         ~MainWindow();
 
         void SetStartupLaunchPath(std::wstring path);
+        void OpenViewerAtPath(const std::wstring& filePath);
         bool Create();
         void Show(int nCmdShow) const;
         bool TranslateAcceleratorMessage(MSG* message) const;
@@ -276,6 +279,7 @@ namespace hyperbrowse::ui
         void StartMoveSelectionToNewChildFolder();
         void StartDeleteSelection(bool permanent);
         void StartFolderTreeRename(std::wstring folderPath);
+        bool BeginFolderTreeInlineRename(const std::wstring& folderPath);
         void StartFolderTreeDelete(std::wstring folderPath, bool permanent);
         void StartFolderTreeMoveToDestination(std::wstring folderPath, std::wstring destinationFolder);
         void StartFolderTreeCreateNewFolder(std::wstring parentPath);
@@ -288,7 +292,13 @@ namespace hyperbrowse::ui
         void RevealSelectedInExplorer() const;
         void OpenSelectedContainingFolder() const;
         void CopySelectedPathsToClipboard() const;
+        void CopySelectionFilesToClipboard() const;
+        void PasteClipboardFilesIntoCurrentFolder();
         void ShowSelectedFileProperties() const;
+        void SetDesktopWallpaperFromImageFile(const std::wstring& imagePath);
+        void ShowImageInformationForPath(const std::wstring& filePath);
+        void CopySelectedImagePixelsToClipboard();
+        void StartDuplicateSelection();
         void StartSlideshow(bool selectionScope);
         void StartFolderSlideshow(std::wstring_view preferredPath = {});
         void StartBatchConvert(bool selectionScope, services::BatchConvertFormat format);
@@ -305,6 +315,8 @@ namespace hyperbrowse::ui
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeBeginDrag(const NMTREEVIEWW& treeView);
+        LRESULT OnFolderTreeBeginLabelEdit(const NMTVDISPINFOW& dispInfo);
+        LRESULT OnFolderTreeEndLabelEdit(const NMTVDISPINFOW& dispInfo);
         LRESULT OnFolderTreeRightClick();
         void UpdateFolderTreeDrag(POINT windowPoint);
         void FinishFolderTreeDrag(bool commitDrop);
@@ -312,6 +324,11 @@ namespace hyperbrowse::ui
         void FinishInternalSelectionDrag(bool commitDrop);
         void StartExternalSelectionDrag();
         LRESULT OnDropFiles(HDROP dropHandle);
+        std::vector<std::wstring> ShellPathsFromDataObject(IDataObject* dataObject) const;
+        DWORD DropEffectForKeyState(DWORD keyState, const std::wstring& destinationFolder, const std::vector<std::wstring>& sourcePaths) const;
+        std::wstring ResolveExternalDropTarget(POINT clientPoint, HTREEITEM* treeItemOut) const;
+        void HandleExternalDrop(IDataObject* dataObject, DWORD effect, POINT clientPoint);
+        void ClearExternalDropVisuals();
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
@@ -323,6 +340,8 @@ namespace hyperbrowse::ui
         LRESULT OnViewerActivityMessage(LPARAM lParam);
         LRESULT OnViewerDeleteRequested(WPARAM wParam);
         LRESULT OnViewerStartFolderSlideshowMessage(WPARAM wParam);
+        LRESULT OnViewerContextMenuCommand(WPARAM wParam);
+        LRESULT OnViewerDroppedFileMessage(LPARAM lParam);
         LRESULT OnViewerClosedMessage();
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
         void TryOpenPendingStartupViewerPath(bool clearIfNotFound);
@@ -400,6 +419,8 @@ namespace hyperbrowse::ui
         HMODULE detailsPanelRichEditModule_{};
         HIMAGELIST treeImageList_{};
         HIMAGELIST treeDragImageList_{};
+        IDropTarget* externalDropTarget_{};
+        HTREEITEM externalDropTreeHoverItem_{};
         HMENU menu_{};
         HMENU fileMenu_{};
         HMENU viewMenu_{};
@@ -524,6 +545,7 @@ namespace hyperbrowse::ui
         std::wstring batchConvertCurrentFile_;
         std::wstring activeTreeFolderOperationPath_;
         std::wstring activeTreeFolderRenamePath_;
+        std::wstring pendingInlineRenameOriginalPath_;
         struct PendingViewerDelete
         {
             std::wstring sourcePath;
@@ -563,5 +585,7 @@ namespace hyperbrowse::ui
         bool detailsStripVisible_{true};
         viewer::MouseWheelBehavior viewerMouseWheelBehavior_{};
         UINT_PTR memoryPressureTimerId_{};
+
+        friend class HyperBrowseExternalDropTarget;
     };
 }

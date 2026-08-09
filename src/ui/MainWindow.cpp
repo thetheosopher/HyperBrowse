@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <new>
 #include <string>
 #include <system_error>
 #include <unordered_map>
@@ -128,6 +129,12 @@ namespace
     constexpr UINT ID_FILE_CLEAR_RECENT_DESTINATIONS = 1038;
     constexpr UINT ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER = 1039;
     constexpr UINT ID_VIEW_NAVIGATE_BACK_FOLDER = 1049;
+    constexpr UINT ID_FILE_COPY_FILES_TO_CLIPBOARD = 1087;
+    constexpr UINT ID_FILE_PASTE_FILES = 1088;
+    constexpr UINT ID_FILE_SELECT_ALL = 1089;
+    constexpr UINT ID_FILE_MINIMIZE = 1090;
+    constexpr UINT ID_FILE_COPY_IMAGE_PIXELS = 1091;
+    constexpr UINT ID_FILE_DUPLICATE_SELECTION = 1092;
     constexpr UINT ID_FILE_SET_RATING_0 = 1080;
     constexpr UINT ID_FILE_SET_RATING_1 = 1081;
     constexpr UINT ID_FILE_SET_RATING_2 = 1082;
@@ -476,6 +483,28 @@ namespace
             }
         }
 
+        return paths;
+    }
+
+    // Reads a CF_HDROP out of an OLE IDataObject (as opposed to the raw HDROP the
+    // legacy WM_DROPFILES path receives).
+    std::vector<std::wstring> CollectShellDropPathsFromDataObject(IDataObject* dataObject)
+    {
+        std::vector<std::wstring> paths;
+        if (!dataObject)
+        {
+            return paths;
+        }
+
+        FORMATETC format{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        STGMEDIUM storage{};
+        if (FAILED(dataObject->GetData(&format, &storage)) || !storage.hGlobal)
+        {
+            return paths;
+        }
+
+        paths = CollectShellDropPaths(static_cast<HDROP>(storage.hGlobal));
+        ReleaseStgMedium(&storage);
         return paths;
     }
 
@@ -5893,6 +5922,124 @@ namespace
 
 namespace hyperbrowse::ui
 {
+    // OLE drop target that gives real drag-over feedback (copy/move cursor and folder
+    // highlight) for external file drags onto the main window. It reuses the window's
+    // quick-access row / tree hit-testing so a drop lands where the cursor is.
+    class HyperBrowseExternalDropTarget final : public IDropTarget
+    {
+    public:
+        explicit HyperBrowseExternalDropTarget(MainWindow* window)
+            : window_(window)
+        {
+        }
+
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override
+        {
+            if (!object)
+            {
+                return E_POINTER;
+            }
+            *object = nullptr;
+            if (riid == IID_IUnknown || riid == IID_IDropTarget)
+            {
+                *object = static_cast<IDropTarget*>(this);
+                AddRef();
+                return S_OK;
+            }
+            return E_NOINTERFACE;
+        }
+
+        ULONG STDMETHODCALLTYPE AddRef() override { return ++refCount_; }
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const ULONG remaining = --refCount_;
+            if (remaining == 0)
+            {
+                delete this;
+            }
+            return remaining;
+        }
+
+        HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* dataObject, DWORD keyState, POINTL point, DWORD* effect) override
+        {
+            lastDataObject_ = dataObject;
+            return DragOver(keyState, point, effect);
+        }
+
+        HRESULT STDMETHODCALLTYPE DragOver(DWORD keyState, POINTL point, DWORD* effect) override
+        {
+            if (!effect)
+            {
+                return E_POINTER;
+            }
+
+            MainWindow* window = window_;
+            if (!window || !window->hwnd_)
+            {
+                *effect = DROPEFFECT_NONE;
+                return S_OK;
+            }
+
+            POINT clientPoint{point.x, point.y};
+            ScreenToClient(window->hwnd_, &clientPoint);
+
+            HTREEITEM treeItem = nullptr;
+            const std::vector<std::wstring> sourcePaths = window->ShellPathsFromDataObject(lastDataObject_);
+            const std::wstring destination = window->ResolveExternalDropTarget(clientPoint, &treeItem);
+            const DWORD allowed = window->DropEffectForKeyState(keyState, destination, sourcePaths);
+            *effect = allowed;
+
+            if (window->externalDropTreeHoverItem_ != treeItem && window->treePane_)
+            {
+                TreeView_SelectDropTarget(window->treePane_, treeItem);
+                window->externalDropTreeHoverItem_ = treeItem;
+            }
+            return S_OK;
+        }
+
+        HRESULT STDMETHODCALLTYPE DragLeave() override
+        {
+            if (window_)
+            {
+                window_->ClearExternalDropVisuals();
+            }
+            lastDataObject_ = nullptr;
+            return S_OK;
+        }
+
+        HRESULT STDMETHODCALLTYPE Drop(IDataObject* dataObject, DWORD keyState, POINTL point, DWORD* effect) override
+        {
+            if (!effect)
+            {
+                return E_POINTER;
+            }
+
+            MainWindow* window = window_;
+            if (window && window->hwnd_)
+            {
+                POINT clientPoint{point.x, point.y};
+                ScreenToClient(window->hwnd_, &clientPoint);
+                HTREEITEM treeItem = nullptr;
+                const std::vector<std::wstring> sourcePaths = window->ShellPathsFromDataObject(dataObject);
+                const std::wstring destination = window->ResolveExternalDropTarget(clientPoint, &treeItem);
+                const DWORD chosen = window->DropEffectForKeyState(keyState, destination, sourcePaths);
+                window->HandleExternalDrop(dataObject, chosen, clientPoint);
+                *effect = chosen;
+            }
+            else
+            {
+                *effect = DROPEFFECT_NONE;
+            }
+            lastDataObject_ = nullptr;
+            return S_OK;
+        }
+
+    private:
+        MainWindow* window_{};
+        IDataObject* lastDataObject_{};
+        ULONG refCount_{1};
+    };
+
     MainWindow::MainWindow(HINSTANCE instance)
         : instance_(instance)
         , browserModel_(std::make_unique<browser::BrowserModel>())
@@ -5911,6 +6058,16 @@ namespace hyperbrowse::ui
 
     MainWindow::~MainWindow()
     {
+        if (externalDropTarget_)
+        {
+            if (hwnd_)
+            {
+                RevokeDragDrop(hwnd_);
+            }
+            externalDropTarget_->Release();
+            externalDropTarget_ = nullptr;
+        }
+
         if (folderEnumerationService_)
         {
             folderEnumerationService_->Cancel();
@@ -6015,7 +6172,21 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        DragAcceptFiles(hwnd_, TRUE);
+        externalDropTarget_ = new (std::nothrow) HyperBrowseExternalDropTarget(this);
+        if (externalDropTarget_ && SUCCEEDED(RegisterDragDrop(hwnd_, externalDropTarget_)))
+        {
+            // OLE drop target now owns feedback for file drags; the legacy
+            // WM_DROPFILES path stays as a fallback for non-OLE sources.
+        }
+        else
+        {
+            if (externalDropTarget_)
+            {
+                externalDropTarget_->Release();
+                externalDropTarget_ = nullptr;
+            }
+            DragAcceptFiles(hwnd_, TRUE);
+        }
 
         memoryPressureExecutor_ = std::make_unique<util::BackgroundExecutor>(1);
         if (memoryPressureExecutor_)
@@ -6044,6 +6215,53 @@ namespace hyperbrowse::ui
         startupLaunchPathOverride_ = std::move(path);
     }
 
+    void MainWindow::OpenViewerAtPath(const std::wstring& filePath)
+    {
+        if (filePath.empty())
+        {
+            return;
+        }
+
+        std::error_code error;
+        const fs::path resolvedPath(filePath);
+        if (!fs::is_regular_file(resolvedPath, error) || error)
+        {
+            return;
+        }
+
+        if (!browser::IsSupportedImageExtension(resolvedPath.extension().wstring()))
+        {
+            return;
+        }
+
+        const fs::path containingFolder = resolvedPath.parent_path();
+        if (containingFolder.empty())
+        {
+            return;
+        }
+
+        const std::wstring folderPath = NormalizeFolderPath(containingFolder.wstring());
+        const std::wstring targetPath = NormalizeFolderPath(resolvedPath.wstring());
+
+        // Navigate to the containing folder and mark the dropped file as the pending
+        // viewer target; TryOpenPendingStartupViewerPath opens it once enumerated.
+        pendingStartupViewerPath_ = targetPath;
+        if (browserModel_ && FolderPathsEqual(browserModel_->FolderPath(), folderPath))
+        {
+            // Already browsing this folder: open immediately if the item exists.
+            const int modelIndex = browserModel_->FindItemIndexByPath(targetPath);
+            if (modelIndex >= 0)
+            {
+                pendingStartupViewerPath_.clear();
+                browserPaneController_->RestoreSelectionByFilePaths({targetPath}, targetPath);
+                OpenItemInViewer(modelIndex, ShouldDefaultViewerToSecondaryMonitor());
+            }
+            return;
+        }
+
+        LoadFolderAsync(folderPath);
+    }
+
     bool MainWindow::TranslateAcceleratorMessage(MSG* message) const
     {
         if (!hwnd_ || !accelerators_ || !message)
@@ -6065,7 +6283,7 @@ namespace hyperbrowse::ui
             }
         }
 
-        // Do not translate the Escape accelerator (ID_FILE_EXIT) when a folder drag is active.
+        // Do not translate the Escape accelerator (ID_FILE_MINIMIZE) when a folder drag is active.
         // The drag operation should have exclusive control over the Escape key to cancel itself.
         if (treeFolderDragActive_ && message->message == WM_KEYDOWN && message->wParam == VK_ESCAPE)
         {
@@ -6113,11 +6331,17 @@ namespace hyperbrowse::ui
         ACCEL accelerators[] = {
             {FVIRTKEY | FCONTROL, static_cast<WORD>('O'), ID_FILE_OPEN_FOLDER},
             {FVIRTKEY, VK_BACK, ID_VIEW_NAVIGATE_BACK_FOLDER},
-            {FVIRTKEY, VK_ESCAPE, ID_FILE_EXIT},
+            {FVIRTKEY, VK_ESCAPE, ID_FILE_MINIMIZE},
+            {FVIRTKEY | FCONTROL, static_cast<WORD>('W'), ID_FILE_MINIMIZE},
             {FVIRTKEY, VK_F5, ID_FILE_REFRESH_TREE},
             {FVIRTKEY, VK_F2, ID_FILE_RENAME_SELECTED},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('I'), ID_FILE_IMAGE_INFORMATION},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('C'), ID_FILE_COPY_PATH},
+            {FVIRTKEY | FCONTROL, static_cast<WORD>('C'), ID_FILE_COPY_FILES_TO_CLIPBOARD},
+            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('I'), ID_FILE_COPY_IMAGE_PIXELS},
+            {FVIRTKEY | FCONTROL, static_cast<WORD>('V'), ID_FILE_PASTE_FILES},
+            {FVIRTKEY | FCONTROL, static_cast<WORD>('A'), ID_FILE_SELECT_ALL},
+            {FVIRTKEY | FCONTROL, static_cast<WORD>('D'), ID_FILE_DUPLICATE_SELECTION},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('E'), ID_FILE_REVEAL_IN_EXPLORER},
             {FVIRTKEY | FALT, VK_RETURN, ID_FILE_PROPERTIES},
             {FVIRTKEY, VK_DELETE, ID_FILE_DELETE_SELECTION},
@@ -6189,6 +6413,9 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_FILES_TO_CLIPBOARD, L"&Copy\tCtrl+C");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_IMAGE_PIXELS, L"Copy &Image\tCtrl+Shift+I");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PASTE_FILES, L"&Paste\tCtrl+V");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
@@ -6202,6 +6429,8 @@ namespace hyperbrowse::ui
 
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...\tF2");
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
+        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_DUPLICATE_SELECTION, L"Dup&licate\tCtrl+D");
+        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_SELECT_ALL, L"Select &All\tCtrl+A");
         AppendMenuW(fileOrganizeMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To");
         AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To");
@@ -6227,6 +6456,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileConvertMenu), L"&Convert");
 
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_MINIMIZE, L"&Minimize\tEsc");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_EXIT, L"E&xit");
 
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode\tCtrl+1");
@@ -6392,7 +6622,7 @@ namespace hyperbrowse::ui
             WS_EX_CLIENTEDGE,
             WC_TREEVIEWW,
             L"",
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS | TVS_EDITLABELS,
             0, 0, 100, 100,
             hwnd_,
             nullptr,
@@ -6957,6 +7187,10 @@ namespace hyperbrowse::ui
             return OnFolderTreeItemExpanding(*reinterpret_cast<const NMTREEVIEWW*>(lParam));
         case TVN_SELCHANGEDW:
             return OnFolderTreeSelectionChanged(*reinterpret_cast<const NMTREEVIEWW*>(lParam));
+        case TVN_BEGINLABELEDITW:
+            return OnFolderTreeBeginLabelEdit(*reinterpret_cast<const NMTVDISPINFOW*>(lParam));
+        case TVN_ENDLABELEDITW:
+            return OnFolderTreeEndLabelEdit(*reinterpret_cast<const NMTVDISPINFOW*>(lParam));
         default:
             return 0;
         }
@@ -6990,6 +7224,68 @@ namespace hyperbrowse::ui
             RequestFolderTreeChildren(treeView.itemNew.hItem);
         }
 
+        return 0;
+    }
+
+    LRESULT MainWindow::OnFolderTreeBeginLabelEdit(const NMTVDISPINFOW& dispInfo)
+    {
+        const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(dispInfo.item.hItem);
+        if (!nodeData || nodeData->path.empty())
+        {
+            return TRUE; // cancel edit
+        }
+
+        if (fileOperationActive_)
+        {
+            return TRUE; // cancel edit
+        }
+
+        // Roots (drives) cannot be renamed.
+        if (!TreeView_GetParent(treePane_, dispInfo.item.hItem))
+        {
+            return TRUE;
+        }
+
+        return FALSE; // allow edit
+    }
+
+    LRESULT MainWindow::OnFolderTreeEndLabelEdit(const NMTVDISPINFOW& dispInfo)
+    {
+        // pszText is null when the user cancelled (Esc).
+        if (!dispInfo.item.pszText)
+        {
+            return 0;
+        }
+
+        const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(dispInfo.item.hItem);
+        if (!nodeData || nodeData->path.empty())
+        {
+            return 0;
+        }
+
+        const std::wstring newLeafName = dispInfo.item.pszText;
+        const std::wstring currentLeafName = fs::path(nodeData->path).filename().wstring();
+        if (newLeafName.empty() || newLeafName == currentLeafName)
+        {
+            return 0; // no change; keep the old label
+        }
+
+        std::wstring validationError;
+        if (!IsValidFolderName(newLeafName, &validationError))
+        {
+            MessageBoxW(hwnd_, validationError.c_str(), L"Rename Folder", MB_OK | MB_ICONWARNING);
+            return 0;
+        }
+
+        const std::wstring folderPath = nodeData->path;
+        activeTreeFolderRenamePath_ = folderPath;
+        StartFileOperation(services::FileOperationType::Rename,
+                           {folderPath},
+                           {},
+                           services::FileConflictPolicy::PromptShell,
+                           {newLeafName});
+        // Return 0 so the tree does not apply the label itself; the folder-watch /
+        // operation-completion path will refresh the node with the real new name.
         return 0;
     }
 
@@ -10489,6 +10785,7 @@ namespace hyperbrowse::ui
         constexpr UINT kMoveFolderRecentLastCommandId = 27;
         constexpr UINT kNewFolderCommandId = 30;
         constexpr UINT kToggleFavoriteCommandId = 31;
+        constexpr UINT kFolderPropertiesCommandId = 32;
 
         std::vector<std::wstring> favoriteMoveDestinations;
         std::vector<std::wstring> recentMoveDestinations;
@@ -10591,6 +10888,8 @@ namespace hyperbrowse::ui
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kDeleteFolderCommandId, L"&Delete Folder");
         AppendMenuW(menu, MF_STRING, kDeleteFolderPermanentCommandId, L"Delete Folder &Permanently");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kFolderPropertiesCommandId, L"P&roperties");
 
         const UINT enableState = fileOperationActive_ ? MF_GRAYED : MF_ENABLED;
         EnableMenuItem(menu, kNewFolderCommandId, MF_BYCOMMAND | enableState);
@@ -10622,7 +10921,10 @@ namespace hyperbrowse::ui
             StartFolderTreeCreateNewFolder(folderPath);
             break;
         case kRenameFolderCommandId:
-            StartFolderTreeRename(folderPath);
+            if (!BeginFolderTreeInlineRename(folderPath))
+            {
+                StartFolderTreeRename(folderPath);
+            }
             break;
         case kMoveFolderBrowseCommandId:
         {
@@ -10672,6 +10974,21 @@ namespace hyperbrowse::ui
         case kDeleteFolderPermanentCommandId:
             StartFolderTreeDelete(folderPath, true);
             break;
+        case kFolderPropertiesCommandId:
+        {
+            SHELLEXECUTEINFOW executeInfo{};
+            executeInfo.cbSize = sizeof(executeInfo);
+            executeInfo.fMask = SEE_MASK_INVOKEIDLIST;
+            executeInfo.hwnd = hwnd_;
+            executeInfo.lpVerb = L"properties";
+            executeInfo.lpFile = folderPath.c_str();
+            executeInfo.nShow = SW_SHOWNORMAL;
+            if (ShellExecuteExW(&executeInfo) == FALSE)
+            {
+                MessageBoxW(hwnd_, L"Failed to open the folder properties dialog.", L"Properties", MB_OK | MB_ICONERROR);
+            }
+            break;
+        }
         default:
             if (commandId >= kMoveFolderFavoriteBaseCommandId && commandId <= kMoveFolderFavoriteLastCommandId)
             {
@@ -11209,6 +11526,24 @@ namespace hyperbrowse::ui
                            {renamedLeafName});
     }
 
+    bool MainWindow::BeginFolderTreeInlineRename(const std::wstring& folderPath)
+    {
+        if (!treePane_ || folderPath.empty() || fileOperationActive_)
+        {
+            return false;
+        }
+
+        HTREEITEM item = FindFolderTreeItemByPath(folderPath);
+        if (!item || !TreeView_GetParent(treePane_, item))
+        {
+            return false;
+        }
+
+        TreeView_SelectItem(treePane_, item);
+        TreeView_EnsureVisible(treePane_, item);
+        return TreeView_EditLabel(treePane_, item) != nullptr;
+    }
+
     void MainWindow::StartFolderTreeDelete(std::wstring folderPath, bool permanent)
     {
         if (folderPath.empty() || fileOperationActive_)
@@ -11499,6 +11834,336 @@ namespace hyperbrowse::ui
         {
             MessageBoxW(hwnd_, L"Failed to open the file properties dialog.", L"Properties", MB_OK | MB_ICONERROR);
         }
+    }
+
+    void MainWindow::CopySelectionFilesToClipboard() const
+    {
+        if (!browserPaneController_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = SelectedFileOperationPathsSnapshot();
+        if (selectedPaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more images first.", L"Copy", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        // Build a CF_HDROP (DROPFILES + double-NUL-terminated path list) so the
+        // selection can be pasted into Explorer or any other shell target.
+        std::size_t pathChars = 0;
+        for (const std::wstring& path : selectedPaths)
+        {
+            pathChars += path.size() + 1;
+        }
+
+        const std::size_t totalBytes = sizeof(DROPFILES) + (pathChars + 1) * sizeof(wchar_t);
+        HGLOBAL buffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, totalBytes);
+        if (!buffer)
+        {
+            MessageBoxW(hwnd_, L"Failed to allocate the clipboard data.", L"Copy", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        auto* dropFiles = static_cast<DROPFILES*>(GlobalLock(buffer));
+        if (!dropFiles)
+        {
+            GlobalFree(buffer);
+            MessageBoxW(hwnd_, L"Failed to lock the clipboard data.", L"Copy", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        dropFiles->pFiles = sizeof(DROPFILES);
+        dropFiles->fWide = TRUE;
+        wchar_t* cursor = reinterpret_cast<wchar_t*>(reinterpret_cast<BYTE*>(dropFiles) + sizeof(DROPFILES));
+        for (const std::wstring& path : selectedPaths)
+        {
+            memcpy(cursor, path.data(), path.size() * sizeof(wchar_t));
+            cursor += path.size() + 1;
+        }
+        GlobalUnlock(buffer);
+
+        // Signal "copy" semantics (as opposed to cut) via CFSTR_PREFERREDDROPEFFECT.
+        HGLOBAL effectBuffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
+        if (effectBuffer)
+        {
+            if (DWORD* effect = static_cast<DWORD*>(GlobalLock(effectBuffer)))
+            {
+                *effect = DROPEFFECT_COPY;
+                GlobalUnlock(effectBuffer);
+            }
+        }
+
+        if (!OpenClipboard(hwnd_))
+        {
+            GlobalFree(buffer);
+            if (effectBuffer)
+            {
+                GlobalFree(effectBuffer);
+            }
+            MessageBoxW(hwnd_, L"Failed to open the clipboard.", L"Copy", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        bool success = EmptyClipboard() != FALSE;
+        if (success && SetClipboardData(CF_HDROP, buffer) == nullptr)
+        {
+            success = false;
+        }
+        if (success && effectBuffer)
+        {
+            const UINT effectFormat = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
+            if (SetClipboardData(effectFormat, effectBuffer) == nullptr)
+            {
+                GlobalFree(effectBuffer);
+            }
+        }
+        if (!success)
+        {
+            GlobalFree(buffer);
+        }
+        CloseClipboard();
+
+        if (!success)
+        {
+            MessageBoxW(hwnd_, L"Failed to copy the selected files to the clipboard.", L"Copy", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void MainWindow::PasteClipboardFilesIntoCurrentFolder()
+    {
+        if (!browserModel_ || browserModel_->FolderPath().empty())
+        {
+            return;
+        }
+
+        if (fileOperationActive_)
+        {
+            MessageBoxW(hwnd_, L"A file operation is already in progress.", L"Paste", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (!OpenClipboard(hwnd_))
+        {
+            return;
+        }
+
+        std::vector<std::wstring> sourcePaths;
+        DWORD pasteEffect = DROPEFFECT_COPY;
+        if (IsClipboardFormatAvailable(CF_HDROP))
+        {
+            if (HGLOBAL data = GetClipboardData(CF_HDROP))
+            {
+                if (auto* dropFiles = static_cast<const DROPFILES*>(GlobalLock(data)))
+                {
+                    if (dropFiles->fWide)
+                    {
+                        const wchar_t* cursor = reinterpret_cast<const wchar_t*>(
+                            reinterpret_cast<const BYTE*>(dropFiles) + dropFiles->pFiles);
+                        while (*cursor != L'\0')
+                        {
+                            const std::size_t length = wcslen(cursor);
+                            if (length == 0)
+                            {
+                                break;
+                            }
+                            sourcePaths.emplace_back(cursor, length);
+                            cursor += length + 1;
+                        }
+                    }
+                    GlobalUnlock(data);
+                }
+            }
+
+            const UINT effectFormat = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
+            if (HGLOBAL effectData = GetClipboardData(effectFormat))
+            {
+                if (const DWORD* effect = static_cast<const DWORD*>(GlobalLock(effectData)))
+                {
+                    pasteEffect = *effect;
+                    GlobalUnlock(effectData);
+                }
+            }
+        }
+        CloseClipboard();
+
+        if (sourcePaths.empty())
+        {
+            return;
+        }
+
+        const std::wstring destinationFolder = browserModel_->FolderPath();
+        // A "cut" paste is a move; an Explorer copy is a copy. Same-drive copies stay
+        // copies; cross-drive moves from a cut degrade gracefully via shell conflicts.
+        const services::FileOperationType type = (pasteEffect & DROPEFFECT_MOVE) != 0
+            ? services::FileOperationType::Move
+            : services::FileOperationType::Copy;
+        StartFileOperation(type,
+                           std::move(sourcePaths),
+                           destinationFolder,
+                           services::FileConflictPolicy::PromptShell,
+                           {});
+    }
+
+    void MainWindow::SetDesktopWallpaperFromImageFile(const std::wstring& imagePath)
+    {
+        if (imagePath.empty())
+        {
+            return;
+        }
+
+        if (SystemParametersInfoW(SPI_SETDESKWALLPAPER, 0, const_cast<PWCHAR>(imagePath.c_str()), SPIF_UPDATEINIFILE | SPIF_SENDCHANGE) == FALSE)
+        {
+            MessageBoxW(hwnd_, L"Failed to set the desktop wallpaper.", L"Set Wallpaper", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void MainWindow::CopySelectedImagePixelsToClipboard()
+    {
+        if (!browserPaneController_ || !browserModel_)
+        {
+            return;
+        }
+
+        const int modelIndex = browserPaneController_->PrimarySelectedModelIndex();
+        if (modelIndex < 0 || modelIndex >= static_cast<int>(browserModel_->Items().size()))
+        {
+            MessageBoxW(hwnd_, L"Select a single image first.", L"Copy Image", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const browser::BrowserItem& item = browserModel_->Items()[static_cast<std::size_t>(modelIndex)];
+        std::wstring errorMessage;
+        const auto image = decode::DecodeFullImage(item, &errorMessage);
+        if (!image || !image->Bitmap())
+        {
+            MessageBoxW(hwnd_,
+                        errorMessage.empty() ? L"Unable to decode the selected image." : errorMessage.c_str(),
+                        L"Copy Image",
+                        MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        // Convert the decoded bitmap into a packed CF_DIB (BITMAPINFOHEADER + pixels),
+        // which is the clipboard format most image editors read.
+        HDC screenDc = GetDC(nullptr);
+        HDC memoryDc = CreateCompatibleDC(screenDc);
+        HGDIOBJ oldBitmap = memoryDc ? SelectObject(memoryDc, image->Bitmap()) : nullptr;
+
+        BITMAP bitmapInfo{};
+        GetObjectW(image->Bitmap(), sizeof(bitmapInfo), &bitmapInfo);
+        const int width = bitmapInfo.bmWidth;
+        const int height = bitmapInfo.bmHeight;
+
+        BITMAPINFOHEADER header{};
+        header.biSize = sizeof(header);
+        header.biWidth = width;
+        header.biHeight = height; // bottom-up
+        header.biPlanes = 1;
+        header.biBitCount = 32;
+        header.biCompression = BI_RGB;
+
+        const std::size_t pixelBytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
+        const std::size_t totalBytes = sizeof(BITMAPINFOHEADER) + pixelBytes;
+        HGLOBAL dibBuffer = GlobalAlloc(GMEM_MOVEABLE, totalBytes);
+        bool success = false;
+        if (dibBuffer)
+        {
+            if (BYTE* dib = static_cast<BYTE*>(GlobalLock(dibBuffer)))
+            {
+                memcpy(dib, &header, sizeof(header));
+                const int scanLines = memoryDc
+                    ? GetDIBits(memoryDc,
+                                image->Bitmap(),
+                                0,
+                                static_cast<UINT>(height),
+                                dib + sizeof(BITMAPINFOHEADER),
+                                reinterpret_cast<BITMAPINFO*>(dib),
+                                DIB_RGB_COLORS)
+                    : 0;
+                GlobalUnlock(dibBuffer);
+                success = scanLines == height;
+            }
+            if (!success)
+            {
+                GlobalFree(dibBuffer);
+                dibBuffer = nullptr;
+            }
+        }
+
+        if (memoryDc)
+        {
+            if (oldBitmap)
+            {
+                SelectObject(memoryDc, oldBitmap);
+            }
+            DeleteDC(memoryDc);
+        }
+        if (screenDc)
+        {
+            ReleaseDC(nullptr, screenDc);
+        }
+
+        if (success && OpenClipboard(hwnd_))
+        {
+            success = EmptyClipboard() != FALSE && SetClipboardData(CF_DIB, dibBuffer) != nullptr;
+            CloseClipboard();
+        }
+
+        if (!success)
+        {
+            if (dibBuffer)
+            {
+                GlobalFree(dibBuffer);
+            }
+            MessageBoxW(hwnd_, L"Failed to copy the image to the clipboard.", L"Copy Image", MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void MainWindow::StartDuplicateSelection()
+    {
+        if (!browserPaneController_ || !browserModel_ || fileOperationActive_)
+        {
+            return;
+        }
+
+        const std::vector<std::wstring> selectedPaths = SelectedFileOperationPathsSnapshot();
+        if (selectedPaths.empty())
+        {
+            MessageBoxW(hwnd_, L"Select one or more images first.", L"Duplicate", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        // Duplicate = copy into the same folder with an auto numeric suffix ("name (2)").
+        const std::wstring destinationFolder = browserModel_->FolderPath();
+        StartFileOperation(services::FileOperationType::Copy,
+                           std::move(selectedPaths),
+                           destinationFolder,
+                           services::FileConflictPolicy::AutoRenameNumericSuffix,
+                           {});
+    }
+
+    void MainWindow::ShowImageInformationForPath(const std::wstring& filePath)
+    {
+        if (!browserPaneController_ || !browserModel_ || filePath.empty())
+        {
+            return;
+        }
+
+        const int modelIndex = browserModel_->FindItemIndexByPath(filePath);
+        if (modelIndex < 0)
+        {
+            MessageBoxW(hwnd_, L"The image is no longer available in the current folder.", L"Image Information", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (browserPaneController_->PrimarySelectedModelIndex() != modelIndex)
+        {
+            browserPaneController_->RestoreSelectionByFilePaths({filePath}, filePath);
+        }
+
+        ShowImageInformation();
     }
 
     void MainWindow::SetSelectionRating(int rating)
@@ -12602,6 +13267,11 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_COPY_FILES_TO_CLIPBOARD, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_COPY_IMAGE_PIXELS, MF_BYCOMMAND | (hasSingleSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_PASTE_FILES, MF_BYCOMMAND | (hasFolder && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_DUPLICATE_SELECTION, MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_SELECT_ALL, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_RENAME_SELECTED, MF_BYCOMMAND | (hasSingleSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_BATCH_RENAME_SELECTION, MF_BYCOMMAND | (hasBatchRenameSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_PROPERTIES, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
@@ -14042,6 +14712,64 @@ namespace hyperbrowse::ui
         return 0;
     }
 
+    LRESULT MainWindow::OnViewerContextMenuCommand(WPARAM wParam)
+    {
+        if (!viewerWindow_ || !viewerWindow_->IsOpen())
+        {
+            return 0;
+        }
+
+        const std::wstring currentPath = viewerWindow_->CurrentFilePath();
+        if (currentPath.empty())
+        {
+            return 0;
+        }
+
+        constexpr UINT kImageInformationId = 4;
+        constexpr UINT kSetWallpaperId = 5;
+        constexpr UINT kPropertiesId = 3;
+
+        switch (static_cast<UINT>(wParam))
+        {
+        case kImageInformationId:
+            ShowImageInformationForPath(currentPath);
+            break;
+        case kSetWallpaperId:
+            SetDesktopWallpaperFromImageFile(currentPath);
+            break;
+        case kPropertiesId:
+        {
+            SHELLEXECUTEINFOW executeInfo{};
+            executeInfo.cbSize = sizeof(executeInfo);
+            executeInfo.fMask = SEE_MASK_INVOKEIDLIST;
+            executeInfo.hwnd = hwnd_;
+            executeInfo.lpVerb = L"properties";
+            executeInfo.lpFile = currentPath.c_str();
+            executeInfo.nShow = SW_SHOWNORMAL;
+            if (ShellExecuteExW(&executeInfo) == FALSE)
+            {
+                MessageBoxW(hwnd_, L"Failed to open the file properties dialog.", L"Properties", MB_OK | MB_ICONERROR);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        return 0;
+    }
+
+    LRESULT MainWindow::OnViewerDroppedFileMessage(LPARAM lParam)
+    {
+        std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+        if (!path || path->empty())
+        {
+            return 0;
+        }
+
+        OpenViewerAtPath(*path);
+        return 0;
+    }
+
     LRESULT MainWindow::OnViewerStartFolderSlideshowMessage(WPARAM wParam)
     {
         if (!viewerWindow_ || !viewerWindow_->IsOpen())
@@ -14220,6 +14948,9 @@ namespace hyperbrowse::ui
         case ID_FILE_EXIT:
             PostMessageW(hwnd_, WM_CLOSE, 0, 0);
             return true;
+        case ID_FILE_MINIMIZE:
+            ShowWindow(hwnd_, SW_MINIMIZE);
+            return true;
         case ID_FILE_REFRESH_TREE:
             RefreshFolderTree();
             return true;
@@ -14281,6 +15012,24 @@ namespace hyperbrowse::ui
             return true;
         case ID_FILE_COPY_PATH:
             CopySelectedPathsToClipboard();
+            return true;
+        case ID_FILE_COPY_FILES_TO_CLIPBOARD:
+            CopySelectionFilesToClipboard();
+            return true;
+        case ID_FILE_COPY_IMAGE_PIXELS:
+            CopySelectedImagePixelsToClipboard();
+            return true;
+        case ID_FILE_PASTE_FILES:
+            PasteClipboardFilesIntoCurrentFolder();
+            return true;
+        case ID_FILE_DUPLICATE_SELECTION:
+            StartDuplicateSelection();
+            return true;
+        case ID_FILE_SELECT_ALL:
+            if (browserPaneController_)
+            {
+                browserPaneController_->SelectAll();
+            }
             return true;
         case ID_FILE_PROPERTIES:
             ShowSelectedFileProperties();
@@ -15688,6 +16437,136 @@ namespace hyperbrowse::ui
         return 0;
     }
 
+    std::vector<std::wstring> MainWindow::ShellPathsFromDataObject(IDataObject* dataObject) const
+    {
+        return CollectShellDropPathsFromDataObject(dataObject);
+    }
+
+    DWORD MainWindow::DropEffectForKeyState(DWORD keyState,
+                                            const std::wstring& destinationFolder,
+                                            const std::vector<std::wstring>& sourcePaths) const
+    {
+        if (destinationFolder.empty() || sourcePaths.empty())
+        {
+            return DROPEFFECT_NONE;
+        }
+
+        if ((keyState & MK_CONTROL) != 0)
+        {
+            return DROPEFFECT_COPY;
+        }
+        if ((keyState & MK_SHIFT) != 0)
+        {
+            return DROPEFFECT_MOVE;
+        }
+        return AreAllSourcePathsOnSameDrive(sourcePaths, destinationFolder) ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
+    }
+
+    std::wstring MainWindow::ResolveExternalDropTarget(POINT clientPoint, HTREEITEM* treeItemOut) const
+    {
+        if (treeItemOut)
+        {
+            *treeItemOut = nullptr;
+        }
+
+        // Quick-access destination row first (screen-space panel on the right).
+        const int rowIndex = HitTestQuickAccessDestinationRow(clientPoint.x, clientPoint.y);
+        if (rowIndex >= 0 && rowIndex < static_cast<int>(quickAccessDestinationRows_.size()))
+        {
+            return NormalizeFolderPath(quickAccessDestinationRows_[static_cast<std::size_t>(rowIndex)].destinationPath);
+        }
+
+        // Then the folder tree.
+        if (treePane_)
+        {
+            RECT treeRect{};
+            GetWindowRect(treePane_, &treeRect);
+            POINT screenPoint = clientPoint;
+            ClientToScreen(hwnd_, &screenPoint);
+            if (PtInRect(&treeRect, screenPoint) != FALSE)
+            {
+                POINT treePoint = screenPoint;
+                ScreenToClient(treePane_, &treePoint);
+                TVHITTESTINFO hitTest{};
+                hitTest.pt = treePoint;
+                if (HTREEITEM item = TreeView_HitTest(treePane_, &hitTest))
+                {
+                    if ((hitTest.flags & TVHT_ONITEM) != 0)
+                    {
+                        if (const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item))
+                        {
+                            if (!nodeData->path.empty())
+                            {
+                                if (treeItemOut)
+                                {
+                                    *treeItemOut = item;
+                                }
+                                return NormalizeFolderPath(nodeData->path);
+                            }
+                        }
+                    }
+                }
+            }
+            // Dropping anywhere else in the tree pane targets the current folder.
+            if (browserModel_ && !browserModel_->FolderPath().empty())
+            {
+                return browserModel_->FolderPath();
+            }
+            return {};
+        }
+
+        // Browser/details area: drop into the currently open folder.
+        if (browserModel_ && !browserModel_->FolderPath().empty())
+        {
+            return browserModel_->FolderPath();
+        }
+        return {};
+    }
+
+    void MainWindow::ClearExternalDropVisuals()
+    {
+        if (externalDropTreeHoverItem_ && treePane_)
+        {
+            TreeView_SelectDropTarget(treePane_, nullptr);
+        }
+        externalDropTreeHoverItem_ = nullptr;
+        if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+        {
+            InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+        }
+    }
+
+    void MainWindow::HandleExternalDrop(IDataObject* dataObject, DWORD effect, POINT clientPoint)
+    {
+        std::vector<std::wstring> sourcePaths = ShellPathsFromDataObject(dataObject);
+        HTREEITEM treeItem = nullptr;
+        const std::wstring destinationFolder = ResolveExternalDropTarget(clientPoint, &treeItem);
+        ClearExternalDropVisuals();
+
+        if (sourcePaths.empty() || destinationFolder.empty() || fileOperationActive_)
+        {
+            return;
+        }
+
+        if (!IsExistingDirectory(destinationFolder))
+        {
+            MessageBoxW(hwnd_,
+                        L"The drop destination folder is no longer available.",
+                        L"Drop Files",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const services::FileOperationType type = (effect & DROPEFFECT_MOVE) != 0
+            ? services::FileOperationType::Move
+            : services::FileOperationType::Copy;
+        StartFileOperation(type,
+                           std::move(sourcePaths),
+                           std::move(destinationFolder),
+                           services::FileConflictPolicy::PromptShell,
+                           {});
+    }
+
     LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
         switch (message)
@@ -15868,6 +16747,10 @@ namespace hyperbrowse::ui
             return OnViewerDeleteRequested(wParam);
         case viewer::ViewerWindow::kStartFolderSlideshowMessage:
             return OnViewerStartFolderSlideshowMessage(wParam);
+        case viewer::ViewerWindow::kContextMenuCommandMessage:
+            return OnViewerContextMenuCommand(wParam);
+        case viewer::ViewerWindow::kDroppedFileMessage:
+            return OnViewerDroppedFileMessage(lParam);
         case viewer::ViewerWindow::kClosedMessage:
             return OnViewerClosedMessage();
         case kMemoryPressureSampledMessage:
@@ -16197,3 +17080,4 @@ namespace hyperbrowse::ui
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
 }
+

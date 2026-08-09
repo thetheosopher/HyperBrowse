@@ -141,6 +141,7 @@ namespace hyperbrowse::browser
         void SetDarkTheme(bool enabled);
 
         void ClearSelection();
+        void SelectAll();
         std::uint64_t SelectedCount() const noexcept;
         std::uint64_t SelectedBytes() const noexcept;
         int PrimarySelectedModelIndex() const noexcept;
@@ -213,7 +214,6 @@ namespace hyperbrowse::browser
         void RebuildSelectionFromDetailsList();
         void SyncDetailsListSelectionFromModel();
         void UpdateSelectionBytes();
-        void SelectAll();
         int PrimarySelectedViewIndex() const;
         int VisibleRepresentativeForModelIndex(int modelIndex) const noexcept;
         int PairedCompanionModelIndex(int modelIndex) const noexcept;

@@ -1,6 +1,8 @@
 #include "viewer/ViewerWindow.h"
 
 #include <windowsx.h>
+#include <shellapi.h>
+#include <shlobj.h>
 #include <d2d1.h>
 #include <d2d1_1helper.h>
 #include <d2d1effects.h>
@@ -11,6 +13,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <filesystem>
 #include <future>
 #include <memory>
 
@@ -622,6 +626,50 @@ namespace
             || std::abs(current.y - origin.y) >= dragThresholdY;
     }
 
+    bool CopyTextToClipboardLocal(HWND ownerWindow, const std::wstring& text)
+    {
+        if (!OpenClipboard(ownerWindow))
+        {
+            return false;
+        }
+
+        if (!EmptyClipboard())
+        {
+            CloseClipboard();
+            return false;
+        }
+
+        const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+        HGLOBAL buffer = GlobalAlloc(GMEM_MOVEABLE, bytes);
+        if (!buffer)
+        {
+            CloseClipboard();
+            return false;
+        }
+
+        void* locked = GlobalLock(buffer);
+        if (!locked)
+        {
+            GlobalFree(buffer);
+            CloseClipboard();
+            return false;
+        }
+
+        memcpy(locked, text.data(), text.size() * sizeof(wchar_t));
+        static_cast<wchar_t*>(locked)[text.size()] = L'\0';
+        GlobalUnlock(buffer);
+
+        if (!SetClipboardData(CF_UNICODETEXT, buffer))
+        {
+            GlobalFree(buffer);
+            CloseClipboard();
+            return false;
+        }
+
+        CloseClipboard();
+        return true;
+    }
+
 }
 
 namespace hyperbrowse::viewer
@@ -739,6 +787,7 @@ namespace hyperbrowse::viewer
                 return false;
             }
 
+            DragAcceptFiles(hwnd_, TRUE);
             util::LogInfo(L"ViewerWindow::Open created HWND " + FormatWindowHandle(hwnd_));
         }
         else
@@ -2246,6 +2295,137 @@ namespace hyperbrowse::viewer
         SetFullScreen(false);
     }
 
+    void ViewerWindow::ShowContextMenu(POINT screenPoint)
+    {
+        if (!hwnd_ || currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        {
+            return;
+        }
+
+        const std::wstring currentPath = items_[static_cast<std::size_t>(currentIndex_)].filePath;
+        if (currentPath.empty())
+        {
+            return;
+        }
+
+        constexpr UINT kCopyPathId = 1;
+        constexpr UINT kRevealInExplorerId = 2;
+        constexpr UINT kPropertiesId = 3;
+        constexpr UINT kImageInformationId = 4;
+        constexpr UINT kSetWallpaperId = 5;
+        constexpr UINT kDeleteId = 6;
+        constexpr UINT kDeletePermanentlyId = 7;
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        AppendMenuW(menu, MF_STRING, kCopyPathId, L"Copy Pat&h");
+        AppendMenuW(menu, MF_STRING, kRevealInExplorerId, L"Reveal in &Explorer");
+        AppendMenuW(menu, MF_STRING, kImageInformationId, L"Image &Information");
+        AppendMenuW(menu, MF_STRING, kPropertiesId, L"P&roperties");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kSetWallpaperId, L"Set as Desktop &Wallpaper");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kDeleteId, L"&Delete");
+        AppendMenuW(menu, MF_STRING, kDeletePermanentlyId, L"Delete &Permanently");
+
+        SetForegroundWindow(hwnd_);
+        const UINT commandId = TrackPopupMenuEx(
+            menu,
+            TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+            screenPoint.x,
+            screenPoint.y,
+            hwnd_,
+            nullptr);
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+        DestroyMenu(menu);
+
+        if (commandId == 0)
+        {
+            return;
+        }
+
+        if (commandId == kDeleteId || commandId == kDeletePermanentlyId)
+        {
+            // Route deletes through the owner's delete pipeline (confirmation,
+            // recycle-bin handling, focus restoration) exactly like VK_DELETE.
+            if (owner_ && IsWindow(owner_))
+            {
+                const WPARAM flags = commandId == kDeletePermanentlyId ? kDeleteRequestPermanent : 0;
+                SendMessageW(owner_, kDeleteRequestedMessage, flags, 0);
+            }
+            return;
+        }
+
+        DispatchContextMenuCommand(commandId);
+    }
+
+    void ViewerWindow::DispatchContextMenuCommand(UINT commandId)
+    {
+        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        {
+            return;
+        }
+
+        const std::wstring currentPath = items_[static_cast<std::size_t>(currentIndex_)].filePath;
+        if (currentPath.empty())
+        {
+            return;
+        }
+
+        constexpr UINT kCopyPathId = 1;
+        constexpr UINT kRevealInExplorerId = 2;
+        constexpr UINT kPropertiesId = 3;
+        constexpr UINT kImageInformationId = 4;
+        constexpr UINT kSetWallpaperId = 5;
+
+        switch (commandId)
+        {
+        case kCopyPathId:
+            if (!CopyTextToClipboardLocal(hwnd_, currentPath))
+            {
+                MessageBoxW(hwnd_, L"Failed to copy the file path to the clipboard.", L"Copy Path", MB_OK | MB_ICONERROR);
+            }
+            return;
+        case kRevealInExplorerId:
+        {
+            PIDLIST_ABSOLUTE folderPidl = nullptr;
+            const std::wstring parentPath = std::filesystem::path(currentPath).parent_path().wstring();
+            if (SUCCEEDED(SHParseDisplayName(parentPath.c_str(), nullptr, &folderPidl, 0, nullptr)) && folderPidl)
+            {
+                PIDLIST_ABSOLUTE itemPidl = nullptr;
+                LPCITEMIDLIST relativePidl = nullptr;
+                if (SUCCEEDED(SHParseDisplayName(currentPath.c_str(), nullptr, &itemPidl, 0, nullptr)) && itemPidl)
+                {
+                    relativePidl = ILFindLastID(itemPidl);
+                    if (relativePidl)
+                    {
+                        SHOpenFolderAndSelectItems(folderPidl, 1, &relativePidl, 0);
+                    }
+                    ILFree(itemPidl);
+                }
+                ILFree(folderPidl);
+            }
+            return;
+        }
+        case kImageInformationId:
+        case kPropertiesId:
+        case kSetWallpaperId:
+            if (owner_ && IsWindow(owner_))
+            {
+                // Defer to the main window so metadata dialogs and the wallpaper
+                // operation reuse the same code paths as the browser.
+                PostMessageW(owner_, kContextMenuCommandMessage, static_cast<WPARAM>(commandId), 0);
+            }
+            return;
+        default:
+            return;
+        }
+    }
+
     void ViewerWindow::AdvanceSlideshow()
     {
         if (items_.size() < 2)
@@ -2882,6 +3062,13 @@ namespace hyperbrowse::viewer
                 return 0;
             }
 
+            if (wParam == static_cast<WPARAM>('W')
+                && (GetKeyState(VK_CONTROL) & 0x8000) != 0)
+            {
+                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+                return 0;
+            }
+
             switch (wParam)
             {
             case VK_DELETE:
@@ -2961,12 +3148,68 @@ namespace hyperbrowse::viewer
                 ToggleFullScreen();
                 return 0;
             case VK_ESCAPE:
-                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+                if (fullScreen_)
+                {
+                    SetFullScreen(false);
+                }
+                else
+                {
+                    PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+                }
                 return 0;
             default:
                 break;
             }
             break;
+        case WM_CONTEXTMENU:
+        {
+            POINT screenPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            if (screenPoint.x == -1 && screenPoint.y == -1)
+            {
+                RECT clientRect{};
+                GetClientRect(hwnd_, &clientRect);
+                screenPoint.x = (clientRect.left + clientRect.right) / 2;
+                screenPoint.y = (clientRect.top + clientRect.bottom) / 2;
+                ClientToScreen(hwnd_, &screenPoint);
+            }
+            ShowContextMenu(screenPoint);
+            return 0;
+        }
+        case WM_DROPFILES:
+        {
+            HDROP dropHandle = reinterpret_cast<HDROP>(wParam);
+            if (dropHandle && owner_ && IsWindow(owner_))
+            {
+                const UINT pathCount = DragQueryFileW(dropHandle, 0xFFFFFFFFu, nullptr, 0);
+                for (UINT index = 0; index < pathCount; ++index)
+                {
+                    const UINT length = DragQueryFileW(dropHandle, index, nullptr, 0);
+                    if (length == 0)
+                    {
+                        continue;
+                    }
+                    std::wstring path(length + 1, L'\0');
+                    DragQueryFileW(dropHandle, index, path.data(), length + 1);
+                    path.resize(length);
+                    if (!path.empty())
+                    {
+                        // Hand off to the main window, which owns folder navigation
+                        // and the viewer item list.
+                        auto* payload = new std::wstring(std::move(path));
+                        if (!PostMessageW(owner_, kDroppedFileMessage, 0, reinterpret_cast<LPARAM>(payload)))
+                        {
+                            delete payload;
+                        }
+                        break; // only open the first dropped image
+                    }
+                }
+            }
+            if (dropHandle)
+            {
+                DragFinish(dropHandle);
+            }
+            return 0;
+        }
         case WM_MOUSEWHEEL:
         {
             const short wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
