@@ -52,3 +52,33 @@ Source: "{#ReleaseLayout}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 Name: "{group}\HyperBrowse"; Filename: "{app}\bin\HyperBrowse.exe"; WorkingDir: "{app}\bin"; IconFilename: "{app}\bin\HyperBrowse.exe"; Comment: "Launch HyperBrowse"
 Name: "{group}\Uninstall HyperBrowse"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\HyperBrowse"; Filename: "{app}\bin\HyperBrowse.exe"; WorkingDir: "{app}\bin"; IconFilename: "{app}\bin\HyperBrowse.exe"; Tasks: desktopicon
+
+; ---------------------------------------------------------------------------
+; Per-user image file associations (HKCU — no admin required, PrivilegesRequired=lowest).
+; Registers a HyperBrowse.Image prog-id, an "Open with HyperBrowse" verb, and lists
+; HyperBrowse under Open With for each supported extension. Users still choose the
+; default via Windows Settings; this only adds HyperBrowse as an available handler.
+; ---------------------------------------------------------------------------
+[Registry]
+; Application capabilities / Open With registration
+Root: HKCU; Subkey: "Software\HyperBrowse"; ValueType: string; ValueName: ""; ValueData: "HyperBrowse Image Browser"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "HyperBrowse"
+Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "High-performance native image browser for Windows"
+Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\bin\HyperBrowse.exe,0"
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "HyperBrowse"; ValueData: "Software\HyperBrowse\Capabilities"; Flags: uninsdeletevalue
+
+; ProgID for images opened by HyperBrowse
+Root: HKCU; Subkey: "Software\Classes\HyperBrowse.Image"; ValueType: string; ValueName: ""; ValueData: "HyperBrowse Image"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\HyperBrowse.Image\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\bin\HyperBrowse.exe,0"
+Root: HKCU; Subkey: "Software\Classes\HyperBrowse.Image\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\HyperBrowse.exe"" ""%1"""
+
+; Map each extension's OpenWith list to the HyperBrowse.Image prog-id.
+Root: HKCU; Subkey: "Software\Classes\.jpg\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.jpeg\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.png\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.gif\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.bmp\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.tif\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.tiff\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.webp\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.heic\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue

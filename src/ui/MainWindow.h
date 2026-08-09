@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <objidl.h>
 
 #include <array>
@@ -261,6 +262,7 @@ namespace hyperbrowse::ui
         bool ChooseFolder(std::wstring* folderPath) const;
         bool HasSelectedJpegItems() const;
         void ShowBrowserContextMenu(POINT screenPoint);
+        bool ShowShellContextMenuForSelection(POINT screenPoint);
         void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
         void ShowAboutDialog() const;
         void ShowSlideshowSettingsDialog();
@@ -289,6 +291,8 @@ namespace hyperbrowse::ui
                     std::wstring destinationFolder,
                     services::FileConflictPolicy conflictPolicy,
                     std::vector<std::wstring> targetLeafNames = {});
+        void UpdateTaskbarProgress(ULONGLONG completed, ULONGLONG total);
+        void ClearTaskbarProgress();
         void RevealSelectedInExplorer() const;
         void OpenSelectedContainingFolder() const;
         void CopySelectedPathsToClipboard() const;
@@ -335,6 +339,7 @@ namespace hyperbrowse::ui
         LRESULT OnBrowserPaneQuickSendDragMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBatchConvertMessage(LPARAM lParam);
         LRESULT OnFileOperationMessage(LPARAM lParam);
+        LRESULT OnFileOperationProgressMessage(LPARAM lParam);
         LRESULT OnDetailsPanelThumbnailMessage(LPARAM lParam);
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
@@ -421,6 +426,8 @@ namespace hyperbrowse::ui
         HIMAGELIST treeDragImageList_{};
         IDropTarget* externalDropTarget_{};
         HTREEITEM externalDropTreeHoverItem_{};
+        ITaskbarList3* taskbarList_{};
+        bool taskbarProgressActive_{};
         HMENU menu_{};
         HMENU fileMenu_{};
         HMENU viewMenu_{};

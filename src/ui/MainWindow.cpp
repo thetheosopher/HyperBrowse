@@ -6113,6 +6113,21 @@ namespace hyperbrowse::ui
             detailsPanelRichEditModule_ = nullptr;
         }
 
+        if (hwnd_)
+        {
+            RevokeDragDrop(hwnd_);
+        }
+        if (externalDropTarget_)
+        {
+            externalDropTarget_->Release();
+            externalDropTarget_ = nullptr;
+        }
+        if (taskbarList_)
+        {
+            taskbarList_->Release();
+            taskbarList_ = nullptr;
+        }
+
         if (accelerators_)
         {
             DestroyAcceleratorTable(accelerators_);
@@ -8392,6 +8407,9 @@ namespace hyperbrowse::ui
 
     void MainWindow::RecordRecentFolder(std::wstring folderPath)
     {
+        // Surface the folder in the taskbar jump list's "Recent" category.
+        SHAddToRecentDocs(SHARD_PATHW, folderPath.c_str());
+
         if (InsertFolderPath(&recentFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
         {
             UpdateMenuState();
@@ -10495,6 +10513,115 @@ namespace hyperbrowse::ui
                            std::move(targetLeafNames));
     }
 
+    bool MainWindow::ShowShellContextMenuForSelection(POINT screenPoint)
+    {
+        if (!hwnd_ || !browserPaneController_)
+        {
+            return false;
+        }
+
+        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+        if (selectedPaths.empty())
+        {
+            return false;
+        }
+
+        // All items must share a parent folder for a single shell context menu.
+        const std::wstring parentPath = fs::path(selectedPaths.front()).parent_path().wstring();
+        for (const std::wstring& path : selectedPaths)
+        {
+            if (!FolderPathsEqual(parentPath, fs::path(path).parent_path().wstring()))
+            {
+                return false;
+            }
+        }
+
+        PIDLIST_ABSOLUTE folderPidl = ILCreateFromPathW(parentPath.c_str());
+        if (!folderPidl)
+        {
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<IShellFolder> parentFolder;
+        PCIDLIST_ABSOLUTE childIdl = nullptr;
+        HRESULT result = SHBindToParent(folderPidl, IID_PPV_ARGS(parentFolder.GetAddressOf()), &childIdl);
+        if (FAILED(result) || !parentFolder)
+        {
+            ILFree(folderPidl);
+            return false;
+        }
+
+        // Resolve each item's child PIDL within the parent folder.
+        std::vector<PIDLIST_ABSOLUTE> itemPidls;
+        std::vector<PCUITEMID_CHILD> childPidls;
+        for (const std::wstring& path : selectedPaths)
+        {
+            PIDLIST_ABSOLUTE itemPidl = ILCreateFromPathW(path.c_str());
+            if (!itemPidl)
+            {
+                continue;
+            }
+            itemPidls.push_back(itemPidl);
+            childPidls.push_back(ILFindLastID(itemPidl));
+        }
+
+        Microsoft::WRL::ComPtr<IContextMenu> contextMenu;
+        result = parentFolder->GetUIObjectOf(hwnd_,
+                                             static_cast<UINT>(childPidls.size()),
+                                             childPidls.data(),
+                                             IID_IContextMenu,
+                                             nullptr,
+                                             reinterpret_cast<void**>(contextMenu.GetAddressOf()));
+        for (PIDLIST_ABSOLUTE itemPidl : itemPidls)
+        {
+            ILFree(itemPidl);
+        }
+        ILFree(folderPidl);
+
+        if (FAILED(result) || !contextMenu)
+        {
+            return false;
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return false;
+        }
+
+        // CMF_NORMAL lets the shell add its own verbs; CMF_EXTENDEDVERCS surfaces the
+        // extended (shift) verbs since this path is triggered by Shift+right-click.
+        result = contextMenu->QueryContextMenu(menu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_EXTENDEDVERBS);
+        if (FAILED(result))
+        {
+            DestroyMenu(menu);
+            return false;
+        }
+
+        SetForegroundWindow(hwnd_);
+        const UINT commandId = TrackPopupMenuEx(
+            menu,
+            TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+            screenPoint.x,
+            screenPoint.y,
+            hwnd_,
+            nullptr);
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+
+        if (commandId > 0)
+        {
+            CMINVOKECOMMANDINFO invoke{};
+            invoke.cbSize = sizeof(invoke);
+            invoke.hwnd = hwnd_;
+            invoke.lpVerb = MAKEINTRESOURCEA(commandId - 1);
+            invoke.nShow = SW_SHOWNORMAL;
+            contextMenu->InvokeCommand(&invoke);
+        }
+
+        DestroyMenu(menu);
+        return true;
+    }
+
     void MainWindow::ShowBrowserContextMenu(POINT screenPoint)
     {
         if (!hwnd_)
@@ -10590,7 +10717,9 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer");
             AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
-            AppendMenuW(menu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h");
+            AppendMenuW(menu, MF_STRING, ID_FILE_COPY_FILES_TO_CLIPBOARD, L"&Copy\tCtrl+C");
+            AppendMenuW(menu, MF_STRING, ID_FILE_COPY_IMAGE_PIXELS, L"Copy &Image\tCtrl+Shift+I");
+            AppendMenuW(menu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
             AppendMenuW(menu, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information");
             AppendMenuW(menu, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties");
             AppendMenuW(metadataMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set &Rating");
@@ -10599,6 +10728,7 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(metadataMenu), L"&Metadata");
             AppendMenuW(menu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...");
             AppendMenuW(menu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
+            AppendMenuW(menu, MF_STRING, ID_FILE_DUPLICATE_SELECTION, L"Dup&licate\tCtrl+D");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
             AppendMenuW(menu, MF_STRING, ID_FILE_MOVE_SELECTION, L"Mo&ve Selection...");
@@ -10621,12 +10751,15 @@ namespace hyperbrowse::ui
             EnableMenuItem(menu, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | MF_ENABLED);
             EnableMenuItem(menu, ID_FILE_REVEAL_IN_EXPLORER, MF_BYCOMMAND | MF_ENABLED);
             EnableMenuItem(menu, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_COPY_FILES_TO_CLIPBOARD, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_COPY_IMAGE_PIXELS, MF_BYCOMMAND | (hasSingleSelection ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_COPY_PATH, MF_BYCOMMAND | MF_ENABLED);
             EnableMenuItem(menu, ID_FILE_IMAGE_INFORMATION, MF_BYCOMMAND | MF_ENABLED);
             EnableMenuItem(menu, ID_FILE_PROPERTIES, MF_BYCOMMAND | MF_ENABLED);
             EnableMenuItem(menu, ID_FILE_EDIT_TAGS, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_RENAME_SELECTED, MF_BYCOMMAND | (allowRenameSelected ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_BATCH_RENAME_SELECTION, MF_BYCOMMAND | (allowBatchRenameSelected ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_DUPLICATE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_COPY_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_MOVE_SELECTION, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
             if (hasBatchRenameSelection)
@@ -10644,6 +10777,7 @@ namespace hyperbrowse::ui
         {
             AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_FOLDER, L"Open &Folder...");
             AppendMenuW(menu, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree");
+            AppendMenuW(menu, MF_STRING, ID_FILE_PASTE_FILES, L"&Paste\tCtrl+V");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode");
             AppendMenuW(menu, MF_STRING, ID_VIEW_DETAILS, L"&Details Mode");
@@ -10656,6 +10790,7 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"Slideshow from &Folder");
 
             EnableMenuItem(menu, ID_FILE_REFRESH_TREE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
+            EnableMenuItem(menu, ID_FILE_PASTE_FILES, MF_BYCOMMAND | (hasFolder && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_VIEW_THUMBNAILS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_VIEW_DETAILS, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_VIEW_RECURSIVE, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
@@ -11716,8 +11851,62 @@ namespace hyperbrowse::ui
             std::move(destinationFolder),
             conflictPolicy,
             std::move(targetLeafNames));
+        UpdateTaskbarProgress(0, 1); // show the bar immediately (0%) until ticks arrive
         UpdateStatusText();
         UpdateMenuState();
+    }
+
+    void MainWindow::UpdateTaskbarProgress(ULONGLONG completed, ULONGLONG total)
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        if (!taskbarList_)
+        {
+            // Lazy-init; ITaskbarList3 is available on Windows 7+.
+            if (FAILED(CoCreateInstance(CLSID_TaskbarList,
+                                        nullptr,
+                                        CLSCTX_INPROC_SERVER,
+                                        IID_PPV_ARGS(&taskbarList_)))
+                || !taskbarList_)
+            {
+                return;
+            }
+            taskbarList_->HrInit();
+        }
+
+        taskbarProgressActive_ = true;
+        taskbarList_->SetProgressState(hwnd_, TBPF_NORMAL);
+        taskbarList_->SetProgressValue(hwnd_, completed, total);
+    }
+
+    void MainWindow::ClearTaskbarProgress()
+    {
+        if (!taskbarList_ || !hwnd_ || !taskbarProgressActive_)
+        {
+            return;
+        }
+
+        taskbarList_->SetProgressState(hwnd_, TBPF_NOPROGRESS);
+        taskbarProgressActive_ = false;
+    }
+
+    LRESULT MainWindow::OnFileOperationProgressMessage(LPARAM lParam)
+    {
+        std::unique_ptr<services::FileOperationProgress> progress(
+            reinterpret_cast<services::FileOperationProgress*>(lParam));
+        if (!progress || progress->requestId != activeFileOperationRequestId_)
+        {
+            return 0;
+        }
+
+        if (progress->total > 0)
+        {
+            UpdateTaskbarProgress(progress->completed, progress->total);
+        }
+        return 0;
     }
 
     void MainWindow::RevealSelectedInExplorer() const
@@ -14502,6 +14691,12 @@ namespace hyperbrowse::ui
         }
 
         const POINT screenPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        // Shift+right-click opens the real Windows shell context menu (with the
+        // user's shell extensions); a plain right-click shows HyperBrowse's menu.
+        if ((GetKeyState(VK_SHIFT) & 0x8000) != 0 && ShowShellContextMenuForSelection(screenPoint))
+        {
+            return 0;
+        }
         ShowBrowserContextMenu(screenPoint);
         return 0;
     }
@@ -14625,6 +14820,7 @@ namespace hyperbrowse::ui
         }
 
         ApplyCompletedFileOperation(*update);
+        ClearTaskbarProgress();
         return 0;
     }
 
@@ -16737,6 +16933,8 @@ namespace hyperbrowse::ui
             return OnBatchConvertMessage(lParam);
         case services::FileOperationService::kMessageId:
             return OnFileOperationMessage(lParam);
+        case services::FileOperationService::kProgressMessageId:
+            return OnFileOperationProgressMessage(lParam);
         case services::ThumbnailScheduler::kMessageId:
             return OnDetailsPanelThumbnailMessage(lParam);
         case viewer::ViewerWindow::kZoomChangedMessage:

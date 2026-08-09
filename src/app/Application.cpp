@@ -2,6 +2,7 @@
 
 #include <objbase.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 
 #include <string_view>
 
@@ -101,6 +102,10 @@ namespace hyperbrowse::app
             util::LogError(L"Failed to initialize OLE for the application shell");
             return -1;
         }
+
+        // A stable AppUserModelID makes the taskbar jump list's "Recent" category
+        // (populated via SHAddToRecentDocs) attach to HyperBrowse's taskbar button.
+        SetCurrentProcessExplicitAppUserModelID(L"TheTheosopher.HyperBrowse");
 
         mainWindow_ = std::make_unique<ui::MainWindow>(instance_);
         if (!startupOptions.launchPath.empty())

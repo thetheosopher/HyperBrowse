@@ -48,6 +48,14 @@ namespace hyperbrowse::services
         std::wstring message;
     };
 
+    // Lightweight progress tick posted while an operation runs (percent 0-100).
+    struct FileOperationProgress
+    {
+        std::uint64_t requestId{};
+        UINT completed{};
+        UINT total{};
+    };
+
     FileConflictPlan PlanDestinationConflicts(const std::vector<std::wstring>& sourcePaths,
                                               std::wstring_view destinationFolder,
                                               FileConflictPolicy conflictPolicy);
@@ -59,6 +67,7 @@ namespace hyperbrowse::services
     {
     public:
         static constexpr UINT kMessageId = WM_APP + 48;
+        static constexpr UINT kProgressMessageId = WM_APP + 51;
 
         FileOperationService() = default;
         ~FileOperationService();

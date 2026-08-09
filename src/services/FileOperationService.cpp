@@ -142,6 +142,12 @@ namespace
     class FileOperationProgressSink final : public IFileOperationProgressSink
     {
     public:
+        void SetProgressTarget(HWND targetWindow, std::uint64_t requestId) noexcept
+        {
+            progressTargetWindow_ = targetWindow;
+            progressRequestId_ = requestId;
+        }
+
         const std::vector<std::wstring>& SucceededSourcePaths() const noexcept
         {
             return succeededSourcePaths_;
@@ -281,8 +287,22 @@ namespace
             return S_OK;
         }
 
-        HRESULT STDMETHODCALLTYPE UpdateProgress(UINT, UINT) override
+        HRESULT STDMETHODCALLTYPE UpdateProgress(UINT workCompleted, UINT workTotal) override
         {
+            if (progressTargetWindow_ && workTotal > 0)
+            {
+                auto* progress = new hyperbrowse::services::FileOperationProgress();
+                progress->requestId = progressRequestId_;
+                progress->completed = workCompleted;
+                progress->total = workTotal;
+                if (!PostMessageW(progressTargetWindow_,
+                                  hyperbrowse::services::FileOperationService::kProgressMessageId,
+                                  0,
+                                  reinterpret_cast<LPARAM>(progress)))
+                {
+                    delete progress;
+                }
+            }
             return S_OK;
         }
 
@@ -331,6 +351,8 @@ namespace
         }
 
         volatile long refCount_{1};
+        HWND progressTargetWindow_{};
+        std::uint64_t progressRequestId_{};
         std::vector<std::wstring> succeededSourcePaths_;
         std::vector<std::wstring> createdPaths_;
         std::vector<std::wstring> pendingDeleteSourcePaths_;
@@ -551,6 +573,7 @@ namespace hyperbrowse::services
             }
 
             auto* sink = new FileOperationProgressSink();
+            sink->SetProgressTarget(targetWindow, requestId);
             DWORD sinkCookie = 0;
             result = operation->Advise(sink, &sinkCookie);
             if (FAILED(result))
