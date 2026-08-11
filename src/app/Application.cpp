@@ -13,6 +13,9 @@
 
 namespace
 {
+    constexpr wchar_t kSingleInstanceMutexName[] = L"Local\\TheTheosopher.HyperBrowse.SingleInstance";
+    constexpr wchar_t kSingleInstancePipeName[] = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch";
+
     struct StartupBenchmarkOptions
     {
         bool enabled{};
@@ -80,7 +83,179 @@ namespace hyperbrowse::app
     {
     }
 
-    Application::~Application() = default;
+    Application::~Application()
+    {
+        StopInstanceListener();
+        if (singleInstanceMutex_)
+        {
+            ReleaseMutex(singleInstanceMutex_);
+            CloseHandle(singleInstanceMutex_);
+            singleInstanceMutex_ = nullptr;
+        }
+    }
+
+    bool Application::TryBecomePrimaryInstance(const std::wstring& launchPath)
+    {
+        singleInstanceMutex_ = CreateMutexW(nullptr, TRUE, kSingleInstanceMutexName);
+        if (!singleInstanceMutex_)
+        {
+            return true; // Could not determine; proceed as primary.
+        }
+
+        if (GetLastError() != ERROR_ALREADY_EXISTS)
+        {
+            isPrimaryInstance_ = true;
+            return true;
+        }
+
+        // Another instance is running: forward the launch path (if any) to it and exit.
+        CloseHandle(singleInstanceMutex_);
+        singleInstanceMutex_ = nullptr;
+
+        if (!launchPath.empty())
+        {
+            HANDLE pipe = CreateFileW(kSingleInstancePipeName,
+                                      GENERIC_WRITE,
+                                      0,
+                                      nullptr,
+                                      OPEN_EXISTING,
+                                      0,
+                                      nullptr);
+            if (pipe != INVALID_HANDLE_VALUE)
+            {
+                const DWORD bytesToWrite = static_cast<DWORD>((launchPath.size() + 1) * sizeof(wchar_t));
+                DWORD bytesWritten = 0;
+                WriteFile(pipe, launchPath.c_str(), bytesToWrite, &bytesWritten, nullptr);
+                CloseHandle(pipe);
+            }
+            else
+            {
+                // Pipe not ready; still try to foreground the existing window by class name.
+                if (HWND existing = FindWindowW(L"HyperBrowseMainWindow", nullptr))
+                {
+                    if (IsIconic(existing))
+                    {
+                        ShowWindow(existing, SW_RESTORE);
+                    }
+                    SetForegroundWindow(existing);
+                }
+            }
+        }
+        return false;
+    }
+
+    void Application::StartInstanceListener()
+    {
+        if (!isPrimaryInstance_ || listenerThread_.joinable())
+        {
+            return;
+        }
+
+        listenerStopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        listenerThread_ = std::thread([this]()
+        {
+            InstanceListenerLoop();
+        });
+    }
+
+    void Application::StopInstanceListener()
+    {
+        if (listenerStopEvent_)
+        {
+            SetEvent(listenerStopEvent_);
+        }
+        if (listenerThread_.joinable())
+        {
+            listenerThread_.join();
+        }
+        if (listenerStopEvent_)
+        {
+            CloseHandle(listenerStopEvent_);
+            listenerStopEvent_ = nullptr;
+        }
+    }
+
+    void Application::InstanceListenerLoop()
+    {
+        while (true)
+        {
+            HANDLE pipe = CreateNamedPipeW(kSingleInstancePipeName,
+                                           PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+                                           PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                                           1,
+                                           4096,
+                                           4096,
+                                           0,
+                                           nullptr);
+            if (pipe == INVALID_HANDLE_VALUE)
+            {
+                return;
+            }
+
+            OVERLAPPED overlapped{};
+            overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            BOOL connected = ConnectNamedPipe(pipe, &overlapped);
+            if (!connected)
+            {
+                const DWORD error = GetLastError();
+                if (error == ERROR_PIPE_CONNECTED)
+                {
+                    connected = TRUE;
+                }
+                else if (error == ERROR_IO_PENDING)
+                {
+                    HANDLE waitHandles[] = {overlapped.hEvent, listenerStopEvent_};
+                    const DWORD waitResult = WaitForMultipleObjects(2, waitHandles, FALSE, INFINITE);
+                    if (waitResult == WAIT_OBJECT_0)
+                    {
+                        DWORD bytes = 0;
+                        connected = GetOverlappedResult(pipe, &overlapped, &bytes, FALSE);
+                    }
+                    else
+                    {
+                        connected = FALSE;
+                    }
+                }
+            }
+
+            if (connected)
+            {
+                wchar_t buffer[2048]{};
+                DWORD bytesRead = 0;
+                if (ReadFile(pipe, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead >= sizeof(wchar_t))
+                {
+                    std::wstring path(buffer, bytesRead / sizeof(wchar_t));
+                    while (!path.empty() && path.back() == L'\0')
+                    {
+                        path.pop_back();
+                    }
+                    if (!path.empty() && mainWindow_ && mainWindow_->Hwnd())
+                    {
+                        auto* payload = new std::wstring(std::move(path));
+                        if (!PostMessageW(mainWindow_->Hwnd(),
+                                          ui::MainWindow::kExternalLaunchMessage,
+                                          0,
+                                          reinterpret_cast<LPARAM>(payload)))
+                        {
+                            delete payload;
+                        }
+                    }
+                }
+            }
+
+            if (overlapped.hEvent)
+            {
+                CloseHandle(overlapped.hEvent);
+            }
+            DisconnectNamedPipe(pipe);
+            CloseHandle(pipe);
+
+            if (listenerStopEvent_ && WaitForSingleObject(listenerStopEvent_, 0) == WAIT_OBJECT_0)
+            {
+                return;
+            }
+        }
+    }
 
     int Application::Run(int nCmdShow)
     {
@@ -107,6 +282,17 @@ namespace hyperbrowse::app
         // (populated via SHAddToRecentDocs) attach to HyperBrowse's taskbar button.
         SetCurrentProcessExplicitAppUserModelID(L"TheTheosopher.HyperBrowse");
 
+        // Single instance: a second launch forwards its path to the running window.
+        if (!TryBecomePrimaryInstance(startupOptions.launchPath))
+        {
+            util::LogInfo(L"Another HyperBrowse instance is running; forwarded launch path and exiting.");
+            if (shouldUninitializeOle)
+            {
+                OleUninitialize();
+            }
+            return 0;
+        }
+
         mainWindow_ = std::make_unique<ui::MainWindow>(instance_);
         if (!startupOptions.launchPath.empty())
         {
@@ -123,6 +309,7 @@ namespace hyperbrowse::app
         }
 
         mainWindow_->Show(nCmdShow);
+        StartInstanceListener();
         util::RecordTiming(L"app.startup", startupStopwatch.ElapsedMilliseconds());
     util::MarkStartupWindowVisible();
 

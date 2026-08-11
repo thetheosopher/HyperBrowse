@@ -135,6 +135,8 @@ namespace
     constexpr UINT ID_FILE_MINIMIZE = 1090;
     constexpr UINT ID_FILE_COPY_IMAGE_PIXELS = 1091;
     constexpr UINT ID_FILE_DUPLICATE_SELECTION = 1092;
+    constexpr UINT ID_EDIT_UNDO = 1093;
+    constexpr UINT ID_EDIT_REDO = 1094;
     constexpr UINT ID_FILE_SET_RATING_0 = 1080;
     constexpr UINT ID_FILE_SET_RATING_1 = 1081;
     constexpr UINT ID_FILE_SET_RATING_2 = 1082;
@@ -6117,6 +6119,7 @@ namespace hyperbrowse::ui
         {
             RevokeDragDrop(hwnd_);
         }
+        RemoveTrayIcon();
         if (externalDropTarget_)
         {
             externalDropTarget_->Release();
@@ -6277,6 +6280,32 @@ namespace hyperbrowse::ui
         LoadFolderAsync(folderPath);
     }
 
+    void MainWindow::HandleExternalLaunchPath(const std::wstring& path)
+    {
+        if (path.empty() || !hwnd_)
+        {
+            return;
+        }
+
+        // Bring the existing window forward.
+        if (IsIconic(hwnd_))
+        {
+            ShowWindow(hwnd_, SW_RESTORE);
+        }
+        SetForegroundWindow(hwnd_);
+
+        std::error_code error;
+        const fs::path resolvedPath(path);
+        if (fs::is_directory(resolvedPath, error) && !error)
+        {
+            LoadFolderAsync(NormalizeFolderPath(resolvedPath.wstring()));
+            return;
+        }
+
+        // A file path opens in the viewer.
+        OpenViewerAtPath(path);
+    }
+
     bool MainWindow::TranslateAcceleratorMessage(MSG* message) const
     {
         if (!hwnd_ || !accelerators_ || !message)
@@ -6357,6 +6386,8 @@ namespace hyperbrowse::ui
             {FVIRTKEY | FCONTROL, static_cast<WORD>('V'), ID_FILE_PASTE_FILES},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('A'), ID_FILE_SELECT_ALL},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('D'), ID_FILE_DUPLICATE_SELECTION},
+            {FVIRTKEY | FCONTROL, static_cast<WORD>('Z'), ID_EDIT_UNDO},
+            {FVIRTKEY | FCONTROL, static_cast<WORD>('Y'), ID_EDIT_REDO},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('E'), ID_FILE_REVEAL_IN_EXPLORER},
             {FVIRTKEY | FALT, VK_RETURN, ID_FILE_PROPERTIES},
             {FVIRTKEY, VK_DELETE, ID_FILE_DELETE_SELECTION},
@@ -6432,6 +6463,9 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_IMAGE_PIXELS, L"Copy &Image\tCtrl+Shift+I");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PASTE_FILES, L"&Paste\tCtrl+V");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
+        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(fileMenu_, MF_STRING, ID_EDIT_UNDO, L"&Undo\tCtrl+Z");
+        AppendMenuW(fileMenu_, MF_STRING, ID_EDIT_REDO, L"&Redo\tCtrl+Y");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_2, L"&2 Stars");
@@ -11893,6 +11927,74 @@ namespace hyperbrowse::ui
         taskbarProgressActive_ = false;
     }
 
+    void MainWindow::EnsureTrayIcon()
+    {
+        if (trayIconAdded_ || !hwnd_)
+        {
+            return;
+        }
+
+        if (trayIconMessageId_ == 0)
+        {
+            trayIconMessageId_ = RegisterWindowMessageW(L"TheTheosopher.HyperBrowse.TrayIcon");
+        }
+
+        NOTIFYICONDATAW iconData{};
+        iconData.cbSize = sizeof(iconData);
+        iconData.hWnd = hwnd_;
+        iconData.uID = 1;
+        iconData.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+        iconData.uCallbackMessage = trayIconMessageId_;
+        iconData.hIcon = LoadIconW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE));
+        if (!iconData.hIcon)
+        {
+            iconData.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+        }
+        wcsncpy_s(iconData.szTip, L"HyperBrowse", _TRUNCATE);
+        trayIconAdded_ = Shell_NotifyIconW(NIM_ADD, &iconData) != FALSE;
+    }
+
+    void MainWindow::RemoveTrayIcon()
+    {
+        if (!trayIconAdded_ || !hwnd_)
+        {
+            return;
+        }
+
+        NOTIFYICONDATAW iconData{};
+        iconData.cbSize = sizeof(iconData);
+        iconData.hWnd = hwnd_;
+        iconData.uID = 1;
+        Shell_NotifyIconW(NIM_DELETE, &iconData);
+        trayIconAdded_ = false;
+    }
+
+    void MainWindow::NotifyLongOperationComplete(const std::wstring& title, const std::wstring& message)
+    {
+        // Only notify when the user has moved focus elsewhere; an in-focus completion
+        // is already visible in the status bar / dialogs.
+        if (GetForegroundWindow() == hwnd_)
+        {
+            return;
+        }
+
+        EnsureTrayIcon();
+        if (!trayIconAdded_)
+        {
+            return;
+        }
+
+        NOTIFYICONDATAW iconData{};
+        iconData.cbSize = sizeof(iconData);
+        iconData.hWnd = hwnd_;
+        iconData.uID = 1;
+        iconData.uFlags = NIF_INFO;
+        iconData.dwInfoFlags = NIIF_INFO;
+        wcsncpy_s(iconData.szInfoTitle, title.c_str(), _TRUNCATE);
+        wcsncpy_s(iconData.szInfo, message.c_str(), _TRUNCATE);
+        Shell_NotifyIconW(NIM_MODIFY, &iconData);
+    }
+
     LRESULT MainWindow::OnFileOperationProgressMessage(LPARAM lParam)
     {
         std::unique_ptr<services::FileOperationProgress> progress(
@@ -12632,11 +12734,188 @@ namespace hyperbrowse::ui
         MessageBoxW(hwnd_, summary.c_str(), L"Adjust JPEG Orientation", MB_OK | MB_ICONINFORMATION);
     }
 
+    void MainWindow::RecordUndoableOperation(const services::FileOperationUpdate& update)
+    {
+        // Recycle-bin deletes are already undoable via the shell (FOF_ALLOWUNDO), and
+        // permanent deletes cannot be undone; only journal Copy / Move / Rename.
+        if (applyingUndoRedo_)
+        {
+            return;
+        }
+
+        const auto type = update.type;
+        const bool isCopy = type == services::FileOperationType::Copy;
+        const bool isMove = type == services::FileOperationType::Move;
+        const bool isRename = type == services::FileOperationType::Rename;
+        if (!isCopy && !isMove && !isRename)
+        {
+            return;
+        }
+
+        if (update.succeededSourcePaths.empty())
+        {
+            return;
+        }
+
+        UndoableOperation operation;
+        operation.type = static_cast<int>(type);
+        operation.sourcePaths = update.succeededSourcePaths;
+        operation.createdPaths = update.createdPaths;
+        operation.destinationFolder = update.destinationFolder;
+        operation.description = services::FileOperationTypeToActivityLabel(type);
+
+        // Renames and moves produce one created path per source; copies always create
+        // a destination file. Without created paths we cannot compute the inverse.
+        if (isRename && operation.createdPaths.empty())
+        {
+            return;
+        }
+
+        undoStack_.push_back(std::move(operation));
+        constexpr std::size_t kMaxUndoDepth = 32;
+        while (undoStack_.size() > kMaxUndoDepth)
+        {
+            undoStack_.pop_front();
+        }
+        // A new operation invalidates the redo history.
+        redoStack_.clear();
+        UpdateUndoRedoMenuState();
+    }
+
+    void MainWindow::PerformUndo()
+    {
+        if (undoStack_.empty() || fileOperationActive_)
+        {
+            return;
+        }
+
+        UndoableOperation operation = std::move(undoStack_.back());
+        undoStack_.pop_back();
+
+        const auto type = static_cast<services::FileOperationType>(operation.type);
+        std::vector<std::wstring> undoSources;
+        std::wstring undoDestination;
+        std::vector<std::wstring> undoLeafNames;
+
+        if (type == services::FileOperationType::Copy)
+        {
+            // Undo a copy = delete the created copies (recycle bin for safety).
+            undoSources = operation.createdPaths.empty() ? operation.sourcePaths : operation.createdPaths;
+            applyingUndoRedo_ = true;
+            StartFileOperation(services::FileOperationType::DeleteRecycleBin,
+                               undoSources,
+                               {},
+                               services::FileConflictPolicy::PromptShell,
+                               {});
+        }
+        else if (type == services::FileOperationType::Move)
+        {
+            // Undo a move = move the created files back to the original folder.
+            // createdPaths[i] is the post-move location; move each back beside the
+            // original source's parent folder.
+            if (operation.createdPaths.empty())
+            {
+                applyingUndoRedo_ = false;
+                UpdateUndoRedoMenuState();
+                return;
+            }
+            const std::wstring originalFolder = fs::path(operation.sourcePaths.front()).parent_path().wstring();
+            applyingUndoRedo_ = true;
+            StartFileOperation(services::FileOperationType::Move,
+                               operation.createdPaths,
+                               originalFolder,
+                               services::FileConflictPolicy::PromptShell,
+                               {});
+        }
+        else // Rename
+        {
+            // Undo a rename = rename back to the original leaf name.
+            std::vector<std::wstring> originalLeafNames;
+            originalLeafNames.reserve(operation.sourcePaths.size());
+            for (const std::wstring& sourcePath : operation.sourcePaths)
+            {
+                originalLeafNames.push_back(fs::path(sourcePath).filename().wstring());
+            }
+            applyingUndoRedo_ = true;
+            StartFileOperation(services::FileOperationType::Rename,
+                               operation.createdPaths,
+                               {},
+                               services::FileConflictPolicy::PromptShell,
+                               originalLeafNames);
+        }
+
+        redoStack_.push_back(std::move(operation));
+        UpdateUndoRedoMenuState();
+    }
+
+    void MainWindow::PerformRedo()
+    {
+        if (redoStack_.empty() || fileOperationActive_)
+        {
+            return;
+        }
+
+        UndoableOperation operation = std::move(redoStack_.back());
+        redoStack_.pop_back();
+
+        const auto type = static_cast<services::FileOperationType>(operation.type);
+        applyingUndoRedo_ = true;
+        if (type == services::FileOperationType::Copy)
+        {
+            StartFileOperation(services::FileOperationType::Copy,
+                               operation.sourcePaths,
+                               operation.destinationFolder,
+                               services::FileConflictPolicy::PromptShell,
+                               {});
+        }
+        else if (type == services::FileOperationType::Move)
+        {
+            StartFileOperation(services::FileOperationType::Move,
+                               operation.sourcePaths,
+                               operation.destinationFolder,
+                               services::FileConflictPolicy::PromptShell,
+                               {});
+        }
+        else // Rename: redo renames back to the new leaf names.
+        {
+            std::vector<std::wstring> newLeafNames;
+            newLeafNames.reserve(operation.createdPaths.size());
+            for (const std::wstring& createdPath : operation.createdPaths)
+            {
+                newLeafNames.push_back(fs::path(createdPath).filename().wstring());
+            }
+            StartFileOperation(services::FileOperationType::Rename,
+                               operation.sourcePaths,
+                               {},
+                               services::FileConflictPolicy::PromptShell,
+                               newLeafNames);
+        }
+
+        undoStack_.push_back(std::move(operation));
+        UpdateUndoRedoMenuState();
+    }
+
+    void MainWindow::UpdateUndoRedoMenuState()
+    {
+        if (!menu_)
+        {
+            return;
+        }
+
+        const bool canUndo = !undoStack_.empty() && !fileOperationActive_;
+        const bool canRedo = !redoStack_.empty() && !fileOperationActive_;
+        EnableMenuItem(menu_, ID_EDIT_UNDO, MF_BYCOMMAND | (canUndo ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_EDIT_REDO, MF_BYCOMMAND | (canRedo ? MF_ENABLED : MF_GRAYED));
+    }
+
     void MainWindow::ApplyCompletedFileOperation(const services::FileOperationUpdate& update)
     {
         util::ScopedTimer applyTimer(L"MainWindow::ApplyCompletedFileOperation");
         fileOperationActive_ = false;
         activeFileOperationLabel_.clear();
+        applyingUndoRedo_ = false;
+
+        RecordUndoableOperation(update);
 
         const HWND activationRestoreWindow = foregroundWindowAtFileOperationStart_;
         foregroundWindowAtFileOperationStart_ = nullptr;
@@ -13431,6 +13710,7 @@ namespace hyperbrowse::ui
         }
 
         RefreshQuickAccessMenus();
+        UpdateUndoRedoMenuState();
 
         const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
@@ -14749,23 +15029,36 @@ namespace hyperbrowse::ui
             batchConvertActive_ = false;
             UpdateMenuState();
 
-            if (!update->cancelled && update->failedCount > 0)
+            std::wstring summary;
+            if (!update->message.empty())
             {
-                std::wstring summary;
-                if (!update->message.empty())
-                {
-                    summary = update->message;
-                    summary.append(L"\n\n");
-                }
+                summary = update->message;
+                summary.append(L"\n\n");
+            }
 
-                summary.append(L"Batch conversion completed. Converted ");
-                summary.append(std::to_wstring(update->completedCount - update->failedCount));
-                summary.append(L" of ");
-                summary.append(std::to_wstring(update->totalCount));
-                summary.append(L" image(s).\nFailures: ");
+            summary.append(L"Converted ");
+            summary.append(std::to_wstring(update->completedCount - update->failedCount));
+            summary.append(L" of ");
+            summary.append(std::to_wstring(update->totalCount));
+            summary.append(L" image(s).");
+            if (update->failedCount > 0)
+            {
+                summary.append(L" Failures: ");
                 summary.append(std::to_wstring(update->failedCount));
                 summary.append(L".");
-                MessageBoxW(hwnd_, summary.c_str(), L"Batch Convert", MB_OK | MB_ICONWARNING);
+            }
+
+            if (update->cancelled)
+            {
+                NotifyLongOperationComplete(L"Batch Convert", L"Batch conversion was cancelled.");
+            }
+            else
+            {
+                NotifyLongOperationComplete(L"Batch Convert Complete", summary);
+                if (update->failedCount > 0)
+                {
+                    MessageBoxW(hwnd_, summary.c_str(), L"Batch Convert", MB_OK | MB_ICONWARNING);
+                }
             }
         }
 
@@ -15217,6 +15510,12 @@ namespace hyperbrowse::ui
             return true;
         case ID_FILE_PASTE_FILES:
             PasteClipboardFilesIntoCurrentFolder();
+            return true;
+        case ID_EDIT_UNDO:
+            PerformUndo();
+            return true;
+        case ID_EDIT_REDO:
+            PerformRedo();
             return true;
         case ID_FILE_DUPLICATE_SELECTION:
             StartDuplicateSelection();
@@ -16875,6 +17174,15 @@ namespace hyperbrowse::ui
             break;
         case WM_DROPFILES:
             return OnDropFiles(reinterpret_cast<HDROP>(wParam));
+        case kExternalLaunchMessage:
+        {
+            std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+            if (path)
+            {
+                HandleExternalLaunchPath(*path);
+            }
+            return 0;
+        }
         case WM_SETCURSOR:
         {
             POINT point{};

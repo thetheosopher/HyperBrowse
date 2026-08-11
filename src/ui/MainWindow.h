@@ -75,9 +75,13 @@ namespace hyperbrowse::ui
 
         void SetStartupLaunchPath(std::wstring path);
         void OpenViewerAtPath(const std::wstring& filePath);
+        void HandleExternalLaunchPath(const std::wstring& path);
         bool Create();
         void Show(int nCmdShow) const;
         bool TranslateAcceleratorMessage(MSG* message) const;
+        HWND Hwnd() const noexcept { return hwnd_; }
+
+        static constexpr UINT kExternalLaunchMessage = WM_APP + 71;
 
     private:
         struct FolderTreeNodeData
@@ -293,6 +297,13 @@ namespace hyperbrowse::ui
                     std::vector<std::wstring> targetLeafNames = {});
         void UpdateTaskbarProgress(ULONGLONG completed, ULONGLONG total);
         void ClearTaskbarProgress();
+        void NotifyLongOperationComplete(const std::wstring& title, const std::wstring& message);
+        void EnsureTrayIcon();
+        void RemoveTrayIcon();
+        void RecordUndoableOperation(const services::FileOperationUpdate& update);
+        void PerformUndo();
+        void PerformRedo();
+        void UpdateUndoRedoMenuState();
         void RevealSelectedInExplorer() const;
         void OpenSelectedContainingFolder() const;
         void CopySelectedPathsToClipboard() const;
@@ -428,6 +439,20 @@ namespace hyperbrowse::ui
         HTREEITEM externalDropTreeHoverItem_{};
         ITaskbarList3* taskbarList_{};
         bool taskbarProgressActive_{};
+        bool trayIconAdded_{};
+        UINT trayIconMessageId_{};
+
+        struct UndoableOperation
+        {
+            int type{}; // services::FileOperationType as int
+            std::vector<std::wstring> sourcePaths;
+            std::vector<std::wstring> createdPaths;
+            std::wstring destinationFolder;
+            std::wstring description;
+        };
+        std::deque<UndoableOperation> undoStack_;
+        std::deque<UndoableOperation> redoStack_;
+        bool applyingUndoRedo_{};
         HMENU menu_{};
         HMENU fileMenu_{};
         HMENU viewMenu_{};
