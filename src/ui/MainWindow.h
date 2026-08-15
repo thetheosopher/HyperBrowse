@@ -365,6 +365,7 @@ namespace hyperbrowse::ui
 
         void SetBrowserMode(BrowserMode mode);
         void ToggleRecursiveBrowsing();
+        void ToggleShowSubfoldersInBrowser();
         void ToggleCurrentFolderFavoriteDestination();
         int CommonSelectionRating() const;
         void ApplyThumbnailDisplaySettings();
@@ -477,6 +478,7 @@ namespace hyperbrowse::ui
         RightPaneTab activeRightPaneTab_{RightPaneTab::FileDetails};
         ThemeMode themeMode_{ThemeMode::Light};
         bool recursiveBrowsingEnabled_{false};
+        bool showSubfoldersInBrowser_{false};
         bool rawJpegPairedOperationsEnabled_{false};
         browser::RawJpegDisplayPreference pairedRawJpegViewerPreference_{browser::RawJpegDisplayPreference::Raw};
         bool persistentThumbnailCacheEnabled_{true};

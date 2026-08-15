@@ -118,25 +118,42 @@ namespace
     void HandleEntry(const EnumerationSharedStateView& stateView,
                      const std::wstring& folderPath,
                      const fs::directory_entry& entry,
+                     bool includeSubfolder,
                      std::vector<hyperbrowse::browser::BrowserItem>* batch,
                      std::uint64_t* totalCount,
                      std::uint64_t* totalBytes)
     {
         std::error_code statusError;
-        if (!entry.is_regular_file(statusError) || statusError)
+        if (entry.is_directory(statusError))
         {
-            return;
-        }
+            if (statusError || !includeSubfolder)
+            {
+                return;
+            }
 
-        if (!hyperbrowse::browser::IsSupportedImageExtension(entry.path().extension().wstring()))
+            hyperbrowse::browser::BrowserItem item = hyperbrowse::browser::BuildBrowserItemFromPath(entry.path());
+            item.isDirectory = true;
+            item.fileType = L"Folder";
+            ++(*totalCount);
+            batch->push_back(std::move(item));
+        }
+        else
         {
-            return;
-        }
+            if (statusError || !entry.is_regular_file(statusError))
+            {
+                return;
+            }
 
-        hyperbrowse::browser::BrowserItem item = hyperbrowse::browser::BuildBrowserItemFromPath(entry.path());
-        *totalBytes += item.fileSizeBytes;
-        ++(*totalCount);
-        batch->push_back(std::move(item));
+            if (!hyperbrowse::browser::IsSupportedImageExtension(entry.path().extension().wstring()))
+            {
+                return;
+            }
+
+            hyperbrowse::browser::BrowserItem item = hyperbrowse::browser::BuildBrowserItemFromPath(entry.path());
+            *totalBytes += item.fileSizeBytes;
+            ++(*totalCount);
+            batch->push_back(std::move(item));
+        }
 
         const std::size_t batchSize = *totalCount <= kInitialBatchItemLimit ? kInitialBatchSize : kBatchSize;
         if (batch->size() >= batchSize)
@@ -147,7 +164,8 @@ namespace
 
     void EnumerateFolder(const EnumerationSharedStateView& stateView,
                          const std::wstring& folderPath,
-                         bool recursive)
+                         bool recursive,
+                         bool includeSubfolders)
     {
         try
         {
@@ -183,7 +201,13 @@ namespace
                         continue;
                     }
 
-                    HandleEntry(stateView, folderPath, *iterator, &batch, &totalCount, &totalBytes);
+                    HandleEntry(stateView,
+                                folderPath,
+                                *iterator,
+                                includeSubfolders && iterator.depth() == 0,
+                                &batch,
+                                &totalCount,
+                                &totalBytes);
                 }
             }
             else
@@ -204,7 +228,13 @@ namespace
                         continue;
                     }
 
-                    HandleEntry(stateView, folderPath, *iterator, &batch, &totalCount, &totalBytes);
+                    HandleEntry(stateView,
+                                folderPath,
+                                *iterator,
+                                includeSubfolders,
+                                &batch,
+                                &totalCount,
+                                &totalBytes);
                 }
             }
 
@@ -234,7 +264,10 @@ namespace hyperbrowse::services
         WaitForWorkers();
     }
 
-    std::uint64_t FolderEnumerationService::EnumerateFolderAsync(HWND targetWindow, std::wstring folderPath, bool recursive)
+    std::uint64_t FolderEnumerationService::EnumerateFolderAsync(HWND targetWindow,
+                                                                 std::wstring folderPath,
+                                                                 bool recursive,
+                                                                 bool includeSubfolders)
     {
         ReapCompletedWorkers();
 
@@ -244,10 +277,13 @@ namespace hyperbrowse::services
         EnumerationSharedStateView stateView{sharedState_, targetWindow, requestId};
         util::LogInfo(L"Starting async folder enumeration for " + folderPath);
 
-        workers_.push_back(std::async(std::launch::async, [stateView, folderPath = std::move(folderPath), recursive]() mutable
+        workers_.push_back(std::async(std::launch::async, [stateView,
+                                                           folderPath = std::move(folderPath),
+                                                           recursive,
+                                                           includeSubfolders]() mutable
         {
             util::Stopwatch stopwatch;
-            EnumerateFolder(stateView, folderPath, recursive);
+            EnumerateFolder(stateView, folderPath, recursive, includeSubfolders);
             util::RecordTiming(L"folder.enumeration", stopwatch.ElapsedMilliseconds());
         }));
 

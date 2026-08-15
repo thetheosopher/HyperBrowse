@@ -41,7 +41,10 @@ namespace hyperbrowse::services
         FolderEnumerationService();
         ~FolderEnumerationService();
 
-        std::uint64_t EnumerateFolderAsync(HWND targetWindow, std::wstring folderPath, bool recursive);
+        std::uint64_t EnumerateFolderAsync(HWND targetWindow,
+                           std::wstring folderPath,
+                           bool recursive,
+                           bool includeSubfolders = false);
         void Cancel();
 
     private:

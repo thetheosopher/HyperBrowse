@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <commctrl.h>
 #include <d2d1.h>
 #include <dwrite.h>
 #include <wrl/client.h>
@@ -277,6 +278,7 @@ namespace hyperbrowse::browser
         HWND thumbnailTooltip_{};
         HFONT detailsListFont_{};
         HFONT thumbnailTitleFont_{};
+        HFONT folderTitleFont_{};
         HFONT thumbnailMetaFont_{};
         HFONT thumbnailStatusFont_{};
         HFONT placeholderTitleFont_{};
@@ -293,6 +295,9 @@ namespace hyperbrowse::browser
         HPEN rubberBandPen_{};
         std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> placeholderArt_;
         std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> unavailableThumbnailArt_;
+        std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> folderArt_;
+        HIMAGELIST shellImageList_{};
+        int folderIconIndex_{-1};
         ThemeColors colors_{};
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
@@ -353,6 +358,7 @@ namespace hyperbrowse::browser
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dMutedTextBrush_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSelectionTextBrush_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dTitleFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dFolderTitleFormat_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dMetaFormat_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dStatusFormat_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dPlaceholderTitleFormat_;

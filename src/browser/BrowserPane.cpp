@@ -1,6 +1,9 @@
 #include "browser/BrowserPane.h"
 
 #include <commctrl.h>
+#include <commoncontrols.h>
+#include <shellapi.h>
+#include <shobjidl.h>
 #include <windowsx.h>
 #include <d2d1.h>
 #include <dwrite.h>
@@ -464,6 +467,11 @@ namespace
 
     std::wstring BuildThumbnailDisplayTitle(const hyperbrowse::browser::BrowserItem& item)
     {
+        if (item.isDirectory)
+        {
+            return item.fileName;
+        }
+
         const std::wstring stem = fs::path(item.fileName).stem().wstring();
         return stem.empty() ? item.fileName : stem;
     }
@@ -697,6 +705,55 @@ namespace hyperbrowse::browser
                                                       kPlaceholderBrandArtSize,
                                                       kPlaceholderBrandArtSize);
         unavailableThumbnailArt_ = CreateIconThumbnail(LoadIconW(nullptr, IDI_WARNING), 64);
+        wchar_t windowsDirectory[MAX_PATH]{};
+        const UINT windowsDirectoryLength = GetWindowsDirectoryW(windowsDirectory, static_cast<UINT>(std::size(windowsDirectory)));
+        const std::wstring folderIconPath = windowsDirectoryLength > 0
+                && windowsDirectoryLength < std::size(windowsDirectory)
+            ? std::wstring(windowsDirectory, windowsDirectoryLength)
+            : std::wstring(L"C:\\Windows");
+        SHFILEINFOW folderImageListInfo{};
+        shellImageList_ = reinterpret_cast<HIMAGELIST>(SHGetFileInfoW(
+            folderIconPath.c_str(),
+            FILE_ATTRIBUTE_DIRECTORY,
+            &folderImageListInfo,
+            sizeof(folderImageListInfo),
+            SHGFI_SYSICONINDEX | SHGFI_SMALLICON));
+        if (shellImageList_)
+        {
+            folderIconIndex_ = folderImageListInfo.iIcon;
+        }
+
+        if (folderIconIndex_ >= 0)
+        {
+            Microsoft::WRL::ComPtr<IImageList> jumboImageList;
+            if (SUCCEEDED(SHGetImageList(SHIL_JUMBO,
+                                         IID_IImageList,
+                                         reinterpret_cast<void**>(jumboImageList.GetAddressOf()))))
+            {
+                HICON jumboFolderIcon{};
+                if (SUCCEEDED(jumboImageList->GetIcon(folderIconIndex_, ILD_TRANSPARENT, &jumboFolderIcon))
+                    && jumboFolderIcon)
+                {
+                    folderArt_ = CreateIconThumbnail(jumboFolderIcon, 256);
+                    DestroyIcon(jumboFolderIcon);
+                }
+            }
+        }
+
+        if (!folderArt_)
+        {
+            SHFILEINFOW folderShellInfo{};
+            if (SHGetFileInfoW(folderIconPath.c_str(),
+                               FILE_ATTRIBUTE_DIRECTORY,
+                               &folderShellInfo,
+                               sizeof(folderShellInfo),
+                               SHGFI_ICON | SHGFI_LARGEICON) != 0
+                && folderShellInfo.hIcon)
+            {
+                folderArt_ = CreateIconThumbnail(folderShellInfo.hIcon, 128);
+                DestroyIcon(folderShellInfo.hIcon);
+            }
+        }
         RebuildThemeResources();
         RebuildThumbnailFonts();
     }
@@ -1394,9 +1451,15 @@ namespace hyperbrowse::browser
                 continue;
             }
 
+            const BrowserItem& item = model_->Items()[static_cast<std::size_t>(modelIndex)];
+            if (item.isDirectory)
+            {
+                continue;
+            }
+
             workItems.push_back(services::MetadataWorkItem{
                 modelIndex,
-                model_->Items()[static_cast<std::size_t>(modelIndex)],
+                item,
                 kVisiblePriority,
             });
         }
@@ -1415,6 +1478,11 @@ namespace hyperbrowse::browser
         }
 
         const BrowserItem& item = model_->Items()[static_cast<std::size_t>(modelIndex)];
+        if (item.isDirectory)
+        {
+            return L"Folders do not have image metadata.";
+        }
+
         std::wstring errorMessage;
         const auto metadata = FindCachedMetadataForModelIndex(modelIndex)
             ? FindCachedMetadataForModelIndex(modelIndex)
@@ -1468,6 +1536,10 @@ namespace hyperbrowse::browser
 
         ListView_SetUnicodeFormat(detailsList_, TRUE);
         ListView_SetExtendedListViewStyle(detailsList_, LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP);
+        if (shellImageList_)
+        {
+            ListView_SetImageList(detailsList_, shellImageList_, LVSIL_SMALL);
+        }
 
         detailsListFont_ = CreateSystemUiFont();
         ownsDetailsListFont_ = detailsListFont_ != nullptr;
@@ -1907,6 +1979,11 @@ namespace hyperbrowse::browser
                     return tieBreakByName();
                 }
             };
+
+            if (lhs.isDirectory != rhs.isDirectory)
+            {
+                return lhs.isDirectory;
+            }
 
             const bool ascending = compareAscending();
             if (!sortAscending_
@@ -2348,6 +2425,7 @@ namespace hyperbrowse::browser
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
 
         thumbnailTitleFont_ = CreateSizedUiFont(layout.titlePointSize, FW_SEMIBOLD);
+        folderTitleFont_ = CreateSizedUiFont(std::clamp(layout.titlePointSize + 3, 14, 20), FW_SEMIBOLD);
         thumbnailMetaFont_ = CreateSizedUiFont(layout.metaPointSize, FW_NORMAL);
         thumbnailStatusFont_ = CreateSizedUiFont(layout.statusPointSize, FW_SEMIBOLD);
         placeholderTitleFont_ = CreateSizedUiFont(kPlaceholderTitlePointSize, FW_SEMIBOLD);
@@ -2356,6 +2434,10 @@ namespace hyperbrowse::browser
         if (!thumbnailTitleFont_)
         {
             thumbnailTitleFont_ = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
+        if (!folderTitleFont_)
+        {
+            folderTitleFont_ = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
         if (!thumbnailMetaFont_)
         {
@@ -2438,6 +2520,10 @@ namespace hyperbrowse::browser
         {
             DeleteObject(thumbnailTitleFont_);
         }
+        if (folderTitleFont_ && folderTitleFont_ != GetStockObject(DEFAULT_GUI_FONT))
+        {
+            DeleteObject(folderTitleFont_);
+        }
         if (thumbnailMetaFont_ && thumbnailMetaFont_ != GetStockObject(DEFAULT_GUI_FONT))
         {
             DeleteObject(thumbnailMetaFont_);
@@ -2456,6 +2542,7 @@ namespace hyperbrowse::browser
         }
 
         thumbnailTitleFont_ = nullptr;
+        folderTitleFont_ = nullptr;
         thumbnailMetaFont_ = nullptr;
         thumbnailStatusFont_ = nullptr;
         placeholderTitleFont_ = nullptr;
@@ -2920,7 +3007,7 @@ namespace hyperbrowse::browser
 
     void BrowserPane::ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const
     {
-        if (!metadataService_ || modelIndex < 0)
+        if (!metadataService_ || modelIndex < 0 || item.isDirectory)
         {
             return;
         }
@@ -2970,7 +3057,7 @@ namespace hyperbrowse::browser
             for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
             {
                 const BrowserItem* item = ItemFromViewIndex(viewIndex);
-                if (!item)
+                if (!item || item->isDirectory)
                 {
                     continue;
                 }
@@ -3018,7 +3105,7 @@ namespace hyperbrowse::browser
             for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
             {
                 const BrowserItem* item = ItemFromViewIndex(viewIndex);
-                if (!item)
+                if (!item || item->isDirectory)
                 {
                     continue;
                 }
@@ -3226,6 +3313,7 @@ namespace hyperbrowse::browser
         d2dBitmapCache_.clear();
         d2dPlaceholderArtBitmap_.Reset();
         d2dTitleFormat_.Reset();
+        d2dFolderTitleFormat_.Reset();
         d2dMetaFormat_.Reset();
         d2dStatusFormat_.Reset();
         d2dPlaceholderTitleFormat_.Reset();
@@ -3289,6 +3377,10 @@ namespace hyperbrowse::browser
 
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
         d2dTitleFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.titlePointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        d2dFolderTitleFormat_ = renderer.CreateTextFormat(
+            L"Segoe UI",
+            static_cast<float>(std::clamp(layout.titlePointSize + 3, 14, 20)),
+            DWRITE_FONT_WEIGHT_SEMI_BOLD);
         d2dMetaFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.metaPointSize), DWRITE_FONT_WEIGHT_NORMAL);
         d2dStatusFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.statusPointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
         d2dPlaceholderTitleFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(kPlaceholderTitlePointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
@@ -3301,6 +3393,13 @@ namespace hyperbrowse::browser
             d2dTitleFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             d2dTitleFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             d2dTitleFormat_->SetTrimming(&trimming, nullptr);
+        }
+
+        if (d2dFolderTitleFormat_)
+        {
+            d2dFolderTitleFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            d2dFolderTitleFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            d2dFolderTitleFormat_->SetTrimming(&trimming, nullptr);
         }
 
         if (d2dMetaFormat_)
@@ -3549,7 +3648,7 @@ namespace hyperbrowse::browser
 
             D2DDrawPreviewThumbnail(rt, previewRect, *item, selected);
 
-            if (thumbnailDetailsVisible_)
+            if (thumbnailDetailsVisible_ && !item->isDirectory)
             {
                 ID2D1SolidColorBrush* textBrush = selected ? d2dSelectionTextBrush_.Get() : d2dTextBrush_.Get();
                 ID2D1SolidColorBrush* mutedBrush = selected ? d2dSelectionTextBrush_.Get() : d2dMutedTextBrush_.Get();
@@ -3595,8 +3694,8 @@ namespace hyperbrowse::browser
                     infoRect.bottom);
 
                 const std::wstring typeLabel = BuildDisplayFileTypeLabel(*item, modelIndex);
-                const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
-                const int rating = ThumbnailRatingForItem(userMetadataStore_, *item);
+                const std::wstring dimensionLabel = item->isDirectory ? std::wstring{} : FormatDimensionsForItem(*item);
+                const int rating = item->isDirectory ? 0 : ThumbnailRatingForItem(userMetadataStore_, *item);
                 ID2D1SolidColorBrush* ratingBaseBrush = d2dMutedTextBrush_ ? d2dMutedTextBrush_.Get() : mutedBrush;
 
                 if (d2dMetaFormat_)
@@ -3643,6 +3742,51 @@ namespace hyperbrowse::browser
     void BrowserPane::D2DDrawPreviewThumbnail(ID2D1RenderTarget* rt, const D2D1_RECT_F& previewRect, const BrowserItem& item, bool selected) const
     {
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        if (item.isDirectory)
+        {
+            const float previewHeight = previewRect.bottom - previewRect.top;
+            const float labelHeight = static_cast<float>(std::max(24, layout.titleHeight + 8));
+            const float iconSize = std::min({
+                folderArt_ ? static_cast<float>(folderArt_->Width()) : 0.0f,
+                std::max(0.0f, previewRect.right - previewRect.left - (layout.textInset * 2.0f)),
+                previewHeight * 0.60f,
+            });
+            const float contentHeight = iconSize > 0.0f ? iconSize + 6.0f + labelHeight : labelHeight;
+            const float contentTop = previewRect.top + std::max(4.0f, (previewHeight - contentHeight) / 2.0f);
+            float labelTop = contentTop;
+
+            if (folderArt_ && iconSize > 0.0f)
+            {
+                if (ID2D1Bitmap* iconBitmap = GetOrCreateD2DBitmap(rt, *folderArt_))
+                {
+                    const float iconX = previewRect.left + ((previewRect.right - previewRect.left - iconSize) / 2.0f);
+                    rt->DrawBitmap(iconBitmap,
+                                   D2D1::RectF(iconX, contentTop, iconX + iconSize, contentTop + iconSize),
+                                   1.0f,
+                                   D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                    labelTop += iconSize + 6.0f;
+                }
+            }
+
+            ID2D1SolidColorBrush* titleBrush = selected ? d2dSelectionTextBrush_.Get() : d2dTextBrush_.Get();
+            if (d2dFolderTitleFormat_ && titleBrush)
+            {
+                const D2D1_RECT_F labelRect = D2D1::RectF(
+                    previewRect.left + layout.textInset,
+                    labelTop,
+                    previewRect.right - layout.textInset,
+                    labelTop + labelHeight);
+                const std::wstring displayTitle = BuildThumbnailDisplayTitle(item);
+                rt->DrawText(displayTitle.c_str(),
+                             static_cast<UINT32>(displayTitle.size()),
+                             d2dFolderTitleFormat_.Get(),
+                             labelRect,
+                             titleBrush,
+                             D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            }
+            return;
+        }
+
         const int targetWidth = layout.previewWidth;
         const int targetHeight = layout.previewHeight;
         const auto cacheKey = MakeThumbnailCacheKey(item, targetWidth, targetHeight);
@@ -4011,7 +4155,7 @@ namespace hyperbrowse::browser
             SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
             DrawPreviewThumbnail(hdc, previewRect, *item, selected);
 
-            if (thumbnailDetailsVisible_)
+            if (thumbnailDetailsVisible_ && !item->isDirectory)
             {
                 SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
                 const int titleTop = previewRect.bottom + layout.titleTopGap;
@@ -4055,8 +4199,8 @@ namespace hyperbrowse::browser
                               infoRect.right,
                               infoRect.bottom};
                 const std::wstring typeLabel = BuildDisplayFileTypeLabel(*item, modelIndex);
-                const std::wstring dimensionLabel = FormatDimensionsForItem(*item);
-                const int rating = ThumbnailRatingForItem(userMetadataStore_, *item);
+                const std::wstring dimensionLabel = item->isDirectory ? std::wstring{} : FormatDimensionsForItem(*item);
+                const int rating = item->isDirectory ? 0 : ThumbnailRatingForItem(userMetadataStore_, *item);
                 HGDIOBJ footerFont = thumbnailMetaFont_
                     ? SelectObject(hdc, thumbnailMetaFont_)
                     : static_cast<HGDIOBJ>(nullptr);
@@ -4117,6 +4261,53 @@ namespace hyperbrowse::browser
     void BrowserPane::DrawPreviewThumbnail(HDC hdc, const RECT& previewRect, const BrowserItem& item, bool selected) const
     {
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        if (item.isDirectory)
+        {
+            const int previewHeight = previewRect.bottom - previewRect.top;
+            const int labelHeight = std::max(24, layout.titleHeight + 8);
+            const int iconSize = std::min({
+                folderArt_ ? folderArt_->Width() : 0,
+                std::max(0, static_cast<int>(previewRect.right - previewRect.left) - (layout.textInset * 2)),
+                static_cast<int>(previewHeight * 0.60f),
+            });
+            const int contentHeight = iconSize > 0 ? iconSize + 6 + labelHeight : labelHeight;
+            const int contentTop = previewRect.top + std::max(4, (previewHeight - contentHeight) / 2);
+            int labelTop = contentTop;
+
+            if (folderArt_ && iconSize > 0)
+            {
+                util::DrawBitmapWithAlpha(hdc,
+                                          *folderArt_,
+                                          previewRect.left + ((previewRect.right - previewRect.left - iconSize) / 2),
+                                          contentTop,
+                                          iconSize,
+                                          iconSize);
+                labelTop += iconSize + 6;
+            }
+
+            SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
+            HGDIOBJ oldFont = folderTitleFont_
+                ? SelectObject(hdc, folderTitleFont_)
+                : static_cast<HGDIOBJ>(nullptr);
+            RECT folderRect{
+                previewRect.left + layout.textInset,
+                labelTop,
+                previewRect.right - layout.textInset,
+                labelTop + labelHeight,
+            };
+            const std::wstring displayTitle = BuildThumbnailDisplayTitle(item);
+            DrawTextW(hdc,
+                      displayTitle.c_str(),
+                      -1,
+                      &folderRect,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            if (oldFont)
+            {
+                SelectObject(hdc, oldFont);
+            }
+            return;
+        }
+
         const int targetWidth = layout.previewWidth;
         const int targetHeight = layout.previewHeight;
         const auto cacheKey = MakeThumbnailCacheKey(item, targetWidth, targetHeight);
@@ -4263,6 +4454,21 @@ namespace hyperbrowse::browser
             return L"";
         }
 
+        if (item->isDirectory)
+        {
+            switch (subItem)
+            {
+            case 0:
+                return item->fileName;
+            case 1:
+                return L"Folder";
+            case 3:
+                return item->modifiedDate;
+            default:
+                return L"";
+            }
+        }
+
         switch (subItem)
         {
         case 0:
@@ -4357,6 +4563,13 @@ namespace hyperbrowse::browser
         std::wstring tooltip = item->fileName;
         tooltip.append(L"\r\nType: ");
         tooltip.append(ToUppercase(item->fileType));
+        if (item->isDirectory)
+        {
+            tooltip.append(L"\r\nModified: ");
+            tooltip.append(item->modifiedDate);
+            return tooltip;
+        }
+
         tooltip.append(L"\r\nDimensions: ");
         tooltip.append(FormatDimensionsForItem(*item));
         tooltip.append(L"\r\nSize: ");
@@ -4901,6 +5114,11 @@ namespace hyperbrowse::browser
                 case LVN_GETDISPINFOW:
                 {
                     auto* info = reinterpret_cast<NMLVDISPINFOW*>(lParam);
+                    if ((info->item.mask & LVIF_IMAGE) != 0)
+                    {
+                        const BrowserItem* item = ItemFromViewIndex(info->item.iItem);
+                        info->item.iImage = item && item->isDirectory ? folderIconIndex_ : -1;
+                    }
                     if ((info->item.mask & LVIF_TEXT) != 0 && info->item.pszText && info->item.cchTextMax > 0)
                     {
                         listViewTextBuffer_ = BuildListText(info->item.iItem, info->item.iSubItem);

@@ -155,7 +155,8 @@ namespace hyperbrowse::browser
                 || existingItem.modifiedTimestampUtc != item.modifiedTimestampUtc
                 || existingItem.modifiedDate != item.modifiedDate
                 || existingItem.fileName != item.fileName
-                || existingItem.fileType != item.fileType;
+                || existingItem.fileType != item.fileType
+                || existingItem.isDirectory != item.isDirectory;
             existingItem = std::move(item);
             totalCount_ = static_cast<std::uint64_t>(items_.size());
             return changed;
@@ -399,10 +400,11 @@ namespace hyperbrowse::browser
         WIN32_FILE_ATTRIBUTE_DATA attributeData{};
         if (GetFileAttributesExW(item.filePath.c_str(), GetFileExInfoStandard, &attributeData) != FALSE)
         {
+            item.isDirectory = (attributeData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
             ULARGE_INTEGER fileSize{};
             fileSize.HighPart = attributeData.nFileSizeHigh;
             fileSize.LowPart = attributeData.nFileSizeLow;
-            item.fileSizeBytes = fileSize.QuadPart;
+            item.fileSizeBytes = item.isDirectory ? 0 : fileSize.QuadPart;
             item.modifiedDate = FormatFileTime(attributeData.ftLastWriteTime);
 
             ULARGE_INTEGER modifiedTimestamp{};
@@ -413,6 +415,11 @@ namespace hyperbrowse::browser
         else
         {
             item.modifiedDate = L"Unavailable";
+        }
+
+        if (item.isDirectory)
+        {
+            item.fileType = L"Folder";
         }
 
         return item;

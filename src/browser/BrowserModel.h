@@ -27,6 +27,7 @@ namespace hyperbrowse::browser
         int imageWidth{};
         int imageHeight{};
         std::int64_t dateTakenTimestampUtc{};
+        bool isDirectory{};
     };
 
     class BrowserModel

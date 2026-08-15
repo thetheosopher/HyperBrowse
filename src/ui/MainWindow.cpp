@@ -64,6 +64,7 @@ namespace
     constexpr wchar_t kRegistryValueThumbnailSizePreset[] = L"ThumbnailSizePreset";
     constexpr wchar_t kRegistryValueCompactThumbnailLayout[] = L"CompactThumbnailLayout";
     constexpr wchar_t kRegistryValueThumbnailDetailsVisible[] = L"ThumbnailDetailsVisible";
+    constexpr wchar_t kRegistryValueShowSubfoldersInBrowser[] = L"ShowSubfoldersInBrowser";
     constexpr wchar_t kRegistryValueSelectedFolderPath[] = L"SelectedFolderPath";
     constexpr wchar_t kRegistryValueSelectedImagePath[] = L"SelectedImagePath";
     constexpr wchar_t kRegistryValueWindowLeft[] = L"WindowLeft";
@@ -191,6 +192,7 @@ namespace
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_640 = 2120;
     constexpr UINT ID_VIEW_THUMBNAIL_LAYOUT_COMPACT = 2121;
     constexpr UINT ID_VIEW_THUMBNAIL_DETAILS = 2122;
+    constexpr UINT ID_VIEW_SHOW_SUBFOLDERS = 2123;
     constexpr UINT ID_VIEW_SORT_FILENAME = 2201;
     constexpr UINT ID_VIEW_SORT_MODIFIED = 2202;
     constexpr UINT ID_VIEW_SORT_SIZE = 2203;
@@ -1622,6 +1624,11 @@ namespace
 
     std::wstring BuildSingleSelectionSummary(const hyperbrowse::browser::BrowserItem& item)
     {
+        if (item.isDirectory)
+        {
+            return L"Folder";
+        }
+
         std::wstring summary = item.fileType;
 
         const std::wstring dimensions = hyperbrowse::browser::FormatDimensionsForItem(item);
@@ -6569,6 +6576,7 @@ namespace hyperbrowse::ui
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE, L"Persistent Thumbnail &Cache");
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PRESSURE_STATE_STATUS, L"Show Memory Pressure &Status");
+        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_SHOW_SUBFOLDERS, L"Show Subfolders in Browser");
         AppendMenuW(advancedViewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
@@ -7994,7 +8002,8 @@ namespace hyperbrowse::ui
             ? browserModel_->TotalBytes()
             : 0;
         statusPrimaryText_ = L"Folder: " + std::to_wstring(folderCount)
-            + L" files | " + browser::FormatByteSize(folderBytes);
+            + (showSubfoldersInBrowser_ ? L" items | " : L" files | ")
+            + browser::FormatByteSize(folderBytes);
 
         const std::uint64_t selectedCount = browserPaneController_ ? browserPaneController_->SelectedCount() : 0;
         const std::uint64_t selectedBytes = browserPaneController_ ? browserPaneController_->SelectedBytes() : 0;
@@ -9037,6 +9046,12 @@ namespace hyperbrowse::ui
             selectedBytes += items[static_cast<std::size_t>(modelIndex)].fileSizeBytes;
             if (metadataList.size() < kMaxSharedMetadataItems)
             {
+                if (items[static_cast<std::size_t>(modelIndex)].isDirectory)
+                {
+                    metadataList.push_back(nullptr);
+                    continue;
+                }
+
                 const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex);
                 metadataList.push_back(metadata);
                 allMetadataLoaded = allMetadataLoaded && static_cast<bool>(metadata);
@@ -9060,9 +9075,10 @@ namespace hyperbrowse::ui
 
             const std::wstring summary = BuildSingleSelectionSummary(item);
 
-            std::wstring body = metadata
-                ? services::FormatImageMetadataReport(item, *metadata)
-                : L"Loading detailed metadata...";
+            std::wstring body = item.isDirectory
+                ? L"Double-click this folder to open it."
+                : (metadata ? services::FormatImageMetadataReport(item, *metadata)
+                            : L"Loading detailed metadata...");
 
             if (userMetadataStore_)
             {
@@ -9722,13 +9738,25 @@ namespace hyperbrowse::ui
 
     void MainWindow::OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor)
     {
-        if (!browserModel_ || !browserPaneController_ || !viewerWindow_)
+        if (!browserModel_ || !browserPaneController_)
         {
             return;
         }
 
         const auto& modelItems = browserModel_->Items();
         if (modelIndex < 0 || modelIndex >= static_cast<int>(modelItems.size()))
+        {
+            return;
+        }
+
+        const browser::BrowserItem& selectedItem = modelItems[static_cast<std::size_t>(modelIndex)];
+        if (selectedItem.isDirectory)
+        {
+            LoadFolderAsync(selectedItem.filePath);
+            return;
+        }
+
+        if (!viewerWindow_)
         {
             return;
         }
@@ -9774,6 +9802,31 @@ namespace hyperbrowse::ui
                                        bool preferSecondaryMonitor,
                                        bool resolvePairedRawJpegItems)
     {
+        if (std::any_of(items.begin(), items.end(), [](const browser::BrowserItem& item)
+        {
+            return item.isDirectory;
+        }))
+        {
+            std::vector<browser::BrowserItem> imageItems;
+            imageItems.reserve(items.size());
+            int imageSelectedIndex = -1;
+            for (int index = 0; index < static_cast<int>(items.size()); ++index)
+            {
+                if (items[static_cast<std::size_t>(index)].isDirectory)
+                {
+                    continue;
+                }
+
+                if (index == selectedIndex)
+                {
+                    imageSelectedIndex = static_cast<int>(imageItems.size());
+                }
+                imageItems.push_back(std::move(items[static_cast<std::size_t>(index)]));
+            }
+            items = std::move(imageItems);
+            selectedIndex = imageSelectedIndex;
+        }
+
         if (!viewerWindow_ || items.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(items.size()))
         {
             return false;
@@ -13203,12 +13256,24 @@ namespace hyperbrowse::ui
                 }
 
                 const fs::path filePath(path);
+                std::error_code error;
+                if (fs::is_directory(filePath, error) && !error)
+                {
+                    if (!showSubfoldersInBrowser_
+                        || !FolderPathsEqual(filePath.parent_path().wstring(), browserModel_->FolderPath()))
+                    {
+                        return;
+                    }
+
+                    modelChanged = browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(filePath)) || modelChanged;
+                    return;
+                }
+
                 if (!browser::IsSupportedImageExtension(filePath.extension().wstring()))
                 {
                     return;
                 }
 
-                std::error_code error;
                 if (!fs::is_regular_file(filePath, error) || error)
                 {
                     return;
@@ -13581,12 +13646,21 @@ namespace hyperbrowse::ui
                 return;
             }
 
-            if (!recursiveBrowsingEnabled_ || !fs::is_directory(watchedPath, error) || error)
+            if (!fs::is_directory(watchedPath, error) || error)
             {
                 return;
             }
 
-            preferAsyncReload = true;
+            if (showSubfoldersInBrowser_
+                && FolderPathsEqual(watchedPath.parent_path().wstring(), browserModel_->FolderPath()))
+            {
+                changed = browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(watchedPath)) || changed;
+            }
+
+            if (recursiveBrowsingEnabled_)
+            {
+                preferAsyncReload = true;
+            }
         };
 
         for (const services::FolderWatchEvent& event : update.events)
@@ -13799,6 +13873,10 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_RECURSIVE,
             MF_BYCOMMAND | (recursiveBrowsingEnabled_ ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_SHOW_SUBFOLDERS,
+            MF_BYCOMMAND | (showSubfoldersInBrowser_ ? MF_CHECKED : MF_UNCHECKED));
 
         CheckMenuRadioItem(
             menu_,
@@ -14410,6 +14488,7 @@ namespace hyperbrowse::ui
     {
         // Always start non-recursive so restoring the last folder cannot trigger an expensive drive-wide scan.
         recursiveBrowsingEnabled_ = false;
+        showSubfoldersInBrowser_ = false;
         hasPersistedWindowBounds_ = false;
         persistedWindowBounds_ = {};
 
@@ -14451,6 +14530,11 @@ namespace hyperbrowse::ui
             if (TryReadDwordValue(key, kRegistryValueThumbnailDetailsVisible, &value))
             {
                 thumbnailDetailsVisible_ = value != 0;
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueShowSubfoldersInBrowser, &value))
+            {
+                showSubfoldersInBrowser_ = value != 0;
             }
 
             TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
@@ -14671,6 +14755,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueThumbnailSizePreset, static_cast<DWORD>(thumbnailSizePreset_));
             RegDeleteValueW(key, kRegistryValueCompactThumbnailLayout);
             WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueShowSubfoldersInBrowser, showSubfoldersInBrowser_ ? 1UL : 0UL);
             if (!selectedFolderPath.empty())
             {
                 WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
@@ -14742,7 +14827,11 @@ namespace hyperbrowse::ui
         UpdateStatusText();
         UpdateWindowTitle();
         UpdateWindow(browserPane_);
-        activeEnumerationRequestId_ = folderEnumerationService_->EnumerateFolderAsync(hwnd_, std::move(folderPath), recursiveBrowsingEnabled_);
+        activeEnumerationRequestId_ = folderEnumerationService_->EnumerateFolderAsync(
+            hwnd_,
+            std::move(folderPath),
+            recursiveBrowsingEnabled_,
+            showSubfoldersInBrowser_);
         folderEnumerationActive_ = true;
         ShowSelectedFolderInTree();
     }
@@ -15608,6 +15697,9 @@ namespace hyperbrowse::ui
         case ID_VIEW_RECURSIVE:
             ToggleRecursiveBrowsing();
             return true;
+        case ID_VIEW_SHOW_SUBFOLDERS:
+            ToggleShowSubfoldersInBrowser();
+            return true;
         case ID_VIEW_SLIDESHOW_SETTINGS:
             ShowSlideshowSettingsDialog();
             return true;
@@ -15812,6 +15904,25 @@ namespace hyperbrowse::ui
         util::LogInfo(recursiveBrowsingEnabled_
             ? L"Enabled recursive browsing for folder enumeration"
             : L"Disabled recursive browsing for folder enumeration");
+        UpdateMenuState();
+
+        if (browserModel_ && !browserModel_->FolderPath().empty())
+        {
+            LoadFolderAsync(browserModel_->FolderPath());
+            return;
+        }
+
+        RefreshBrowserPane();
+        UpdateStatusText();
+        UpdateWindowTitle();
+    }
+
+    void MainWindow::ToggleShowSubfoldersInBrowser()
+    {
+        showSubfoldersInBrowser_ = !showSubfoldersInBrowser_;
+        util::LogInfo(showSubfoldersInBrowser_
+            ? L"Enabled subfolder entries in the browser"
+            : L"Disabled subfolder entries in the browser");
         UpdateMenuState();
 
         if (browserModel_ && !browserModel_->FolderPath().empty())

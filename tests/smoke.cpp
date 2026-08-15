@@ -812,6 +812,21 @@ namespace
         Expect(state->enumerationResult.items.front().placeholderWidth == 256, "Placeholder width was not collected");
         Expect(state->enumerationResult.items.front().placeholderHeight == 256, "Placeholder height was not collected");
 
+         ResetEnumerationResult(state);
+         state->expectedRequestId = service.EnumerateFolderAsync(hwnd, root.Root().wstring(), false, true);
+         Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
+             "Subfolder enumeration timed out or failed");
+         Expect(state->enumerationResult.totalCount == 10, "Subfolder enumeration returned the wrong item count");
+         Expect(state->enumerationResult.totalBytes == 590, "Subfolder enumeration changed the file byte total");
+         const auto nestedFolder = std::find_if(state->enumerationResult.items.begin(),
+                                 state->enumerationResult.items.end(),
+                                 [](const hyperbrowse::browser::BrowserItem& item)
+                                 {
+                                  return item.fileName == L"nested";
+                                 });
+         Expect(nestedFolder != state->enumerationResult.items.end() && nestedFolder->isDirectory,
+             "Subfolder enumeration did not emit a directory item");
+
          TempFolder firstPage(L"HyperBrowseFirstPageEnumeration");
         for (int index = 0; index < 40; ++index)
          {
@@ -829,10 +844,10 @@ namespace
              "Folder enumeration did not flush the remaining items after the priority batches");
 
         ResetEnumerationResult(state);
-        state->expectedRequestId = service.EnumerateFolderAsync(hwnd, root.Root().wstring(), true);
+          state->expectedRequestId = service.EnumerateFolderAsync(hwnd, root.Root().wstring(), true, true);
         Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
                "Recursive enumeration timed out or failed");
-         Expect(state->enumerationResult.totalCount == 11, "Recursive enumeration returned the wrong supported-file count");
+           Expect(state->enumerationResult.totalCount == 12, "Recursive enumeration returned the wrong item count");
          Expect(state->enumerationResult.totalBytes == 660, "Recursive enumeration returned the wrong byte total");
 
         TempFolder slow(L"HyperBrowsePrompt3Slow");
