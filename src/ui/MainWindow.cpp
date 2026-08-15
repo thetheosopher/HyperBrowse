@@ -23,6 +23,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "app/Application.h"
 #include "browser/BrowserModel.h"
 #include "browser/BrowserPane.h"
 #include "cache/DiskThumbnailCache.h"
@@ -176,6 +177,7 @@ namespace
     constexpr UINT ID_VIEW_PERSISTENT_THUMBNAIL_CACHE = 2105;
     constexpr UINT ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR = 2106;
     constexpr UINT ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER = 2107;
+    constexpr UINT ID_VIEW_SINGLE_INSTANCE = 2108;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_96 = 2110;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_128 = 2111;
     constexpr UINT ID_VIEW_THUMBNAIL_SIZE_160 = 2112;
@@ -6570,6 +6572,7 @@ namespace hyperbrowse::ui
         AppendMenuW(advancedViewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
+        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_SINGLE_INSTANCE, L"Use &Single Instance");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Advanced");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
@@ -13822,6 +13825,10 @@ namespace hyperbrowse::ui
             MF_BYCOMMAND | (persistentThumbnailCacheEnabled_ ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(
             menu_,
+            ID_VIEW_SINGLE_INSTANCE,
+            MF_BYCOMMAND | (app::Application::IsSingleInstanceEnabled() ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
             ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR,
             MF_BYCOMMAND | (defaultViewerToSecondaryMonitor_ ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(
@@ -15629,6 +15636,10 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER:
             ShowPersistentThumbnailCacheDialog();
+            return true;
+        case ID_VIEW_SINGLE_INSTANCE:
+            app::Application::SetSingleInstanceEnabled(!app::Application::IsSingleInstanceEnabled());
+            UpdateMenuState();
             return true;
         case ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG:
             pairedRawJpegViewerPreference_ = browser::RawJpegDisplayPreference::Jpeg;

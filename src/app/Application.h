@@ -19,6 +19,9 @@ namespace hyperbrowse::app
         ~Application();
         int Run(int nCmdShow);
 
+        static bool IsSingleInstanceEnabled();
+        static void SetSingleInstanceEnabled(bool enabled);
+
     private:
         bool TryBecomePrimaryInstance(const std::wstring& launchPath);
         void StartInstanceListener();
