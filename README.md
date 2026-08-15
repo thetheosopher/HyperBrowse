@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.2.6-2EA043)
+![Version](https://img.shields.io/badge/Version-1.2.7-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -21,11 +21,11 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Direct2D and DirectWrite rendering in the browser and viewer, with per-monitor DPI awareness v2.
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
 - WIC baseline decode path, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
-- Thumbnail and details modes, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
+- Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
-- Folder tree workflow upgrades with validated folder moves, inline folder creation, favorite destinations, back-navigation history, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
+- Folder tree workflow upgrades with validated folder moves, inline folder creation, favorite destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
 - Selected thumbnails and details rows can be dragged to File Explorer, mail clients, and other shell-aware applications using native Windows file-drop data.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 
@@ -128,13 +128,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.6-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.7-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.6-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.7-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -195,11 +195,17 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.2.6**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.6-portable-win64.zip` and `HyperBrowse-1.2.6-installer.exe`).
+Current release: **1.2.7**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.7-portable-win64.zip` and `HyperBrowse-1.2.7-installer.exe`).
 
-Release **1.2.6** adds native drag-out of selected files to File Explorer and other shell-aware applications, with OLE initialization required for reliable Windows drag feedback.
+Release **1.2.7** adds optional Explorer-style subfolder browsing in thumbnail and Details modes, plus a toolbar back button for folder-history navigation.
 
 ## Version History
+
+### 1.2.7
+
+- Added an Advanced setting to show immediate subfolders in thumbnail and Details views, with folder rows that navigate into the selected subfolder.
+- Added Explorer-style folder rendering with shell folder icons, larger centered folder names, and folders-first ordering.
+- Added a toolbar back-arrow button that invokes the same folder-history action as Backspace.
 
 ### 1.2.6
 
@@ -276,7 +282,7 @@ Release **1.2.6** adds native drag-out of selected files to File Explorer and ot
 
 ## Next Features
 
-Planned near-term areas after 1.2.6 include:
+Planned near-term areas after 1.2.7 include:
 
 - Viewer polish and workflow depth improvements that keep navigation fast while expanding compare/cull ergonomics.
 - Additional browser workflow refinements for high-volume folder organization.
