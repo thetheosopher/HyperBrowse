@@ -14020,6 +14020,11 @@ namespace hyperbrowse::ui
         {
             switch (item.commandId)
             {
+            case ID_VIEW_NAVIGATE_BACK_FOLDER:
+                item.enabled = browserModel_
+                    && openedFolderHistoryIndex_ != kInvalidHistoryIndex
+                    && openedFolderHistoryIndex_ > 0;
+                break;
             case ID_VIEW_RECURSIVE:
                 item.checked = recursiveBrowsingEnabled_;
                 break;
@@ -16017,8 +16022,9 @@ namespace hyperbrowse::ui
         };
 
         // Left group 1: Navigation
-    addIcon(ID_FILE_OPEN_FOLDER, "open-folder", L"Open Folder (Ctrl+O)");
-    addIcon(ID_VIEW_RECURSIVE, "recursive", L"Recursive Browsing (Ctrl+R)", ToolbarItemKind::IconToggle);
+        addIcon(ID_VIEW_NAVIGATE_BACK_FOLDER, "back", L"Back to Previous Folder (Backspace)");
+        addIcon(ID_FILE_OPEN_FOLDER, "open-folder", L"Open Folder (Ctrl+O)");
+        addIcon(ID_VIEW_RECURSIVE, "recursive", L"Recursive Browsing (Ctrl+R)", ToolbarItemKind::IconToggle);
 
         addSeparator();
 

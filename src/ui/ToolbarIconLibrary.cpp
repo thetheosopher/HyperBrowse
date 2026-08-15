@@ -172,6 +172,7 @@ namespace hyperbrowse::ui
         success = LoadIconAsset(L"delete", IDR_TOOLBAR_ICON_DELETE, L"delete.svg") && success;
         success = LoadIconAsset(L"search", IDR_TOOLBAR_ICON_SEARCH, L"search.svg") && success;
         success = LoadIconAsset(L"chevron-down", IDR_TOOLBAR_ICON_CHEVRON_DOWN, L"chevron-down.svg") && success;
+        success = LoadIconAsset(L"back", IDR_TOOLBAR_ICON_BACK, L"back.svg") && success;
         return success;
     }
 
