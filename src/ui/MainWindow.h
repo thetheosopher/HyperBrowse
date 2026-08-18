@@ -78,7 +78,7 @@ namespace hyperbrowse::ui
         void HandleExternalLaunchPath(const std::wstring& path);
         bool Create();
         void Show(int nCmdShow) const;
-        bool TranslateAcceleratorMessage(MSG* message) const;
+        bool TranslateAcceleratorMessage(MSG* message);
         HWND Hwnd() const noexcept { return hwnd_; }
 
         static constexpr UINT kExternalLaunchMessage = WM_APP + 71;
@@ -93,6 +93,7 @@ namespace hyperbrowse::ui
         };
 
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
+        static constexpr UINT kDeferredMenuStateMessage = WM_APP + 73;
         static constexpr int kActionStripHeight = 44;
         static constexpr int kMinLeftPaneWidth = 250;
         static constexpr int kMinRightPaneWidth = 240;
@@ -469,6 +470,9 @@ namespace hyperbrowse::ui
         int commandBarPressedIndex_{-1};
         HWND commandBarPreviousFocus_{};
         bool commandBarKeyboardActive_{};
+        bool menuLoopActive_{};
+        bool menuStateRefreshPending_{};
+        bool menuStateRefreshPosted_{};
         int toolbarHotIndex_{-1};
         int toolbarPressedIndex_{-1};
         bool toolbarMouseTracking_{};

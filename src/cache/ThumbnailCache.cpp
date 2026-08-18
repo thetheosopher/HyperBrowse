@@ -7,6 +7,11 @@
 
 namespace hyperbrowse::cache
 {
+    namespace
+    {
+        constexpr std::size_t kMaximumEntryCount = 2048;
+    }
+
     std::size_t ThumbnailCacheKeyHasher::operator()(const ThumbnailCacheKey& key) const noexcept
     {
         std::size_t seed = 0;
@@ -177,6 +182,22 @@ namespace hyperbrowse::cache
         EvictToBytes(capacityBytes_);
     }
 
+    void ThumbnailCache::EvictToEntryCount()
+    {
+        while (entries_.size() > kMaximumEntryCount && !lruOrder_.empty())
+        {
+            const ThumbnailCacheKey key = lruOrder_.back();
+            const auto iterator = entries_.find(key);
+            if (iterator != entries_.end())
+            {
+                currentBytes_ -= iterator->second.byteCount;
+                entries_.erase(iterator);
+            }
+
+            lruOrder_.pop_back();
+        }
+    }
+
     void ThumbnailCache::EvictToBytes(std::size_t targetBytes)
     {
         while (currentBytes_ > targetBytes && !lruOrder_.empty())
@@ -191,5 +212,7 @@ namespace hyperbrowse::cache
 
             lruOrder_.pop_back();
         }
+
+        EvictToEntryCount();
     }
 }

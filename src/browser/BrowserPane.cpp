@@ -2300,6 +2300,34 @@ namespace hyperbrowse::browser
         return true;
     }
 
+    bool BrowserPane::HandleNavigationKey(UINT message, WPARAM keyCode, LPARAM keyData)
+    {
+        switch (keyCode)
+        {
+        case VK_PRIOR:
+        case VK_NEXT:
+        case VK_HOME:
+        case VK_END:
+            break;
+        default:
+            return false;
+        }
+
+        if (viewMode_ == BrowserViewMode::Thumbnails)
+        {
+            HandleThumbnailNavigationKey(keyCode, GetKeyState(VK_SHIFT) < 0);
+            return true;
+        }
+
+        if (viewMode_ == BrowserViewMode::Details && detailsList_)
+        {
+            SendMessageW(detailsList_, message, keyCode, keyData);
+            return true;
+        }
+
+        return false;
+    }
+
     int BrowserPane::ColumnsForClientWidth(int width) const
     {
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();

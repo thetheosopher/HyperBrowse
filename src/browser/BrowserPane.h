@@ -106,6 +106,7 @@ namespace hyperbrowse::browser
 
         bool Create(HWND parent);
         HWND Hwnd() const noexcept;
+        bool HandleNavigationKey(UINT message, WPARAM keyCode, LPARAM keyData);
 
         void SetModel(BrowserModel* model);
         void BeginFolderLoad();

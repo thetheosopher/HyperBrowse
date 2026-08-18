@@ -88,6 +88,7 @@ namespace hyperbrowse::cache
         };
 
         void EvictIfNeeded();
+        void EvictToEntryCount();
         void EvictToBytes(std::size_t targetBytes);
 
         const std::size_t capacityBytes_{};

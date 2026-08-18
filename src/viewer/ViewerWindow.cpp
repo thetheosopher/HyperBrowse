@@ -3148,14 +3148,7 @@ namespace hyperbrowse::viewer
                 ToggleFullScreen();
                 return 0;
             case VK_ESCAPE:
-                if (fullScreen_)
-                {
-                    SetFullScreen(false);
-                }
-                else
-                {
-                    PostMessageW(hwnd_, WM_CLOSE, 0, 0);
-                }
+                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
                 return 0;
             default:
                 break;

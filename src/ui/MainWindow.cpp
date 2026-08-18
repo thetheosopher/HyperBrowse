@@ -6315,9 +6315,9 @@ namespace hyperbrowse::ui
         OpenViewerAtPath(path);
     }
 
-    bool MainWindow::TranslateAcceleratorMessage(MSG* message) const
+    bool MainWindow::TranslateAcceleratorMessage(MSG* message)
     {
-        if (!hwnd_ || !accelerators_ || !message)
+        if (!hwnd_ || !message)
         {
             return false;
         }
@@ -6334,6 +6334,22 @@ namespace hyperbrowse::ui
             {
                 return false;
             }
+        }
+
+        if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
+            && message->hwnd
+            && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
+            && browserPaneController_
+            && browserPaneController_->HandleNavigationKey(message->message,
+                                                            message->wParam,
+                                                            message->lParam))
+        {
+            return true;
+        }
+
+        if (!accelerators_)
+        {
+            return false;
         }
 
         // Do not translate the Escape accelerator (ID_FILE_MINIMIZE) when a folder drag is active.
@@ -13786,6 +13802,12 @@ namespace hyperbrowse::ui
             return;
         }
 
+        if (menuLoopActive_)
+        {
+            menuStateRefreshPending_ = true;
+            return;
+        }
+
         RefreshQuickAccessMenus();
         UpdateUndoRedoMenuState();
 
@@ -17228,6 +17250,16 @@ namespace hyperbrowse::ui
             }
             RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
             break;
+        case WM_ENTERMENULOOP:
+            menuLoopActive_ = true;
+            break;
+        case WM_EXITMENULOOP:
+            menuLoopActive_ = false;
+            if (menuStateRefreshPending_ && !menuStateRefreshPosted_)
+            {
+                menuStateRefreshPosted_ = PostMessageW(hwnd_, kDeferredMenuStateMessage, 0, 0) != FALSE;
+            }
+            break;
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
         case WM_SYSCHAR:
@@ -17389,6 +17421,14 @@ namespace hyperbrowse::ui
             return OnViewerClosedMessage();
         case kMemoryPressureSampledMessage:
             return OnMemoryPressureSampleMessage(lParam);
+        case kDeferredMenuStateMessage:
+            menuStateRefreshPosted_ = false;
+            if (!menuLoopActive_ && menuStateRefreshPending_)
+            {
+                menuStateRefreshPending_ = false;
+                UpdateMenuState();
+            }
+            return 0;
         case WM_MEASUREITEM:
         {
             auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
