@@ -17239,6 +17239,10 @@ namespace hyperbrowse::ui
             ApplyTheme();
             return 0;
         }
+        case WM_DISPLAYCHANGE:
+            RedrawWindow(hwnd_, nullptr, nullptr,
+                         RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+            return 0;
         case WM_ACTIVATE:
             if (LOWORD(wParam) == WA_INACTIVE && commandBarKeyboardActive_)
             {
