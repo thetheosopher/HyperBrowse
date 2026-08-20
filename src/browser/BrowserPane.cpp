@@ -32,6 +32,7 @@ namespace
     namespace fs = std::filesystem;
 
     constexpr int kWheelScrollAmount = 72;
+    constexpr double kThumbnailWheelRowsPerNotch = 2.5;
     constexpr float kThumbnailPreviewAspectRatio = 0.72f;
     constexpr int kVisiblePriority = 0;
     constexpr int kNearVisiblePriority = 1;
@@ -3309,6 +3310,19 @@ namespace hyperbrowse::browser
         InvalidateRect(hwnd_, &invalidRect, FALSE);
     }
 
+    void BrowserPane::RecoverDisplaySurface()
+    {
+        if (!hwnd_ || IsWindow(hwnd_) == FALSE)
+        {
+            return;
+        }
+
+        ReleaseD2DResources();
+        EnsureD2DRenderTarget();
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
+    }
+
     void BrowserPane::EnsureD2DRenderTarget()
     {
         if (d2dRenderTarget_)
@@ -4854,14 +4868,18 @@ namespace hyperbrowse::browser
             {
                 HideThumbnailTooltip();
                 const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-                const double scrollAmount = static_cast<double>((delta / WHEEL_DELTA) * kWheelScrollAmount);
+                const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+                const int wheelScrollDistance = layout.itemHeight + layout.cellPadding;
+                const double scrollAmount = static_cast<double>(delta / WHEEL_DELTA)
+                    * wheelScrollDistance
+                    * kThumbnailWheelRowsPerNotch;
 
                 if (!smoothScrollTimerId_)
                 {
                     smoothScrollCurrent_ = static_cast<double>(scrollOffsetY_);
                 }
 
-                smoothScrollTarget_ = smoothScrollCurrent_ - scrollAmount * 2.5;
+                smoothScrollTarget_ = smoothScrollCurrent_ - scrollAmount;
 
                 if (!smoothScrollTimerId_)
                 {

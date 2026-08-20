@@ -94,6 +94,9 @@ namespace hyperbrowse::ui
 
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
         static constexpr UINT kDeferredMenuStateMessage = WM_APP + 73;
+        static constexpr UINT_PTR kDisplaySurfaceRecoveryTimerId = 9103;
+        static constexpr UINT kDisplaySurfaceRecoveryIntervalMs = 400;
+        static constexpr int kDisplaySurfaceRecoveryRetryLimit = 8;
         static constexpr int kActionStripHeight = 44;
         static constexpr int kMinLeftPaneWidth = 250;
         static constexpr int kMinRightPaneWidth = 240;
@@ -413,6 +416,10 @@ namespace hyperbrowse::ui
         void ShowDropdownForItem(int itemIndex);
         void UpdateToolbarItemStates();
         void InvalidateToolbarStrip();
+        void HandleDisplaySurfaceChange();
+        void RecoverDisplaySurfaces(bool relayout);
+        void ScheduleDisplaySurfaceRecoveryRetries();
+        void StopDisplaySurfaceRecoveryRetries();
 
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -623,6 +630,11 @@ namespace hyperbrowse::ui
         bool detailsStripVisible_{true};
         viewer::MouseWheelBehavior viewerMouseWheelBehavior_{};
         UINT_PTR memoryPressureTimerId_{};
+        UINT_PTR displaySurfaceRecoveryTimerId_{};
+        int displaySurfaceRecoveryAttempt_{};
+        bool sessionNotificationRegistered_{};
+        HPOWERNOTIFY consoleDisplayNotify_{};
+        HPOWERNOTIFY monitorPowerNotify_{};
 
         friend class HyperBrowseExternalDropTarget;
     };

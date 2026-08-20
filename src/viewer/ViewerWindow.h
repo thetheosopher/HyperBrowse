@@ -115,6 +115,7 @@ namespace hyperbrowse::viewer
         bool ReplaceItems(std::vector<browser::BrowserItem> items, int selectedIndex);
         bool GetDeleteCurrentPaths(std::wstring* sourcePath, std::wstring* preferredFocusPath) const;
         bool AdvanceAfterDeleteCurrent();
+        void RecoverDisplaySurface();
 
     private:
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseViewerWindow";

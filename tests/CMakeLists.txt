@@ -1,5 +1,6 @@
 add_executable(HyperBrowseTests
     smoke.cpp
+    ../src/app/Application.cpp
 )
 
 target_compile_features(HyperBrowseTests PRIVATE cxx_std_20)

@@ -469,6 +469,17 @@ namespace hyperbrowse::ui
         }
     }
 
+    void DiagnosticsWindow::RecoverDisplaySurface()
+    {
+        if (!hwnd_ || IsWindow(hwnd_) == FALSE)
+        {
+            return;
+        }
+
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
+    }
+
     void DiagnosticsWindow::RefreshView()
     {
         if (!hwnd_)
@@ -595,6 +606,9 @@ namespace hyperbrowse::ui
             return CreateChildWindows() ? 0 : -1;
         case WM_SIZE:
             LayoutChildren();
+            return 0;
+        case WM_DISPLAYCHANGE:
+            RecoverDisplaySurface();
             return 0;
         case WM_GETMINMAXINFO:
         {

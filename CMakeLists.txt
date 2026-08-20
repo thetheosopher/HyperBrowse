@@ -142,6 +142,7 @@ target_link_libraries(HyperBrowseCore PUBLIC
     windowscodecs
     shell32
     shlwapi
+    wtsapi32
 )
 
 if(HYPERBROWSE_ENABLE_LIBRAW)

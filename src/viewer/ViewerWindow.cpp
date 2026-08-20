@@ -1277,6 +1277,19 @@ namespace hyperbrowse::viewer
         return true;
     }
 
+    void ViewerWindow::RecoverDisplaySurface()
+    {
+        if (!hwnd_ || IsWindow(hwnd_) == FALSE)
+        {
+            return;
+        }
+
+        ReleaseD2DResources();
+        EnsureD2DRenderTarget();
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_UPDATENOW);
+    }
+
     void ViewerWindow::EnsureD2DRenderTarget()
     {
         if (!hwnd_ || IsWindow(hwnd_) == FALSE)
@@ -3041,7 +3054,7 @@ namespace hyperbrowse::viewer
             return 0;
         }
         case WM_DISPLAYCHANGE:
-            RequestRepaint();
+            RecoverDisplaySurface();
             return 0;
         case WM_ERASEBKGND:
             return 1;

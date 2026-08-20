@@ -23,6 +23,7 @@ namespace hyperbrowse::ui
                   bool darkTheme);
         void SetDarkTheme(bool enabled);
         bool IsOpen() const noexcept;
+        void RecoverDisplaySurface();
 
     private:
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseDiagnosticsWindow";

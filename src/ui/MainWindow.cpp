@@ -7,6 +7,7 @@
 #include <shellapi.h>
 #include <windowsx.h>
 #include <richedit.h>
+#include <wtsapi32.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -239,6 +240,10 @@ namespace
     constexpr std::size_t kInvalidHistoryIndex = static_cast<std::size_t>(-1);
     constexpr UINT_PTR kMemoryPressureTimerId = 9101;
     constexpr UINT kMemoryPressureIntervalMs = 1500;
+    constexpr GUID kConsoleDisplayStateGuid{
+        0x6fe69556, 0x704a, 0x47a0, {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
+    constexpr GUID kMonitorPowerOnGuid{
+        0x02731015, 0x4510, 0x4526, {0x99, 0xe6, 0xe5, 0xa1, 0x7e, 0xbd, 0x1a, 0xea}};
     constexpr std::uint64_t kMemoryPressureAvailableBytesThreshold = 1024ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kMemoryPressureActivateUsedPercent = 85ULL;
     constexpr std::uint64_t kMemoryPressureRecoverUsedPercent = 70ULL;
@@ -6193,6 +6198,16 @@ namespace hyperbrowse::ui
             util::LogLastError(L"CreateWindowExW(MainWindow)");
             return false;
         }
+
+        sessionNotificationRegistered_ = WTSRegisterSessionNotification(hwnd_, NOTIFY_FOR_THIS_SESSION) != FALSE;
+        consoleDisplayNotify_ = RegisterPowerSettingNotification(
+            hwnd_,
+            &kConsoleDisplayStateGuid,
+            DEVICE_NOTIFY_WINDOW_HANDLE);
+        monitorPowerNotify_ = RegisterPowerSettingNotification(
+            hwnd_,
+            &kMonitorPowerOnGuid,
+            DEVICE_NOTIFY_WINDOW_HANDLE);
 
         if (!CreateAccelerators() || !CreateMenuBar() || !CreateChildWindows())
         {
@@ -14088,6 +14103,78 @@ namespace hyperbrowse::ui
         InvalidateRect(hwnd_, &stripRect, FALSE);
     }
 
+    void MainWindow::HandleDisplaySurfaceChange()
+    {
+        if (displaySurfaceRecoveryTimerId_ == 0)
+        {
+            RecoverDisplaySurfaces(true);
+        }
+
+        ScheduleDisplaySurfaceRecoveryRetries();
+    }
+
+    void MainWindow::RecoverDisplaySurfaces(bool relayout)
+    {
+        if (!hwnd_ || IsWindow(hwnd_) == FALSE)
+        {
+            return;
+        }
+
+        if (relayout && !IsIconic(hwnd_))
+        {
+            LayoutChildren();
+        }
+
+        if (browserPaneController_)
+        {
+            browserPaneController_->RecoverDisplaySurface();
+        }
+
+        if (viewerWindow_ && viewerWindow_->IsOpen())
+        {
+            viewerWindow_->RecoverDisplaySurface();
+        }
+
+        if (diagnosticsWindow_ && diagnosticsWindow_->IsOpen())
+        {
+            diagnosticsWindow_->RecoverDisplaySurface();
+        }
+
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
+    }
+
+    void MainWindow::ScheduleDisplaySurfaceRecoveryRetries()
+    {
+        if (!hwnd_ || IsWindow(hwnd_) == FALSE)
+        {
+            return;
+        }
+
+        displaySurfaceRecoveryAttempt_ = 0;
+        if (displaySurfaceRecoveryTimerId_ != 0)
+        {
+            return;
+        }
+
+        displaySurfaceRecoveryTimerId_ = SetTimer(
+            hwnd_,
+            kDisplaySurfaceRecoveryTimerId,
+            kDisplaySurfaceRecoveryIntervalMs,
+            nullptr);
+    }
+
+    void MainWindow::StopDisplaySurfaceRecoveryRetries()
+    {
+        if (displaySurfaceRecoveryTimerId_ != 0 && hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            KillTimer(hwnd_, kDisplaySurfaceRecoveryTimerId);
+        }
+
+        displaySurfaceRecoveryTimerId_ = 0;
+        displaySurfaceRecoveryAttempt_ = 0;
+    }
+
     void MainWindow::UpdateWindowTitle() const
     {
         if (!hwnd_)
@@ -17240,9 +17327,40 @@ namespace hyperbrowse::ui
             return 0;
         }
         case WM_DISPLAYCHANGE:
-            RedrawWindow(hwnd_, nullptr, nullptr,
-                         RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+            HandleDisplaySurfaceChange();
             return 0;
+        case WM_WTSSESSION_CHANGE:
+            switch (wParam)
+            {
+            case WTS_CONSOLE_CONNECT:
+            case WTS_SESSION_UNLOCK:
+            case WTS_SESSION_REMOTE_CONTROL:
+                HandleDisplaySurfaceChange();
+                break;
+            default:
+                break;
+            }
+            return 0;
+        case WM_POWERBROADCAST:
+            if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND)
+            {
+                HandleDisplaySurfaceChange();
+                return TRUE;
+            }
+            if (wParam == PBT_POWERSETTINGCHANGE)
+            {
+                const auto* setting = reinterpret_cast<POWERBROADCAST_SETTING*>(lParam);
+                if (setting
+                    && (IsEqualGUID(setting->PowerSetting, kConsoleDisplayStateGuid)
+                        || IsEqualGUID(setting->PowerSetting, kMonitorPowerOnGuid))
+                    && setting->DataLength >= sizeof(DWORD)
+                    && *reinterpret_cast<const DWORD*>(setting->Data) != 0)
+                {
+                    HandleDisplaySurfaceChange();
+                }
+                return TRUE;
+            }
+            break;
         case WM_ACTIVATE:
             if (LOWORD(wParam) == WA_INACTIVE && commandBarKeyboardActive_)
             {
@@ -17253,6 +17371,12 @@ namespace hyperbrowse::ui
                 LayoutChildren();
             }
             RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+            break;
+        case WM_SYSCOMMAND:
+            if ((wParam & 0xFFF0) == SC_MONITORPOWER && lParam == static_cast<LPARAM>(-1))
+            {
+                HandleDisplaySurfaceChange();
+            }
             break;
         case WM_ENTERMENULOOP:
             menuLoopActive_ = true;
@@ -17519,6 +17643,16 @@ namespace hyperbrowse::ui
                 QueueMemoryPressureSample();
                 return 0;
             }
+            if (wParam == kDisplaySurfaceRecoveryTimerId && displaySurfaceRecoveryTimerId_ != 0)
+            {
+                ++displaySurfaceRecoveryAttempt_;
+                RecoverDisplaySurfaces(displaySurfaceRecoveryAttempt_ == 1);
+                if (displaySurfaceRecoveryAttempt_ >= kDisplaySurfaceRecoveryRetryLimit)
+                {
+                    StopDisplaySurfaceRecoveryRetries();
+                }
+                return 0;
+            }
             break;
         case WM_MOUSELEAVE:
             toolbarMouseTracking_ = false;
@@ -17696,6 +17830,22 @@ namespace hyperbrowse::ui
             if (treeFolderDragActive_)
             {
                 FinishFolderTreeDrag(false);
+            }
+            StopDisplaySurfaceRecoveryRetries();
+            if (sessionNotificationRegistered_)
+            {
+                WTSUnRegisterSessionNotification(hwnd_);
+                sessionNotificationRegistered_ = false;
+            }
+            if (consoleDisplayNotify_)
+            {
+                UnregisterPowerSettingNotification(consoleDisplayNotify_);
+                consoleDisplayNotify_ = nullptr;
+            }
+            if (monitorPowerNotify_)
+            {
+                UnregisterPowerSettingNotification(monitorPowerNotify_);
+                monitorPowerNotify_ = nullptr;
             }
             if (folderEnumerationPresentationTimerId_ != 0)
             {
