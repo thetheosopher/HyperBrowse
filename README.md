@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.2.7-2EA043)
+![Version](https://img.shields.io/badge/Version-1.2.8-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -27,6 +27,9 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
 - Folder tree workflow upgrades with validated folder moves, inline folder creation, favorite destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
 - Selected thumbnails and details rows can be dragged to File Explorer, mail clients, and other shell-aware applications using native Windows file-drop data.
+- Keyboard navigation now covers browser and viewer workflows with consistent focus, selection, and folder-history behavior.
+- Display changes and graphics-surface loss trigger redraw and resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
+- Files dropped onto the application can open directly in the viewer or be copied into the current folder through the existing shell-aware workflows.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 
 ## Current Capabilities
@@ -128,13 +131,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.7-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.8-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.7-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.8-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -187,7 +190,7 @@ The `specs/` directory tracks both design intent and implementation follow-up. U
 HyperBrowse is already a capable browser/viewer, but it is still deliberately scoped. Current non-goals or deferred items include:
 
 - Heavy image editing, annotations, cropping, and organizer-style database features.
-- Drag-and-drop file operations between multiple HyperBrowse instances, or dropping files into HyperBrowse to navigate or copy them into the current folder.
+- Drag-and-drop file operations between multiple HyperBrowse instances.
 - Multipage TIFF navigation and animated GIF thumbnails.
 - Plugin ecosystems, duplicate finders, face detection, and library/database back ends.
 
@@ -195,11 +198,17 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.2.7**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.7-portable-win64.zip` and `HyperBrowse-1.2.7-installer.exe`).
+Current release: **1.2.8**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.8-portable-win64.zip` and `HyperBrowse-1.2.8-installer.exe`).
 
-Release **1.2.7** adds optional Explorer-style subfolder browsing in thumbnail and Details modes, plus a toolbar back button for folder-history navigation.
+Release **1.2.8** adds keyboard navigation improvements, display-change redraw handling, and graphics-surface recovery for the main window, viewer, diagnostics window, and thumbnail pipeline. It also supports opening dropped files in the viewer and copying dropped files into the current folder.
 
 ## Version History
+
+### 1.2.8
+
+- Added consistent keyboard navigation handling across browser and viewer workflows, including focus and selection behavior.
+- Added display-change redraw handling and graphics-surface recovery so windows restore their Direct2D resources after monitor or display changes.
+- Added file-drop workflows for opening files in the viewer and copying files into the current folder.
 
 ### 1.2.7
 
