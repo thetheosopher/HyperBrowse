@@ -741,6 +741,7 @@ namespace hyperbrowse::viewer
         darkTheme_ = darkTheme;
         compareMode_ = false;
         compareDirection_ = CompareDirection::Next;
+        ClearWraparoundMessage();
         StopSlideshow();
         StopTransition();
         ResetCachedImageSlots();
@@ -1127,6 +1128,7 @@ namespace hyperbrowse::viewer
 
         items_ = std::move(items);
         currentIndex_ = selectedIndex;
+        ClearWraparoundMessage();
         if (compareMode_)
         {
             compareDirection_ = ResolveCompareDirection(compareDirection_);
@@ -1781,10 +1783,28 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        const int nextIndex = std::clamp(currentIndex_ + delta, 0, static_cast<int>(items_.size()) - 1);
+        const int itemCount = static_cast<int>(items_.size());
+        int nextIndex = currentIndex_ + delta;
+        bool wrapped = false;
+        if (nextIndex < 0)
+        {
+            nextIndex = itemCount - 1;
+            wrapped = true;
+        }
+        else if (nextIndex >= itemCount)
+        {
+            nextIndex = 0;
+            wrapped = true;
+        }
+
         if (nextIndex == currentIndex_)
         {
             return;
+        }
+
+        if (wrapped)
+        {
+            ShowWraparoundMessage(delta > 0);
         }
 
         QueueTransitionFromCurrent(delta > 0);
@@ -1874,12 +1894,12 @@ namespace hyperbrowse::viewer
         const int navigationZoneWidth = std::max(1, clientWidth / 8);
         const int leftBoundary = clientRect.left + navigationZoneWidth;
         const int rightBoundary = clientRect.right - navigationZoneWidth;
-        if (point.x < leftBoundary && currentIndex_ > 0)
+        if (point.x < leftBoundary)
         {
             return -1;
         }
 
-        if (point.x >= rightBoundary && currentIndex_ + 1 < static_cast<int>(items_.size()))
+        if (point.x >= rightBoundary)
         {
             return +1;
         }
@@ -2677,6 +2697,40 @@ namespace hyperbrowse::viewer
         }
 
         Navigate(+1);
+    }
+
+    void ViewerWindow::ShowWraparoundMessage(bool forward)
+    {
+        wraparoundMessage_ = forward ? L"Wrapped to first image" : L"Wrapped to last image";
+        if (!hwnd_ || IsWindow(hwnd_) == FALSE)
+        {
+            return;
+        }
+
+        if (wraparoundTimerId_ != 0)
+        {
+            KillTimer(hwnd_, wraparoundTimerId_);
+        }
+
+        wraparoundTimerId_ = SetTimer(hwnd_, kWraparoundTimerId, kWraparoundMessageDurationMs, nullptr);
+        if (wraparoundTimerId_ == 0)
+        {
+            wraparoundMessage_.clear();
+            return;
+        }
+
+        RequestRepaint();
+    }
+
+    void ViewerWindow::ClearWraparoundMessage()
+    {
+        if (hwnd_ && wraparoundTimerId_ != 0)
+        {
+            KillTimer(hwnd_, wraparoundTimerId_);
+        }
+
+        wraparoundTimerId_ = 0;
+        wraparoundMessage_.clear();
     }
 
     void ViewerWindow::ResetViewState()
@@ -3685,6 +3739,14 @@ namespace hyperbrowse::viewer
             ToggleFullScreen();
             return 0;
         case WM_TIMER:
+            if (wParam == kWraparoundTimerId && wraparoundTimerId_)
+            {
+                KillTimer(hwnd_, wraparoundTimerId_);
+                wraparoundTimerId_ = 0;
+                wraparoundMessage_.clear();
+                RequestRepaint();
+                return 0;
+            }
             if (wParam == slideshowTimerId_)
             {
                 AdvanceSlideshow();
@@ -5071,6 +5133,36 @@ namespace hyperbrowse::viewer
                                                        metadataLoading_ ? d2dMutedTextBrush_.Get() : d2dTextBrush_.Get());
                         }
                     }
+
+                    if (!wraparoundMessage_.empty() && d2dInfoFormat_ && d2dTextBrush_)
+                    {
+                        const float toastWidth = std::min(320.0f, std::max(120.0f, clientWidth - 32.0f));
+                        const float toastHeight = 42.0f;
+                        const float toastLeft = std::max(8.0f, (clientWidth - toastWidth) / 2.0f);
+                        const D2D1_RECT_F toastRect = D2D1::RectF(toastLeft,
+                                                                  16.0f,
+                                                                  toastLeft + toastWidth,
+                                                                  16.0f + toastHeight);
+                        const D2D1_ROUNDED_RECT roundedToast = D2D1::RoundedRect(toastRect, 8.0f, 8.0f);
+                        if (d2dPanelFillBrush_)
+                        {
+                            d2dRenderTarget_->FillRoundedRectangle(roundedToast, d2dPanelFillBrush_.Get());
+                        }
+                        if (d2dPanelBorderBrush_)
+                        {
+                            d2dRenderTarget_->DrawRoundedRectangle(roundedToast, d2dPanelBorderBrush_.Get(), 1.0f);
+                        }
+
+                        d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                        d2dRenderTarget_->DrawText(wraparoundMessage_.c_str(),
+                                                   static_cast<UINT32>(wraparoundMessage_.size()),
+                                                   d2dInfoFormat_.Get(),
+                                                   D2D1::RectF(toastRect.left + 12.0f,
+                                                               toastRect.top,
+                                                               toastRect.right - 12.0f,
+                                                               toastRect.bottom),
+                                                   d2dTextBrush_.Get());
+                    }
                 }
 
                 const HRESULT hr = d2dRenderTarget_->EndDraw();
@@ -5189,6 +5281,28 @@ namespace hyperbrowse::viewer
                 DeleteDC(backBufferDc);
             }
 
+            if (!wraparoundMessage_.empty())
+            {
+                const int toastWidth = std::min(320, std::max(120, clientWidth - 32));
+                const int toastHeight = 42;
+                const int toastLeft = std::max(8, (clientWidth - toastWidth) / 2);
+                const int toastTop = 16;
+                HBRUSH toastBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
+                HPEN toastPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
+                HGDIOBJ oldBrush = SelectObject(hdc, toastBrush);
+                HGDIOBJ oldPen = SelectObject(hdc, toastPen);
+                RoundRect(hdc, toastLeft, toastTop, toastLeft + toastWidth, toastTop + toastHeight, 12, 12);
+                SelectObject(hdc, oldPen);
+                SelectObject(hdc, oldBrush);
+                DeleteObject(toastPen);
+                DeleteObject(toastBrush);
+
+                SetTextColor(hdc, TextColor(darkTheme_));
+                RECT toastRect{toastLeft + 12, toastTop, toastLeft + toastWidth - 12, toastTop + toastHeight};
+                DrawTextW(hdc, wraparoundMessage_.c_str(), static_cast<int>(wraparoundMessage_.size()), &toastRect,
+                          DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            }
+
             EndPaint(hwnd_, &paintStruct);
             return 0;
         }
@@ -5200,6 +5314,7 @@ namespace hyperbrowse::viewer
             return 0;
         case WM_DESTROY:
             util::LogInfo(L"ViewerWindow WM_DESTROY hwnd=" + FormatWindowHandle(hwnd));
+            ClearWraparoundMessage();
             StopSlideshow();
             StopTransition();
             memoryPressureActive_ = false;

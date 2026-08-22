@@ -2240,6 +2240,20 @@ namespace
         Expect(viewer.IsFullScreen(), "Viewer fit-mode window should open in full screen by default");
         RunViewerWindowFitModeChecks(viewer);
 
+        Expect(viewer.CurrentIndex() == 1, "Viewer wraparound scenario did not start from the middle image");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 2 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer next-image navigation failed before the wraparound boundary");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 3 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer next-image navigation did not reach the last image");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer next-image navigation did not wrap from the last image to the first");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 3 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer previous-image navigation did not wrap from the first image to the last");
+
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);
     }

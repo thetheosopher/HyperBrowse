@@ -201,6 +201,8 @@ namespace hyperbrowse::viewer
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
         void ToggleFullScreen();
         void AdvanceSlideshow();
+        void ShowWraparoundMessage(bool forward);
+        void ClearWraparoundMessage();
         void ShowContextMenu(POINT screenPoint);
         void DispatchContextMenuCommand(UINT commandId);
         int DisplayedImageIndex() const noexcept;
@@ -325,6 +327,8 @@ namespace hyperbrowse::viewer
         std::chrono::steady_clock::time_point pendingLoadStartedAt_{};
         bool pendingLoadActive_{};
         bool preserveDisplayedImageWhileLoading_{};
+        std::wstring wraparoundMessage_;
+        UINT_PTR wraparoundTimerId_{};
         std::unique_ptr<hyperbrowse::util::BackgroundExecutor> backgroundExecutor_;
 
         Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget_;
@@ -352,5 +356,7 @@ namespace hyperbrowse::viewer
         static constexpr UINT kSmoothZoomIntervalMs = 16;
         static constexpr UINT_PTR kTransitionTimerId = 9003;
         static constexpr UINT kTransitionIntervalMs = 16;
+        static constexpr UINT_PTR kWraparoundTimerId = 9004;
+        static constexpr UINT kWraparoundMessageDurationMs = 1400;
     };
 }
