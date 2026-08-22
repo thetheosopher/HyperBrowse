@@ -2167,6 +2167,11 @@ namespace hyperbrowse::viewer
         customZoomScale_ = 1.0;
         panOffsetX_ = 0.0;
         panOffsetY_ = 0.0;
+        if (smoothZoomTimerId_)
+        {
+            KillTimer(hwnd_, kSmoothZoomTimerId);
+            smoothZoomTimerId_ = 0;
+        }
         if (hwnd_)
         {
             RequestRepaint();
@@ -3159,11 +3164,15 @@ namespace hyperbrowse::viewer
             case VK_OEM_MINUS:
                 ZoomBy(0.8);
                 return 0;
-            case '0':
-                FitToWindow();
-                return 0;
-            case '1':
-                SetActualSize();
+            case VK_RETURN:
+                if (zoomMode_ == ZoomMode::Fit)
+                {
+                    SetActualSize();
+                }
+                else
+                {
+                    FitToWindow();
+                }
                 return 0;
             case 'L':
                 RotateLeft();

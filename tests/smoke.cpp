@@ -2191,14 +2191,39 @@ namespace
         PumpMessagesFor(100);
         Expect(!viewer.AreInfoOverlaysVisible(), "Viewer Tab key did not hide the info overlays");
 
-        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, '1', 0);
-        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == 100; }, 1000),
-               "Viewer actual-size mode did not set zoom to 100%");
+        RECT secondImageClientRect{};
+        Expect(GetClientRect(viewer.Hwnd(), &secondImageClientRect) != FALSE,
+            "Failed to read the viewer client area for the Enter zoom toggle test");
+        const int secondImageFitZoomPercent = std::max(
+            1,
+            static_cast<int>(std::lround(std::min(
+                static_cast<double>(secondImageClientRect.right) / 64.0,
+                static_cast<double>(secondImageClientRect.bottom) / 32.0) * 100.0)));
 
-         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_MINUS, 0);
-         PumpMessagesFor(300);
-         Expect(viewer.CurrentZoomPercent() == 100,
-             "Viewer zoom-out should not shrink the image below the current window-fit bound");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RETURN, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == 100; }, 1000),
+               "Viewer Enter key did not switch from fit-to-window to actual size");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_MINUS, 0);
+        PumpMessagesFor(300);
+        Expect(viewer.CurrentZoomPercent() == 100,
+            "Viewer zoom-out should not shrink the image below the current window-fit bound");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 100; }, 1000),
+            "Viewer zoom-in command failed before testing the Enter fit fallback");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RETURN, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == secondImageFitZoomPercent; }, 1000),
+            "Viewer Enter key did not choose fit-to-window from custom zoom");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RETURN, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == 100; }, 1000),
+            "Viewer Enter key did not switch from fit-to-window to actual size");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RETURN, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == secondImageFitZoomPercent; }, 1000),
+            "Viewer Enter key did not switch from actual size to fit-to-window");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'R', 0);
         PumpMessagesFor(100);
