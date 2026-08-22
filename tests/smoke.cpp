@@ -2108,6 +2108,19 @@ namespace
         PumpMessagesFor(50);
         Expect(viewer.CurrentZoomPercent() <= firstZoomTargetPercent,
             "Viewer zoom stepped past the target while leaving fit mode");
+        for (int index = 0; index < 4; ++index)
+        {
+            SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
+        }
+        PumpMessagesFor(250);
+        const LONG initialHorizontalPan = viewer.PanOffset().x;
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        const POINT pannedRight = viewer.PanOffset();
+        Expect(viewer.CurrentIndex() == 0 && pannedRight.x > initialHorizontalPan,
+            "Viewer right arrow did not pan the horizontally zoomed image");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
+        Expect(viewer.CurrentIndex() == 0 && viewer.PanOffset().x == initialHorizontalPan,
+            "Viewer left arrow did not pan the horizontally zoomed image back");
         SetWindowPos(viewer.Hwnd(), nullptr,
                      originalViewerRect.left,
                      originalViewerRect.top,
@@ -2125,6 +2138,19 @@ namespace
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
                "Viewer next-image navigation failed");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer up arrow did not navigate to the previous image when fit to window");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer down arrow did not navigate to the next image when fit to window");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_PRIOR, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer Page Up did not navigate to the previous image");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_NEXT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer Page Down did not navigate to the next image");
 
         state->viewerStartFolderSlideshowRequests = 0;
         state->lastViewerStartFolderSlideshowSource = nullptr;
@@ -2240,6 +2266,38 @@ namespace
         PumpMessagesFor(100);
         const POINT movedPan = viewer.PanOffset();
         Expect(movedPan.x != initialPan.x || movedPan.y != initialPan.y, "Viewer pan interaction failed");
+
+        const LONG panBeforeArrow = viewer.PanOffset().y;
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
+        const LONG panAfterUp = viewer.PanOffset().y;
+        Expect(panAfterUp < panBeforeArrow, "Viewer up arrow did not pan the zoomed image upward");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
+        Expect(viewer.PanOffset().y == panBeforeArrow, "Viewer down arrow did not pan the zoomed image downward");
+
+        for (int index = 0; index < 128; ++index)
+        {
+            SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
+        }
+        const LONG topPan = viewer.PanOffset().y;
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
+        Expect(viewer.PanOffset().y == topPan, "Viewer up arrow exceeded the top image pan limit");
+
+        for (int index = 0; index < 128; ++index)
+        {
+            SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
+        }
+        const LONG bottomPan = viewer.PanOffset().y;
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
+        Expect(viewer.PanOffset().y == bottomPan, "Viewer down arrow exceeded the bottom image pan limit");
+        Expect(topPan < bottomPan, "Viewer vertical pan limits did not reflect image overflow");
+
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RETURN, 0);
+         PumpMessagesFor(100);
+         const POINT fitPan = viewer.PanOffset();
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
+         Expect(fitPan.x == 0 && fitPan.y == 0 && viewer.PanOffset().x == 0 && viewer.PanOffset().y == 0,
+             "Viewer arrows panned an image while it was fit to the window");
 
         SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
         PumpMessagesFor(100);

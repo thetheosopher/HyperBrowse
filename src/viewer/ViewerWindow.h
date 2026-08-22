@@ -198,6 +198,10 @@ namespace hyperbrowse::viewer
         void StopTransition(bool clearPending = true);
         TransitionStyle ResolveActiveTransitionStyle() noexcept;
         void ResetViewState();
+        void CalculatePanLimits(double& maxPanX, double& maxPanY) const;
+        void ClampPanOffsets();
+        bool CanPanHorizontally() const;
+        bool CanPanVertically() const;
         CompareDirection ResolveCompareDirection(CompareDirection preferred) const noexcept;
         int CompareIndexForDirection(CompareDirection direction) const noexcept;
         int ActiveCompareIndex() const noexcept;

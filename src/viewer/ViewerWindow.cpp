@@ -43,6 +43,7 @@ namespace
     constexpr int kPlaceholderBrandArtSize = 256;
     constexpr bool kEnableFullImagePrefetch = false;
     constexpr std::size_t kViewerFullImageCacheBytes = 256ULL * 1024ULL * 1024ULL;
+    constexpr double kKeyboardPanStep = 64.0;
 
     using InfoOverlayTextSize = hyperbrowse::viewer::InfoOverlayTextSize;
 
@@ -916,6 +917,7 @@ namespace hyperbrowse::viewer
             d2dCompareImageIndex_ = -1;
             StopTransition();
             UpdateWindowTitle();
+            ClampPanOffsets();
             if (hwnd_ && IsWindow(hwnd_) != FALSE)
             {
                 RequestRepaint();
@@ -929,6 +931,7 @@ namespace hyperbrowse::viewer
         d2dCompareImageIndex_ = -1;
         StopTransition();
         UpdateWindowTitle();
+        ClampPanOffsets();
         if (compareMode_ && currentImage_ && !pendingLoadActive_)
         {
             ScheduleAdjacentPrefetch(asyncState_->navigationGeneration.load(std::memory_order_acquire));
@@ -2524,6 +2527,69 @@ namespace hyperbrowse::viewer
         smoothZoomCurrent_ = 1.0;
     }
 
+    void ViewerWindow::CalculatePanLimits(double& maxPanX, double& maxPanY) const
+    {
+        maxPanX = 0.0;
+        maxPanY = 0.0;
+        if (!currentImage_ || !hwnd_ || zoomMode_ == ZoomMode::Fit)
+        {
+            return;
+        }
+
+        RECT clientRect{};
+        if (GetClientRect(hwnd_, &clientRect) == FALSE)
+        {
+            return;
+        }
+
+        if (compareMode_ && ActiveCompareIndex() >= 0)
+        {
+            const LONG totalWidth = clientRect.right - clientRect.left;
+            const LONG gapWidth = std::clamp<LONG>(totalWidth / 40, 12, 24);
+            const LONG paneWidth = std::max<LONG>(1, (totalWidth - gapWidth) / 2);
+            clientRect.right = clientRect.left + paneWidth;
+        }
+
+        const double scale = EffectiveScaleForClient(clientRect);
+        const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+        const int rotatedWidth = swapDimensions ? currentImage_->SourceHeight() : currentImage_->SourceWidth();
+        const int rotatedHeight = swapDimensions ? currentImage_->SourceWidth() : currentImage_->SourceHeight();
+        const double destinationWidth = static_cast<double>(std::max(
+            1, static_cast<int>(std::lround(static_cast<double>(rotatedWidth) * scale))));
+        const double destinationHeight = static_cast<double>(std::max(
+            1, static_cast<int>(std::lround(static_cast<double>(rotatedHeight) * scale))));
+        const double clientWidth = static_cast<double>(std::max<LONG>(1, clientRect.right - clientRect.left));
+        const double clientHeight = static_cast<double>(std::max<LONG>(1, clientRect.bottom - clientRect.top));
+        maxPanX = std::max(0.0, (destinationWidth - clientWidth) / 2.0);
+        maxPanY = std::max(0.0, (destinationHeight - clientHeight) / 2.0);
+    }
+
+    void ViewerWindow::ClampPanOffsets()
+    {
+        double maxPanX = 0.0;
+        double maxPanY = 0.0;
+        CalculatePanLimits(maxPanX, maxPanY);
+
+        panOffsetX_ = std::clamp(panOffsetX_, -maxPanX, maxPanX);
+        panOffsetY_ = std::clamp(panOffsetY_, -maxPanY, maxPanY);
+    }
+
+    bool ViewerWindow::CanPanHorizontally() const
+    {
+        double maxPanX = 0.0;
+        double maxPanY = 0.0;
+        CalculatePanLimits(maxPanX, maxPanY);
+        return maxPanX > 0.0;
+    }
+
+    bool ViewerWindow::CanPanVertically() const
+    {
+        double maxPanX = 0.0;
+        double maxPanY = 0.0;
+        CalculatePanLimits(maxPanX, maxPanY);
+        return maxPanY > 0.0;
+    }
+
     int ViewerWindow::DisplayedImageIndex() const noexcept
     {
         if (currentImage_
@@ -3049,6 +3115,7 @@ namespace hyperbrowse::viewer
                 ReleaseD2DResources();
                 return 0;
             }
+            ClampPanOffsets();
             RequestRepaint();
             return 0;
         case WM_DPICHANGED:
@@ -3138,6 +3205,15 @@ namespace hyperbrowse::viewer
                 {
                     SetCompareMode(true, CompareDirection::Next);
                 }
+                else if (CanPanHorizontally())
+                {
+                    double maxPanX = 0.0;
+                    double maxPanY = 0.0;
+                    CalculatePanLimits(maxPanX, maxPanY);
+                    panOffsetX_ += std::min(kKeyboardPanStep, maxPanX);
+                    ClampPanOffsets();
+                    RequestRepaint();
+                }
                 else
                 {
                     Navigate(+1);
@@ -3148,10 +3224,42 @@ namespace hyperbrowse::viewer
                 {
                     SetCompareMode(true, CompareDirection::Previous);
                 }
+                else if (CanPanHorizontally())
+                {
+                    double maxPanX = 0.0;
+                    double maxPanY = 0.0;
+                    CalculatePanLimits(maxPanX, maxPanY);
+                    panOffsetX_ -= std::min(kKeyboardPanStep, maxPanX);
+                    ClampPanOffsets();
+                    RequestRepaint();
+                }
                 else
                 {
                     Navigate(-1);
                 }
+                return 0;
+            case VK_UP:
+            case VK_DOWN:
+                if (CanPanVertically())
+                {
+                    double maxPanX = 0.0;
+                    double maxPanY = 0.0;
+                    CalculatePanLimits(maxPanX, maxPanY);
+                    const double panStep = std::min(kKeyboardPanStep, maxPanY);
+                    panOffsetY_ += wParam == VK_UP ? -panStep : panStep;
+                    ClampPanOffsets();
+                    RequestRepaint();
+                }
+                else
+                {
+                    Navigate(wParam == VK_UP ? -1 : +1);
+                }
+                return 0;
+            case VK_PRIOR:
+                Navigate(-1);
+                return 0;
+            case VK_NEXT:
+                Navigate(+1);
                 return 0;
             case VK_TAB:
                 ToggleInfoOverlays();
@@ -3327,6 +3435,7 @@ namespace hyperbrowse::viewer
                     lastPanPoint_ = pendingNavigationPoint_;
                     panOffsetX_ += static_cast<double>(currentPoint.x - lastPanPoint_.x);
                     panOffsetY_ += static_cast<double>(currentPoint.y - lastPanPoint_.y);
+                    ClampPanOffsets();
                     lastPanPoint_ = currentPoint;
                     RequestRepaint();
                     return 0;
@@ -3343,6 +3452,7 @@ namespace hyperbrowse::viewer
             {
                 panOffsetX_ += static_cast<double>(currentPoint.x - lastPanPoint_.x);
                 panOffsetY_ += static_cast<double>(currentPoint.y - lastPanPoint_.y);
+                ClampPanOffsets();
                 lastPanPoint_ = currentPoint;
                 RequestRepaint();
                 return 0;
@@ -3427,6 +3537,7 @@ namespace hyperbrowse::viewer
                     smoothZoomCurrent_ += diff * 0.22;
                     customZoomScale_ = smoothZoomCurrent_;
                 }
+                ClampPanOffsets();
                 RequestRepaint();
                 return 0;
             }
