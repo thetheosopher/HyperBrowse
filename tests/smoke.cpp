@@ -2254,6 +2254,26 @@ namespace
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 3 && viewer.CurrentZoomPercent() > 0; }, 5000),
             "Viewer previous-image navigation did not wrap from the first image to the last");
 
+        BYTE originalKeyboardState[256]{};
+        BYTE controlKeyboardState[256]{};
+        Expect(GetKeyboardState(originalKeyboardState) != FALSE,
+            "Failed to read the keyboard state before testing viewer boundary shortcuts");
+        for (int index = 0; index < static_cast<int>(std::size(originalKeyboardState)); ++index)
+        {
+            controlKeyboardState[index] = originalKeyboardState[index];
+        }
+        controlKeyboardState[VK_CONTROL] |= 0x80;
+        Expect(SetKeyboardState(controlKeyboardState) != FALSE,
+            "Failed to stage Ctrl state for the viewer boundary shortcut test");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_HOME, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer Ctrl+Home did not navigate to the first image");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_END, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 3 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer Ctrl+End did not navigate to the last image");
+        Expect(SetKeyboardState(originalKeyboardState) != FALSE,
+            "Failed to restore the keyboard state after testing viewer boundary shortcuts");
+
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);
     }

@@ -1807,9 +1807,22 @@ namespace hyperbrowse::viewer
             ShowWraparoundMessage(delta > 0);
         }
 
-        QueueTransitionFromCurrent(delta > 0);
+        NavigateToIndex(nextIndex, delta > 0);
+    }
 
-        if (delta > 0)
+    void ViewerWindow::NavigateToIndex(int targetIndex, bool forward)
+    {
+        slideshowAdvancePending_ = false;
+
+        if (targetIndex < 0 || targetIndex >= static_cast<int>(items_.size()) || targetIndex == currentIndex_)
+        {
+            return;
+        }
+
+        const int nextIndex = targetIndex;
+        QueueTransitionFromCurrent(forward);
+
+        if (forward)
         {
             if (nextSlot_.index == nextIndex && nextSlot_.image)
             {
@@ -1837,7 +1850,7 @@ namespace hyperbrowse::viewer
             previousSlot_ = currentSlot_;
             nextSlot_ = {};
         }
-        else if (delta < 0)
+        else
         {
             if (previousSlot_.index == nextIndex && previousSlot_.image)
             {
@@ -2701,7 +2714,29 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ShowWraparoundMessage(bool forward)
     {
-        wraparoundMessage_ = forward ? L"Wrapped to first image" : L"Wrapped to last image";
+        ShowNavigationMessage(forward ? L"Wrapped to first image" : L"Wrapped to last image");
+    }
+
+    void ViewerWindow::NavigateToBoundary(bool first)
+    {
+        if (items_.empty())
+        {
+            return;
+        }
+
+        const int targetIndex = first ? 0 : static_cast<int>(items_.size()) - 1;
+        ShowNavigationMessage(first ? L"First image" : L"Last image");
+        if (targetIndex == currentIndex_)
+        {
+            return;
+        }
+
+        NavigateToIndex(targetIndex, targetIndex > currentIndex_);
+    }
+
+    void ViewerWindow::ShowNavigationMessage(std::wstring message)
+    {
+        wraparoundMessage_ = std::move(message);
         if (!hwnd_ || IsWindow(hwnd_) == FALSE)
         {
             return;
@@ -3494,6 +3529,18 @@ namespace hyperbrowse::viewer
                 return 0;
             case VK_NEXT:
                 Navigate(+1);
+                return 0;
+            case VK_HOME:
+                if ((GetKeyState(VK_CONTROL) & 0x8000) != 0)
+                {
+                    NavigateToBoundary(true);
+                }
+                return 0;
+            case VK_END:
+                if ((GetKeyState(VK_CONTROL) & 0x8000) != 0)
+                {
+                    NavigateToBoundary(false);
+                }
                 return 0;
             case VK_TAB:
                 ToggleInfoOverlays();

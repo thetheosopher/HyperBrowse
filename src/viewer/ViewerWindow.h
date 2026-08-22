@@ -168,6 +168,7 @@ namespace hyperbrowse::viewer
         void UpdateWindowTitle() const;
         void LoadCurrentImageAsync(LoadReason reason);
         void Navigate(int delta);
+        void NavigateToIndex(int targetIndex, bool forward);
         int NavigationDeltaForPoint(POINT point) const noexcept;
         bool SetNavigationCursorForPoint(POINT point);
         void PrepareForImageChange(bool keepDisplayedImage = false);
@@ -201,7 +202,9 @@ namespace hyperbrowse::viewer
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
         void ToggleFullScreen();
         void AdvanceSlideshow();
+        void ShowNavigationMessage(std::wstring message);
         void ShowWraparoundMessage(bool forward);
+        void NavigateToBoundary(bool first);
         void ClearWraparoundMessage();
         void ShowContextMenu(POINT screenPoint);
         void DispatchContextMenuCommand(UINT commandId);
