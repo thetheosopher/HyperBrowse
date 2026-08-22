@@ -68,6 +68,12 @@ namespace hyperbrowse::viewer
         Large = 2,
     };
 
+    enum class QuickSendOperation : int
+    {
+        Move = 0,
+        Copy = 1,
+    };
+
     class ViewerWindow
     {
     public:
@@ -76,6 +82,7 @@ namespace hyperbrowse::viewer
         static constexpr UINT kClosedMessage = WM_APP + 62;
         static constexpr UINT kDeleteRequestedMessage = WM_APP + 65;
         static constexpr UINT kStartFolderSlideshowMessage = WM_APP + 66;
+        static constexpr UINT kQuickSendRequestedMessage = WM_APP + 70;
         static constexpr UINT kContextMenuCommandMessage = WM_APP + 68;
         static constexpr UINT kDroppedFileMessage = WM_APP + 69;
         static constexpr WPARAM kDeleteRequestPermanent = 0x1;

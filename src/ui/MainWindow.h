@@ -18,6 +18,7 @@
 
 #include "browser/BrowserModel.h"
 #include "util/ResourceSizing.h"
+#include "ui/QuickSend.h"
 
 namespace hyperbrowse::browser
 {
@@ -179,8 +180,10 @@ namespace hyperbrowse::ui
             std::wstring destinationPath;
             std::wstring displayLabel;
             std::wstring metadataLabel;
+            int assignedShortcut{-1};
             bool favorite{};
             RECT rowRect{};
+            RECT shortcutRect{};
             RECT copyRect{};
             RECT moveRect{};
             RECT removeRect{};
@@ -254,6 +257,9 @@ namespace hyperbrowse::ui
             bool startSlideshow) const;
         bool SyncViewerToBrowserModel(std::wstring_view preferredPath = {});
         void RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top);
+        void UpdateQuickAccessShortcutEditControls();
+        void HideQuickAccessShortcutEditControls();
+        bool IsQuickAccessShortcutEdit(HWND control) const;
         bool IsQuickAccessDestinationCurrentFolder(std::wstring_view folderPath) const;
         bool CanNavigateToQuickAccessDestination(std::wstring_view folderPath) const;
         bool CanUseQuickAccessDestinationActions(std::wstring_view folderPath) const;
@@ -267,7 +273,7 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> ExpandRawJpegPairedPaths(const std::vector<std::wstring>& paths,
                                    std::size_t* pairedCompanionCount = nullptr) const;
         std::vector<std::wstring> SelectedFileOperationPathsSnapshot(std::size_t* pairedCompanionCount = nullptr) const;
-        bool ChooseFolder(std::wstring* folderPath) const;
+        bool ChooseFolder(std::wstring* folderPath, HWND ownerWindow = nullptr) const;
         bool HasSelectedJpegItems() const;
         void ShowBrowserContextMenu(POINT screenPoint);
         bool ShowShellContextMenuForSelection(POINT screenPoint);
@@ -294,11 +300,18 @@ namespace hyperbrowse::ui
         void StartFolderTreeMoveToDestination(std::wstring folderPath, std::wstring destinationFolder);
         void StartFolderTreeCreateNewFolder(std::wstring parentPath);
         void StartSelectionFileOperationToDestination(services::FileOperationType type, std::wstring destinationFolder);
-        void StartFileOperation(services::FileOperationType type,
+        bool ChooseQuickSendDestination(services::FileOperationType operationType,
+                         POINT popupPoint,
+                         HWND dialogOwner,
+                         std::wstring* destinationFolder);
+        void StartQuickSendForSelection(services::FileOperationType type);
+        bool StartViewerQuickSendOperation(services::FileOperationType type, std::wstring destinationFolder);
+        bool StartFileOperation(services::FileOperationType type,
                     std::vector<std::wstring> sourcePaths,
                     std::wstring destinationFolder,
                     services::FileConflictPolicy conflictPolicy,
-                    std::vector<std::wstring> targetLeafNames = {});
+                    std::vector<std::wstring> targetLeafNames = {},
+                    HWND ownerWindow = nullptr);
         void UpdateTaskbarProgress(ULONGLONG completed, ULONGLONG total);
         void ClearTaskbarProgress();
         void NotifyLongOperationComplete(const std::wstring& title, const std::wstring& message);
@@ -331,6 +344,19 @@ namespace hyperbrowse::ui
         LRESULT OnFolderTreeEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderWatchMessage(LPARAM lParam);
         LRESULT OnFolderTreeNotify(LPARAM lParam);
+        void RelayFolderTreeTooltipEvent(UINT message, WPARAM wParam, LPARAM lParam);
+        static LRESULT CALLBACK FolderTreeTooltipSubclassProc(HWND hwnd,
+                                       UINT message,
+                                       WPARAM wParam,
+                                       LPARAM lParam,
+                                       UINT_PTR subclassId,
+                                       DWORD_PTR refData);
+        static LRESULT CALLBACK QuickAccessShortcutEditSubclassProc(HWND hwnd,
+                           UINT message,
+                           WPARAM wParam,
+                           LPARAM lParam,
+                           UINT_PTR subclassId,
+                           DWORD_PTR refData);
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeBeginDrag(const NMTREEVIEWW& treeView);
@@ -359,6 +385,7 @@ namespace hyperbrowse::ui
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
         LRESULT OnViewerDeleteRequested(WPARAM wParam);
+        LRESULT OnViewerQuickSendRequest(WPARAM wParam, LPARAM lParam);
         LRESULT OnViewerStartFolderSlideshowMessage(WPARAM wParam);
         LRESULT OnViewerContextMenuCommand(WPARAM wParam);
         LRESULT OnViewerDroppedFileMessage(LPARAM lParam);
@@ -381,8 +408,10 @@ namespace hyperbrowse::ui
         void ClearFavoriteDestinations();
         void ClearRecentFolders();
         void ClearRecentDestinations();
+        void SortFavoriteDestinationsByShortcut();
         void RecordRecentFolder(std::wstring folderPath);
         void RecordRecentDestination(std::wstring folderPath);
+        void SyncQuickSendModel();
         void RecordOpenedFolderHistory(std::wstring folderPath);
         bool NavigateBackToLastOpenedFolder();
         void RefreshQuickAccessMenus();
@@ -430,6 +459,8 @@ namespace hyperbrowse::ui
         void OnLButtonUp();
         void OnLButtonDoubleClick(int x, int y);
         void OnMouseMove(int x, int y);
+        bool OnQuickAccessMouseWheel(WPARAM wParam, LPARAM lParam);
+        void OnQuickAccessScroll(WPARAM wParam);
         bool IsOverSplitter(int x, int y) const;
         bool IsOverDetailsPanelSplitter(int x, int y) const;
 
@@ -440,7 +471,10 @@ namespace hyperbrowse::ui
         HWND browserPane_{};
         HWND statusBar_{};
         HWND detailsPanelText_{};
+        HWND quickAccessScrollBar_{};
         HWND tooltipControl_{};
+        std::wstring treeFolderTooltipText_;
+        std::wstring treeTooltipPath_;
         HMODULE detailsPanelRichEditModule_{};
         HIMAGELIST treeImageList_{};
         HIMAGELIST treeDragImageList_{};
@@ -517,6 +551,7 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> recentFolders_;
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
+        QuickSendModel quickSendModel_;
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems_;
         std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
         std::unique_ptr<browser::BrowserModel> browserModel_;
@@ -549,6 +584,7 @@ namespace hyperbrowse::ui
         RECT detailsPanelHistogramRect_{};
         RECT detailsPanelCloseButtonRect_{};
         RECT quickAccessDestinationPanelRect_{};
+        RECT quickAccessDestinationViewportRect_{};
         std::wstring detailsPanelTitleText_;
         std::wstring detailsPanelSummaryText_;
         std::wstring detailsPanelBodyText_;
@@ -568,6 +604,9 @@ namespace hyperbrowse::ui
         int quickAccessHotButtonIndex_{-1};
         int quickAccessPressedRowIndex_{-1};
         int quickAccessPressedButtonIndex_{-1};
+        int quickAccessScrollOffset_{};
+        std::vector<HWND> quickAccessShortcutEdits_;
+        bool updatingQuickAccessShortcutEdits_{};
         std::array<std::uint32_t, 64> detailsPanelHistogramRed_{};
         std::array<std::uint32_t, 64> detailsPanelHistogramGreen_{};
         std::array<std::uint32_t, 64> detailsPanelHistogramBlue_{};
@@ -598,10 +637,21 @@ namespace hyperbrowse::ui
             std::wstring preferredFocusPath;
             bool permanent{};
         };
+        struct PendingViewerQuickSend
+        {
+            services::FileOperationType type{static_cast<services::FileOperationType>(0)};
+            std::wstring sourcePath;
+            std::vector<std::wstring> sourcePaths;
+            std::wstring destinationFolder;
+            bool viewerAdvanced{};
+            bool active{};
+        };
         std::wstring pendingViewerDeleteSourcePath_;
         std::vector<std::wstring> pendingViewerDeleteSourcePaths_;
         std::wstring pendingViewerDeletePreferredFocusPath_;
         std::deque<PendingViewerDelete> pendingViewerDeletes_;
+        PendingViewerQuickSend pendingViewerQuickSend_;
+        bool quickSendPopupActive_{};
         std::wstring pendingFolderWatchReloadPath_;
         bool pendingFolderWatchTreeRefresh_{};
         std::wstring activeFileOperationLabel_;

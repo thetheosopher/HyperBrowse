@@ -3067,6 +3067,29 @@ namespace hyperbrowse::viewer
             RequestRepaint();
             return 0;
         case WM_KEYDOWN:
+            if ((wParam == VK_F7 || wParam == VK_F8)
+                && (GetKeyState(VK_CONTROL) & 0x8000) == 0
+                && (GetKeyState(VK_SHIFT) & 0x8000) == 0
+                && (GetKeyState(VK_MENU) & 0x8000) == 0)
+            {
+                if ((lParam & (1LL << 30)) != 0)
+                {
+                    return 0;
+                }
+
+                if (owner_ && IsWindow(owner_) != FALSE)
+                {
+                    const QuickSendOperation operation = wParam == VK_F7
+                        ? QuickSendOperation::Move
+                        : QuickSendOperation::Copy;
+                    PostMessageW(owner_,
+                                 kQuickSendRequestedMessage,
+                                 static_cast<WPARAM>(operation),
+                                 reinterpret_cast<LPARAM>(hwnd_));
+                }
+                return 0;
+            }
+
             if (wParam == static_cast<WPARAM>('F')
                 && (GetKeyState(VK_CONTROL) & 0x8000) != 0
                 && (GetKeyState(VK_SHIFT) & 0x8000) != 0)

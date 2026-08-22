@@ -117,6 +117,7 @@ add_library(HyperBrowseCore STATIC
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
     src/ui/MainWindow.cpp
+    src/ui/QuickSend.cpp
     src/ui/ToolbarIconLibrary.cpp
     src/util/Diagnostics.cpp
     src/util/Log.cpp

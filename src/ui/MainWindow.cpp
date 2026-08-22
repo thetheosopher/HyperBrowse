@@ -84,6 +84,7 @@ namespace
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
     constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
+    constexpr wchar_t kRegistryValueQuickSendShortcutPrefix[] = L"QuickSendShortcut";
     constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
     constexpr wchar_t kRegistryValuePairedRawJpegViewerPreference[] = L"PairedRawJpegViewerPreference";
     constexpr wchar_t kRegistryValueDefaultViewerToSecondaryMonitor[] = L"DefaultViewerToSecondaryMonitor";
@@ -140,6 +141,8 @@ namespace
     constexpr UINT ID_FILE_DUPLICATE_SELECTION = 1092;
     constexpr UINT ID_EDIT_UNDO = 1093;
     constexpr UINT ID_EDIT_REDO = 1094;
+    constexpr UINT ID_FILE_QUICK_SEND_MOVE = 1095;
+    constexpr UINT ID_FILE_QUICK_SEND_COPY = 1096;
     constexpr UINT ID_FILE_SET_RATING_0 = 1080;
     constexpr UINT ID_FILE_SET_RATING_1 = 1081;
     constexpr UINT ID_FILE_SET_RATING_2 = 1082;
@@ -150,15 +153,17 @@ namespace
     constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_BASE = 1030;
     constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_LAST = 1037;
     constexpr UINT ID_FILE_COPY_SELECTION_BROWSE = 1040;
-    constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_BASE = 1041;
-    constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_LAST = 1048;
-    constexpr UINT ID_FILE_COPY_SELECTION_RECENT_BASE = 1051;
-    constexpr UINT ID_FILE_COPY_SELECTION_RECENT_LAST = 1058;
+    constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_BASE = 1100;
+    constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_LAST = ID_FILE_COPY_SELECTION_FAVORITE_BASE
+        + static_cast<UINT>(hyperbrowse::ui::kQuickSendShortcutCount) - 1;
+    constexpr UINT ID_FILE_COPY_SELECTION_RECENT_BASE = 1140;
+    constexpr UINT ID_FILE_COPY_SELECTION_RECENT_LAST = 1147;
     constexpr UINT ID_FILE_MOVE_SELECTION_BROWSE = 1060;
-    constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_BASE = 1061;
-    constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_LAST = 1068;
-    constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_BASE = 1071;
-    constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_LAST = 1078;
+    constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_BASE = 1150;
+    constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_LAST = ID_FILE_MOVE_SELECTION_FAVORITE_BASE
+        + static_cast<UINT>(hyperbrowse::ui::kQuickSendShortcutCount) - 1;
+    constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_BASE = 1190;
+    constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_LAST = 1197;
 
     std::wstring ToLowercaseCopy(std::wstring value);
     int CountDecimalDigits(std::size_t value);
@@ -297,7 +302,13 @@ namespace
     constexpr int kQuickAccessPanelRowTextGap = 4;
     constexpr int kQuickAccessPanelRowBottomInset = 6;
     constexpr int kQuickAccessPanelButtonVerticalInset = 6;
-    constexpr int kQuickAccessPanelMaxRows = 4;
+    constexpr int kQuickAccessPanelShortcutWidth = 24;
+    constexpr int kQuickAccessPanelShortcutGap = 8;
+    constexpr int kQuickAccessPanelScrollBarGap = 6;
+    constexpr UINT kQuickAccessShortcutEditBaseId = 5200;
+    constexpr UINT kQuickSendPopupCommandBase = 5300;
+    constexpr UINT kQuickSendPopupBrowseCommand = kQuickSendPopupCommandBase;
+    constexpr UINT kQuickSendPopupDestinationBase = kQuickSendPopupCommandBase + 1;
     constexpr std::size_t kIncrementalFolderWatchEventLimit = 64;
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
     constexpr UINT_PTR kFolderEnumerationPresentationTimerId = 9102;
@@ -340,6 +351,7 @@ namespace
     constexpr int kAboutDialogButtonWidth = 104;
     constexpr int kAboutDialogButtonHeight = 38;
     constexpr std::size_t kQuickAccessFolderLimit = 8;
+    constexpr std::size_t kFavoriteDestinationLimit = hyperbrowse::ui::kQuickSendShortcutCount;
     constexpr int kAboutDialogLinkButtonWidth = 172;
     constexpr int kAboutDialogSupportButtonWidth = 196;
     constexpr int kAboutDialogButtonGap = 12;
@@ -1029,6 +1041,21 @@ namespace
         }
 
         return displayName + L" (" + std::wstring(folderPath) + L")";
+    }
+
+    std::wstring EscapeMenuMnemonicText(std::wstring_view text)
+    {
+        std::wstring escaped;
+        escaped.reserve(text.size());
+        for (const wchar_t character : text)
+        {
+            if (character == L'&')
+            {
+                escaped.push_back(L'&');
+            }
+            escaped.push_back(character);
+        }
+        return escaped;
     }
 
     int CurrentCalendarYear()
@@ -6419,6 +6446,8 @@ namespace hyperbrowse::ui
             {FVIRTKEY | FCONTROL, static_cast<WORD>('W'), ID_FILE_MINIMIZE},
             {FVIRTKEY, VK_F5, ID_FILE_REFRESH_TREE},
             {FVIRTKEY, VK_F2, ID_FILE_RENAME_SELECTED},
+            {FVIRTKEY, VK_F7, ID_FILE_QUICK_SEND_MOVE},
+            {FVIRTKEY, VK_F8, ID_FILE_QUICK_SEND_COPY},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('I'), ID_FILE_IMAGE_INFORMATION},
             {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('C'), ID_FILE_COPY_PATH},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('C'), ID_FILE_COPY_FILES_TO_CLIPBOARD},
@@ -6720,6 +6749,18 @@ namespace hyperbrowse::ui
             instance_,
             nullptr);
 
+        if (tooltipControl_ && treePane_)
+        {
+            TTTOOLINFOW toolInfo{};
+            toolInfo.cbSize = sizeof(toolInfo);
+            toolInfo.uFlags = TTF_IDISHWND;
+            toolInfo.hwnd = hwnd_;
+            toolInfo.uId = reinterpret_cast<UINT_PTR>(treePane_);
+            toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+            SendMessageW(tooltipControl_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+            SetWindowSubclass(treePane_, &MainWindow::FolderTreeTooltipSubclassProc, 1, reinterpret_cast<DWORD_PTR>(this));
+        }
+
         statusBar_ = CreateWindowExW(
             0,
             L"STATIC",
@@ -6765,7 +6806,18 @@ namespace hyperbrowse::ui
                 nullptr);
         }
 
-        if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsPanelText_)
+            quickAccessScrollBar_ = CreateWindowExW(
+                0,
+                L"SCROLLBAR",
+                nullptr,
+                WS_CHILD | WS_TABSTOP | SBS_VERT,
+                0, 0, 0, 0,
+                hwnd_,
+                nullptr,
+                instance_,
+                nullptr);
+
+            if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsPanelText_ || !quickAccessScrollBar_)
         {
             util::LogLastError(L"CreateChildWindows");
             return false;
@@ -7272,6 +7324,27 @@ namespace hyperbrowse::ui
         {
         case NM_RCLICK:
             return OnFolderTreeRightClick();
+        case NM_CUSTOMDRAW:
+        {
+            auto* customDraw = reinterpret_cast<NMTVCUSTOMDRAW*>(lParam);
+            if (customDraw->nmcd.dwDrawStage == CDDS_PREPAINT)
+            {
+                return CDRF_NOTIFYITEMDRAW;
+            }
+
+            if (customDraw->nmcd.dwDrawStage == CDDS_ITEMPREPAINT
+                && (customDraw->nmcd.uItemState & CDIS_SELECTED) == 0)
+            {
+                const HTREEITEM item = reinterpret_cast<HTREEITEM>(customDraw->nmcd.dwItemSpec);
+                const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+                if (nodeData && IsFavoriteDestination(nodeData->path))
+                {
+                    customDraw->clrText = GetThemePalette().accent;
+                }
+            }
+
+            return CDRF_DODEFAULT;
+        }
         case TVN_BEGINDRAGW:
             return OnFolderTreeBeginDrag(*reinterpret_cast<const NMTREEVIEWW*>(lParam));
         case TVN_ITEMEXPANDINGW:
@@ -7285,6 +7358,89 @@ namespace hyperbrowse::ui
         default:
             return 0;
         }
+    }
+
+    void MainWindow::RelayFolderTreeTooltipEvent(UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if (!tooltipControl_ || !treePane_)
+        {
+            return;
+        }
+
+        if (message == WM_MOUSEMOVE)
+        {
+            TRACKMOUSEEVENT tracking{};
+            tracking.cbSize = sizeof(tracking);
+            tracking.dwFlags = TME_LEAVE;
+            tracking.hwndTrack = treePane_;
+            TrackMouseEvent(&tracking);
+
+            std::wstring hoveredPath;
+            TVHITTESTINFO hitTest{};
+            hitTest.pt = POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            const HTREEITEM item = TreeView_HitTest(treePane_, &hitTest);
+            if (item && (hitTest.flags & TVHT_ONITEM) != 0)
+            {
+                if (const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+                    nodeData && IsFavoriteDestination(nodeData->path)
+                    && quickSendModel_.ShortcutForDestination(nodeData->path).has_value())
+                {
+                    hoveredPath = nodeData->path;
+                }
+            }
+
+            if (!FolderPathsEqual(treeTooltipPath_, hoveredPath))
+            {
+                treeTooltipPath_ = std::move(hoveredPath);
+                treeFolderTooltipText_.clear();
+                SendMessageW(tooltipControl_, TTM_POP, 0, 0);
+            }
+        }
+        else if (message == WM_MOUSELEAVE)
+        {
+            treeTooltipPath_.clear();
+            treeFolderTooltipText_.clear();
+            SendMessageW(tooltipControl_, TTM_POP, 0, 0);
+        }
+
+        MSG relayMessage{};
+        relayMessage.hwnd = treePane_;
+        relayMessage.message = message;
+        relayMessage.wParam = wParam;
+        relayMessage.lParam = lParam;
+        SendMessageW(tooltipControl_, TTM_RELAYEVENT, 0, reinterpret_cast<LPARAM>(&relayMessage));
+    }
+
+    LRESULT CALLBACK MainWindow::FolderTreeTooltipSubclassProc(HWND hwnd,
+                                                                 UINT message,
+                                                                 WPARAM wParam,
+                                                                 LPARAM lParam,
+                                                                 UINT_PTR,
+                                                                 DWORD_PTR refData)
+    {
+        auto* window = reinterpret_cast<MainWindow*>(refData);
+        if (window && (message == WM_MOUSEMOVE || message == WM_MOUSELEAVE))
+        {
+            window->RelayFolderTreeTooltipEvent(message, wParam, lParam);
+        }
+
+        return DefSubclassProc(hwnd, message, wParam, lParam);
+    }
+
+    LRESULT CALLBACK MainWindow::QuickAccessShortcutEditSubclassProc(HWND hwnd,
+                                                                       UINT message,
+                                                                       WPARAM wParam,
+                                                                       LPARAM lParam,
+                                                                       UINT_PTR,
+                                                                       DWORD_PTR)
+    {
+        const LRESULT result = DefSubclassProc(hwnd, message, wParam, lParam);
+        if (message == WM_LBUTTONUP)
+        {
+            PostMessageW(hwnd, EM_SETSEL, 0, static_cast<LPARAM>(-1));
+        }
+
+        return result;
     }
 
     LRESULT MainWindow::OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView)
@@ -7878,7 +8034,13 @@ namespace hyperbrowse::ui
         detailsPanelHistogramRect_ = RECT{};
         detailsPanelCloseButtonRect_ = RECT{};
         quickAccessDestinationPanelRect_ = RECT{};
+        quickAccessDestinationViewportRect_ = RECT{};
         quickAccessDestinationRows_.clear();
+        if (quickAccessScrollBar_)
+        {
+            ShowWindow(quickAccessScrollBar_, SW_HIDE);
+        }
+        HideQuickAccessShortcutEditControls();
         quickAccessHotRowIndex_ = -1;
         quickAccessHotButtonIndex_ = -1;
         quickAccessPressedRowIndex_ = -1;
@@ -8586,6 +8748,17 @@ namespace hyperbrowse::ui
                 LayoutChildren();
             }
         }
+    }
+
+    void MainWindow::SyncQuickSendModel()
+    {
+        quickSendModel_.SetFavoriteDestinations(favoriteDestinationFolders_);
+    }
+
+    void MainWindow::SortFavoriteDestinationsByShortcut()
+    {
+        quickSendModel_.SortFavoriteDestinationsByShortcut();
+        favoriteDestinationFolders_ = quickSendModel_.FavoriteDestinations();
     }
 
     void MainWindow::RefreshQuickAccessMenus()
@@ -9591,6 +9764,12 @@ namespace hyperbrowse::ui
                 DrawTextW(hdc, label, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             };
 
+            const int savedDC = SaveDC(hdc);
+            IntersectClipRect(hdc,
+                              quickAccessDestinationViewportRect_.left,
+                              quickAccessDestinationViewportRect_.top,
+                              quickAccessDestinationViewportRect_.right,
+                              quickAccessDestinationViewportRect_.bottom);
             for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
             {
                 const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
@@ -9616,7 +9795,7 @@ namespace hyperbrowse::ui
                 RECT labelRect = row.rowRect;
                 labelRect.left += 10;
                 labelRect.top += metrics.labelTopInset;
-                labelRect.right = row.copyRect.left - 10;
+                labelRect.right = row.shortcutRect.left - 10;
                 labelRect.bottom = labelRect.top + metrics.labelHeight;
                 SetTextColor(hdc, rowEnabled ? palette.text : palette.mutedText);
                 SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
@@ -9653,6 +9832,7 @@ namespace hyperbrowse::ui
                                  palette.mutedText,
                                  rowBorder);
             }
+            RestoreDC(hdc, savedDC);
         }
         else if (activeRightPaneTab_ == RightPaneTab::QuickSend && !IsRectEmpty(&detailsPanelContentRect_))
         {
@@ -9660,7 +9840,7 @@ namespace hyperbrowse::ui
             SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
             SetTextColor(hdc, palette.mutedText);
             DrawTextW(hdc,
-                      L"Quick Send favorites and recent destinations will appear here.",
+                      L"Favorite destinations will appear here.",
                       -1,
                       &emptyStateRect,
                       DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
@@ -9988,6 +10168,11 @@ namespace hyperbrowse::ui
     {
         quickAccessDestinationRows_.clear();
         quickAccessDestinationPanelRect_ = RECT{};
+        quickAccessDestinationViewportRect_ = RECT{};
+        if (quickAccessScrollBar_)
+        {
+            ShowWindow(quickAccessScrollBar_, SW_HIDE);
+        }
         quickAccessHotRowIndex_ = -1;
         quickAccessHotButtonIndex_ = -1;
         quickAccessPressedRowIndex_ = -1;
@@ -9995,53 +10180,85 @@ namespace hyperbrowse::ui
 
         if (!detailsStripVisible_ || innerRight <= innerLeft)
         {
+            HideQuickAccessShortcutEditControls();
             return;
         }
 
         std::vector<std::pair<std::wstring, bool>> destinations;
-        destinations.reserve(kQuickAccessPanelMaxRows);
-        for (const std::wstring& favoritePath : favoriteDestinationFolders_)
+        destinations.reserve(quickSendModel_.FavoriteDestinations().size());
+        for (const std::wstring& favoritePath : quickSendModel_.FavoriteDestinations())
         {
-            if (destinations.size() >= kQuickAccessPanelMaxRows)
-            {
-                break;
-            }
-
             destinations.emplace_back(favoritePath, true);
-        }
-
-        for (const std::wstring& recentPath : RecentDestinationShortcutPaths())
-        {
-            if (destinations.size() >= kQuickAccessPanelMaxRows)
-            {
-                break;
-            }
-
-            destinations.emplace_back(recentPath, false);
         }
 
         if (destinations.empty())
         {
+            HideQuickAccessShortcutEditControls();
             return;
         }
 
         const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
-        const int panelHeight = metrics.headerHeight
-            + static_cast<int>(destinations.size()) * metrics.rowHeight
-            + static_cast<int>((destinations.size() - 1) * kQuickAccessPanelRowGap);
-        quickAccessDestinationPanelRect_ = RECT{innerLeft, top, innerRight, top + panelHeight};
+        const int panelBottom = detailsPanelContentRect_.bottom;
+        const int viewportTop = top + metrics.headerHeight;
+        if (panelBottom <= viewportTop)
+        {
+            HideQuickAccessShortcutEditControls();
+            return;
+        }
 
-        int rowTop = top + metrics.headerHeight;
+        const int totalRowsHeight = static_cast<int>(destinations.size()) * metrics.rowHeight
+            + static_cast<int>((destinations.size() - 1) * kQuickAccessPanelRowGap);
+        const int viewportHeight = panelBottom - viewportTop;
+        const int maximumScrollOffset = std::max(0, totalRowsHeight - viewportHeight);
+        int contentRight = innerRight;
+        if (maximumScrollOffset > 0 && quickAccessScrollBar_)
+        {
+            const int scrollBarWidth = std::max(1, GetSystemMetrics(SM_CXVSCROLL));
+            const int scrollBarLeft = innerRight - scrollBarWidth;
+            contentRight = scrollBarLeft - kQuickAccessPanelScrollBarGap;
+            if (contentRight > innerLeft)
+            {
+                SCROLLINFO scrollInfo{};
+                scrollInfo.cbSize = sizeof(scrollInfo);
+                scrollInfo.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+                scrollInfo.nMin = 0;
+                scrollInfo.nMax = std::max(0, totalRowsHeight - 1);
+                scrollInfo.nPage = static_cast<UINT>(viewportHeight);
+                scrollInfo.nPos = quickAccessScrollOffset_;
+                SetScrollInfo(quickAccessScrollBar_, SB_CTL, &scrollInfo, TRUE);
+                MoveWindow(quickAccessScrollBar_,
+                           scrollBarLeft,
+                           viewportTop,
+                           scrollBarWidth,
+                           viewportHeight,
+                           TRUE);
+                ShowWindow(quickAccessScrollBar_, SW_SHOW);
+            }
+            else
+            {
+                contentRight = innerRight;
+            }
+        }
+
+        quickAccessDestinationPanelRect_ = RECT{innerLeft, top, innerRight, panelBottom};
+        quickAccessDestinationViewportRect_ = RECT{innerLeft, viewportTop, contentRight, panelBottom};
+        quickAccessScrollOffset_ = std::clamp(quickAccessScrollOffset_, 0, maximumScrollOffset);
+
+        int rowTop = viewportTop - quickAccessScrollOffset_;
         for (const auto& [path, favorite] : destinations)
         {
             QuickAccessDestinationRow row;
             row.destinationPath = path;
             row.displayLabel = FormatFolderShortcutMenuLabel(path);
             row.metadataLabel = BuildQuickAccessDestinationMetadata(path, favorite, IsQuickAccessDestinationCurrentFolder(path));
+            if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(path))
+            {
+                row.assignedShortcut = *assignedShortcut;
+            }
             row.favorite = favorite;
-            row.rowRect = RECT{innerLeft, rowTop, innerRight, rowTop + metrics.rowHeight};
+            row.rowRect = RECT{innerLeft, rowTop, contentRight, rowTop + metrics.rowHeight};
             const int buttonTop = rowTop + metrics.buttonTopInset;
-            int buttonRight = innerRight - kQuickAccessPanelButtonRightInset;
+            int buttonRight = contentRight - kQuickAccessPanelButtonRightInset;
             row.removeRect = RECT{buttonRight - kQuickAccessPanelRemoveButtonWidth,
                                   buttonTop,
                                   buttonRight,
@@ -10055,9 +10272,132 @@ namespace hyperbrowse::ui
                                 row.moveRect.top,
                                 row.moveRect.left - kQuickAccessPanelButtonGap,
                                 row.moveRect.bottom};
+            const int shortcutRight = row.copyRect.left - kQuickAccessPanelShortcutGap;
+            row.shortcutRect = RECT{shortcutRight - kQuickAccessPanelShortcutWidth,
+                                    buttonTop,
+                                    shortcutRight,
+                                    buttonTop + metrics.buttonHeight};
             quickAccessDestinationRows_.push_back(std::move(row));
             rowTop += metrics.rowHeight + kQuickAccessPanelRowGap;
         }
+
+        UpdateQuickAccessShortcutEditControls();
+    }
+
+    void MainWindow::UpdateQuickAccessShortcutEditControls()
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        const HFONT font = detailsPanelBodyFont_
+            ? detailsPanelBodyFont_
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        while (quickAccessShortcutEdits_.size() < quickAccessDestinationRows_.size())
+        {
+            const UINT controlId = kQuickAccessShortcutEditBaseId
+                + static_cast<UINT>(quickAccessShortcutEdits_.size());
+            HWND edit = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                L"",
+                WS_CHILD | WS_TABSTOP | ES_CENTER,
+                0,
+                0,
+                kQuickAccessPanelShortcutWidth,
+                kTextInputButtonHeight,
+                hwnd_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
+                instance_,
+                nullptr);
+            if (!edit)
+            {
+                break;
+            }
+
+            SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            SendMessageW(edit, EM_LIMITTEXT, 1, 0);
+            SetWindowSubclass(edit,
+                              &MainWindow::QuickAccessShortcutEditSubclassProc,
+                              1,
+                              reinterpret_cast<DWORD_PTR>(this));
+            quickAccessShortcutEdits_.push_back(edit);
+
+            if (tooltipControl_)
+            {
+                TTTOOLINFOW toolInfo{};
+                toolInfo.cbSize = sizeof(toolInfo);
+                toolInfo.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+                toolInfo.hwnd = hwnd_;
+                toolInfo.uId = reinterpret_cast<UINT_PTR>(edit);
+                toolInfo.lpszText = const_cast<LPWSTR>(L"Quick Send hotkey: enter one digit or letter from 0 through 9 or A through Z.");
+                SendMessageW(tooltipControl_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+            }
+        }
+
+        updatingQuickAccessShortcutEdits_ = true;
+        for (std::size_t index = 0; index < quickAccessShortcutEdits_.size(); ++index)
+        {
+            HWND edit = quickAccessShortcutEdits_[index];
+            if (!edit)
+            {
+                continue;
+            }
+
+            if (index >= quickAccessDestinationRows_.size())
+            {
+                ShowWindow(edit, SW_HIDE);
+                continue;
+            }
+
+            const QuickAccessDestinationRow& row = quickAccessDestinationRows_[index];
+            RECT visibleIntersection{};
+            const bool visible = !IsRectEmpty(&row.shortcutRect)
+                && IntersectRect(&visibleIntersection,
+                                 &row.shortcutRect,
+                                 &quickAccessDestinationViewportRect_) != FALSE
+                && EqualRect(&visibleIntersection, &row.shortcutRect) != FALSE;
+            if (!visible)
+            {
+                ShowWindow(edit, SW_HIDE);
+                continue;
+            }
+
+            MoveWindow(edit,
+                       row.shortcutRect.left,
+                       row.shortcutRect.top,
+                       row.shortcutRect.right - row.shortcutRect.left,
+                       row.shortcutRect.bottom - row.shortcutRect.top,
+                       TRUE);
+            std::wstring shortcutText;
+            const wchar_t shortcutCharacter = QuickSendModel::ShortcutCharacter(row.assignedShortcut);
+            if (shortcutCharacter != L'\0')
+            {
+                shortcutText.push_back(shortcutCharacter);
+            }
+            SetWindowTextW(edit, shortcutText.c_str());
+            ShowWindow(edit, SW_SHOW);
+        }
+        updatingQuickAccessShortcutEdits_ = false;
+    }
+
+    void MainWindow::HideQuickAccessShortcutEditControls()
+    {
+        for (HWND edit : quickAccessShortcutEdits_)
+        {
+            if (edit)
+            {
+                ShowWindow(edit, SW_HIDE);
+            }
+        }
+    }
+
+    bool MainWindow::IsQuickAccessShortcutEdit(HWND control) const
+    {
+        return control
+            && std::find(quickAccessShortcutEdits_.begin(), quickAccessShortcutEdits_.end(), control)
+                != quickAccessShortcutEdits_.end();
     }
 
     bool MainWindow::IsQuickAccessDestinationCurrentFolder(std::wstring_view folderPath) const
@@ -10078,6 +10418,12 @@ namespace hyperbrowse::ui
     int MainWindow::HitTestQuickAccessDestinationRow(int x, int y) const
     {
         const POINT point{x, y};
+        if (IsRectEmpty(&quickAccessDestinationViewportRect_)
+            || PtInRect(&quickAccessDestinationViewportRect_, point) == FALSE)
+        {
+            return -1;
+        }
+
         for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
         {
             const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
@@ -10102,6 +10448,12 @@ namespace hyperbrowse::ui
     int MainWindow::HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type) const
     {
         const POINT point{x, y};
+        if (IsRectEmpty(&quickAccessDestinationViewportRect_)
+            || PtInRect(&quickAccessDestinationViewportRect_, point) == FALSE)
+        {
+            return -1;
+        }
+
         for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
         {
             const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
@@ -10336,7 +10688,7 @@ namespace hyperbrowse::ui
         LoadFolderAsync(std::move(folderPath));
     }
 
-    bool MainWindow::ChooseFolder(std::wstring* folderPath) const
+    bool MainWindow::ChooseFolder(std::wstring* folderPath, HWND ownerWindow) const
     {
         if (!folderPath)
         {
@@ -10356,7 +10708,7 @@ namespace hyperbrowse::ui
         DWORD options = 0;
         dialog->GetOptions(&options);
         dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-        result = dialog->Show(hwnd_);
+        result = dialog->Show(ownerWindow ? ownerWindow : hwnd_);
         if (FAILED(result))
         {
             return false;
@@ -10474,6 +10826,11 @@ namespace hyperbrowse::ui
         }
 
         favoriteDestinationFolders_.erase(newEnd, favoriteDestinationFolders_.end());
+        SyncQuickSendModel();
+        if (treePane_)
+        {
+            InvalidateRect(treePane_, nullptr, FALSE);
+        }
         UpdateMenuState();
         if (hwnd_ && detailsStripVisible_)
         {
@@ -10509,6 +10866,11 @@ namespace hyperbrowse::ui
         }
 
         favoriteDestinationFolders_.clear();
+        SyncQuickSendModel();
+        if (treePane_)
+        {
+            InvalidateRect(treePane_, nullptr, FALSE);
+        }
         UpdateMenuState();
         if (hwnd_ && detailsStripVisible_)
         {
@@ -10554,6 +10916,7 @@ namespace hyperbrowse::ui
         {
             return FolderPathsEqual(candidate, folderPath);
         });
+        bool addedFavorite = false;
 
         if (existing != favoriteDestinationFolders_.end())
         {
@@ -10561,9 +10924,19 @@ namespace hyperbrowse::ui
         }
         else
         {
-            InsertFolderPath(&favoriteDestinationFolders_, folderPath, kQuickAccessFolderLimit, true);
+            addedFavorite = InsertFolderPath(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
         }
+        SyncQuickSendModel();
+        if (addedFavorite)
+        {
+            quickSendModel_.AssignNextAvailableShortcut(folderPath);
+        }
+        SortFavoriteDestinationsByShortcut();
 
+        if (treePane_)
+        {
+            InvalidateRect(treePane_, nullptr, FALSE);
+        }
         UpdateMenuState();
         if (hwnd_ && detailsStripVisible_)
         {
@@ -11035,10 +11408,11 @@ namespace hyperbrowse::ui
         constexpr UINT kOpenInExplorerCommandId = 4;
         constexpr UINT kCopyPathCommandId = 5;
         constexpr UINT kMoveFolderBrowseCommandId = 6;
-        constexpr UINT kMoveFolderFavoriteBaseCommandId = 10;
-        constexpr UINT kMoveFolderFavoriteLastCommandId = 17;
-        constexpr UINT kMoveFolderRecentBaseCommandId = 20;
-        constexpr UINT kMoveFolderRecentLastCommandId = 27;
+        constexpr UINT kMoveFolderFavoriteBaseCommandId = 40;
+        constexpr UINT kMoveFolderFavoriteLastCommandId = kMoveFolderFavoriteBaseCommandId
+            + static_cast<UINT>(kFavoriteDestinationLimit) - 1;
+        constexpr UINT kMoveFolderRecentBaseCommandId = 80;
+        constexpr UINT kMoveFolderRecentLastCommandId = 87;
         constexpr UINT kNewFolderCommandId = 30;
         constexpr UINT kToggleFavoriteCommandId = 31;
         constexpr UINT kFolderPropertiesCommandId = 32;
@@ -11209,13 +11583,24 @@ namespace hyperbrowse::ui
             {
                 return FolderPathsEqual(candidate, folderPath);
             });
+            bool addedFavorite = false;
             if (existing != favoriteDestinationFolders_.end())
             {
                 favoriteDestinationFolders_.erase(existing);
             }
             else
             {
-                InsertFolderPath(&favoriteDestinationFolders_, folderPath, kQuickAccessFolderLimit, true);
+                addedFavorite = InsertFolderPath(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
+            }
+            SyncQuickSendModel();
+            if (addedFavorite)
+            {
+                quickSendModel_.AssignNextAvailableShortcut(folderPath);
+            }
+            SortFavoriteDestinationsByShortcut();
+            if (treePane_)
+            {
+                InvalidateRect(treePane_, nullptr, FALSE);
             }
             UpdateMenuState();
             if (hwnd_ && detailsStripVisible_)
@@ -11943,15 +12328,16 @@ namespace hyperbrowse::ui
                            {});
     }
 
-    void MainWindow::StartFileOperation(services::FileOperationType type,
+    bool MainWindow::StartFileOperation(services::FileOperationType type,
                                         std::vector<std::wstring> sourcePaths,
                                         std::wstring destinationFolder,
                                         services::FileConflictPolicy conflictPolicy,
-                                        std::vector<std::wstring> targetLeafNames)
+                                        std::vector<std::wstring> targetLeafNames,
+                                        HWND ownerWindow)
     {
         if (!fileOperationService_ || sourcePaths.empty() || fileOperationActive_)
         {
-            return;
+            return false;
         }
 
         activeFileOperationLabel_ = services::FileOperationTypeToActivityLabel(type);
@@ -11959,14 +12345,15 @@ namespace hyperbrowse::ui
         activeFileOperationLabel_.append(std::to_wstring(sourcePaths.size()));
         activeFileOperationLabel_.append(L" item(s)");
         fileOperationActive_ = true;
-        // IFileOperation's progress dialog is owned by the main window, so tearing it
-        // down reactivates the main window. Remember who was active first, so the
-        // completion handler can hand activation back; otherwise a delete issued from
-        // the viewer silently leaves the viewer without keyboard focus.
+        // Remember who was active first, so shell-operation completion can hand
+        // activation back when the operation was initiated from the viewer.
         foregroundWindowAtFileOperationStart_ = GetForegroundWindow();
+        const HWND operationOwnerWindow = ownerWindow && IsWindow(ownerWindow)
+            ? ownerWindow
+            : hwnd_;
         activeFileOperationRequestId_ = fileOperationService_->Start(
             hwnd_,
-            hwnd_,
+            operationOwnerWindow,
             type,
             std::move(sourcePaths),
             std::move(destinationFolder),
@@ -11975,6 +12362,7 @@ namespace hyperbrowse::ui
         UpdateTaskbarProgress(0, 1); // show the bar immediately (0%) until ticks arrive
         UpdateStatusText();
         UpdateMenuState();
+        return true;
     }
 
     void MainWindow::UpdateTaskbarProgress(ULONGLONG completed, ULONGLONG total)
@@ -13015,6 +13403,11 @@ namespace hyperbrowse::ui
         pendingViewerDeleteSourcePaths_.clear();
         pendingViewerDeletePreferredFocusPath_.clear();
 
+        const PendingViewerQuickSend viewerQuickSend = pendingViewerQuickSend_;
+        pendingViewerQuickSend_ = {};
+        const bool viewerQuickSendOperation = viewerQuickSend.active
+            && viewerQuickSend.type == update.type;
+
         // Only deletes that originated in the viewer get the "do not re-enumerate"
         // treatment below; browser-initiated deletes must still update the model.
         const bool viewerDeleteOperation = !viewerDeleteSourcePath.empty()
@@ -13395,7 +13788,10 @@ namespace hyperbrowse::ui
                 // browser-initiated operation. Viewer deletes are excluded: the
                 // viewer already advanced locally and re-syncing it here would
                 // blank and re-decode the image that is already on screen.
-                if (!viewerDeleteOperation && viewerWindow_ && viewerWindow_->IsOpen())
+                if (!viewerDeleteOperation
+                    && !viewerQuickSendOperation
+                    && viewerWindow_
+                    && viewerWindow_->IsOpen())
                 {
                     SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
                 }
@@ -13495,6 +13891,44 @@ namespace hyperbrowse::ui
                 if (modelIndex >= 0)
                 {
                     OpenItemInViewer(modelIndex);
+                }
+            }
+        }
+
+        if (viewerQuickSendOperation && viewerQuickSend.type == services::FileOperationType::Move)
+        {
+            const bool primaryPathSucceeded = std::any_of(
+                update.succeededSourcePaths.begin(),
+                update.succeededSourcePaths.end(),
+                [&](const std::wstring& succeededPath)
+                {
+                    return browser::FilePathsEqual(succeededPath, viewerQuickSend.sourcePath);
+                });
+            const bool primaryPathMissingAfterOperation = [&]()
+            {
+                if (update.aborted || primaryPathSucceeded)
+                {
+                    return false;
+                }
+
+                std::error_code error;
+                return !fs::exists(fs::path(viewerQuickSend.sourcePath), error) && !error;
+            }();
+            const bool viewerQuickSendSucceeded = primaryPathSucceeded || primaryPathMissingAfterOperation;
+
+            if (!viewerQuickSendSucceeded)
+            {
+                if (viewerWindow_ && viewerWindow_->IsOpen())
+                {
+                    SyncViewerToBrowserModel(viewerQuickSend.sourcePath);
+                }
+                else if (browserModel_)
+                {
+                    const int sourceModelIndex = browserModel_->FindItemIndexByPath(viewerQuickSend.sourcePath);
+                    if (sourceModelIndex >= 0)
+                    {
+                        OpenItemInViewer(sourceModelIndex);
+                    }
                 }
             }
         }
@@ -14675,8 +15109,19 @@ namespace hyperbrowse::ui
 
             if (TryReadStringValue(key, kRegistryValueFavoriteDestinationFolders, &serializedPaths))
             {
-                favoriteDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kQuickAccessFolderLimit);
+                favoriteDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kFavoriteDestinationLimit);
             }
+
+            SyncQuickSendModel();
+            QuickSendModel::ShortcutAssignments shortcutAssignments{};
+            for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
+            {
+                const std::wstring valueName = std::wstring(kRegistryValueQuickSendShortcutPrefix)
+                    + std::to_wstring(index);
+                TryReadStringValue(key, valueName.c_str(), &shortcutAssignments[index]);
+            }
+            quickSendModel_.SetShortcutAssignments(shortcutAssignments);
+            SortFavoriteDestinationsByShortcut();
 
             if (TryReadDwordValue(key, kRegistryValueSortMode, &value) && value <= static_cast<DWORD>(browser::BrowserSortMode::Tags))
             {
@@ -14885,6 +15330,13 @@ namespace hyperbrowse::ui
             WriteStringValue(key, kRegistryValueRecentFolders, SerializeFolderPathList(recentFolders_));
             WriteStringValue(key, kRegistryValueRecentDestinationFolders, SerializeFolderPathList(recentDestinationFolders_));
             WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, SerializeFolderPathList(favoriteDestinationFolders_));
+            const QuickSendModel::ShortcutAssignments& shortcutAssignments = quickSendModel_.ShortcutAssignmentsByKey();
+            for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
+            {
+                const std::wstring valueName = std::wstring(kRegistryValueQuickSendShortcutPrefix)
+                    + std::to_wstring(index);
+                WriteStringValue(key, valueName.c_str(), shortcutAssignments[index]);
+            }
             if (browserPaneController_)
             {
                 WriteDwordValue(key, kRegistryValueSortMode, static_cast<DWORD>(browserPaneController_->GetSortMode()));
@@ -15341,6 +15793,242 @@ namespace hyperbrowse::ui
         return 0;
     }
 
+    bool MainWindow::ChooseQuickSendDestination(services::FileOperationType operationType,
+                                                 POINT popupPoint,
+                                                 HWND dialogOwner,
+                                                 std::wstring* destinationFolder)
+    {
+        if (!destinationFolder || !hwnd_)
+        {
+            return false;
+        }
+
+        const HWND browseOwner = dialogOwner && IsWindow(dialogOwner) ? dialogOwner : hwnd_;
+        const std::vector<std::wstring> destinations = quickSendModel_.FavoriteDestinations();
+        HMENU popupMenu = CreatePopupMenu();
+        if (!popupMenu)
+        {
+            return false;
+        }
+
+        AppendMenuW(popupMenu,
+                    MF_STRING,
+                    kQuickSendPopupBrowseCommand,
+                    operationType == services::FileOperationType::Move
+                        ? L"Move to..."
+                        : L"Copy to...");
+        AppendMenuW(popupMenu, MF_SEPARATOR, 0, nullptr);
+
+        for (std::size_t index = 0; index < destinations.size(); ++index)
+        {
+            std::wstring label;
+            if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(destinations[index]))
+            {
+                label.push_back(L'&');
+                label.push_back(QuickSendModel::ShortcutCharacter(*assignedShortcut));
+                label.append(L"  ");
+            }
+            label.append(EscapeMenuMnemonicText(FormatFolderShortcutMenuLabel(destinations[index])));
+
+            const UINT flags = IsExistingDirectory(destinations[index]) ? MF_ENABLED : MF_GRAYED;
+            AppendMenuW(popupMenu,
+                        MF_STRING | flags,
+                        kQuickSendPopupDestinationBase + static_cast<UINT>(index),
+                        label.c_str());
+        }
+
+        quickSendPopupActive_ = true;
+        const int selectedCommand = TrackPopupMenuEx(
+            popupMenu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            popupPoint.x,
+            popupPoint.y,
+            hwnd_,
+            nullptr);
+        quickSendPopupActive_ = false;
+        DestroyMenu(popupMenu);
+        SetForegroundWindow(browseOwner);
+
+        if (selectedCommand == static_cast<int>(kQuickSendPopupBrowseCommand))
+        {
+            return ChooseFolder(destinationFolder, browseOwner) && !destinationFolder->empty();
+        }
+
+        if (selectedCommand < static_cast<int>(kQuickSendPopupDestinationBase)
+            || selectedCommand >= static_cast<int>(kQuickSendPopupDestinationBase + destinations.size()))
+        {
+            return false;
+        }
+
+        const std::wstring& selectedDestination = destinations[
+            static_cast<std::size_t>(selectedCommand - static_cast<int>(kQuickSendPopupDestinationBase))];
+        if (!IsExistingDirectory(selectedDestination))
+        {
+            return false;
+        }
+
+        *destinationFolder = selectedDestination;
+        return true;
+    }
+
+    void MainWindow::StartQuickSendForSelection(services::FileOperationType type)
+    {
+        if (fileOperationActive_ || !browserPaneController_ || SelectedFileOperationPathsSnapshot().empty())
+        {
+            return;
+        }
+
+        RECT mainRect{};
+        GetClientRect(hwnd_, &mainRect);
+        POINT popupPoint{
+            (mainRect.left + mainRect.right) / 2,
+            (mainRect.top + mainRect.bottom) / 2,
+        };
+        ClientToScreen(hwnd_, &popupPoint);
+
+        std::wstring destinationFolder;
+        if (ChooseQuickSendDestination(type, popupPoint, hwnd_, &destinationFolder))
+        {
+            StartSelectionFileOperationToDestination(type, std::move(destinationFolder));
+        }
+    }
+
+    LRESULT MainWindow::OnViewerQuickSendRequest(WPARAM wParam, LPARAM lParam)
+    {
+        if (!viewerWindow_
+            || !viewerWindow_->IsOpen()
+            || reinterpret_cast<HWND>(lParam) != viewerWindow_->Hwnd()
+            || fileOperationActive_
+            || quickSendPopupActive_)
+        {
+            return 0;
+        }
+
+        services::FileOperationType operationType{};
+        if (wParam == static_cast<WPARAM>(viewer::QuickSendOperation::Move))
+        {
+            operationType = services::FileOperationType::Move;
+        }
+        else if (wParam == static_cast<WPARAM>(viewer::QuickSendOperation::Copy))
+        {
+            operationType = services::FileOperationType::Copy;
+        }
+        else
+        {
+            return 0;
+        }
+
+        const std::wstring sourcePath = viewerWindow_->CurrentFilePath();
+        if (sourcePath.empty())
+        {
+            return 0;
+        }
+
+        RECT viewerRect{};
+        GetClientRect(viewerWindow_->Hwnd(), &viewerRect);
+        POINT popupPoint{
+            (viewerRect.left + viewerRect.right) / 2,
+            (viewerRect.top + viewerRect.bottom) / 2,
+        };
+        ClientToScreen(viewerWindow_->Hwnd(), &popupPoint);
+
+        std::wstring destinationFolder;
+        if (ChooseQuickSendDestination(operationType,
+                                       popupPoint,
+                                       viewerWindow_->Hwnd(),
+                                       &destinationFolder))
+        {
+            StartViewerQuickSendOperation(operationType, std::move(destinationFolder));
+        }
+        return 0;
+    }
+
+    bool MainWindow::StartViewerQuickSendOperation(services::FileOperationType type,
+                                                    std::wstring destinationFolder)
+    {
+        if (!viewerWindow_ || !viewerWindow_->IsOpen() || fileOperationActive_)
+        {
+            return false;
+        }
+
+        const HWND viewerHwnd = viewerWindow_->Hwnd();
+        const std::wstring sourcePath = NormalizeFolderPath(viewerWindow_->CurrentFilePath());
+        if (sourcePath.empty())
+        {
+            return false;
+        }
+
+        std::vector<std::wstring> sourcePaths = ExpandRawJpegPairedPaths({sourcePath});
+        if (sourcePaths.empty())
+        {
+            return false;
+        }
+
+        destinationFolder = NormalizeFolderPath(std::move(destinationFolder));
+        if (!IsExistingDirectory(destinationFolder))
+        {
+            MessageBoxW(viewerHwnd,
+                        L"The selected destination folder is no longer available.",
+                        L"Quick Send",
+                        MB_OK | MB_ICONINFORMATION);
+            return false;
+        }
+
+        const std::wstring sourceParent = NormalizeFolderPath(fs::path(sourcePath).parent_path().wstring());
+        if (FolderPathsEqual(sourceParent, destinationFolder))
+        {
+            MessageBoxW(viewerHwnd,
+                        L"The selected destination is already the current folder.",
+                        L"Quick Send",
+                        MB_OK | MB_ICONINFORMATION);
+            return false;
+        }
+
+        const services::FileConflictPlan conflictPlan = services::PlanDestinationConflicts(
+            sourcePaths,
+            destinationFolder,
+            services::FileConflictPolicy::OverwriteExisting);
+        services::FileConflictPolicy conflictPolicy = services::FileConflictPolicy::PromptShell;
+        if (!PromptForFileConflictPolicy(viewerHwnd, type, conflictPlan.conflictCount, &conflictPolicy))
+        {
+            return false;
+        }
+
+        std::vector<std::wstring> targetLeafNames;
+        if (conflictPolicy == services::FileConflictPolicy::AutoRenameNumericSuffix)
+        {
+            targetLeafNames = services::PlanDestinationConflicts(
+                sourcePaths,
+                destinationFolder,
+                conflictPolicy).targetLeafNames;
+        }
+
+        PendingViewerQuickSend pending;
+        pending.type = type;
+        pending.sourcePath = sourcePath;
+        pending.sourcePaths = sourcePaths;
+        pending.destinationFolder = destinationFolder;
+        pending.active = true;
+        pendingViewerQuickSend_ = std::move(pending);
+
+        if (!StartFileOperation(type,
+                                sourcePaths,
+                                destinationFolder,
+                                conflictPolicy,
+                                std::move(targetLeafNames),
+                                viewerHwnd))
+        {
+            pendingViewerQuickSend_ = {};
+            return false;
+        }
+
+        if (type == services::FileOperationType::Move)
+        {
+            pendingViewerQuickSend_.viewerAdvanced = viewerWindow_->AdvanceAfterDeleteCurrent();
+        }
+        return true;
+    }
+
     LRESULT MainWindow::OnViewerDeleteRequested(WPARAM wParam)
     {
         util::LogInfo(L"MainWindow::OnViewerDeleteRequested entered");
@@ -15665,6 +16353,12 @@ namespace hyperbrowse::ui
             return true;
         case ID_FILE_IMAGE_INFORMATION:
             ShowImageInformation();
+            return true;
+        case ID_FILE_QUICK_SEND_MOVE:
+            StartQuickSendForSelection(services::FileOperationType::Move);
+            return true;
+        case ID_FILE_QUICK_SEND_COPY:
+            StartQuickSendForSelection(services::FileOperationType::Copy);
             return true;
         case ID_FILE_COPY_SELECTION:
             StartCopySelection();
@@ -17129,6 +17823,97 @@ namespace hyperbrowse::ui
         }
     }
 
+    bool MainWindow::OnQuickAccessMouseWheel(WPARAM wParam, LPARAM lParam)
+    {
+        if (quickAccessDestinationRows_.empty() || IsRectEmpty(&quickAccessDestinationViewportRect_))
+        {
+            return false;
+        }
+
+        POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        ScreenToClient(hwnd_, &point);
+        if (PtInRect(&quickAccessDestinationPanelRect_, point) == FALSE)
+        {
+            return false;
+        }
+
+        const int wheelSteps = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+        if (wheelSteps == 0)
+        {
+            return true;
+        }
+
+        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+        const int totalRowsHeight = static_cast<int>(quickAccessDestinationRows_.size()) * metrics.rowHeight
+            + static_cast<int>((quickAccessDestinationRows_.size() - 1) * kQuickAccessPanelRowGap);
+        const int maximumScrollOffset = std::max(
+            0,
+            totalRowsHeight - static_cast<int>(quickAccessDestinationViewportRect_.bottom - quickAccessDestinationViewportRect_.top));
+        const int scrollStep = metrics.rowHeight + kQuickAccessPanelRowGap;
+        quickAccessScrollOffset_ = std::clamp(quickAccessScrollOffset_ - (wheelSteps * scrollStep * 2),
+                                              0,
+                                              maximumScrollOffset);
+        LayoutChildren();
+        return true;
+    }
+
+    void MainWindow::OnQuickAccessScroll(WPARAM wParam)
+    {
+        if (!quickAccessScrollBar_)
+        {
+            return;
+        }
+
+        SCROLLINFO scrollInfo{};
+        scrollInfo.cbSize = sizeof(scrollInfo);
+        scrollInfo.fMask = SIF_ALL;
+        if (GetScrollInfo(quickAccessScrollBar_, SB_CTL, &scrollInfo) == FALSE)
+        {
+            return;
+        }
+
+        const int maximumScrollOffset = std::max(0,
+                                                  scrollInfo.nMax
+                                                      - std::max(0, static_cast<int>(scrollInfo.nPage) - 1));
+        const int scrollStep = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_).rowHeight
+            + kQuickAccessPanelRowGap;
+        int nextOffset = quickAccessScrollOffset_;
+        switch (LOWORD(wParam))
+        {
+        case SB_LINEUP:
+            nextOffset -= scrollStep;
+            break;
+        case SB_LINEDOWN:
+            nextOffset += scrollStep;
+            break;
+        case SB_PAGEUP:
+            nextOffset -= static_cast<int>(scrollInfo.nPage);
+            break;
+        case SB_PAGEDOWN:
+            nextOffset += static_cast<int>(scrollInfo.nPage);
+            break;
+        case SB_THUMBPOSITION:
+        case SB_THUMBTRACK:
+            nextOffset = scrollInfo.nTrackPos;
+            break;
+        case SB_TOP:
+            nextOffset = 0;
+            break;
+        case SB_BOTTOM:
+            nextOffset = maximumScrollOffset;
+            break;
+        default:
+            return;
+        }
+
+        nextOffset = std::clamp(nextOffset, 0, maximumScrollOffset);
+        if (nextOffset != quickAccessScrollOffset_)
+        {
+            quickAccessScrollOffset_ = nextOffset;
+            LayoutChildren();
+        }
+    }
+
     LRESULT MainWindow::OnDropFiles(HDROP dropHandle)
     {
         if (!dropHandle)
@@ -17388,6 +18173,13 @@ namespace hyperbrowse::ui
                 menuStateRefreshPosted_ = PostMessageW(hwnd_, kDeferredMenuStateMessage, 0, 0) != FALSE;
             }
             break;
+        case WM_INITMENUPOPUP:
+            if (quickSendPopupActive_ && HIWORD(lParam) == FALSE)
+            {
+                PostMessageW(hwnd_, WM_KEYDOWN, VK_DOWN, 0);
+                PostMessageW(hwnd_, WM_KEYUP, VK_DOWN, 0);
+            }
+            break;
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
         case WM_SYSCHAR:
@@ -17436,6 +18228,19 @@ namespace hyperbrowse::ui
         case WM_MOUSEMOVE:
             OnMouseMove(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             return 0;
+        case WM_MOUSEWHEEL:
+            if (OnQuickAccessMouseWheel(wParam, lParam))
+            {
+                return 0;
+            }
+            break;
+        case WM_VSCROLL:
+            if (reinterpret_cast<HWND>(lParam) == quickAccessScrollBar_)
+            {
+                OnQuickAccessScroll(wParam);
+                return 0;
+            }
+            break;
         case WM_CAPTURECHANGED:
             if (treeFolderDragActive_)
             {
@@ -17539,6 +18344,8 @@ namespace hyperbrowse::ui
             return OnViewerActivityMessage(lParam);
         case viewer::ViewerWindow::kDeleteRequestedMessage:
             return OnViewerDeleteRequested(wParam);
+        case viewer::ViewerWindow::kQuickSendRequestedMessage:
+            return OnViewerQuickSendRequest(wParam, lParam);
         case viewer::ViewerWindow::kStartFolderSlideshowMessage:
             return OnViewerStartFolderSlideshowMessage(wParam);
         case viewer::ViewerWindow::kContextMenuCommandMessage:
@@ -17699,6 +18506,28 @@ namespace hyperbrowse::ui
             if (nmh->hwndFrom == tooltipControl_ && nmh->code == TTN_GETDISPINFOW)
             {
                 auto* di = reinterpret_cast<NMTTDISPINFOW*>(lParam);
+                if (treePane_ && di->hdr.idFrom == reinterpret_cast<UINT_PTR>(treePane_))
+                {
+                    treeFolderTooltipText_.clear();
+                    if (!treeTooltipPath_.empty())
+                    {
+                        if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(treeTooltipPath_))
+                        {
+                            const wchar_t shortcutCharacter = QuickSendModel::ShortcutCharacter(*assignedShortcut);
+                            if (shortcutCharacter != L'\0')
+                            {
+                                treeFolderTooltipText_ = L"Move: F7,";
+                                treeFolderTooltipText_.push_back(shortcutCharacter);
+                                treeFolderTooltipText_.append(L"  Copy: F8,");
+                                treeFolderTooltipText_.push_back(shortcutCharacter);
+                            }
+                        }
+                    }
+
+                    di->lpszText = const_cast<wchar_t*>(treeFolderTooltipText_.c_str());
+                    return 0;
+                }
+
                 const auto idx = static_cast<std::size_t>(di->hdr.idFrom);
                 if (idx < toolbarItems_.size() && !toolbarItems_[idx].tooltip.empty())
                 {
@@ -17709,6 +18538,13 @@ namespace hyperbrowse::ui
             return OnFolderTreeNotify(lParam);
         }
         case WM_CTLCOLOREDIT:
+            if (IsQuickAccessShortcutEdit(reinterpret_cast<HWND>(lParam)))
+            {
+                const ThemePalette palette = GetThemePalette();
+                SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
+                SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionFieldBackground);
+                return reinterpret_cast<INT_PTR>(actionFieldBrush_ ? actionFieldBrush_ : backgroundBrush_);
+            }
             if (reinterpret_cast<HWND>(lParam) == filterEdit_)
             {
                 const ThemePalette palette = GetThemePalette();
@@ -17734,6 +18570,83 @@ namespace hyperbrowse::ui
             }
             break;
         case WM_COMMAND:
+            if (LOWORD(wParam) >= kQuickAccessShortcutEditBaseId
+                && LOWORD(wParam) < kQuickAccessShortcutEditBaseId + quickAccessShortcutEdits_.size())
+            {
+                if (HIWORD(wParam) == EN_SETFOCUS)
+                {
+                    PostMessageW(reinterpret_cast<HWND>(lParam), EM_SETSEL, 0, static_cast<LPARAM>(-1));
+                    return 0;
+                }
+
+                if (HIWORD(wParam) == EN_KILLFOCUS)
+                {
+                    SortFavoriteDestinationsByShortcut();
+                    if (hwnd_ && detailsStripVisible_)
+                    {
+                        LayoutChildren();
+                    }
+                    UpdateMenuState();
+                    return 0;
+                }
+
+                if (HIWORD(wParam) == EN_CHANGE && !updatingQuickAccessShortcutEdits_)
+                {
+                    const std::size_t rowIndex = static_cast<std::size_t>(LOWORD(wParam) - kQuickAccessShortcutEditBaseId);
+                    if (rowIndex < quickAccessDestinationRows_.size())
+                    {
+                        HWND edit = quickAccessShortcutEdits_[rowIndex];
+                        const int textLength = GetWindowTextLengthW(edit);
+                        std::wstring shortcutText(static_cast<std::size_t>(textLength) + 1, L'\0');
+                        GetWindowTextW(edit, shortcutText.data(), static_cast<int>(shortcutText.size()));
+                        shortcutText.resize(wcslen(shortcutText.c_str()));
+
+                        QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
+                        const QuickSendAssignmentResult result = quickSendModel_.SetShortcutForDestination(
+                            row.destinationPath,
+                            shortcutText);
+                        if (result != QuickSendAssignmentResult::Accepted)
+                        {
+                            std::wstring restoredShortcut;
+                            if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(row.destinationPath))
+                            {
+                                const wchar_t shortcutCharacter = QuickSendModel::ShortcutCharacter(*assignedShortcut);
+                                if (shortcutCharacter != L'\0')
+                                {
+                                    restoredShortcut.push_back(shortcutCharacter);
+                                }
+                                row.assignedShortcut = *assignedShortcut;
+                            }
+                            else
+                            {
+                                row.assignedShortcut = -1;
+                            }
+
+                            updatingQuickAccessShortcutEdits_ = true;
+                            SetWindowTextW(edit, restoredShortcut.c_str());
+                            updatingQuickAccessShortcutEdits_ = false;
+                        }
+                        else if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(row.destinationPath))
+                        {
+                            row.assignedShortcut = *assignedShortcut;
+                            const wchar_t shortcutCharacter = QuickSendModel::ShortcutCharacter(*assignedShortcut);
+                            if (shortcutCharacter != L'\0' && shortcutText != std::wstring(1, shortcutCharacter))
+                            {
+                                updatingQuickAccessShortcutEdits_ = true;
+                                SetWindowTextW(edit, std::wstring(1, shortcutCharacter).c_str());
+                                updatingQuickAccessShortcutEdits_ = false;
+                            }
+                        }
+                        else
+                        {
+                            row.assignedShortcut = -1;
+                        }
+
+                        InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+                    }
+                }
+                return 0;
+            }
             if (LOWORD(wParam) == ID_ACTION_FILTER_EDIT && HIWORD(wParam) == EN_CHANGE && browserPaneController_)
             {
                 const int textLength = GetWindowTextLengthW(filterEdit_);

@@ -23,6 +23,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - WIC baseline decode path, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
+- Quick Send with favorite-only destinations, persistent key assignments, F7 move, and F8 copy for the currently displayed image or selected browser files.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
 - Folder tree workflow upgrades with validated folder moves, inline folder creation, favorite destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
@@ -42,6 +43,12 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, viewer prefetch, folder watch refresh, and optional GPU-assisted JPEG decode |
 | Distribution | Debug and Release presets, smoke tests, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode |
+
+### Viewer Quick Send
+
+Quick Send supports up to 36 favorite destinations. Each newly added favorite is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`; its key field accepts one digit or letter and can be edited later. Assignments persist by folder path and remain associated with the same folder when favorites are reordered. Recent folders are not included.
+
+In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed.
 
 ## Architecture Overview
 

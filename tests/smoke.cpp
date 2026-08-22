@@ -38,6 +38,7 @@
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "ui/MainWindow.h"
+#include "ui/QuickSend.h"
 #include "viewer/ViewerWindow.h"
 
 namespace fs = std::filesystem;
@@ -99,6 +100,10 @@ namespace
         FileOperationResult fileOperationResult;
         int viewerStartFolderSlideshowRequests{};
         HWND lastViewerStartFolderSlideshowSource{};
+        int viewerQuickSendRequests{};
+        hyperbrowse::viewer::QuickSendOperation lastViewerQuickSendOperation{
+            hyperbrowse::viewer::QuickSendOperation::Move};
+        HWND lastViewerQuickSendSource{};
     };
 
     class ComScope
@@ -526,6 +531,19 @@ namespace
 
             ++state->viewerStartFolderSlideshowRequests;
             state->lastViewerStartFolderSlideshowSource = reinterpret_cast<HWND>(wParam);
+            return 0;
+        }
+
+        if (message == hyperbrowse::viewer::ViewerWindow::kQuickSendRequestedMessage)
+        {
+            if (!state)
+            {
+                return 0;
+            }
+
+            ++state->viewerQuickSendRequests;
+            state->lastViewerQuickSendOperation = static_cast<hyperbrowse::viewer::QuickSendOperation>(wParam);
+            state->lastViewerQuickSendSource = reinterpret_cast<HWND>(lParam);
             return 0;
         }
 
@@ -1845,6 +1863,145 @@ namespace
                "Bulk model removal left the requested item in the model");
     }
 
+    void RunQuickSendModelScenario()
+    {
+        using hyperbrowse::ui::QuickSendAssignmentResult;
+        using hyperbrowse::ui::QuickSendModel;
+
+        QuickSendModel model;
+        model.SetFavoriteDestinations({
+            L"C:\\Favorites\\One\\",
+            L"c:/favorites/one",
+            L"D:\\Favorites\\Two",
+            L"E:\\Favorites\\Three",
+            L"F:\\Favorites\\Four",
+            L"G:\\Favorites\\Five",
+        });
+
+        Expect(model.FavoriteDestinations().size() == 5,
+            "Quick Send did not deduplicate favorite destinations while preserving more than four entries");
+        Expect(model.FavoriteDestinations().front() == L"C:\\Favorites\\One\\",
+            "Quick Send did not preserve the first favorite path for display");
+        Expect(std::ranges::none_of(model.FavoriteDestinations(), [](const std::wstring& path)
+            {
+                return hyperbrowse::util::NormalizedPathEquals(path, L"H:\\RecentOnly");
+            }),
+            "Recent-only destinations leaked into the favorite Quick Send list");
+        Expect(QuickSendModel::ShortcutIndexFromText(L"0") == 0,
+            "Quick Send did not map the first digit shortcut");
+        Expect(QuickSendModel::ShortcutIndexFromText(L"9") == 9,
+            "Quick Send did not map the last digit shortcut");
+        Expect(QuickSendModel::ShortcutIndexFromText(L"A") == 10,
+            "Quick Send did not map the first letter shortcut");
+        Expect(QuickSendModel::ShortcutIndexFromText(L"z") == 35,
+            "Quick Send did not normalize the last lowercase letter shortcut");
+        Expect(QuickSendModel::ShortcutIndexFromText(L"AB") == std::nullopt,
+            "Quick Send accepted a multi-character shortcut key");
+        Expect(QuickSendModel::ShortcutIndexFromText(L"!") == std::nullopt,
+            "Quick Send accepted a non-alphanumeric shortcut key");
+        Expect(QuickSendModel::ShortcutCharacter(0) == L'0'
+                && QuickSendModel::ShortcutCharacter(9) == L'9'
+                && QuickSendModel::ShortcutCharacter(10) == L'A'
+                && QuickSendModel::ShortcutCharacter(35) == L'Z'
+                && QuickSendModel::ShortcutCharacter(36) == L'\0',
+            "Quick Send did not map shortcut indexes to display keys");
+
+        Expect(model.SetShortcutForDestination(L"c:/FAVORITES/one/", L"2")
+                == QuickSendAssignmentResult::Accepted,
+            "Quick Send rejected a valid normalized favorite assignment");
+        Expect(model.ShortcutForDestination(L"C:\\Favorites\\One") == 2,
+            "Quick Send did not resolve a destination assignment by normalized path");
+        Expect(model.ShortcutAssignmentsByKey()[2] == L"c:\\favorites\\one",
+            "Quick Send did not persist assignments in normalized form");
+
+        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"2")
+                == QuickSendAssignmentResult::DuplicateShortcut,
+            "Quick Send allowed two favorite destinations to claim one digit");
+        Expect(model.ShortcutForDestination(L"C:\\Favorites\\One") == 2,
+            "Quick Send duplicate rejection disturbed the existing assignment");
+        Expect(model.AssignNextAvailableShortcut(L"D:\\Favorites\\Two") == 0,
+            "Quick Send did not assign the lowest available shortcut");
+        Expect(model.AssignNextAvailableShortcut(L"D:\\Favorites\\Two") == 0,
+            "Quick Send changed an existing automatic shortcut assignment");
+        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"12")
+                == QuickSendAssignmentResult::InvalidShortcut,
+            "Quick Send accepted a multi-character shortcut");
+        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"x")
+                == QuickSendAssignmentResult::Accepted
+                && model.ShortcutForDestination(L"D:\\Favorites\\Two") == 33,
+            "Quick Send did not accept and normalize a lowercase letter shortcut");
+        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"!")
+                == QuickSendAssignmentResult::InvalidShortcut,
+            "Quick Send accepted a non-alphanumeric shortcut");
+        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", {})
+                == QuickSendAssignmentResult::Accepted,
+            "Quick Send did not accept a blank shortcut to clear an assignment");
+
+        QuickSendModel restoredModel;
+        restoredModel.SetFavoriteDestinations(model.FavoriteDestinations());
+        QuickSendModel::ShortcutAssignments persisted{};
+        persisted[1] = L"C:\\FAVORITES\\ONE";
+        persisted[2] = L"C:\\Removed\\Destination";
+        persisted[3] = L"c:/favorites/one/";
+        persisted[10] = L"E:\\Favorites\\Three";
+        restoredModel.SetShortcutAssignments(persisted);
+        Expect(restoredModel.ShortcutForDestination(L"C:\\Favorites\\One") == 1,
+            "Quick Send did not restore a persisted path assignment");
+        Expect(restoredModel.ShortcutForDestination(L"E:\\Favorites\\Three") == 10,
+            "Quick Send did not restore a persisted letter assignment");
+        Expect(restoredModel.DestinationForShortcut(2) == std::nullopt,
+            "Quick Send did not prune a persisted destination that is no longer favorited");
+        Expect(restoredModel.DestinationForShortcut(3) == std::nullopt,
+            "Quick Send did not reject duplicate persisted assignments");
+
+        restoredModel.SetFavoriteDestinations({
+            L"G:\\Favorites\\Five",
+            L"C:\\Favorites\\One",
+            L"E:\\Favorites\\Three",
+            L"D:\\Favorites\\Two",
+            L"F:\\Favorites\\Four",
+        });
+        Expect(restoredModel.ShortcutForDestination(L"C:\\Favorites\\One") == 1,
+            "Quick Send assignment changed when favorite ordering changed");
+
+        QuickSendModel sortedModel;
+        sortedModel.SetFavoriteDestinations({
+            L"C:\\Favorites\\Unassigned",
+            L"C:\\Favorites\\Letter",
+            L"C:\\Favorites\\Digit",
+        });
+        Expect(sortedModel.SetShortcutForDestination(L"C:\\Favorites\\Letter", L"A")
+                == QuickSendAssignmentResult::Accepted
+                && sortedModel.SetShortcutForDestination(L"C:\\Favorites\\Digit", L"2")
+                    == QuickSendAssignmentResult::Accepted,
+            "Quick Send rejected valid shortcuts for sort coverage");
+        sortedModel.SortFavoriteDestinationsByShortcut();
+        Expect(sortedModel.FavoriteDestinations().size() == 3
+                && sortedModel.FavoriteDestinations()[0] == L"C:\\Favorites\\Digit"
+                && sortedModel.FavoriteDestinations()[1] == L"C:\\Favorites\\Letter"
+                && sortedModel.FavoriteDestinations()[2] == L"C:\\Favorites\\Unassigned",
+            "Quick Send did not sort favorites by digit-then-letter shortcuts with unassigned entries last");
+
+        QuickSendModel fullModel;
+        std::vector<std::wstring> fullFavorites;
+        for (std::size_t index = 0; index < hyperbrowse::ui::kQuickSendShortcutCount; ++index)
+        {
+            fullFavorites.push_back(L"C:\\Favorites\\Shortcut" + std::to_wstring(index));
+        }
+        fullModel.SetFavoriteDestinations(fullFavorites);
+        for (std::size_t index = 0; index < hyperbrowse::ui::kQuickSendShortcutCount; ++index)
+        {
+            Expect(fullModel.AssignNextAvailableShortcut(fullFavorites[index]) == static_cast<int>(index),
+                "Quick Send did not consume shortcuts in digit-then-letter order");
+        }
+        Expect(fullModel.ShortcutForDestination(L"C:\\Favorites\\Shortcut10") == 10,
+            "Quick Send did not assign A after the digit shortcuts");
+        fullFavorites.push_back(L"C:\\Favorites\\New");
+        fullModel.SetFavoriteDestinations(fullFavorites);
+        Expect(fullModel.AssignNextAvailableShortcut(L"C:\\Favorites\\New") == std::nullopt,
+            "Quick Send assigned a shortcut when all alphanumeric keys were already occupied");
+    }
+
     void RunViewerWindowScenario(HINSTANCE instance, HWND ownerWindow)
     {
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
@@ -1878,11 +2035,11 @@ namespace
         Expect(viewer.Open(ownerWindow, items, 0, false), "Viewer window failed to open");
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
                "Viewer window did not finish the initial image decode");
-         Expect(viewer.IsFullScreen(), "Viewer should open in full screen by default");
-         Expect(viewer.AreInfoOverlaysVisible(), "Viewer should default to showing info overlays when no persisted preference exists");
-         Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Small,
-             "Viewer should default to the small overlay text size when no persisted preference exists");
-         Expect(!viewer.IsFullMetadataVisible(), "Viewer should default to hiding the full metadata pane when no persisted preference exists");
+        Expect(viewer.IsFullScreen(), "Viewer should open in full screen by default");
+        Expect(viewer.AreInfoOverlaysVisible(), "Viewer should default to showing info overlays when no persisted preference exists");
+        Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Small,
+            "Viewer should default to the small overlay text size when no persisted preference exists");
+        Expect(!viewer.IsFullMetadataVisible(), "Viewer should default to hiding the full metadata pane when no persisted preference exists");
 
         viewer.SetOverlayTextSize(hyperbrowse::viewer::InfoOverlayTextSize::Large);
         Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Large,
@@ -1916,9 +2073,48 @@ namespace
         Expect(state->lastViewerStartFolderSlideshowSource == viewer.Hwnd(),
             "Viewer folder slideshow request did not identify the active viewer window");
 
-         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
-         PumpMessagesFor(100);
-         Expect(!viewer.AreInfoOverlaysVisible(), "Viewer Tab key did not hide the info overlays");
+        state->viewerQuickSendRequests = 0;
+        state->lastViewerQuickSendSource = nullptr;
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_F7, 0);
+        PumpMessagesFor(100);
+        Expect(state->viewerQuickSendRequests == 1
+                && state->lastViewerQuickSendOperation == hyperbrowse::viewer::QuickSendOperation::Move,
+            "Viewer F7 did not dispatch a Quick Send move request");
+        Expect(state->lastViewerQuickSendSource == viewer.Hwnd(),
+            "Viewer F7 Quick Send request did not identify the active viewer window");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_F7, 1LL << 30);
+        PumpMessagesFor(100);
+        Expect(state->viewerQuickSendRequests == 1,
+            "Viewer Quick Send move request did not ignore key auto-repeat");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_F8, 0);
+        PumpMessagesFor(100);
+        Expect(state->viewerQuickSendRequests == 2
+                && state->lastViewerQuickSendOperation == hyperbrowse::viewer::QuickSendOperation::Copy,
+            "Viewer F8 did not dispatch a Quick Send copy request");
+
+        modifiedKeyboardState[VK_CONTROL] |= 0x80;
+        Expect(SetKeyboardState(modifiedKeyboardState) != FALSE,
+            "Failed to stage Ctrl state for the viewer Quick Send modifier test");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_F7, 0);
+        PumpMessagesFor(100);
+        SetKeyboardState(originalKeyboardState);
+        Expect(state->viewerQuickSendRequests == 2,
+            "Viewer Quick Send did not ignore a Ctrl-modified shortcut");
+
+        modifiedKeyboardState[VK_MENU] |= 0x80;
+        Expect(SetKeyboardState(modifiedKeyboardState) != FALSE,
+            "Failed to stage Alt state for the viewer Quick Send modifier test");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_F8, 0);
+        PumpMessagesFor(100);
+        SetKeyboardState(originalKeyboardState);
+        Expect(state->viewerQuickSendRequests == 2,
+            "Viewer Quick Send did not ignore an Alt-modified shortcut");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
+        PumpMessagesFor(100);
+        Expect(!viewer.AreInfoOverlaysVisible(), "Viewer Tab key did not hide the info overlays");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, '1', 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == 100; }, 1000),
@@ -2078,6 +2274,7 @@ int main()
         RunRawDecoderScenario();
         RunBrowserPaneScenario(instance);
         RunBrowserModelBulkRemovalScenario();
+        RunQuickSendModelScenario();
         RunViewerWindowScenario(instance, hwnd);
         RunMainWindowFolderTreeScenario(instance);
 
