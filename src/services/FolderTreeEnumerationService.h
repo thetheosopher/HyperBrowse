@@ -16,7 +16,14 @@ namespace hyperbrowse::services
     enum class FolderTreeEnumerationUpdateKind
     {
         Completed,
+        ChildPresenceCompleted,
         Failed,
+    };
+
+    struct FolderTreeChild
+    {
+        std::wstring path;
+        bool hasChildren{};
     };
 
     struct FolderTreeEnumerationUpdate
@@ -24,7 +31,8 @@ namespace hyperbrowse::services
         std::uint64_t requestId{};
         FolderTreeEnumerationUpdateKind kind{FolderTreeEnumerationUpdateKind::Completed};
         std::wstring folderPath;
-        std::vector<std::wstring> childFolders;
+        std::vector<FolderTreeChild> childFolders;
+        std::vector<FolderTreeChild> childPresenceResults;
         std::wstring message;
     };
 
@@ -37,6 +45,9 @@ namespace hyperbrowse::services
         ~FolderTreeEnumerationService();
 
         std::uint64_t EnumerateChildDirectoriesAsync(HWND targetWindow, std::wstring folderPath);
+        std::uint64_t QueryChildDirectoryPresenceAsync(HWND targetWindow, std::wstring folderPath);
+        std::uint64_t QueryChildDirectoryPresenceAsync(HWND targetWindow,
+                                   std::vector<std::wstring> folderPaths);
         void CancelAll();
 
     private:

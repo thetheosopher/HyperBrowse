@@ -6993,6 +6993,7 @@ namespace hyperbrowse::ui
         }
 
         pendingFolderTreeEnumerationItems_.clear();
+        pendingFolderTreeChildPresenceItems_.clear();
         pendingTreeSelectionPath_.clear();
 
         suppressTreeSelectionChange_ = true;
@@ -7066,7 +7067,11 @@ namespace hyperbrowse::ui
         InitializeFolderTree();
     }
 
-    HTREEITEM MainWindow::InsertFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath)
+    HTREEITEM MainWindow::InsertFolderTreeItem(HTREEITEM parentItem,
+                                               const std::wstring& folderPath,
+                                               bool childrenKnown,
+                                                   bool hasChildren,
+                                                   bool requestPresence)
     {
         const std::wstring normalizedPath = NormalizeFolderPath(folderPath);
         if (!ShouldShowFolderInTree(normalizedPath))
@@ -7078,25 +7083,34 @@ namespace hyperbrowse::ui
 
         auto nodeData = std::make_unique<FolderTreeNodeData>();
         nodeData->path = normalizedPath;
+        nodeData->childrenKnown = childrenKnown;
+        nodeData->hasChildren = hasChildren;
         nodeData->childrenLoaded = false;
         nodeData->childrenLoading = false;
         nodeData->childEnumerationRequestId = 0;
+        nodeData->childPresenceLoading = false;
+        nodeData->childPresenceRequestId = 0;
         FolderTreeNodeData* rawNodeData = nodeData.get();
         folderTreeNodes_.push_back(std::move(nodeData));
 
         TVINSERTSTRUCTW item{};
         item.hParent = parentItem;
         item.hInsertAfter = TVI_LAST;
-        item.item.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE | TVIF_PARAM;
+        item.item.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE | TVIF_PARAM | TVIF_CHILDREN;
         item.item.pszText = const_cast<LPWSTR>(shellInfo.displayName.c_str());
         item.item.iImage = shellInfo.iconIndex;
         item.item.iSelectedImage = shellInfo.openIconIndex;
         item.item.lParam = reinterpret_cast<LPARAM>(rawNodeData);
+        item.item.cChildren = childrenKnown && hasChildren ? 1 : 0;
 
         const HTREEITEM insertedItem = TreeView_InsertItem(treePane_, &item);
-        if (insertedItem)
+        if (insertedItem && childrenKnown && hasChildren)
         {
             AddFolderTreePlaceholder(insertedItem);
+        }
+        else if (insertedItem && !childrenKnown && requestPresence)
+        {
+            RequestFolderTreeChildPresence(std::vector<HTREEITEM>{insertedItem});
         }
 
         return insertedItem;
@@ -7128,6 +7142,64 @@ namespace hyperbrowse::ui
         TreeView_InsertItem(treePane_, &placeholder);
     }
 
+    void MainWindow::RequestFolderTreeChildPresence(const std::vector<HTREEITEM>& items)
+    {
+        if (items.empty() || !folderTreeEnumerationService_)
+        {
+            return;
+        }
+
+        std::vector<HTREEITEM> pendingItems;
+        std::vector<std::wstring> folderPaths;
+        pendingItems.reserve(items.size());
+        folderPaths.reserve(items.size());
+        for (HTREEITEM item : items)
+        {
+            FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+            if (!nodeData || nodeData->childrenKnown || nodeData->childPresenceLoading
+                || nodeData->childrenLoading)
+            {
+                continue;
+            }
+
+            nodeData->childPresenceLoading = true;
+            pendingItems.push_back(item);
+            folderPaths.push_back(nodeData->path);
+        }
+
+        if (pendingItems.empty())
+        {
+            return;
+        }
+
+        const std::uint64_t requestId = folderTreeEnumerationService_->QueryChildDirectoryPresenceAsync(
+            hwnd_,
+            std::move(folderPaths));
+        for (HTREEITEM item : pendingItems)
+        {
+            if (FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item))
+            {
+                nodeData->childPresenceRequestId = requestId;
+            }
+        }
+        pendingFolderTreeChildPresenceItems_[requestId] = std::move(pendingItems);
+    }
+
+    void MainWindow::UpdateFolderTreeChildrenIndicator(HTREEITEM item)
+    {
+        FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+        if (!nodeData)
+        {
+            return;
+        }
+
+        TVITEMW treeItem{};
+        treeItem.mask = TVIF_CHILDREN;
+        treeItem.hItem = item;
+        treeItem.cChildren = nodeData->childrenKnown && nodeData->hasChildren ? 1 : 0;
+        TreeView_SetItem(treePane_, &treeItem);
+    }
+
     void MainWindow::RequestFolderTreeChildren(HTREEITEM item)
     {
         FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
@@ -7136,13 +7208,16 @@ namespace hyperbrowse::ui
             return;
         }
 
+        nodeData->childPresenceLoading = false;
+        nodeData->childPresenceRequestId = 0;
         nodeData->childrenLoading = true;
         const std::uint64_t requestId = folderTreeEnumerationService_->EnumerateChildDirectoriesAsync(hwnd_, nodeData->path);
         nodeData->childEnumerationRequestId = requestId;
         pendingFolderTreeEnumerationItems_[requestId] = item;
     }
 
-    void MainWindow::ApplyFolderTreeChildren(HTREEITEM item, std::vector<std::wstring> childFolderPaths)
+    void MainWindow::ApplyFolderTreeChildren(HTREEITEM item,
+                                             std::vector<services::FolderTreeChild> childFolders)
     {
         FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
         if (!nodeData)
@@ -7150,9 +7225,14 @@ namespace hyperbrowse::ui
             return;
         }
 
+        nodeData->childrenKnown = true;
+        nodeData->hasChildren = !childFolders.empty();
+        nodeData->childPresenceLoading = false;
+        nodeData->childPresenceRequestId = 0;
         nodeData->childrenLoaded = true;
         nodeData->childrenLoading = false;
         nodeData->childEnumerationRequestId = 0;
+        UpdateFolderTreeChildrenIndicator(item);
 
         HTREEITEM childItem = TreeView_GetChild(treePane_, item);
         while (childItem)
@@ -7162,10 +7242,18 @@ namespace hyperbrowse::ui
             childItem = nextSibling;
         }
 
-        for (const std::wstring& childFolderPath : childFolderPaths)
+        std::vector<HTREEITEM> childItems;
+        childItems.reserve(childFolders.size());
+        for (const services::FolderTreeChild& childFolder : childFolders)
         {
-            InsertFolderTreeItem(item, childFolderPath);
+            const HTREEITEM insertedChildItem = InsertFolderTreeItem(item, childFolder.path, false, false, false);
+            if (insertedChildItem)
+            {
+                childItems.push_back(insertedChildItem);
+            }
         }
+
+        RequestFolderTreeChildPresence(childItems);
     }
 
     void MainWindow::ShowSelectedFolderInTree()
@@ -15787,32 +15875,92 @@ namespace hyperbrowse::ui
             return 0;
         }
 
-        const auto pendingItem = pendingFolderTreeEnumerationItems_.find(update->requestId);
-        if (pendingItem == pendingFolderTreeEnumerationItems_.end())
+        const auto pendingEnumerationItem = pendingFolderTreeEnumerationItems_.find(update->requestId);
+        if (pendingEnumerationItem != pendingFolderTreeEnumerationItems_.end())
+        {
+            const HTREEITEM item = pendingEnumerationItem->second;
+            pendingFolderTreeEnumerationItems_.erase(pendingEnumerationItem);
+
+            FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+            if (!nodeData)
+            {
+                return 0;
+            }
+
+            switch (update->kind)
+            {
+            case services::FolderTreeEnumerationUpdateKind::Completed:
+                if (nodeData->childEnumerationRequestId != update->requestId)
+                {
+                    return 0;
+                }
+
+                ApplyFolderTreeChildren(item, std::move(update->childFolders));
+                ContinueSelectingFolderInTree();
+                return 0;
+            case services::FolderTreeEnumerationUpdateKind::Failed:
+                if (nodeData->childEnumerationRequestId != update->requestId)
+                {
+                    return 0;
+                }
+
+                nodeData->childrenLoading = false;
+                nodeData->childEnumerationRequestId = 0;
+                nodeData->childrenLoaded = false;
+                if (!nodeData->childrenKnown)
+                {
+                    nodeData->hasChildren = false;
+                    UpdateFolderTreeChildrenIndicator(item);
+                }
+                util::LogError(update->message);
+                return 0;
+            default:
+                return 0;
+            }
+        }
+
+        const auto pendingPresenceItems = pendingFolderTreeChildPresenceItems_.find(update->requestId);
+        if (pendingPresenceItems == pendingFolderTreeChildPresenceItems_.end())
         {
             return 0;
         }
 
-        const HTREEITEM item = pendingItem->second;
-        pendingFolderTreeEnumerationItems_.erase(pendingItem);
-
-        FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
-        if (!nodeData || nodeData->childEnumerationRequestId != update->requestId)
-        {
-            return 0;
-        }
+        const std::vector<HTREEITEM> items = std::move(pendingPresenceItems->second);
+        pendingFolderTreeChildPresenceItems_.erase(pendingPresenceItems);
 
         switch (update->kind)
         {
-        case services::FolderTreeEnumerationUpdateKind::Completed:
-            ApplyFolderTreeChildren(item, std::move(update->childFolders));
-            ContinueSelectingFolderInTree();
+        case services::FolderTreeEnumerationUpdateKind::ChildPresenceCompleted:
+            for (const services::FolderTreeChild& childPresence : update->childPresenceResults)
+            {
+                const HTREEITEM item = FindFolderTreeItemByPath(childPresence.path);
+                FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+                if (!nodeData || nodeData->childPresenceRequestId != update->requestId)
+                {
+                    continue;
+                }
+
+                nodeData->childPresenceLoading = false;
+                nodeData->childPresenceRequestId = 0;
+                nodeData->childrenKnown = true;
+                nodeData->hasChildren = childPresence.hasChildren;
+                if (nodeData->hasChildren)
+                {
+                    AddFolderTreePlaceholder(item);
+                }
+                UpdateFolderTreeChildrenIndicator(item);
+            }
             return 0;
         case services::FolderTreeEnumerationUpdateKind::Failed:
-            nodeData->childrenLoading = false;
-            nodeData->childEnumerationRequestId = 0;
-            nodeData->childrenLoaded = false;
-            AddFolderTreePlaceholder(item);
+            for (HTREEITEM item : items)
+            {
+                FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+                if (nodeData && nodeData->childPresenceRequestId == update->requestId)
+                {
+                    nodeData->childPresenceLoading = false;
+                    nodeData->childPresenceRequestId = 0;
+                }
+            }
             util::LogError(update->message);
             return 0;
         default:

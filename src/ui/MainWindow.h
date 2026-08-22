@@ -29,6 +29,7 @@ namespace hyperbrowse::browser
 
 namespace hyperbrowse::services
 {
+    struct FolderTreeChild;
     struct FolderWatchUpdate;
     enum class BatchConvertFormat : int;
     enum class FileConflictPolicy : int;
@@ -88,9 +89,13 @@ namespace hyperbrowse::ui
         struct FolderTreeNodeData
         {
             std::wstring path;
+            bool childrenKnown{};
+            bool hasChildren{};
             bool childrenLoaded{};
             bool childrenLoading{};
             std::uint64_t childEnumerationRequestId{};
+            bool childPresenceLoading{};
+            std::uint64_t childPresenceRequestId{};
         };
 
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
@@ -211,10 +216,16 @@ namespace hyperbrowse::ui
         void PopulateSpecialFolderRoots();
         void PopulateDriveRoots();
         void RefreshFolderTree();
-        HTREEITEM InsertFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath);
-        void AddFolderTreePlaceholder(HTREEITEM parentItem);
+        HTREEITEM InsertFolderTreeItem(HTREEITEM parentItem,
+                           const std::wstring& folderPath,
+                           bool childrenKnown = false,
+                                       bool hasChildren = false,
+                                       bool requestPresence = true);
+            void AddFolderTreePlaceholder(HTREEITEM parentItem);
+        void RequestFolderTreeChildPresence(const std::vector<HTREEITEM>& items);
+        void UpdateFolderTreeChildrenIndicator(HTREEITEM item);
         void RequestFolderTreeChildren(HTREEITEM item);
-        void ApplyFolderTreeChildren(HTREEITEM item, std::vector<std::wstring> childFolderPaths);
+        void ApplyFolderTreeChildren(HTREEITEM item, std::vector<services::FolderTreeChild> childFolders);
         void ShowSelectedFolderInTree();
         void SelectFolderInTree(const std::wstring& folderPath);
         void ContinueSelectingFolderInTree();
@@ -570,6 +581,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
         std::unique_ptr<util::BackgroundExecutor> memoryPressureExecutor_;
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
+        std::unordered_map<std::uint64_t, std::vector<HTREEITEM>> pendingFolderTreeChildPresenceItems_;
         std::wstring pendingTreeSelectionPath_;
         HTREEITEM treeDragSourceItem_{};
         HTREEITEM treeDragHoverItem_{};

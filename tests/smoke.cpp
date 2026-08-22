@@ -80,7 +80,8 @@ namespace
     struct FolderTreeEnumerationResult
     {
         std::uint64_t expectedRequestId{};
-        std::vector<std::wstring> childFolders;
+        std::vector<hyperbrowse::services::FolderTreeChild> childFolders;
+        std::vector<hyperbrowse::services::FolderTreeChild> childPresenceResults;
         std::wstring errorMessage;
         bool completed{};
         bool failed{};
@@ -501,6 +502,10 @@ namespace
                 state->folderTreeEnumerationResult.childFolders = std::move(update->childFolders);
                 state->folderTreeEnumerationResult.completed = true;
                 return 0;
+            case hyperbrowse::services::FolderTreeEnumerationUpdateKind::ChildPresenceCompleted:
+                state->folderTreeEnumerationResult.childPresenceResults = std::move(update->childPresenceResults);
+                state->folderTreeEnumerationResult.completed = true;
+                return 0;
             case hyperbrowse::services::FolderTreeEnumerationUpdateKind::Failed:
                 state->folderTreeEnumerationResult.errorMessage = update->message;
                 state->folderTreeEnumerationResult.failed = true;
@@ -899,6 +904,7 @@ namespace
          fs::create_directories(root.Root() / L"gamma");
          fs::create_directories(root.Root() / L"alpha");
          fs::create_directories(root.Root() / L"beta");
+         fs::create_directories(root.Root() / L"beta" / L"nested");
          const fs::path hiddenFolder = root.Root() / L"hidden";
          fs::create_directories(hiddenFolder);
          Expect(SetFileAttributesW(hiddenFolder.c_str(), FILE_ATTRIBUTE_HIDDEN) != FALSE,
@@ -919,15 +925,39 @@ namespace
              std::string("Folder-tree enumeration failed: ") + Utf8FromWide(state->folderTreeEnumerationResult.errorMessage));
          Expect(state->folderTreeEnumerationResult.childFolders.size() == (showHiddenFolders ? 4 : 3),
              "Folder-tree enumeration returned the wrong number of child directories");
-         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[0]).filename().wstring() == L"alpha",
+         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[0].path).filename().wstring() == L"alpha",
              "Folder-tree enumeration did not sort child folders alphabetically");
-         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[1]).filename().wstring() == L"beta",
+         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[1].path).filename().wstring() == L"beta",
              "Folder-tree enumeration did not preserve the expected alphabetical order");
-         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[2]).filename().wstring() == L"gamma",
+         Expect(fs::path(state->folderTreeEnumerationResult.childFolders[2].path).filename().wstring() == L"gamma",
              "Folder-tree enumeration omitted the last child folder");
+         ResetFolderTreeEnumerationResult(state);
+         std::vector<std::wstring> childPresencePaths = {
+             (root.Root() / L"alpha").wstring(),
+             (root.Root() / L"beta").wstring(),
+             (root.Root() / L"gamma").wstring(),
+         };
+         state->folderTreeEnumerationResult.expectedRequestId = service.QueryChildDirectoryPresenceAsync(
+             hwnd,
+             std::move(childPresencePaths));
+         Expect(PumpMessagesUntil([&]()
+         {
+             return state->folderTreeEnumerationResult.completed || state->folderTreeEnumerationResult.failed;
+         }, 5000), "Folder-tree child-presence query timed out or failed");
+         Expect(!state->folderTreeEnumerationResult.failed,
+             std::string("Folder-tree child-presence query failed: ")
+                 + Utf8FromWide(state->folderTreeEnumerationResult.errorMessage));
+         Expect(state->folderTreeEnumerationResult.childPresenceResults.size() == 3,
+             "Folder-tree child-presence query returned the wrong number of results");
+         Expect(!state->folderTreeEnumerationResult.childPresenceResults[0].hasChildren,
+             "Folder-tree child-presence query incorrectly marked a leaf folder as expandable");
+         Expect(state->folderTreeEnumerationResult.childPresenceResults[1].hasChildren,
+             "Folder-tree child-presence query did not detect a nested child folder");
+         Expect(!state->folderTreeEnumerationResult.childPresenceResults[2].hasChildren,
+             "Folder-tree child-presence query incorrectly marked an empty folder as expandable");
          if (showHiddenFolders)
          {
-             Expect(fs::path(state->folderTreeEnumerationResult.childFolders[3]).filename().wstring() == L"hidden",
+             Expect(fs::path(state->folderTreeEnumerationResult.childFolders[3].path).filename().wstring() == L"hidden",
                  "Folder-tree enumeration omitted a visible hidden child folder");
          }
          Expect(SetFileAttributesW(hiddenFolder.c_str(), FILE_ATTRIBUTE_NORMAL) != FALSE,

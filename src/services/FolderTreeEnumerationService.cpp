@@ -77,7 +77,7 @@ namespace
 
     void PostCompletion(const EnumerationSharedStateView& stateView,
                         const std::wstring& folderPath,
-                        std::vector<std::wstring> childFolders)
+                        std::vector<hyperbrowse::services::FolderTreeChild> childFolders)
     {
         if (ShouldStop(stateView))
         {
@@ -90,6 +90,65 @@ namespace
         update->folderPath = folderPath;
         update->childFolders = std::move(childFolders);
         PostUpdate(stateView.targetWindow, std::move(update));
+    }
+
+    void PostChildPresenceCompletion(const EnumerationSharedStateView& stateView,
+                                     std::vector<hyperbrowse::services::FolderTreeChild> childPresenceResults)
+    {
+        if (ShouldStop(stateView))
+        {
+            return;
+        }
+
+        auto update = std::make_unique<hyperbrowse::services::FolderTreeEnumerationUpdate>();
+        update->requestId = stateView.requestId;
+        update->kind = hyperbrowse::services::FolderTreeEnumerationUpdateKind::ChildPresenceCompleted;
+        update->childPresenceResults = std::move(childPresenceResults);
+        PostUpdate(stateView.targetWindow, std::move(update));
+    }
+
+    bool IsVisibleChildFolder(const fs::directory_entry& entry, bool showHiddenFolders)
+    {
+        std::error_code statusError;
+        if (!entry.is_directory(statusError) || statusError)
+        {
+            return false;
+        }
+
+        const DWORD attributes = GetFileAttributesW(entry.path().c_str());
+        return attributes == INVALID_FILE_ATTRIBUTES
+            || (attributes & FILE_ATTRIBUTE_HIDDEN) == 0
+            || showHiddenFolders;
+    }
+
+    bool HasVisibleChildDirectory(const EnumerationSharedStateView& stateView,
+                                  const fs::path& folderPath,
+                                  bool showHiddenFolders)
+    {
+        const fs::directory_options options = fs::directory_options::skip_permission_denied;
+        std::error_code iteratorError;
+        for (fs::directory_iterator iterator(folderPath, options, iteratorError), end;
+             iterator != end;
+             iterator.increment(iteratorError))
+        {
+            if (ShouldStop(stateView))
+            {
+                return false;
+            }
+
+            if (iteratorError)
+            {
+                iteratorError.clear();
+                continue;
+            }
+
+            if (IsVisibleChildFolder(*iterator, showHiddenFolders))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     void EnumerateChildDirectories(const EnumerationSharedStateView& stateView,
@@ -115,7 +174,7 @@ namespace
                 return;
             }
 
-            std::vector<std::wstring> childFolders;
+            std::vector<hyperbrowse::services::FolderTreeChild> childFolders;
             const fs::directory_options options = fs::directory_options::skip_permission_denied;
             std::error_code iteratorError;
             for (fs::directory_iterator iterator(basePath, options, iteratorError), end;
@@ -133,26 +192,19 @@ namespace
                     continue;
                 }
 
-                std::error_code statusError;
-                if (!iterator->is_directory(statusError) || statusError)
+                if (!IsVisibleChildFolder(*iterator, showHiddenFolders))
                 {
                     continue;
                 }
 
-                const DWORD attributes = GetFileAttributesW(iterator->path().c_str());
-                if (attributes != INVALID_FILE_ATTRIBUTES
-                    && (attributes & FILE_ATTRIBUTE_HIDDEN) != 0
-                    && !showHiddenFolders)
-                {
-                    continue;
-                }
-
-                childFolders.push_back(iterator->path().wstring());
+                hyperbrowse::services::FolderTreeChild childFolder;
+                childFolder.path = iterator->path().wstring();
+                childFolders.push_back(std::move(childFolder));
             }
 
-            std::sort(childFolders.begin(), childFolders.end(), [](const std::wstring& lhs, const std::wstring& rhs)
+            std::sort(childFolders.begin(), childFolders.end(), [](const auto& lhs, const auto& rhs)
             {
-                return _wcsicmp(lhs.c_str(), rhs.c_str()) < 0;
+                return _wcsicmp(lhs.path.c_str(), rhs.path.c_str()) < 0;
             });
 
             PostCompletion(stateView, folderPath, std::move(childFolders));
@@ -162,6 +214,49 @@ namespace
             PostFailure(stateView,
                         folderPath,
                         L"Folder tree enumeration failed: " + hyperbrowse::util::WidenExceptionMessage(exception.what()));
+        }
+    }
+
+    void QueryChildDirectoryPresence(const EnumerationSharedStateView& stateView,
+                                     const std::vector<std::wstring>& folderPaths)
+    {
+        try
+        {
+            SHELLFLAGSTATE shellState{};
+            SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
+            const bool showHiddenFolders = shellState.fShowAllObjects != FALSE;
+            std::vector<hyperbrowse::services::FolderTreeChild> childPresenceResults;
+            childPresenceResults.reserve(folderPaths.size());
+            for (const std::wstring& folderPath : folderPaths)
+            {
+                if (ShouldStop(stateView))
+                {
+                    return;
+                }
+
+                const fs::path basePath(folderPath);
+                std::error_code existsError;
+                std::error_code directoryError;
+                const bool isReadableFolder = fs::exists(basePath, existsError)
+                    && !existsError
+                    && fs::is_directory(basePath, directoryError)
+                    && !directoryError;
+
+                hyperbrowse::services::FolderTreeChild childPresence;
+                childPresence.path = folderPath;
+                childPresence.hasChildren = isReadableFolder
+                    && HasVisibleChildDirectory(stateView, basePath, showHiddenFolders);
+                childPresenceResults.push_back(std::move(childPresence));
+            }
+
+            PostChildPresenceCompletion(stateView, std::move(childPresenceResults));
+        }
+        catch (const std::exception& exception)
+        {
+            PostFailure(stateView,
+                        folderPaths.empty() ? std::wstring{} : folderPaths.front(),
+                        L"Folder tree child-presence query failed: "
+                            + hyperbrowse::util::WidenExceptionMessage(exception.what()));
         }
     }
 }
@@ -194,6 +289,36 @@ namespace hyperbrowse::services
             util::Stopwatch stopwatch;
             EnumerateChildDirectories(stateView, folderPath);
             util::RecordTiming(L"folder.tree.enumeration", stopwatch.ElapsedMilliseconds());
+        }));
+
+        return requestId;
+    }
+
+    std::uint64_t FolderTreeEnumerationService::QueryChildDirectoryPresenceAsync(HWND targetWindow,
+                                                                                   std::wstring folderPath)
+    {
+        std::vector<std::wstring> folderPaths;
+        folderPaths.push_back(std::move(folderPath));
+        return QueryChildDirectoryPresenceAsync(targetWindow, std::move(folderPaths));
+    }
+
+    std::uint64_t FolderTreeEnumerationService::QueryChildDirectoryPresenceAsync(
+        HWND targetWindow,
+        std::vector<std::wstring> folderPaths)
+    {
+        ReapCompletedWorkers();
+
+        const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        const std::uint64_t generation = sharedState_->generation.load(std::memory_order_acquire);
+        EnumerationSharedStateView stateView{sharedState_, targetWindow, requestId, generation};
+        util::LogInfo(L"Starting async folder-tree child-presence query for "
+                      + std::to_wstring(folderPaths.size()) + L" folders");
+
+        workers_.push_back(std::async(std::launch::async, [stateView, folderPaths = std::move(folderPaths)]() mutable
+        {
+            util::Stopwatch stopwatch;
+            QueryChildDirectoryPresence(stateView, folderPaths);
+            util::RecordTiming(L"folder.tree.child.presence", stopwatch.ElapsedMilliseconds());
         }));
 
         return requestId;
