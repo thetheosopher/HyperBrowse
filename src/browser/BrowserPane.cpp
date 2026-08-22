@@ -557,7 +557,7 @@ namespace
             iconSize);
     }
 
-    HFONT CreateSystemUiFont()
+    HFONT CreateSystemUiFont(hyperbrowse::util::AppTextSize size)
     {
         NONCLIENTMETRICSW metrics{};
         metrics.cbSize = sizeof(metrics);
@@ -565,6 +565,9 @@ namespace
         {
             metrics.lfMessageFont.lfCharSet = DEFAULT_CHARSET;
             metrics.lfMessageFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
+            metrics.lfMessageFont.lfHeight = static_cast<LONG>(std::lround(
+                static_cast<double>(metrics.lfMessageFont.lfHeight)
+                * hyperbrowse::util::AppTextSizeScale(size)));
             return CreateFontIndirectW(&metrics.lfMessageFont);
         }
 
@@ -1081,6 +1084,29 @@ namespace hyperbrowse::browser
         return thumbnailDetailsVisible_;
     }
 
+    void BrowserPane::SetAppTextSize(hyperbrowse::util::AppTextSize size)
+    {
+        size = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(size));
+        if (appTextSize_ == size)
+        {
+            return;
+        }
+
+        appTextSize_ = size;
+        RebuildDetailsListFont();
+        RebuildThumbnailFonts();
+        RebuildD2DTextFormats();
+        UpdateVerticalScrollBar();
+        ScheduleVisibleThumbnailWork();
+        NotifyStateChanged();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    hyperbrowse::util::AppTextSize BrowserPane::GetAppTextSize() const noexcept
+    {
+        return appTextSize_;
+    }
+
     void BrowserPane::SetResourceProfile(hyperbrowse::util::ResourceProfile profile)
     {
         if (resourceProfile_ == profile)
@@ -1542,19 +1568,7 @@ namespace hyperbrowse::browser
             ListView_SetImageList(detailsList_, shellImageList_, LVSIL_SMALL);
         }
 
-        detailsListFont_ = CreateSystemUiFont();
-        ownsDetailsListFont_ = detailsListFont_ != nullptr;
-        if (!detailsListFont_)
-        {
-            detailsListFont_ = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-            ownsDetailsListFont_ = false;
-        }
-
-        SendMessageW(detailsList_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsListFont_), TRUE);
-        if (HWND header = ListView_GetHeader(detailsList_))
-        {
-            SendMessageW(header, WM_SETFONT, reinterpret_cast<WPARAM>(detailsListFont_), TRUE);
-        }
+        RebuildDetailsListFont();
 
         LVCOLUMNW column{};
         column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
@@ -1662,21 +1676,39 @@ namespace hyperbrowse::browser
         layout.previewWidth = previewWidth;
         layout.previewHeight = previewHeight;
         layout.textInset = compact ? std::max(8, previewWidth / 22) : std::max(12, previewWidth / 16);
-        layout.titleTopGap = showDetails ? std::max(4, previewWidth / 56) : 0;
-        layout.titleHeight = showDetails ? std::clamp(previewWidth / (compact ? 7 : 6), compact ? 20 : 22, compact ? 25 : 28) : 0;
+        layout.titleTopGap = showDetails
+            ? hyperbrowse::util::ScaleAppTextDimension(std::max(4, previewWidth / 56), appTextSize_)
+            : 0;
+        layout.titleHeight = showDetails
+            ? hyperbrowse::util::ScaleAppTextDimension(
+                std::clamp(previewWidth / (compact ? 7 : 6), compact ? 20 : 22, compact ? 25 : 28),
+                appTextSize_)
+            : 0;
         layout.metaTopGap = 0;
         layout.metaHeight = 0;
-        layout.infoBottomInset = showDetails ? (compact ? 6 : 8) : 0;
-        layout.infoHeight = showDetails ? std::clamp(previewWidth / (compact ? 10 : 9), compact ? 16 : 18, compact ? 20 : 22) : 0;
+        layout.infoBottomInset = showDetails
+            ? hyperbrowse::util::ScaleAppTextDimension(compact ? 6 : 8, appTextSize_)
+            : 0;
+        layout.infoHeight = showDetails
+            ? hyperbrowse::util::ScaleAppTextDimension(
+                std::clamp(previewWidth / (compact ? 10 : 9), compact ? 16 : 18, compact ? 20 : 22),
+                appTextSize_)
+            : 0;
         layout.badgeHorizontalPadding = compact ? 6 : 8;
         layout.badgeGap = compact ? 6 : 10;
         layout.badgeCornerRadius = compact ? 6 : 8;
         layout.cellCornerRadius = compact ? 12 : 16;
         layout.previewCornerRadius = compact ? 10 : 12;
         layout.loadingIconSize = std::clamp(previewWidth / 5, 18, 40);
-        layout.titlePointSize = std::clamp(previewWidth / (compact ? 15 : 14), compact ? 12 : 13, compact ? 14 : 15);
-        layout.metaPointSize = std::clamp(previewWidth / (compact ? 18 : 17), compact ? 11 : 12, compact ? 12 : 13);
-        layout.statusPointSize = std::clamp(previewWidth / (compact ? 18 : 17), compact ? 11 : 12, compact ? 12 : 13);
+        layout.titlePointSize = hyperbrowse::util::ScaleAppTextDimension(
+            std::clamp(previewWidth / (compact ? 15 : 14), compact ? 12 : 13, compact ? 14 : 15),
+            appTextSize_);
+        layout.metaPointSize = hyperbrowse::util::ScaleAppTextDimension(
+            std::clamp(previewWidth / (compact ? 18 : 17), compact ? 11 : 12, compact ? 12 : 13),
+            appTextSize_);
+        layout.statusPointSize = hyperbrowse::util::ScaleAppTextDimension(
+            std::clamp(previewWidth / (compact ? 18 : 17), compact ? 11 : 12, compact ? 12 : 13),
+            appTextSize_);
         const int horizontalInset = std::max(layout.previewInset, layout.textInset);
         layout.itemWidth = layout.previewWidth + (horizontalInset * 2);
         layout.itemHeight = layout.previewHeight + (layout.previewInset * 2);
@@ -2447,6 +2479,33 @@ namespace hyperbrowse::browser
         rubberBandPen_ = CreatePen(PS_DOT, 1, colors_.rubberBand);
     }
 
+    void BrowserPane::RebuildDetailsListFont()
+    {
+        if (!detailsList_)
+        {
+            return;
+        }
+
+        if (detailsListFont_ && ownsDetailsListFont_)
+        {
+            DeleteObject(detailsListFont_);
+        }
+
+        detailsListFont_ = CreateSystemUiFont(appTextSize_);
+        ownsDetailsListFont_ = detailsListFont_ != nullptr;
+        if (!detailsListFont_)
+        {
+            detailsListFont_ = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            ownsDetailsListFont_ = false;
+        }
+
+        SendMessageW(detailsList_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsListFont_), TRUE);
+        if (HWND header = ListView_GetHeader(detailsList_))
+        {
+            SendMessageW(header, WM_SETFONT, reinterpret_cast<WPARAM>(detailsListFont_), TRUE);
+        }
+    }
+
     void BrowserPane::RebuildThumbnailFonts()
     {
         ReleaseThumbnailFonts();
@@ -2454,11 +2513,17 @@ namespace hyperbrowse::browser
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
 
         thumbnailTitleFont_ = CreateSizedUiFont(layout.titlePointSize, FW_SEMIBOLD);
-        folderTitleFont_ = CreateSizedUiFont(std::clamp(layout.titlePointSize + 3, 14, 20), FW_SEMIBOLD);
+        folderTitleFont_ = CreateSizedUiFont(
+            std::clamp(layout.titlePointSize + hyperbrowse::util::ScaleAppTextDimension(3, appTextSize_),
+                       hyperbrowse::util::ScaleAppTextDimension(14, appTextSize_),
+                       hyperbrowse::util::ScaleAppTextDimension(20, appTextSize_)),
+            FW_SEMIBOLD);
         thumbnailMetaFont_ = CreateSizedUiFont(layout.metaPointSize, FW_NORMAL);
         thumbnailStatusFont_ = CreateSizedUiFont(layout.statusPointSize, FW_SEMIBOLD);
-        placeholderTitleFont_ = CreateSizedUiFont(kPlaceholderTitlePointSize, FW_SEMIBOLD);
-        placeholderBodyFont_ = CreateSizedUiFont(kPlaceholderBodyPointSize, FW_NORMAL);
+        placeholderTitleFont_ = CreateSizedUiFont(
+            hyperbrowse::util::ScaleAppTextDimension(kPlaceholderTitlePointSize, appTextSize_), FW_SEMIBOLD);
+        placeholderBodyFont_ = CreateSizedUiFont(
+            hyperbrowse::util::ScaleAppTextDimension(kPlaceholderBodyPointSize, appTextSize_), FW_NORMAL);
 
         if (!thumbnailTitleFont_)
         {
@@ -3421,12 +3486,20 @@ namespace hyperbrowse::browser
         d2dTitleFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.titlePointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
         d2dFolderTitleFormat_ = renderer.CreateTextFormat(
             L"Segoe UI",
-            static_cast<float>(std::clamp(layout.titlePointSize + 3, 14, 20)),
+            static_cast<float>(std::clamp(layout.titlePointSize + hyperbrowse::util::ScaleAppTextDimension(3, appTextSize_),
+                                          hyperbrowse::util::ScaleAppTextDimension(14, appTextSize_),
+                                          hyperbrowse::util::ScaleAppTextDimension(20, appTextSize_))),
             DWRITE_FONT_WEIGHT_SEMI_BOLD);
         d2dMetaFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.metaPointSize), DWRITE_FONT_WEIGHT_NORMAL);
         d2dStatusFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.statusPointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        d2dPlaceholderTitleFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(kPlaceholderTitlePointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        d2dPlaceholderBodyFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(kPlaceholderBodyPointSize), DWRITE_FONT_WEIGHT_NORMAL);
+        d2dPlaceholderTitleFormat_ = renderer.CreateTextFormat(
+            L"Segoe UI",
+            static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(kPlaceholderTitlePointSize, appTextSize_)),
+            DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        d2dPlaceholderBodyFormat_ = renderer.CreateTextFormat(
+            L"Segoe UI",
+            static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(kPlaceholderBodyPointSize, appTextSize_)),
+            DWRITE_FONT_WEIGHT_NORMAL);
 
         const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
 

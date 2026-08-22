@@ -41,6 +41,7 @@
 #include "services/ThumbnailScheduler.h"
 #include "ui/MainWindow.h"
 #include "ui/QuickSend.h"
+#include "util/UiTextSize.h"
 #include "viewer/ViewerWindow.h"
 
 namespace fs = std::filesystem;
@@ -54,6 +55,7 @@ namespace
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
     constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
+    constexpr wchar_t kRegistryValueAppTextSize[] = L"AppTextSize";
 
     struct EnumerationResult
     {
@@ -249,6 +251,65 @@ namespace
         {
             throw std::runtime_error(message);
         }
+    }
+
+    void SetRegistryDwordValue(const wchar_t* path, const wchar_t* valueName, DWORD value)
+    {
+        HKEY key{};
+        DWORD disposition = 0;
+        Expect(RegCreateKeyExW(HKEY_CURRENT_USER,
+                               path,
+                               0,
+                               nullptr,
+                               0,
+                               KEY_WRITE,
+                               nullptr,
+                               &key,
+                               &disposition) == ERROR_SUCCESS,
+               "Failed to open the HyperBrowse registry key for a smoke-test value");
+        const LONG result = RegSetValueExW(key,
+                                           valueName,
+                                           0,
+                                           REG_DWORD,
+                                           reinterpret_cast<const BYTE*>(&value),
+                                           sizeof(value));
+        RegCloseKey(key);
+        Expect(result == ERROR_SUCCESS, "Failed to write a HyperBrowse registry smoke-test value");
+    }
+
+    void DeleteRegistryValue(const wchar_t* path, const wchar_t* valueName)
+    {
+        HKEY key{};
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, path, 0, KEY_WRITE, &key) == ERROR_SUCCESS)
+        {
+            RegDeleteValueW(key, valueName);
+            RegCloseKey(key);
+        }
+    }
+
+    bool TryReadRegistryDwordValue(const wchar_t* path, const wchar_t* valueName, DWORD* value)
+    {
+        if (!value)
+        {
+            return false;
+        }
+
+        HKEY key{};
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, path, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        {
+            return false;
+        }
+
+        DWORD type = 0;
+        DWORD size = sizeof(*value);
+        const LONG result = RegQueryValueExW(key,
+                                             valueName,
+                                             nullptr,
+                                             &type,
+                                             reinterpret_cast<LPBYTE>(value),
+                                             &size);
+        RegCloseKey(key);
+        return result == ERROR_SUCCESS && type == REG_DWORD && size == sizeof(*value);
     }
 
     void CheckHResult(HRESULT result, const char* message)
@@ -2564,6 +2625,104 @@ namespace
          PumpMessagesFor(100);
     }
 
+    void RunAppTextSizeScenario(HINSTANCE instance)
+    {
+        using hyperbrowse::util::AppTextSize;
+
+        Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Small) == 0.90f,
+               "Small app text size did not use the configured scale factor");
+        Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Medium) == 1.0f,
+               "Medium app text size did not preserve the baseline scale factor");
+        Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Large) == 1.15f,
+               "Large app text size did not use the configured scale factor");
+        Expect(hyperbrowse::util::NormalizeAppTextSize(99) == AppTextSize::Medium,
+               "Invalid app text size values did not normalize to Medium");
+        Expect(hyperbrowse::util::ScaleAppTextDimension(100, AppTextSize::Small) == 90,
+               "Small app text dimensions were not rounded as configured");
+        Expect(hyperbrowse::util::ScaleAppTextDimension(100, AppTextSize::Large) == 115,
+               "Large app text dimensions were not rounded as configured");
+
+        ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
+        ScopedRegistryDwordBackup overlayTextSizeBackup(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueAppTextSize);
+        SetRegistryDwordValue(kRegistryPath,
+                              kRegistryValueViewerInfoOverlayTextSize,
+                              static_cast<DWORD>(hyperbrowse::viewer::InfoOverlayTextSize::Large));
+        {
+            hyperbrowse::ui::MainWindow mainWindow(instance);
+            Expect(mainWindow.Create(), "Failed to create MainWindow for app text-size smoke coverage");
+
+            Expect(mainWindow.AppTextSize() == AppTextSize::Medium,
+                   "App text size did not default to Medium when no value was persisted");
+
+            HWND treeView = FindWindowExW(mainWindow.Hwnd(), nullptr, WC_TREEVIEWW, nullptr);
+            Expect(treeView != nullptr, "MainWindow did not create a tree view for app text-size smoke coverage");
+            HFONT mediumFont = reinterpret_cast<HFONT>(SendMessageW(treeView, WM_GETFONT, 0, 0));
+            LOGFONTW mediumLogFont{};
+            Expect(mediumFont != nullptr
+                       && GetObjectW(mediumFont, sizeof(mediumLogFont), &mediumLogFont) == sizeof(mediumLogFont),
+                   "Could not inspect the Medium app UI font");
+
+            constexpr UINT smallCommand = 2223;
+            constexpr UINT mediumCommand = 2224;
+            constexpr UINT largeCommand = 2225;
+
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(largeCommand, 0), 0);
+            Expect(mainWindow.AppTextSize() == AppTextSize::Large,
+                   "Large app text size command was not applied");
+            DWORD overlayTextSize = 0;
+            Expect(TryReadRegistryDwordValue(kRegistryPath,
+                                             kRegistryValueViewerInfoOverlayTextSize,
+                                             &overlayTextSize)
+                       && overlayTextSize == static_cast<DWORD>(hyperbrowse::viewer::InfoOverlayTextSize::Large),
+                   "App text size command changed the independent viewer overlay text-size preference");
+            HFONT largeFont = reinterpret_cast<HFONT>(SendMessageW(treeView, WM_GETFONT, 0, 0));
+            LOGFONTW largeLogFont{};
+            Expect(largeFont != nullptr
+                       && GetObjectW(largeFont, sizeof(largeLogFont), &largeLogFont) == sizeof(largeLogFont),
+                   "Could not inspect the Large app UI font");
+            Expect(-largeLogFont.lfHeight > -mediumLogFont.lfHeight,
+                   "Large app text size did not replace the native control font");
+
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(smallCommand, 0), 0);
+            Expect(mainWindow.AppTextSize() == AppTextSize::Small,
+                   "Small app text size command was not applied");
+            HFONT smallFont = reinterpret_cast<HFONT>(SendMessageW(treeView, WM_GETFONT, 0, 0));
+            LOGFONTW smallLogFont{};
+            Expect(smallFont != nullptr
+                       && GetObjectW(smallFont, sizeof(smallLogFont), &smallLogFont) == sizeof(smallLogFont),
+                   "Could not inspect the Small app UI font");
+            Expect(-smallLogFont.lfHeight < -mediumLogFont.lfHeight,
+                   "Small app text size did not replace the native control font");
+
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(mediumCommand, 0), 0);
+            Expect(mainWindow.AppTextSize() == AppTextSize::Medium,
+                   "Medium app text size command was not applied");
+            DestroyWindow(mainWindow.Hwnd());
+            PumpMessagesFor(100);
+        }
+
+        SetRegistryDwordValue(kRegistryPath, kRegistryValueAppTextSize, static_cast<DWORD>(AppTextSize::Large));
+        {
+            hyperbrowse::ui::MainWindow restoredMainWindow(instance);
+            Expect(restoredMainWindow.Create(), "Failed to recreate MainWindow for app text-size persistence coverage");
+            Expect(restoredMainWindow.AppTextSize() == AppTextSize::Large,
+                   "App text size did not persist across MainWindow recreation");
+            DestroyWindow(restoredMainWindow.Hwnd());
+            PumpMessagesFor(100);
+        }
+
+        SetRegistryDwordValue(kRegistryPath, kRegistryValueAppTextSize, 99);
+        {
+            hyperbrowse::ui::MainWindow normalizedMainWindow(instance);
+            Expect(normalizedMainWindow.Create(), "Failed to create MainWindow for invalid app text-size coverage");
+            Expect(normalizedMainWindow.AppTextSize() == AppTextSize::Medium,
+                   "MainWindow did not normalize an invalid persisted app text size");
+            DestroyWindow(normalizedMainWindow.Hwnd());
+            PumpMessagesFor(100);
+        }
+    }
+
     void RunMainWindowFolderTreeScenario(HINSTANCE instance)
     {
          const std::vector<std::wstring> expectedSpecialRoots = ExpectedSpecialFolderRootTexts();
@@ -2652,9 +2811,14 @@ int main(int argc, char* argv[])
         Expect(hwnd != nullptr, "Failed to create the hidden test window");
 
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
+        const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
+        }
+        else if (appTextSizeOnly)
+        {
+            RunAppTextSizeScenario(instance);
         }
         else
         {
@@ -2681,6 +2845,7 @@ int main(int argc, char* argv[])
             RunBrowserModelBulkRemovalScenario();
             RunQuickSendModelScenario();
             RunViewerWindowScenario(instance, hwnd);
+            RunAppTextSizeScenario(instance);
             RunMainWindowFolderTreeScenario(instance);
         }
 

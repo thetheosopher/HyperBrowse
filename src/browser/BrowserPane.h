@@ -15,6 +15,7 @@
 
 #include "browser/BrowserModel.h"
 #include "util/ResourceSizing.h"
+#include "util/UiTextSize.h"
 
 namespace hyperbrowse::browser
 {
@@ -132,6 +133,8 @@ namespace hyperbrowse::browser
         bool IsCompactThumbnailLayoutEnabled() const noexcept;
         void SetThumbnailDetailsVisible(bool visible);
         bool AreThumbnailDetailsVisible() const noexcept;
+        void SetAppTextSize(hyperbrowse::util::AppTextSize size);
+        hyperbrowse::util::AppTextSize GetAppTextSize() const noexcept;
         void SetResourceProfile(hyperbrowse::util::ResourceProfile profile);
         void SetThumbnailMemoryPressureActive(bool active);
         void SetCacheCapacityOverrides(std::size_t thumbnailCacheCapacityBytes,
@@ -251,6 +254,7 @@ namespace hyperbrowse::browser
         void ReleaseD2DResources();
         void RebuildD2DBrushes();
         void RebuildD2DTextFormats();
+        void RebuildDetailsListFont();
         void D2DDrawPlaceholderState(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
         void D2DDrawThumbnailCells(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
         void D2DDrawUnavailableThumbnailState(ID2D1RenderTarget* rt,
@@ -310,6 +314,7 @@ namespace hyperbrowse::browser
         std::size_t metadataCacheCapacityOverrideEntries_{};
         bool persistentThumbnailCacheEnabled_{true};
         bool darkTheme_{};
+        hyperbrowse::util::AppTextSize appTextSize_{hyperbrowse::util::kDefaultAppTextSize};
         bool syncingDetailsSelection_{};
         BrowserViewMode viewMode_{BrowserViewMode::Thumbnails};
         BrowserSortMode sortMode_{BrowserSortMode::FileName};

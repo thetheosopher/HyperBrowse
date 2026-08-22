@@ -48,6 +48,7 @@
 #include "util/ResourceSizing.h"
 #include "util/StringConvert.h"
 #include "util/Timing.h"
+#include "util/UiTextSize.h"
 #include "viewer/ViewerWindow.h"
 
 #include "app/resource.h"
@@ -61,6 +62,7 @@ namespace
     constexpr wchar_t kRegistryValueLeftPaneWidth[] = L"LeftPaneWidth";
     constexpr wchar_t kRegistryValueBrowserMode[] = L"BrowserMode";
     constexpr wchar_t kRegistryValueThemeMode[] = L"ThemeMode";
+    constexpr wchar_t kRegistryValueAppTextSize[] = L"AppTextSize";
     constexpr wchar_t kRegistryValueNvJpegEnabled[] = L"NvJpegEnabled";
     constexpr wchar_t kRegistryValueLibRawOutOfProcessEnabled[] = L"LibRawOutOfProcessEnabled";
     constexpr wchar_t kRegistryValueThumbnailSizePreset[] = L"ThumbnailSizePreset";
@@ -244,6 +246,9 @@ namespace
     constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE = 2220;
     constexpr UINT ID_VIEW_VIEWER_FULL_METADATA = 2221;
     constexpr UINT ID_VIEW_USE_SLIDESHOW_TRANSITION = 2222;
+    constexpr UINT ID_VIEW_APP_TEXT_SIZE_SMALL = 2223;
+    constexpr UINT ID_VIEW_APP_TEXT_SIZE_MEDIUM = 2224;
+    constexpr UINT ID_VIEW_APP_TEXT_SIZE_LARGE = 2225;
     constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     constexpr UINT ID_VIEW_SLIDESHOW_SETTINGS = 2307;
@@ -293,6 +298,7 @@ namespace
     constexpr int kMenuPopupCheckColumnWidth = 24;
     constexpr int kMenuPopupTextPadding = 12;
     constexpr int kMenuPopupShortcutGap = 24;
+    constexpr int kMenuPopupMeasurementAllowance = 8;
     constexpr int kMenuPopupArrowWidth = 12;
     constexpr int kCommandBarMenuButtonGap = 4;
     constexpr int kCommandBarMenuButtonPadding = 12;
@@ -579,6 +585,8 @@ namespace
         HWND ownerWindow{};
         HWND editWindow{};
         HWND okButton{};
+        HFONT bodyFont{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         std::wstring title;
         std::wstring instruction;
         std::wstring confirmLabel;
@@ -617,6 +625,8 @@ namespace
         HWND patternEditWindow{};
         HWND previewListWindow{};
         HWND okButton{};
+        HFONT bodyFont{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         std::wstring title;
         std::wstring instruction;
         std::wstring initialPattern;
@@ -645,6 +655,7 @@ namespace
         HFONT footerFont{};
         HICON heroIcon{};
         HICON windowIcon{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         bool darkMode{};
         bool done{};
         COLORREF background{};
@@ -669,6 +680,7 @@ namespace
         HWND ownerWindow{};
         HFONT titleFont{};
         HFONT bodyFont{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         HWND instructionWindow{};
         HWND summaryWindow{};
         HWND thumbnailEditWindow{};
@@ -696,6 +708,7 @@ namespace
     {
         HWND ownerWindow{};
         HFONT bodyFont{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         HWND firstFormatWindow{};
         HWND okButton{};
         std::vector<HWND> formatCheckWindows;
@@ -750,6 +763,8 @@ namespace
         HWND transitionDurationEditWindow{};
         HWND transitionDurationSpinWindow{};
         HWND okButton{};
+        HFONT bodyFont{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         std::wstring title;
         std::wstring instruction;
         std::wstring footnote;
@@ -1127,7 +1142,9 @@ namespace
         return static_cast<int>(localTime.wYear);
     }
 
-    HFONT CreateDialogUiFont(int pointSize, int weight)
+    HFONT CreateDialogUiFont(int pointSize,
+                             int weight,
+                             hyperbrowse::util::AppTextSize size = hyperbrowse::util::kDefaultAppTextSize)
     {
         NONCLIENTMETRICSW metrics{};
         metrics.cbSize = sizeof(metrics);
@@ -1149,11 +1166,28 @@ namespace
             ReleaseDC(nullptr, screenDc);
         }
 
-        logFont.lfHeight = -MulDiv(pointSize, dpiY, 72);
+        logFont.lfHeight = -MulDiv(hyperbrowse::util::ScaleAppTextDimension(pointSize, size), dpiY, 72);
         logFont.lfWeight = weight;
         logFont.lfCharSet = DEFAULT_CHARSET;
         logFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
         return CreateFontIndirectW(&logFont);
+    }
+
+    HFONT CreateSystemUiFont(hyperbrowse::util::AppTextSize size)
+    {
+        NONCLIENTMETRICSW metrics{};
+        metrics.cbSize = sizeof(metrics);
+        if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0) == FALSE)
+        {
+            return CreateDialogUiFont(9, FW_NORMAL, size);
+        }
+
+        metrics.lfMessageFont.lfCharSet = DEFAULT_CHARSET;
+        metrics.lfMessageFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
+        metrics.lfMessageFont.lfHeight = static_cast<LONG>(
+            static_cast<double>(metrics.lfMessageFont.lfHeight)
+            * hyperbrowse::util::AppTextSizeScale(size));
+        return CreateFontIndirectW(&metrics.lfMessageFont);
     }
 
     void DeleteFontIfOwned(HFONT font)
@@ -1277,7 +1311,7 @@ namespace
         TextInputDialogLayoutMetrics metrics;
         metrics.clientWidth = kTextInputDialogWidth;
 
-        const auto measureButtonWidth = [](std::wstring_view label) -> int
+        const auto measureButtonWidth = [&state](std::wstring_view label) -> int
         {
             if (label.empty())
             {
@@ -1291,7 +1325,9 @@ namespace
                 return kTextInputButtonWidth;
             }
 
-            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HFONT font = state.bodyFont
+                ? state.bodyFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const HGDIOBJ oldFont = font ? SelectObject(screenDc, font) : nullptr;
             SIZE size{};
             GetTextExtentPoint32W(screenDc,
@@ -1315,7 +1351,7 @@ namespace
         metrics.clientWidth = std::max(metrics.clientWidth, minimumClientWidthForButtons);
 
         metrics.contentWidth = metrics.clientWidth - (kTextInputDialogMargin * 2);
-        metrics.instructionHeight = MeasureTextBlockHeight(static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+        metrics.instructionHeight = MeasureTextBlockHeight(state.bodyFont,
                                                            state.instruction,
                                                            metrics.contentWidth,
                                                            DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
@@ -2389,7 +2425,9 @@ namespace
                 return -1;
             }
 
-            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HFONT font = state->bodyFont
+                ? state->bodyFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
 
             const HWND titleWindow = CreateWindowExW(
@@ -2779,7 +2817,9 @@ namespace
                 return -1;
             }
 
-            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HFONT font = state->bodyFont
+                ? state->bodyFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const TextInputDialogLayoutMetrics metrics = BuildTextInputDialogLayoutMetrics(*state);
             const int clientWidth = metrics.clientWidth;
             const int contentWidth = metrics.contentWidth;
@@ -3133,7 +3173,9 @@ namespace
                 return -1;
             }
 
-            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HFONT font = state->bodyFont
+                ? state->bodyFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const HWND instructionWindow = CreateWindowExW(
                 0,
                 L"STATIC",
@@ -3329,6 +3371,7 @@ namespace
 
     bool PromptForBatchRenamePattern(HWND ownerWindow,
                                      HINSTANCE instance,
+                                     hyperbrowse::util::AppTextSize appTextSize,
                                      std::wstring initialPattern,
                                      std::vector<hyperbrowse::browser::BrowserItem> items,
                                      std::vector<std::wstring>* resultLeafNames)
@@ -3355,6 +3398,12 @@ namespace
 
         BatchRenameDialogState state;
         state.ownerWindow = ownerWindow;
+        state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        if (!state.bodyFont)
+        {
+            state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
         state.title = L"Batch Rename";
         state.instruction = L"Enter a rename pattern. HyperBrowse previews every generated file name and preserves extensions unless you place {ext} yourself.";
         state.initialPattern = std::move(initialPattern);
@@ -3392,6 +3441,7 @@ namespace
             {
                 EnableWindow(ownerWindow, TRUE);
             }
+            DeleteFontIfOwned(state.bodyFont);
             return false;
         }
 
@@ -3416,6 +3466,8 @@ namespace
             SetForegroundWindow(ownerWindow);
             SetActiveWindow(ownerWindow);
         }
+
+        DeleteFontIfOwned(state.bodyFont);
 
         if (!state.accepted)
         {
@@ -3713,6 +3765,7 @@ namespace
 
     bool PromptForPerformanceSettings(HWND ownerWindow,
                                       HINSTANCE instance,
+                                      hyperbrowse::util::AppTextSize appTextSize,
                                       hyperbrowse::util::ResourceProfile resourceProfile,
                                       std::size_t currentThumbnailCacheCapacityBytes,
                                       std::size_t currentMetadataCacheCapacityEntries,
@@ -3745,8 +3798,9 @@ namespace
 
         PerformanceSettingsDialogState state;
         state.ownerWindow = ownerWindow;
-        state.titleFont = CreateDialogUiFont(16, FW_BOLD);
-        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL);
+        state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.titleFont = CreateDialogUiFont(16, FW_BOLD, state.appTextSize);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
         state.title = L"Performance Settings";
         state.instruction = L"Choose whether HyperBrowse should follow adaptive cache sizing or use explicit cache caps for the active profile.";
         state.summary = L"Profile: ";
@@ -4061,7 +4115,9 @@ namespace
                 return -1;
             }
 
-            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HFONT font = state->bodyFont
+                ? state->bodyFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
             const std::span<const hyperbrowse::decode::SupportedFileType> supportedFileTypes =
                 hyperbrowse::decode::SupportedFileTypes();
@@ -4371,6 +4427,7 @@ namespace
 
     bool PromptForFileAssociations(HWND ownerWindow,
                                    HINSTANCE instance,
+                                   hyperbrowse::util::AppTextSize appTextSize,
                                    const std::vector<bool>& initialDefaults,
                                    std::vector<bool>* selectedDefaults)
     {
@@ -4397,7 +4454,8 @@ namespace
 
         FileAssociationsDialogState state;
         state.ownerWindow = ownerWindow;
-        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL);
+        state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL, state.appTextSize);
         state.title = L"File Associations";
         state.instruction = L"Select the formats HyperBrowse should open by default.";
         state.footnote = L"Checked formats become defaults; unchecked formats are left unchanged. Windows may protect an existing choice; use Default apps if a format is rejected.";
@@ -4552,7 +4610,9 @@ namespace
                 return -1;
             }
 
-            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HFONT font = state->bodyFont
+                ? state->bodyFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
             const int contentLeft = kTextInputDialogMargin;
             const int contentWidth = kSlideshowSettingsDialogWidth - (kTextInputDialogMargin * 2);
@@ -4949,6 +5009,7 @@ namespace
 
     bool PromptForSlideshowSettings(HWND ownerWindow,
                                     HINSTANCE instance,
+                                    hyperbrowse::util::AppTextSize appTextSize,
                                     UINT initialSlideshowDurationMs,
                                     hyperbrowse::viewer::TransitionStyle initialTransitionStyle,
                                     UINT initialTransitionDurationMs,
@@ -4978,6 +5039,12 @@ namespace
 
         SlideshowSettingsDialogState state;
         state.ownerWindow = ownerWindow;
+        state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        if (!state.bodyFont)
+        {
+            state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
         state.title = L"Slideshow Settings";
         state.instruction = L"Choose transition style and precise slideshow timing.";
         state.footnote = L"Random selects from the animated transition styles for each transition. None uses hard cuts.";
@@ -5020,6 +5087,7 @@ namespace
             {
                 EnableWindow(ownerWindow, TRUE);
             }
+            DeleteFontIfOwned(state.bodyFont);
             return false;
         }
 
@@ -5045,6 +5113,8 @@ namespace
             SetActiveWindow(ownerWindow);
         }
 
+        DeleteFontIfOwned(state.bodyFont);
+
         if (!state.accepted)
         {
             return false;
@@ -5058,6 +5128,7 @@ namespace
 
     bool PromptForSingleLineText(HWND ownerWindow,
                                  HINSTANCE instance,
+                                 hyperbrowse::util::AppTextSize appTextSize,
                                  const std::wstring& title,
                                  const std::wstring& instruction,
                                  const std::wstring& confirmLabel,
@@ -5088,6 +5159,12 @@ namespace
 
         TextInputDialogState state;
         state.ownerWindow = ownerWindow;
+        state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        if (!state.bodyFont)
+        {
+            state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
         state.title = title;
         state.instruction = instruction;
         state.confirmLabel = confirmLabel;
@@ -5124,6 +5201,7 @@ namespace
             {
                 EnableWindow(ownerWindow, TRUE);
             }
+            DeleteFontIfOwned(state.bodyFont);
             return false;
         }
 
@@ -5148,6 +5226,8 @@ namespace
             SetForegroundWindow(ownerWindow);
             SetActiveWindow(ownerWindow);
         }
+
+        DeleteFontIfOwned(state.bodyFont);
 
         if (!state.accepted)
         {
@@ -5192,6 +5272,7 @@ namespace
 
     bool PromptForRenameLeafName(HWND ownerWindow,
                                  HINSTANCE instance,
+                                 hyperbrowse::util::AppTextSize appTextSize,
                                  std::wstring title,
                                  std::wstring instruction,
                                  std::wstring currentLeafName,
@@ -5207,6 +5288,7 @@ namespace
         const int selectionEnd = DefaultRenameSelectionEnd(currentLeafName, isFile);
         while (PromptForSingleLineText(ownerWindow,
                                        instance,
+                                       appTextSize,
                                        title,
                                        instruction,
                                        L"Rename",
@@ -6402,6 +6484,40 @@ namespace
             && commandId <= ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE;
     }
 
+    hyperbrowse::util::AppTextSize AppTextSizeFromCommandId(UINT commandId)
+    {
+        switch (commandId)
+        {
+        case ID_VIEW_APP_TEXT_SIZE_SMALL:
+            return hyperbrowse::util::AppTextSize::Small;
+        case ID_VIEW_APP_TEXT_SIZE_LARGE:
+            return hyperbrowse::util::AppTextSize::Large;
+        case ID_VIEW_APP_TEXT_SIZE_MEDIUM:
+        default:
+            return hyperbrowse::util::AppTextSize::Medium;
+        }
+    }
+
+    UINT CommandIdFromAppTextSize(hyperbrowse::util::AppTextSize size)
+    {
+        switch (hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(size)))
+        {
+        case hyperbrowse::util::AppTextSize::Small:
+            return ID_VIEW_APP_TEXT_SIZE_SMALL;
+        case hyperbrowse::util::AppTextSize::Large:
+            return ID_VIEW_APP_TEXT_SIZE_LARGE;
+        case hyperbrowse::util::AppTextSize::Medium:
+        default:
+            return ID_VIEW_APP_TEXT_SIZE_MEDIUM;
+        }
+    }
+
+    bool IsAppTextSizeCommand(UINT commandId)
+    {
+        return commandId >= ID_VIEW_APP_TEXT_SIZE_SMALL
+            && commandId <= ID_VIEW_APP_TEXT_SIZE_LARGE;
+    }
+
     bool TryParseResourceProfile(DWORD value, hyperbrowse::util::ResourceProfile* resourceProfile)
     {
         if (!resourceProfile)
@@ -6920,6 +7036,7 @@ namespace hyperbrowse::ui
             DeleteObject(detailsPanelBrush_);
         }
 
+        DeleteFontIfOwned(appTextUiFont_);
         DeleteFontIfOwned(detailsPanelTitleFont_);
         DeleteFontIfOwned(detailsPanelSummaryFont_);
         DeleteFontIfOwned(detailsPanelBodyFont_);
@@ -7014,6 +7131,8 @@ namespace hyperbrowse::ui
         {
             return false;
         }
+
+        ApplyAppTextSize();
 
         externalDropTarget_ = new (std::nothrow) HyperBrowseExternalDropTarget(this);
         if (externalDropTarget_ && SUCCEEDED(RegisterDragDrop(hwnd_, externalDropTarget_)))
@@ -7272,6 +7391,7 @@ namespace hyperbrowse::ui
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
         HMENU slideshowMenu = CreatePopupMenu();
+        HMENU appTextSizeMenu = CreatePopupMenu();
         HMENU viewerMenu = CreatePopupMenu();
         HMENU viewerMouseWheelMenu = CreatePopupMenu();
         HMENU viewerOverlayTextSizeMenu = CreatePopupMenu();
@@ -7283,7 +7403,7 @@ namespace hyperbrowse::ui
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !appTextSizeMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -7389,6 +7509,11 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowMenu), L"S&lideshow");
 
+        AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_SMALL, L"&Small");
+        AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_MEDIUM, L"&Medium");
+        AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_LARGE, L"&Large");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(appTextSizeMenu), L"App Text Si&ze");
+
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM, L"&Zoom");
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE, L"&Next/Previous Image");
         AppendMenuW(viewerOverlayTextSizeMenu, MF_STRING, ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL, L"&Small");
@@ -7452,14 +7577,10 @@ namespace hyperbrowse::ui
 
     bool MainWindow::CreateChildWindows()
     {
-        const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-
-        detailsPanelTitleFont_ = CreateDialogUiFont(11, FW_SEMIBOLD);
-        detailsPanelSummaryFont_ = CreateDialogUiFont(9, FW_NORMAL);
-        detailsPanelBodyFont_ = CreateDialogUiFont(9, FW_NORMAL);
-        if (!detailsPanelTitleFont_) detailsPanelTitleFont_ = defaultGuiFont;
-        if (!detailsPanelSummaryFont_) detailsPanelSummaryFont_ = defaultGuiFont;
-        if (!detailsPanelBodyFont_) detailsPanelBodyFont_ = defaultGuiFont;
+        RebuildAppTextFonts();
+        const HFONT defaultGuiFont = appTextUiFont_
+            ? appTextUiFont_
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
 
         toolbarIconLibrary_ = std::make_unique<ToolbarIconLibrary>();
         if (toolbarIconLibrary_ && !toolbarIconLibrary_->Initialize())
@@ -7704,6 +7825,7 @@ namespace hyperbrowse::ui
         browserPaneController_->SetThumbnailSizePreset(thumbnailSizePreset_);
         browserPaneController_->SetCompactThumbnailLayout(true);
         browserPaneController_->SetThumbnailDetailsVisible(thumbnailDetailsVisible_);
+        browserPaneController_->SetAppTextSize(appTextSize_);
     }
 
     void MainWindow::InitializeFolderTree()
@@ -9257,9 +9379,17 @@ namespace hyperbrowse::ui
         {
             itemWidth += kMenuPopupShortcutGap + shortcutWidth;
         }
+        itemWidth += hyperbrowse::util::ScaleAppTextDimension(kMenuPopupMeasurementAllowance, appTextSize_);
+        if (drawData->hasSubmenu)
+        {
+            itemWidth += kMenuPopupArrowWidth;
+        }
 
         measureItem->itemWidth = static_cast<UINT>(itemWidth);
-        measureItem->itemHeight = kMenuPopupItemHeight;
+        measureItem->itemHeight = static_cast<UINT>(std::max(
+            kMenuPopupItemHeight,
+            MeasureSingleLineTextHeight(menuFont, kMenuPopupItemHeight - kMenuPopupMeasurementAllowance)
+                + kMenuPopupMeasurementAllowance));
     }
 
     void MainWindow::DrawOwnerDrawMenuItem(const DRAWITEMSTRUCT& drawItem) const
@@ -12771,6 +12901,7 @@ namespace hyperbrowse::ui
         AboutDialogState state;
         state.ownerWindow = hwnd_;
         state.instance = instance_;
+        state.appTextSize = appTextSize_;
         state.darkMode = themeMode_ == ThemeMode::Dark;
         state.background = palette.windowBackground;
         state.headerBackground = BlendColor(palette.actionStripBackground, palette.accent, state.darkMode ? 28 : 18);
@@ -12799,10 +12930,10 @@ namespace hyperbrowse::ui
         state.brandArt = util::LoadPngResourceBitmap(instance_, IDB_HYPERBROWSE_BRAND_PNG, kAboutDialogBrandArtSize, kAboutDialogBrandArtSize);
         state.heroIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, 48, 48, LR_DEFAULTCOLOR));
         state.windowIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
-        state.titleFont = CreateDialogUiFont(21, FW_BOLD);
-        state.subtitleFont = CreateDialogUiFont(11, FW_SEMIBOLD);
-        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL);
-        state.footerFont = CreateDialogUiFont(9, FW_NORMAL);
+        state.titleFont = CreateDialogUiFont(21, FW_BOLD, state.appTextSize);
+        state.subtitleFont = CreateDialogUiFont(11, FW_SEMIBOLD, state.appTextSize);
+        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL, state.appTextSize);
+        state.footerFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
 
         if (!state.titleFont) state.titleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         if (!state.subtitleFont) state.subtitleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -13003,6 +13134,7 @@ namespace hyperbrowse::ui
         std::wstring renamedLeafName;
         if (!PromptForRenameLeafName(hwnd_,
                                      instance_,
+                                     appTextSize_,
                                      L"Rename File",
                                      L"Enter a new file name.",
                                      item.fileName,
@@ -13065,6 +13197,7 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> targetLeafNames;
         if (!PromptForBatchRenamePattern(hwnd_,
                                          instance_,
+                                         appTextSize_,
                                          std::move(initialPattern),
                                          std::move(selectedItems),
                                          &targetLeafNames))
@@ -13151,6 +13284,7 @@ namespace hyperbrowse::ui
         std::wstring folderName;
         while (PromptForSingleLineText(hwnd_,
                                        instance_,
+                                       appTextSize_,
                                        L"Move to New Child Folder",
                                        L"Enter a name for the new child folder.",
                                        L"Create and Move",
@@ -13228,6 +13362,7 @@ namespace hyperbrowse::ui
         std::wstring renamedLeafName;
         if (!PromptForRenameLeafName(hwnd_,
                                      instance_,
+                                     appTextSize_,
                                      L"Rename Folder",
                                      L"Enter a new folder name.",
                                      currentLeafName,
@@ -13320,6 +13455,7 @@ namespace hyperbrowse::ui
         const std::wstring initialName = L"New Folder";
         while (PromptForSingleLineText(hwnd_,
                                        instance_,
+                                       appTextSize_,
                                        L"New Folder",
                                        L"Enter a name for the new folder.",
                                        L"Create",
@@ -14066,6 +14202,7 @@ namespace hyperbrowse::ui
         std::wstring editedTags = mixedTags ? std::wstring{} : initialTags;
         if (!PromptForSingleLineText(hwnd_,
                                      instance_,
+                                     appTextSize_,
                                      L"Edit Tags",
                                      L"Enter comma-separated tags for the selected images. Leave blank to clear tags.",
                                      L"Apply",
@@ -15502,6 +15639,12 @@ namespace hyperbrowse::ui
             MF_BYCOMMAND | (detailsStripVisible_ ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuRadioItem(
             menu_,
+            ID_VIEW_APP_TEXT_SIZE_SMALL,
+            ID_VIEW_APP_TEXT_SIZE_LARGE,
+            CommandIdFromAppTextSize(appTextSize_),
+            MF_BYCOMMAND);
+        CheckMenuRadioItem(
+            menu_,
             ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM,
             ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE,
             CommandIdFromViewerMouseWheelBehavior(viewerMouseWheelBehavior_),
@@ -15701,6 +15844,78 @@ namespace hyperbrowse::ui
             title.append(browserModel_->FolderPath());
         }
         SetWindowTextW(hwnd_, title.c_str());
+    }
+
+    void MainWindow::RebuildAppTextFonts()
+    {
+        const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+        DeleteFontIfOwned(appTextUiFont_);
+        appTextUiFont_ = CreateSystemUiFont(appTextSize_);
+        if (!appTextUiFont_)
+        {
+            appTextUiFont_ = defaultGuiFont;
+        }
+
+        DeleteFontIfOwned(detailsPanelTitleFont_);
+        DeleteFontIfOwned(detailsPanelSummaryFont_);
+        DeleteFontIfOwned(detailsPanelBodyFont_);
+        detailsPanelTitleFont_ = CreateDialogUiFont(11, FW_SEMIBOLD, appTextSize_);
+        detailsPanelSummaryFont_ = CreateDialogUiFont(9, FW_NORMAL, appTextSize_);
+        detailsPanelBodyFont_ = CreateDialogUiFont(9, FW_NORMAL, appTextSize_);
+        if (!detailsPanelTitleFont_) detailsPanelTitleFont_ = defaultGuiFont;
+        if (!detailsPanelSummaryFont_) detailsPanelSummaryFont_ = defaultGuiFont;
+        if (!detailsPanelBodyFont_) detailsPanelBodyFont_ = defaultGuiFont;
+
+        const HWND controls[] = {filterEdit_, treePane_, statusBar_};
+        for (HWND control : controls)
+        {
+            if (control)
+            {
+                SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(appTextUiFont_), TRUE);
+            }
+        }
+
+        if (detailsPanelText_)
+        {
+            SendMessageW(detailsPanelText_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
+        }
+
+        for (HWND edit : quickAccessShortcutEdits_)
+        {
+            if (edit)
+            {
+                SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
+            }
+        }
+
+        RefreshDetailsPanelBodyPresentation();
+    }
+
+    void MainWindow::ApplyAppTextSize()
+    {
+        appTextSize_ = util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize_));
+        RebuildAppTextFonts();
+        if (browserPaneController_)
+        {
+            browserPaneController_->SetAppTextSize(appTextSize_);
+        }
+        if (diagnosticsWindow_)
+        {
+            diagnosticsWindow_->SetAppTextSize(appTextSize_);
+        }
+        if (menu_)
+        {
+            RefreshPersistentMenuOwnerDraw();
+        }
+        if (hwnd_)
+        {
+            LayoutChildren();
+            InvalidateToolbarStrip();
+            InvalidateRect(statusBar_, nullptr, TRUE);
+            InvalidateRect(detailsPanelText_, nullptr, TRUE);
+            RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        }
     }
 
     void MainWindow::ApplyTheme()
@@ -16047,7 +16262,7 @@ namespace hyperbrowse::ui
         }
 
         std::vector<bool> selectedDefaults;
-        PromptForFileAssociations(hwnd_, instance_, defaults, &selectedDefaults);
+        PromptForFileAssociations(hwnd_, instance_, appTextSize_, defaults, &selectedDefaults);
     }
 
     void MainWindow::ShowSlideshowSettingsDialog()
@@ -16057,6 +16272,7 @@ namespace hyperbrowse::ui
         UINT transitionDurationMs = slideshowTransitionDurationMs_;
         if (!PromptForSlideshowSettings(hwnd_,
                                         instance_,
+                                        appTextSize_,
                                         slideshowIntervalMs_,
                                         slideshowTransitionStyle_,
                                         slideshowTransitionDurationMs_,
@@ -16100,6 +16316,7 @@ namespace hyperbrowse::ui
         bool showPressureStateInStatusBar = showPressureStateInStatusBar_;
         if (!PromptForPerformanceSettings(hwnd_,
                                           instance_,
+                                          appTextSize_,
                                           resourceProfile_,
                                           currentThumbnailCacheCapacityBytes,
                                           currentMetadataCacheCapacityEntries,
@@ -16153,6 +16370,11 @@ namespace hyperbrowse::ui
             if (TryReadDwordValue(key, kRegistryValueThemeMode, &value) && value <= static_cast<DWORD>(ThemeMode::Dark))
             {
                 themeMode_ = static_cast<ThemeMode>(value);
+            }
+
+            if (TryReadDwordValue(key, kRegistryValueAppTextSize, &value))
+            {
+                appTextSize_ = util::NormalizeAppTextSize(value);
             }
 
             if (TryReadDwordValue(key, kRegistryValueNvJpegEnabled, &value))
@@ -16403,6 +16625,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueLeftPaneWidth, static_cast<DWORD>(std::max(leftPaneWidth_, kMinLeftPaneWidth)));
             WriteDwordValue(key, kRegistryValueBrowserMode, static_cast<DWORD>(browserMode_));
             WriteDwordValue(key, kRegistryValueThemeMode, static_cast<DWORD>(themeMode_));
+            WriteDwordValue(key, kRegistryValueAppTextSize, static_cast<DWORD>(appTextSize_));
             RegDeleteValueW(key, L"RecursiveBrowsing");
             WriteDwordValue(key, kRegistryValueNvJpegEnabled, nvJpegEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueLibRawOutOfProcessEnabled, libRawOutOfProcessEnabled_ ? 1UL : 0UL);
@@ -17450,6 +17673,14 @@ namespace hyperbrowse::ui
         {
             viewerMouseWheelBehavior_ = ViewerMouseWheelBehaviorFromCommandId(commandId);
             ApplyViewerMouseWheelSetting();
+            UpdateMenuState();
+            return true;
+        }
+
+        if (IsAppTextSizeCommand(commandId))
+        {
+            appTextSize_ = AppTextSizeFromCommandId(commandId);
+            ApplyAppTextSize();
             UpdateMenuState();
             return true;
         }

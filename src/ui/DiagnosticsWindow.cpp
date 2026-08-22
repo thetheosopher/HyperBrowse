@@ -39,7 +39,9 @@ namespace
         }
     }
 
-    HFONT CreateUiFont(int pointSize, int weight)
+    HFONT CreateUiFont(int pointSize,
+                       int weight,
+                       hyperbrowse::util::AppTextSize size = hyperbrowse::util::kDefaultAppTextSize)
     {
         HDC screenDc = GetDC(nullptr);
         const int logPixelsY = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
@@ -49,7 +51,7 @@ namespace
         }
 
         return CreateFontW(
-            -MulDiv(pointSize, logPixelsY, 72),
+            -MulDiv(hyperbrowse::util::ScaleAppTextDimension(pointSize, size), logPixelsY, 72),
             0,
             0,
             0,
@@ -207,6 +209,25 @@ namespace hyperbrowse::ui
         }
     }
 
+    void DiagnosticsWindow::SetAppTextSize(hyperbrowse::util::AppTextSize size)
+    {
+        size = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(size));
+        if (appTextSize_ == size)
+        {
+            return;
+        }
+
+        appTextSize_ = size;
+        if (hwnd_)
+        {
+            ReleaseFonts();
+            CreateFonts();
+            ApplyFonts();
+            LayoutChildren();
+            InvalidateRect(hwnd_, nullptr, TRUE);
+        }
+    }
+
     bool DiagnosticsWindow::IsOpen() const noexcept
     {
         return hwnd_ != nullptr;
@@ -303,23 +324,7 @@ namespace hyperbrowse::ui
         }
 
         CreateFonts();
-        if (titleFont_)
-        {
-            SendMessageW(titleLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(titleFont_), TRUE);
-        }
-        if (sectionFont_)
-        {
-            SendMessageW(timingsLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(sectionFont_), TRUE);
-            SendMessageW(countersLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(sectionFont_), TRUE);
-            SendMessageW(derivedLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(sectionFont_), TRUE);
-        }
-        if (bodyFont_)
-        {
-            SendMessageW(summaryLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
-            SendMessageW(timingsList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
-            SendMessageW(countersList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
-            SendMessageW(derivedList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
-        }
+        ApplyFonts();
 
         const DWORD extendedStyle = LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_GRIDLINES | LVS_EX_LABELTIP;
         ListView_SetExtendedListViewStyle(timingsList_, extendedStyle);
@@ -346,15 +351,36 @@ namespace hyperbrowse::ui
     {
         if (!titleFont_)
         {
-            titleFont_ = CreateUiFont(16, FW_SEMIBOLD);
+            titleFont_ = CreateUiFont(16, FW_SEMIBOLD, appTextSize_);
         }
         if (!sectionFont_)
         {
-            sectionFont_ = CreateUiFont(10, FW_SEMIBOLD);
+            sectionFont_ = CreateUiFont(10, FW_SEMIBOLD, appTextSize_);
         }
         if (!bodyFont_)
         {
-            bodyFont_ = CreateUiFont(9, FW_NORMAL);
+            bodyFont_ = CreateUiFont(9, FW_NORMAL, appTextSize_);
+        }
+    }
+
+    void DiagnosticsWindow::ApplyFonts()
+    {
+        if (titleFont_)
+        {
+            SendMessageW(titleLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(titleFont_), TRUE);
+        }
+        if (sectionFont_)
+        {
+            SendMessageW(timingsLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(sectionFont_), TRUE);
+            SendMessageW(countersLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(sectionFont_), TRUE);
+            SendMessageW(derivedLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(sectionFont_), TRUE);
+        }
+        if (bodyFont_)
+        {
+            SendMessageW(summaryLabel_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
+            SendMessageW(timingsList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
+            SendMessageW(countersList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
+            SendMessageW(derivedList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
         }
     }
 

@@ -18,6 +18,7 @@
 
 #include "browser/BrowserModel.h"
 #include "util/ResourceSizing.h"
+#include "util/UiTextSize.h"
 #include "ui/QuickSend.h"
 
 namespace hyperbrowse::browser
@@ -82,6 +83,7 @@ namespace hyperbrowse::ui
         void Show(int nCmdShow) const;
         bool TranslateAcceleratorMessage(MSG* message);
         HWND Hwnd() const noexcept { return hwnd_; }
+        hyperbrowse::util::AppTextSize AppTextSize() const noexcept { return appTextSize_; }
 
         static constexpr UINT kExternalLaunchMessage = WM_APP + 71;
 
@@ -244,6 +246,8 @@ namespace hyperbrowse::ui
         void ApplyResourceProfileSetting();
         void ApplyPersistentThumbnailCacheSetting();
         void ApplyRawJpegPairingSettings();
+        void ApplyAppTextSize();
+        void RebuildAppTextFonts();
         void ApplyTheme();
         void QueueMemoryPressureSample();
         void LoadWindowState();
@@ -537,6 +541,7 @@ namespace hyperbrowse::ui
         BrowserMode browserMode_{BrowserMode::Thumbnails};
         RightPaneTab activeRightPaneTab_{RightPaneTab::FileDetails};
         ThemeMode themeMode_{ThemeMode::Light};
+        hyperbrowse::util::AppTextSize appTextSize_{hyperbrowse::util::kDefaultAppTextSize};
         bool recursiveBrowsingEnabled_{false};
         bool showSubfoldersInBrowser_{false};
         bool rawJpegPairedOperationsEnabled_{false};
@@ -551,6 +556,7 @@ namespace hyperbrowse::ui
         HBRUSH backgroundBrush_{};
         HBRUSH actionFieldBrush_{};
         HBRUSH detailsPanelBrush_{};
+        HFONT appTextUiFont_{};
         HFONT detailsPanelTitleFont_{};
         HFONT detailsPanelSummaryFont_{};
         HFONT detailsPanelBodyFont_{};

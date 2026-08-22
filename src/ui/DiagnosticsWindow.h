@@ -6,6 +6,7 @@
 #include <string>
 
 #include "util/Diagnostics.h"
+#include "util/UiTextSize.h"
 
 namespace hyperbrowse::ui
 {
@@ -22,6 +23,7 @@ namespace hyperbrowse::ui
                   util::DiagnosticsSnapshot snapshot,
                   bool darkTheme);
         void SetDarkTheme(bool enabled);
+        void SetAppTextSize(hyperbrowse::util::AppTextSize size);
         bool IsOpen() const noexcept;
         void RecoverDisplaySurface();
 
@@ -43,6 +45,7 @@ namespace hyperbrowse::ui
         bool EnsureWindow(HWND owner);
         bool CreateChildWindows();
         void CreateFonts();
+        void ApplyFonts();
         void ReleaseFonts();
         void ReleaseBrushes();
         void LayoutChildren();
@@ -72,6 +75,7 @@ namespace hyperbrowse::ui
         HFONT sectionFont_{};
         HFONT bodyFont_{};
         HBRUSH backgroundBrush_{};
+        hyperbrowse::util::AppTextSize appTextSize_{hyperbrowse::util::kDefaultAppTextSize};
         bool darkTheme_{};
         std::wstring jpegPath_;
         std::wstring rawPath_;
