@@ -4607,7 +4607,6 @@ namespace hyperbrowse::viewer
                     if (infoOverlaysVisible_)
                     {
                         const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
-                        const bool showBottomOverlay = !fullMetadataVisible_;
                         std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
                         if (compareLayout && compareItem)
                         {
@@ -4653,10 +4652,13 @@ namespace hyperbrowse::viewer
                             + overlayMetrics.topInfoHeight;
                         const float bottomPanelHeight = (overlayMetrics.bottomPanelPaddingY * 2.0f)
                             + overlayMetrics.bottomInfoHeight;
+                        const float bottomPanelLeft = fullMetadataVisible_
+                            ? 16.0f
+                            : clientWidth - 16.0f - bottomPanelWidth;
                         D2D1_RECT_F topPanel = D2D1::RectF(16, 16, 16 + topPanelWidth, 16 + topPanelHeight);
-                        D2D1_RECT_F bottomPanel = D2D1::RectF(clientWidth - 16 - bottomPanelWidth,
+                        D2D1_RECT_F bottomPanel = D2D1::RectF(bottomPanelLeft,
                                                               clientHeight - 16 - bottomPanelHeight,
-                                                              clientWidth - 16,
+                                                              bottomPanelLeft + bottomPanelWidth,
                                                               clientHeight - 16);
 
                         const D2D1_ROUNDED_RECT roundedTop = D2D1::RoundedRect(topPanel, 8.0f, 8.0f);
@@ -4664,8 +4666,8 @@ namespace hyperbrowse::viewer
 
                         if (d2dPanelFillBrush_) d2dRenderTarget_->FillRoundedRectangle(roundedTop, d2dPanelFillBrush_.Get());
                         if (d2dPanelBorderBrush_) d2dRenderTarget_->DrawRoundedRectangle(roundedTop, d2dPanelBorderBrush_.Get(), 1.0f);
-                        if (showBottomOverlay && d2dPanelFillBrush_) d2dRenderTarget_->FillRoundedRectangle(roundedBottom, d2dPanelFillBrush_.Get());
-                        if (showBottomOverlay && d2dPanelBorderBrush_) d2dRenderTarget_->DrawRoundedRectangle(roundedBottom, d2dPanelBorderBrush_.Get(), 1.0f);
+                        if (d2dPanelFillBrush_) d2dRenderTarget_->FillRoundedRectangle(roundedBottom, d2dPanelFillBrush_.Get());
+                        if (d2dPanelBorderBrush_) d2dRenderTarget_->DrawRoundedRectangle(roundedBottom, d2dPanelBorderBrush_.Get(), 1.0f);
 
                         D2D1_RECT_F nameRect = D2D1::RectF(topPanel.left + overlayMetrics.topPanelPaddingX,
                                                            topPanel.top + overlayMetrics.topPanelPaddingY,
@@ -4692,7 +4694,7 @@ namespace hyperbrowse::viewer
                             d2dRenderTarget_->DrawText(topLine.c_str(), static_cast<UINT32>(topLine.size()),
                                                        d2dInfoFormat_.Get(), topInfoRect, d2dMutedTextBrush_.Get());
                         }
-                        if (showBottomOverlay && d2dBottomInfoFormat_ && d2dTextBrush_)
+                        if (d2dBottomInfoFormat_ && d2dTextBrush_)
                         {
                             d2dBottomInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
                             d2dRenderTarget_->DrawText(bottomLine.c_str(), static_cast<UINT32>(bottomLine.size()),
