@@ -8009,6 +8009,8 @@ namespace hyperbrowse::ui
             return;
         }
 
+        const int previousLeftPaneWidth = leftPaneWidth_;
+        const RECT previousDetailsPanelRect = detailsPanelRect_;
         RECT client{};
         GetClientRect(hwnd_, &client);
 
@@ -8068,6 +8070,15 @@ namespace hyperbrowse::ui
         quickAccessHotButtonIndex_ = -1;
         quickAccessPressedRowIndex_ = -1;
         quickAccessPressedButtonIndex_ = -1;
+        const bool quickAccessPanelActive = detailsStripVisible_ && activeRightPaneTab_ == RightPaneTab::QuickSend;
+        if (!quickAccessPanelActive)
+        {
+            if (quickAccessScrollBar_)
+            {
+                ShowWindow(quickAccessScrollBar_, SW_HIDE);
+            }
+            HideQuickAccessShortcutEditControls();
+        }
 
         if (detailsPanelText_)
         {
@@ -8168,6 +8179,11 @@ namespace hyperbrowse::ui
                 {
                     detailsPanelContentRect_ = RECT{};
                     ShowWindow(detailsPanelText_, SW_HIDE);
+                    if (quickAccessScrollBar_)
+                    {
+                        ShowWindow(quickAccessScrollBar_, SW_HIDE);
+                    }
+                    HideQuickAccessShortcutEditControls();
                 }
             }
             else
@@ -8188,6 +8204,14 @@ namespace hyperbrowse::ui
 
         RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
         InvalidateRect(hwnd_, &splitterRect, FALSE);
+        if (previousLeftPaneWidth != leftPaneWidth_)
+        {
+            RECT previousSplitterRect{previousLeftPaneWidth,
+                                      kActionStripHeight,
+                                      previousLeftPaneWidth + kSplitterWidth,
+                                      client.bottom};
+            InvalidateRect(hwnd_, &previousSplitterRect, FALSE);
+        }
         if (detailsStripVisible_)
         {
             if (!IsRectEmpty(&detailsPanelRect_))
@@ -8198,6 +8222,16 @@ namespace hyperbrowse::ui
                                          client.bottom};
                 InvalidateRect(hwnd_, &detailsSplitterRect, FALSE);
                 InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+            }
+
+            if (!IsRectEmpty(&previousDetailsPanelRect))
+            {
+                RECT previousDetailsSplitterRect{previousDetailsPanelRect.left - kSplitterWidth,
+                                                 kActionStripHeight,
+                                                 previousDetailsPanelRect.left,
+                                                 client.bottom};
+                InvalidateRect(hwnd_, &previousDetailsSplitterRect, FALSE);
+                InvalidateRect(hwnd_, &previousDetailsPanelRect, FALSE);
             }
         }
 
@@ -10192,10 +10226,6 @@ namespace hyperbrowse::ui
         quickAccessDestinationRows_.clear();
         quickAccessDestinationPanelRect_ = RECT{};
         quickAccessDestinationViewportRect_ = RECT{};
-        if (quickAccessScrollBar_)
-        {
-            ShowWindow(quickAccessScrollBar_, SW_HIDE);
-        }
         quickAccessHotRowIndex_ = -1;
         quickAccessHotButtonIndex_ = -1;
         quickAccessPressedRowIndex_ = -1;
@@ -10203,6 +10233,10 @@ namespace hyperbrowse::ui
 
         if (!detailsStripVisible_ || innerRight <= innerLeft)
         {
+            if (quickAccessScrollBar_)
+            {
+                ShowWindow(quickAccessScrollBar_, SW_HIDE);
+            }
             HideQuickAccessShortcutEditControls();
             return;
         }
@@ -10216,6 +10250,10 @@ namespace hyperbrowse::ui
 
         if (destinations.empty())
         {
+            if (quickAccessScrollBar_)
+            {
+                ShowWindow(quickAccessScrollBar_, SW_HIDE);
+            }
             HideQuickAccessShortcutEditControls();
             return;
         }
@@ -10225,6 +10263,10 @@ namespace hyperbrowse::ui
         const int viewportTop = top + metrics.headerHeight;
         if (panelBottom <= viewportTop)
         {
+            if (quickAccessScrollBar_)
+            {
+                ShowWindow(quickAccessScrollBar_, SW_HIDE);
+            }
             HideQuickAccessShortcutEditControls();
             return;
         }
@@ -10261,6 +10303,10 @@ namespace hyperbrowse::ui
             {
                 contentRight = innerRight;
             }
+        }
+        else if (quickAccessScrollBar_)
+        {
+            ShowWindow(quickAccessScrollBar_, SW_HIDE);
         }
 
         quickAccessDestinationPanelRect_ = RECT{innerLeft, top, innerRight, panelBottom};
@@ -17820,6 +17866,7 @@ namespace hyperbrowse::ui
                                          static_cast<int>(client.right) - visibleDetailsPanelWidth - kMinRightPaneWidth - kSplitterWidth - detailsSplitterWidth);
             leftPaneWidth_ = std::clamp(x, kMinLeftPaneWidth, maxLeft);
             LayoutChildren();
+            RedrawWindow(hwnd_, nullptr, nullptr, RDW_NOERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         }
         else if (dragMode_ == DragMode::DetailsSplitter)
         {
@@ -17834,6 +17881,7 @@ namespace hyperbrowse::ui
                                                 maxDetailsPanelWidth);
             }
             LayoutChildren();
+            RedrawWindow(hwnd_, nullptr, nullptr, RDW_NOERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         }
         else
         {
@@ -18711,32 +18759,34 @@ namespace hyperbrowse::ui
             RECT client{};
             GetClientRect(hwnd_, &client);
 
-            // Double-buffered toolbar paint
-            RECT stripRect{0, 0, client.right, kActionStripHeight};
+            const int clientWidth = std::max(1, static_cast<int>(client.right - client.left));
+            const int clientHeight = std::max(1, static_cast<int>(client.bottom - client.top));
             HDC memDC = CreateCompatibleDC(hdc);
-            HBITMAP memBmp = CreateCompatibleBitmap(hdc, client.right, kActionStripHeight);
+            HBITMAP memBmp = CreateCompatibleBitmap(hdc, clientWidth, clientHeight);
             HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+
+            FillRect(memDC,
+                     &client,
+                     backgroundBrush_ ? backgroundBrush_ : reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
+
+            RECT stripRect{0, 0, client.right, kActionStripHeight};
             PaintToolbar(memDC, stripRect);
-            BitBlt(hdc, 0, 0, client.right, kActionStripHeight, memDC, 0, 0, SRCCOPY);
-            SelectObject(memDC, oldBmp);
-            DeleteObject(memBmp);
-            DeleteDC(memDC);
 
             const ThemePalette palette = GetThemePalette();
             auto paintSplitter = [&](const RECT& splitterRect)
             {
                 const HBRUSH splitterBrush = CreateSolidBrush(palette.splitter);
-                FillRect(hdc, &splitterRect, splitterBrush);
+                FillRect(memDC, &splitterRect, splitterBrush);
                 DeleteObject(splitterBrush);
 
                 const HPEN gripPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
-                const HGDIOBJ oldPen = SelectObject(hdc, gripPen);
+                const HGDIOBJ oldPen = SelectObject(memDC, gripPen);
                 const int gripX = (splitterRect.left + splitterRect.right) / 2;
                 const int gripTop = splitterRect.top + 20;
                 const int gripBottom = std::max(gripTop + 12, static_cast<int>(splitterRect.bottom) - 20);
-                MoveToEx(hdc, gripX, gripTop, nullptr);
-                LineTo(hdc, gripX, gripBottom);
-                SelectObject(hdc, oldPen);
+                MoveToEx(memDC, gripX, gripTop, nullptr);
+                LineTo(memDC, gripX, gripBottom);
+                SelectObject(memDC, oldPen);
                 DeleteObject(gripPen);
             };
 
@@ -18751,7 +18801,12 @@ namespace hyperbrowse::ui
                 paintSplitter(detailsSplitterRect);
             }
 
-            PaintDetailsPanel(hdc, client);
+            PaintDetailsPanel(memDC, client);
+
+            BitBlt(hdc, 0, 0, clientWidth, clientHeight, memDC, 0, 0, SRCCOPY);
+            SelectObject(memDC, oldBmp);
+            DeleteObject(memBmp);
+            DeleteDC(memDC);
 
             EndPaint(hwnd_, &ps);
             return 0;
