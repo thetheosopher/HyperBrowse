@@ -11,7 +11,9 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
@@ -2055,6 +2057,34 @@ namespace
         Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Small,
             "Viewer should default to the small overlay text size when no persisted preference exists");
         Expect(!viewer.IsFullMetadataVisible(), "Viewer should default to hiding the full metadata pane when no persisted preference exists");
+
+        RECT originalViewerRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &originalViewerRect) != FALSE,
+            "Failed to save the viewer bounds for the zoom transition test");
+        SetWindowPos(viewer.Hwnd(), nullptr, 0, 0, 32, 32, SWP_NOZORDER | SWP_NOACTIVATE);
+        PumpMessagesFor(50);
+        const int fitZoomPercent = viewer.CurrentZoomPercent();
+        Expect(fitZoomPercent < 100, "Viewer zoom regression setup did not produce a sub-100% fit scale");
+        RECT viewerClientRect{};
+        Expect(GetClientRect(viewer.Hwnd(), &viewerClientRect) != FALSE,
+            "Failed to read the viewer client area for the zoom transition test");
+        const double fitScale = std::min(
+            static_cast<double>(viewerClientRect.right) / 24.0,
+            static_cast<double>(viewerClientRect.bottom) / 48.0);
+        const int firstZoomTargetPercent = std::max(
+            1,
+            static_cast<int>(std::lround(fitScale * 1.25 * 100.0)) + 2);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
+        PumpMessagesFor(50);
+        Expect(viewer.CurrentZoomPercent() <= firstZoomTargetPercent,
+            "Viewer zoom stepped past the target while leaving fit mode");
+        SetWindowPos(viewer.Hwnd(), nullptr,
+                     originalViewerRect.left,
+                     originalViewerRect.top,
+                     originalViewerRect.right - originalViewerRect.left,
+                     originalViewerRect.bottom - originalViewerRect.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        PumpMessagesFor(50);
 
         viewer.SetOverlayTextSize(hyperbrowse::viewer::InfoOverlayTextSize::Large);
         Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Large,

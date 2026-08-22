@@ -2130,9 +2130,13 @@ namespace hyperbrowse::viewer
             return;
         }
 
+        const double currentScale = smoothZoomTimerId_
+            ? smoothZoomCurrent_
+            : (zoomMode_ == ZoomMode::Fit ? fitScale : customZoomScale_);
         zoomMode_ = ZoomMode::Custom;
         smoothZoomTarget_ = targetScale;
-        smoothZoomCurrent_ = customZoomScale_ > 0.0 ? customZoomScale_ : fitScale;
+        smoothZoomCurrent_ = currentScale;
+        customZoomScale_ = smoothZoomCurrent_;
 
         if (!smoothZoomTimerId_)
         {
