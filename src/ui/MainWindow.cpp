@@ -7909,6 +7909,7 @@ namespace hyperbrowse::ui
             }
         }
         pendingFolderTreeChildPresenceItems_[requestId] = std::move(pendingItems);
+        UpdateStatusText();
     }
 
     void MainWindow::UpdateFolderTreeChildrenIndicator(HTREEITEM item)
@@ -7940,6 +7941,7 @@ namespace hyperbrowse::ui
         const std::uint64_t requestId = folderTreeEnumerationService_->EnumerateChildDirectoriesAsync(hwnd_, nodeData->path);
         nodeData->childEnumerationRequestId = requestId;
         pendingFolderTreeEnumerationItems_[requestId] = item;
+        UpdateStatusText();
     }
 
     void MainWindow::ApplyFolderTreeChildren(HTREEITEM item,
@@ -9155,6 +9157,16 @@ namespace hyperbrowse::ui
         {
             statusSecondaryText_.append(L"  |  Pressure: ");
             statusSecondaryText_.append(thumbnailMemoryPressureActive_ ? L"Adaptive throttling active" : L"Normal");
+        }
+
+        const bool folderTreeEnumerationActive = !pendingFolderTreeEnumerationItems_.empty()
+            || !pendingFolderTreeChildPresenceItems_.empty();
+        if (folderEnumerationActive_ || folderTreeEnumerationActive)
+        {
+            const wchar_t* activityText = folderEnumerationActive_ && folderTreeEnumerationActive
+                ? L"Scanning folders...  |  "
+                : (folderEnumerationActive_ ? L"Scanning folder...  |  " : L"Probing folders...  |  ");
+            statusPrimaryText_ = activityText + statusPrimaryText_;
         }
 
         InvalidateRect(statusBar_, nullptr, TRUE);
@@ -16482,6 +16494,7 @@ namespace hyperbrowse::ui
             recursiveBrowsingEnabled_,
             showSubfoldersInBrowser_);
         folderEnumerationActive_ = true;
+        UpdateStatusText();
         ShowSelectedFolderInTree();
     }
 
@@ -16633,6 +16646,7 @@ namespace hyperbrowse::ui
         {
             const HTREEITEM item = pendingEnumerationItem->second;
             pendingFolderTreeEnumerationItems_.erase(pendingEnumerationItem);
+            UpdateStatusText();
 
             FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
             if (!nodeData)
@@ -16680,6 +16694,7 @@ namespace hyperbrowse::ui
 
         const std::vector<HTREEITEM> items = std::move(pendingPresenceItems->second);
         pendingFolderTreeChildPresenceItems_.erase(pendingPresenceItems);
+        UpdateStatusText();
 
         switch (update->kind)
         {
@@ -19514,7 +19529,9 @@ namespace hyperbrowse::ui
                 SetCursor(LoadCursorW(nullptr, IDC_HAND));
                 return TRUE;
             }
-            if (folderEnumerationActive_)
+            if (folderEnumerationActive_
+                || !pendingFolderTreeEnumerationItems_.empty()
+                || !pendingFolderTreeChildPresenceItems_.empty())
             {
                 SetCursor(LoadCursorW(nullptr, IDC_APPSTARTING));
                 return TRUE;
