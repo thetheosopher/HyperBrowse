@@ -293,6 +293,7 @@ namespace hyperbrowse::ui
         void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
         void ShowUserGuide() const;
         void ShowAboutDialog() const;
+        void ShowFileAssociationsDialog();
         void ShowSlideshowSettingsDialog();
         void ShowPerformanceSettingsDialog();
         void ShowPersistentThumbnailCacheDialog();

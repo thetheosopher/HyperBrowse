@@ -30,6 +30,7 @@
 #include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
 #include "services/BatchConvertService.h"
+#include "services/FileAssociationService.h"
 #include "services/FileOperationService.h"
 #include "services/FolderEnumerationService.h"
 #include "services/FolderTreeEnumerationService.h"
@@ -143,6 +144,7 @@ namespace
     constexpr UINT ID_EDIT_REDO = 1094;
     constexpr UINT ID_FILE_QUICK_SEND_MOVE = 1095;
     constexpr UINT ID_FILE_QUICK_SEND_COPY = 1096;
+    constexpr UINT ID_FILE_ASSOCIATIONS = 1097;
     constexpr UINT ID_FILE_SET_RATING_0 = 1080;
     constexpr UINT ID_FILE_SET_RATING_1 = 1081;
     constexpr UINT ID_FILE_SET_RATING_2 = 1082;
@@ -425,6 +427,24 @@ namespace
     constexpr UINT kSlideshowMaximumDurationMs = 60000U;
     constexpr UINT kSlideshowMinimumTransitionDurationMs = 100U;
     constexpr UINT kSlideshowMaximumTransitionDurationMs = 5000U;
+    constexpr wchar_t kFileAssociationsDialogClassName[] = L"HyperBrowseFileAssociationsDialog";
+    constexpr int kFileAssociationsDialogWidth = 640;
+    constexpr int kFileAssociationsDialogHeight = 500;
+    constexpr int kFileAssociationsDialogMargin = 20;
+    constexpr int kFileAssociationsDialogInstructionControlId = 361;
+    constexpr int kFileAssociationsDialogFormatGroupControlId = 362;
+    constexpr int kFileAssociationsDialogSelectAllControlId = 363;
+    constexpr int kFileAssociationsDialogClearAllControlId = 364;
+    constexpr int kFileAssociationsDialogFootnoteControlId = 365;
+    constexpr int kFileAssociationsDialogDividerControlId = 366;
+    constexpr int kFileAssociationsDialogDefaultAppsControlId = 367;
+    constexpr int kFileAssociationsDialogFormatBaseControlId = 380;
+    constexpr int kFileAssociationsDialogButtonWidth = 88;
+    constexpr int kFileAssociationsDialogButtonHeight = 28;
+    constexpr int kFileAssociationsDialogDefaultAppsButtonWidth = 124;
+    constexpr int kFileAssociationsDialogDefaultAppsButtonHeight = 32;
+    constexpr int kFileAssociationsDialogFormatRowHeight = 28;
+    constexpr int kFileAssociationsDialogFormatCheckboxWidth = 72;
 
     hyperbrowse::cache::ThumbnailCacheKey MakeThumbnailCacheKey(const hyperbrowse::browser::BrowserItem& item,
                                                                 int targetWidth,
@@ -672,6 +692,23 @@ namespace
         bool done{};
     };
 
+    struct FileAssociationsDialogState
+    {
+        HWND ownerWindow{};
+        HFONT bodyFont{};
+        HWND firstFormatWindow{};
+        HWND okButton{};
+        std::vector<HWND> formatCheckWindows;
+        std::vector<HWND> formatDescriptionWindows;
+        std::vector<bool> initialDefaults;
+        std::vector<bool> selectedDefaults;
+        std::wstring title;
+        std::wstring instruction;
+        std::wstring footnote;
+        bool accepted{};
+        bool done{};
+    };
+
     struct PerformanceSettingsDialogLayoutMetrics
     {
         int contentLeft{};
@@ -724,6 +761,8 @@ namespace
     };
 
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
+    bool IsWindows11OrGreater();
+    bool LaunchDefaultAppsSettings(HWND ownerWindow);
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
     {
@@ -2357,7 +2396,7 @@ namespace
                 0,
                 L"STATIC",
                 state->title.c_str(),
-                WS_CHILD | WS_VISIBLE,
+                WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX | SS_CENTERIMAGE,
                 0,
                 0,
                 100,
@@ -3099,7 +3138,7 @@ namespace
                 0,
                 L"STATIC",
                 state->instruction.c_str(),
-                WS_CHILD | WS_VISIBLE,
+                WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
                 0,
                 0,
                 100,
@@ -3798,6 +3837,635 @@ namespace
         *thumbnailCacheCapacityOverrideBytes = state.thumbnailCacheCapacityOverrideBytes;
         *metadataCacheCapacityOverrideEntries = state.metadataCacheCapacityOverrideEntries;
         *showPressureStateInStatusBar = state.showPressureStateInStatusBar;
+        return true;
+    }
+
+    void LayoutFileAssociationsDialogControls(HWND hwnd, const FileAssociationsDialogState& state)
+    {
+        RECT clientRect{};
+        GetClientRect(hwnd, &clientRect);
+        const int clientWidth = clientRect.right - clientRect.left;
+        const int clientHeight = clientRect.bottom - clientRect.top;
+        const int contentWidth = std::max(0, clientWidth - (kFileAssociationsDialogMargin * 2));
+        const int selectAllWidth = 92;
+        const int clearAllWidth = 92;
+        const int actionGap = 8;
+        const int instructionTop = 16;
+        const int actionTop = instructionTop + 32;
+        const int formatGroupTop = actionTop + 36;
+        const int formatGroupHeight = 7 * kFileAssociationsDialogFormatRowHeight + 36;
+        const int footnoteTop = formatGroupTop + formatGroupHeight + 14;
+        const int dividerTop = std::max(footnoteTop + 48, clientHeight - 64);
+        const int buttonTop = clientHeight - 50;
+        const int cancelLeft = clientWidth - kFileAssociationsDialogMargin - kFileAssociationsDialogButtonWidth;
+        const int okLeft = cancelLeft - actionGap - kFileAssociationsDialogButtonWidth;
+        const int defaultAppsTop = buttonTop
+            - ((kFileAssociationsDialogDefaultAppsButtonHeight - kFileAssociationsDialogButtonHeight) / 2);
+
+        const HWND instructionWindow = GetDlgItem(hwnd, kFileAssociationsDialogInstructionControlId);
+        if (instructionWindow)
+        {
+            MoveWindow(instructionWindow, kFileAssociationsDialogMargin, instructionTop, contentWidth, 28, TRUE);
+        }
+
+        const HWND selectAllButton = GetDlgItem(hwnd, kFileAssociationsDialogSelectAllControlId);
+        if (selectAllButton)
+        {
+            MoveWindow(selectAllButton,
+                       kFileAssociationsDialogMargin,
+                       actionTop,
+                       selectAllWidth,
+                       kFileAssociationsDialogButtonHeight,
+                       TRUE);
+        }
+
+        const HWND clearAllButton = GetDlgItem(hwnd, kFileAssociationsDialogClearAllControlId);
+        if (clearAllButton)
+        {
+            MoveWindow(clearAllButton,
+                       kFileAssociationsDialogMargin + selectAllWidth + actionGap,
+                       actionTop,
+                       clearAllWidth,
+                       kFileAssociationsDialogButtonHeight,
+                       TRUE);
+        }
+
+        const HWND formatGroupWindow = GetDlgItem(hwnd, kFileAssociationsDialogFormatGroupControlId);
+        if (formatGroupWindow)
+        {
+            MoveWindow(formatGroupWindow,
+                       kFileAssociationsDialogMargin,
+                       formatGroupTop,
+                       contentWidth,
+                       formatGroupHeight,
+                       TRUE);
+        }
+
+        const int columnGap = 28;
+        const int columnWidth = std::max(0, (contentWidth - columnGap) / 2);
+        const int formatLeft = kFileAssociationsDialogMargin + 16;
+        for (std::size_t index = 0; index < state.formatCheckWindows.size(); ++index)
+        {
+            const int column = index < 7 ? 0 : 1;
+            const int row = static_cast<int>(index % 7);
+            const int left = formatLeft + column * (columnWidth + columnGap);
+            const HWND formatWindow = state.formatCheckWindows[index];
+            if (formatWindow)
+            {
+                MoveWindow(formatWindow,
+                           left,
+                           formatGroupTop + 26 + row * kFileAssociationsDialogFormatRowHeight,
+                           kFileAssociationsDialogFormatCheckboxWidth,
+                           22,
+                           TRUE);
+            }
+            if (index < state.formatDescriptionWindows.size())
+            {
+                const HWND descriptionWindow = state.formatDescriptionWindows[index];
+                if (descriptionWindow)
+                {
+                    MoveWindow(descriptionWindow,
+                               left + kFileAssociationsDialogFormatCheckboxWidth,
+                               formatGroupTop + 28 + row * kFileAssociationsDialogFormatRowHeight,
+                               std::max(0, columnWidth - kFileAssociationsDialogFormatCheckboxWidth - 12),
+                               20,
+                               TRUE);
+                }
+            }
+        }
+
+        const HWND footnoteWindow = GetDlgItem(hwnd, kFileAssociationsDialogFootnoteControlId);
+        if (footnoteWindow)
+        {
+            MoveWindow(footnoteWindow,
+                       kFileAssociationsDialogMargin,
+                       footnoteTop,
+                       contentWidth,
+                       std::max(0, dividerTop - footnoteTop - 8),
+                       TRUE);
+        }
+
+        const HWND dividerWindow = GetDlgItem(hwnd, kFileAssociationsDialogDividerControlId);
+        if (dividerWindow)
+        {
+            MoveWindow(dividerWindow, kFileAssociationsDialogMargin, dividerTop, contentWidth, 2, TRUE);
+        }
+
+        if (state.okButton)
+        {
+            MoveWindow(state.okButton,
+                       okLeft,
+                       buttonTop,
+                       kFileAssociationsDialogButtonWidth,
+                       kFileAssociationsDialogButtonHeight,
+                       TRUE);
+        }
+
+        const HWND defaultAppsButton = GetDlgItem(hwnd, kFileAssociationsDialogDefaultAppsControlId);
+        if (defaultAppsButton)
+        {
+            MoveWindow(defaultAppsButton,
+                       kFileAssociationsDialogMargin,
+                       defaultAppsTop,
+                       kFileAssociationsDialogDefaultAppsButtonWidth,
+                       kFileAssociationsDialogDefaultAppsButtonHeight,
+                       TRUE);
+        }
+
+        const HWND cancelButton = GetDlgItem(hwnd, IDCANCEL);
+        if (cancelButton)
+        {
+            MoveWindow(cancelButton,
+                       cancelLeft,
+                       buttonTop,
+                       kFileAssociationsDialogButtonWidth,
+                       kFileAssociationsDialogButtonHeight,
+                       TRUE);
+        }
+    }
+
+    void SetFileAssociationChecks(const FileAssociationsDialogState& state, bool checked)
+    {
+        for (const HWND formatWindow : state.formatCheckWindows)
+        {
+            if (formatWindow)
+            {
+                SendMessageW(formatWindow, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+            }
+        }
+    }
+
+    bool CollectFileAssociationDialogResult(HWND hwnd, FileAssociationsDialogState* state)
+    {
+        if (!hwnd || !state)
+        {
+            return false;
+        }
+
+        state->selectedDefaults.clear();
+        state->selectedDefaults.reserve(state->formatCheckWindows.size());
+        for (const HWND formatWindow : state->formatCheckWindows)
+        {
+            state->selectedDefaults.push_back(formatWindow
+                && SendMessageW(formatWindow, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        }
+
+        std::wstring errorMessage;
+        bool defaultsRejected = false;
+        if (!hyperbrowse::services::ApplyFileAssociationDefaults(state->selectedDefaults,
+                                                                 &errorMessage,
+                                                                 &defaultsRejected))
+        {
+            const std::wstring message = (errorMessage.empty()
+                ? L"Windows could not apply the selected file associations."
+                : errorMessage)
+                + (defaultsRejected ? L"\n\nOpen Windows Default Apps now?" : L"");
+            const UINT messageBoxType = defaultsRejected
+                ? MB_YESNO | MB_ICONWARNING
+                : MB_OK | MB_ICONERROR;
+            const int result = MessageBoxW(hwnd, message.c_str(), state->title.c_str(), messageBoxType);
+            if (defaultsRejected && result == IDYES && !LaunchDefaultAppsSettings(hwnd))
+            {
+                MessageBoxW(hwnd,
+                            L"Windows Default Apps could not be opened.",
+                            state->title.c_str(),
+                            MB_OK | MB_ICONERROR);
+            }
+            if (state->firstFormatWindow)
+            {
+                SetFocus(state->firstFormatWindow);
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    LRESULT CALLBACK FileAssociationsDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<FileAssociationsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<FileAssociationsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+
+            const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+            const std::span<const hyperbrowse::decode::SupportedFileType> supportedFileTypes =
+                hyperbrowse::decode::SupportedFileTypes();
+
+            const HWND instructionWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->instruction.c_str(),
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                100,
+                44,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogInstructionControlId)),
+                hInstance,
+                nullptr);
+            const HWND formatGroupWindow = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Supported formats",
+                WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+                0,
+                0,
+                100,
+                100,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogFormatGroupControlId)),
+                hInstance,
+                nullptr);
+            const HWND selectAllButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Select all",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                0,
+                0,
+                kFileAssociationsDialogButtonWidth,
+                kFileAssociationsDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogSelectAllControlId)),
+                hInstance,
+                nullptr);
+            const HWND clearAllButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Clear all",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                0,
+                0,
+                kFileAssociationsDialogButtonWidth,
+                kFileAssociationsDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogClearAllControlId)),
+                hInstance,
+                nullptr);
+            HWND defaultAppsButton = nullptr;
+            if (IsWindows11OrGreater())
+            {
+                defaultAppsButton = CreateWindowExW(
+                    0,
+                    L"BUTTON",
+                    L"Default &Apps...",
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                    0,
+                    0,
+                    kFileAssociationsDialogDefaultAppsButtonWidth,
+                    kFileAssociationsDialogDefaultAppsButtonHeight,
+                    hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogDefaultAppsControlId)),
+                    hInstance,
+                    nullptr);
+            }
+
+            state->formatCheckWindows.reserve(supportedFileTypes.size());
+            for (std::size_t index = 0; index < supportedFileTypes.size(); ++index)
+            {
+                const auto& fileType = supportedFileTypes[index];
+                std::wstring label = L".";
+                label.append(fileType.extension);
+                const HWND formatWindow = CreateWindowExW(
+                    0,
+                    L"BUTTON",
+                    label.c_str(),
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                    0,
+                    0,
+                    100,
+                    22,
+                    hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogFormatBaseControlId
+                                                                  + static_cast<int>(index))),
+                    hInstance,
+                    nullptr);
+                const HWND descriptionWindow = CreateWindowExW(
+                    0,
+                    L"STATIC",
+                    fileType.description,
+                    WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+                    0,
+                    0,
+                    100,
+                    20,
+                    hwnd,
+                    nullptr,
+                    hInstance,
+                    nullptr);
+                state->formatCheckWindows.push_back(formatWindow);
+                state->formatDescriptionWindows.push_back(descriptionWindow);
+                if (!state->firstFormatWindow)
+                {
+                    state->firstFormatWindow = formatWindow;
+                }
+                if (formatWindow && index < state->initialDefaults.size())
+                {
+                    SendMessageW(formatWindow,
+                                 BM_SETCHECK,
+                                 state->initialDefaults[index] ? BST_CHECKED : BST_UNCHECKED,
+                                 0);
+                }
+            }
+
+            const HWND footnoteWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->footnote.c_str(),
+                WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+                0,
+                0,
+                100,
+                48,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogFootnoteControlId)),
+                hInstance,
+                nullptr);
+            const HWND dividerWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                nullptr,
+                WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
+                0,
+                0,
+                100,
+                2,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogDividerControlId)),
+                hInstance,
+                nullptr);
+            state->okButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Apply",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                0,
+                0,
+                kFileAssociationsDialogButtonWidth,
+                kFileAssociationsDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
+                hInstance,
+                nullptr);
+            const HWND cancelButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Cancel",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                0,
+                0,
+                kFileAssociationsDialogButtonWidth,
+                kFileAssociationsDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
+                hInstance,
+                nullptr);
+
+            const HWND windows[] = {
+                instructionWindow,
+                formatGroupWindow,
+                selectAllButton,
+                clearAllButton,
+                defaultAppsButton,
+                footnoteWindow,
+                dividerWindow,
+                state->okButton,
+                cancelButton,
+            };
+            for (HWND window : windows)
+            {
+                if (window)
+                {
+                    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                }
+            }
+            for (const HWND formatWindow : state->formatCheckWindows)
+            {
+                if (formatWindow)
+                {
+                    SendMessageW(formatWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                }
+            }
+            for (const HWND descriptionWindow : state->formatDescriptionWindows)
+            {
+                if (descriptionWindow)
+                {
+                    SendMessageW(descriptionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                }
+            }
+            if (instructionWindow && state->bodyFont)
+            {
+                SendMessageW(instructionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->bodyFont), TRUE);
+            }
+            if (footnoteWindow && state->bodyFont)
+            {
+                SendMessageW(footnoteWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->bodyFont), TRUE);
+            }
+
+            LayoutFileAssociationsDialogControls(hwnd, *state);
+            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            return 0;
+        }
+        case WM_SIZE:
+            if (state)
+            {
+                LayoutFileAssociationsDialogControls(hwnd, *state);
+            }
+            return 0;
+        case WM_SHOWWINDOW:
+            if (wParam != FALSE && state)
+            {
+                SetFocus(state->firstFormatWindow ? state->firstFormatWindow : state->okButton);
+                return FALSE;
+            }
+            break;
+        case WM_CTLCOLORDLG:
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_CTLCOLORSTATIC:
+            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
+            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_CTLCOLORBTN:
+            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
+            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_COMMAND:
+            if (!state)
+            {
+                break;
+            }
+
+            if (LOWORD(wParam) == kFileAssociationsDialogSelectAllControlId)
+            {
+                SetFileAssociationChecks(*state, true);
+                return 0;
+            }
+
+            if (LOWORD(wParam) == kFileAssociationsDialogClearAllControlId)
+            {
+                SetFileAssociationChecks(*state, false);
+                return 0;
+            }
+
+            if (LOWORD(wParam) == kFileAssociationsDialogDefaultAppsControlId)
+            {
+                if (!LaunchDefaultAppsSettings(hwnd))
+                {
+                    MessageBoxW(hwnd,
+                                L"Windows Default Apps could not be opened.",
+                                state->title.c_str(),
+                                MB_OK | MB_ICONERROR);
+                }
+                return 0;
+            }
+
+            if (LOWORD(wParam) == IDOK)
+            {
+                if (CollectFileAssociationDialogResult(hwnd, state))
+                {
+                    state->accepted = true;
+                    DestroyWindow(hwnd);
+                }
+                return 0;
+            }
+
+            if (LOWORD(wParam) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    bool PromptForFileAssociations(HWND ownerWindow,
+                                   HINSTANCE instance,
+                                   const std::vector<bool>& initialDefaults,
+                                   std::vector<bool>* selectedDefaults)
+    {
+        if (!selectedDefaults
+            || initialDefaults.size() != hyperbrowse::decode::SupportedFileTypes().size())
+        {
+            return false;
+        }
+
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance, kFileAssociationsDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &FileAssociationsDialogProc;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = kFileAssociationsDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return false;
+            }
+        }
+
+        FileAssociationsDialogState state;
+        state.ownerWindow = ownerWindow;
+        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL);
+        state.title = L"File Associations";
+        state.instruction = L"Select the formats HyperBrowse should open by default.";
+        state.footnote = L"Checked formats become defaults; unchecked formats are left unchanged. Windows may protect an existing choice; use Default apps if a format is rejected.";
+        state.initialDefaults = initialDefaults;
+
+        RECT windowRect{0, 0, kFileAssociationsDialogWidth, kFileAssociationsDialogHeight};
+        AdjustWindowRectEx(&windowRect,
+                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                           FALSE,
+                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, FALSE);
+        }
+
+        HWND dialogWindow = CreateWindowExW(
+            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+            kFileAssociationsDialogClassName,
+            state.title.c_str(),
+            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            ownerWindow,
+            nullptr,
+            instance,
+            &state);
+
+        if (!dialogWindow)
+        {
+            if (ownerWindow)
+            {
+                EnableWindow(ownerWindow, TRUE);
+            }
+            DeleteFontIfOwned(state.bodyFont);
+            return false;
+        }
+
+        SetWindowTextW(dialogWindow, state.title.c_str());
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+
+        MSG message{};
+        while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            if (!IsDialogMessageW(dialogWindow, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, TRUE);
+            SetForegroundWindow(ownerWindow);
+            SetActiveWindow(ownerWindow);
+        }
+
+        DeleteFontIfOwned(state.bodyFont);
+        if (!state.accepted)
+        {
+            return false;
+        }
+
+        *selectedDefaults = std::move(state.selectedDefaults);
         return true;
     }
 
@@ -5080,6 +5748,49 @@ namespace
         const std::wstring path(target);
         const HINSTANCE result = ShellExecuteW(ownerWindow, verb, path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         return reinterpret_cast<INT_PTR>(result) > 32;
+    }
+
+    bool IsWindows11OrGreater()
+    {
+        HKEY versionKey{};
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                          L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                          0,
+                          KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+                          &versionKey) != ERROR_SUCCESS)
+        {
+            return false;
+        }
+
+        wchar_t buildBuffer[32]{};
+        DWORD valueType = 0;
+        DWORD valueBytes = sizeof(buildBuffer);
+        const LSTATUS result = RegQueryValueExW(versionKey,
+                                                L"CurrentBuildNumber",
+                                                nullptr,
+                                                &valueType,
+                                                reinterpret_cast<LPBYTE>(buildBuffer),
+                                                &valueBytes);
+        RegCloseKey(versionKey);
+        if (result != ERROR_SUCCESS || valueType != REG_SZ)
+        {
+            return false;
+        }
+
+        wchar_t* parseEnd = nullptr;
+        const unsigned long buildNumber = wcstoul(buildBuffer, &parseEnd, 10);
+        return parseEnd != buildBuffer && *parseEnd == L'\0' && buildNumber >= 22000;
+    }
+
+    bool LaunchDefaultAppsSettings(HWND ownerWindow)
+    {
+        if (IsWindows11OrGreater()
+            && LaunchShellTarget(ownerWindow, L"open", L"ms-settings:defaultapps?registeredAppUser=HyperBrowse"))
+        {
+            return true;
+        }
+
+        return LaunchShellTarget(ownerWindow, L"open", L"ms-settings:defaultapps");
     }
 
     std::wstring FindUserGuidePath()
@@ -6692,6 +7403,8 @@ namespace hyperbrowse::ui
         AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Detail &Overlays");
         AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_FULL_METADATA, L"Show Full &Metadata");
         AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerOverlayTextSizeMenu), L"Overlay Text Si&ze");
+        AppendMenuW(viewerMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(viewerMenu, MF_STRING, ID_FILE_ASSOCIATIONS, L"File &Associations...");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMenu), L"&Viewer");
 
         AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
@@ -15308,6 +16021,23 @@ namespace hyperbrowse::ui
         browserPaneController_->SetRawJpegStackingEnabled(rawJpegPairedOperationsEnabled_);
     }
 
+    void MainWindow::ShowFileAssociationsDialog()
+    {
+        std::vector<bool> defaults;
+        std::wstring errorMessage;
+        if (!services::QueryFileAssociationDefaults(&defaults, &errorMessage))
+        {
+            MessageBoxW(hwnd_,
+                        errorMessage.empty() ? L"Windows could not read the current file associations." : errorMessage.c_str(),
+                        L"File Associations",
+                        MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        std::vector<bool> selectedDefaults;
+        PromptForFileAssociations(hwnd_, instance_, defaults, &selectedDefaults);
+    }
+
     void MainWindow::ShowSlideshowSettingsDialog()
     {
         UINT slideshowDurationMs = slideshowIntervalMs_;
@@ -16923,6 +17653,9 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_SLIDESHOW_SETTINGS:
             ShowSlideshowSettingsDialog();
+            return true;
+        case ID_FILE_ASSOCIATIONS:
+            ShowFileAssociationsDialog();
             return true;
         case ID_VIEW_NVJPEG_ACCELERATION:
             if (HasNvJpegCapability())

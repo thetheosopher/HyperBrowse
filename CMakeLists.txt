@@ -115,6 +115,7 @@ add_library(HyperBrowseCore STATIC
     src/decode/RawHelperProtocol.cpp
     src/decode/WicThumbnailDecoder.cpp
     src/services/BatchConvertService.cpp
+    src/services/FileAssociationService.cpp
     src/services/FileOperationService.cpp
     src/services/FolderEnumerationService.cpp
     src/services/FolderTreeEnumerationService.cpp

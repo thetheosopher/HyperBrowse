@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -10,6 +11,13 @@
 
 namespace hyperbrowse::decode
 {
+    struct SupportedFileType
+    {
+        const wchar_t* extension{};
+        const wchar_t* description{};
+        bool raw{};
+    };
+
     enum class ThumbnailDecodeFailureKind : int
     {
         None = 0,
@@ -48,6 +56,7 @@ namespace hyperbrowse::decode
     bool IsNvJpegRuntimeAvailable();
     std::wstring DescribeJpegAccelerationState();
 
+    std::span<const SupportedFileType> SupportedFileTypes();
     bool IsWicFileType(std::wstring_view fileType);
     bool IsRawFileType(std::wstring_view fileType);
     bool CanDecodeThumbnail(const browser::BrowserItem& item);

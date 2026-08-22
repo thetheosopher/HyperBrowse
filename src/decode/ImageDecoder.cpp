@@ -5,6 +5,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -39,6 +40,22 @@ namespace
     std::atomic_bool g_libRawOutOfProcessEnabled{true};
     constexpr DWORD kRawHelperThumbnailTimeoutMs = 8000;
     constexpr DWORD kRawHelperFullImageTimeoutMs = 30000;
+    constexpr std::array<hyperbrowse::decode::SupportedFileType, 14> kSupportedFileTypes = {{
+        {L"jpg", L"JPEG image", false},
+        {L"jpeg", L"JPEG image", false},
+        {L"png", L"PNG image", false},
+        {L"gif", L"GIF image", false},
+        {L"tif", L"TIFF image", false},
+        {L"tiff", L"TIFF image", false},
+        {L"arw", L"Sony RAW image", true},
+        {L"cr2", L"Canon RAW image", true},
+        {L"cr3", L"Canon RAW image", true},
+        {L"dng", L"Digital Negative image", true},
+        {L"nef", L"Nikon RAW image", true},
+        {L"nrw", L"Nikon RAW image", true},
+        {L"raf", L"Fujifilm RAW image", true},
+        {L"rw2", L"Panasonic RAW image", true},
+    }};
 
     class ScratchByteBufferPool
     {
@@ -1455,28 +1472,35 @@ namespace hyperbrowse::decode
         return L"nvJPEG active for JPEG thumbnails";
     }
 
+    std::span<const SupportedFileType> SupportedFileTypes()
+    {
+        return kSupportedFileTypes;
+    }
+
     bool IsWicFileType(std::wstring_view fileType)
     {
         const std::wstring normalized = NormalizeFileType(fileType);
-        return normalized == L"jpg"
-            || normalized == L"jpeg"
-            || normalized == L"png"
-            || normalized == L"gif"
-            || normalized == L"tif"
-            || normalized == L"tiff";
+        for (const SupportedFileType& supportedFileType : kSupportedFileTypes)
+        {
+            if (!supportedFileType.raw && normalized == supportedFileType.extension)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     bool IsRawFileType(std::wstring_view fileType)
     {
         const std::wstring normalized = NormalizeFileType(fileType);
-        return normalized == L"arw"
-            || normalized == L"cr2"
-            || normalized == L"cr3"
-            || normalized == L"dng"
-            || normalized == L"nef"
-            || normalized == L"nrw"
-            || normalized == L"raf"
-            || normalized == L"rw2";
+        for (const SupportedFileType& supportedFileType : kSupportedFileTypes)
+        {
+            if (supportedFileType.raw && normalized == supportedFileType.extension)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     bool CanDecodeThumbnail(const browser::BrowserItem& item)
