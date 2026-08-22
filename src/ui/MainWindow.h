@@ -615,6 +615,7 @@ namespace hyperbrowse::ui
         int detailsPanelPressedTabIndex_{-1};
         bool detailsPanelCloseButtonHot_{};
         bool detailsPanelCloseButtonPressed_{};
+        bool detailsPanelHistogramTooltipAdded_{};
         RECT quickAccessSortButtonRect_{};
         bool quickAccessSortButtonHot_{};
         bool quickAccessSortButtonPressed_{};

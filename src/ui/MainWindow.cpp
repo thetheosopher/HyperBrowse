@@ -328,6 +328,7 @@ namespace
     constexpr int kQuickAccessPanelScrollBarGap = 6;
     constexpr UINT kQuickAccessShortcutEditBaseId = 5200;
     constexpr UINT_PTR kQuickAccessSortTooltipId = static_cast<UINT_PTR>(-1);
+    constexpr UINT_PTR kDetailsPanelHistogramTooltipId = static_cast<UINT_PTR>(-2);
     constexpr UINT kQuickSendPopupCommandBase = 5300;
     constexpr UINT kQuickSendPopupBrowseCommand = kQuickSendPopupCommandBase;
     constexpr UINT kQuickSendPopupDestinationBase = kQuickSendPopupCommandBase + 1;
@@ -6800,6 +6801,18 @@ namespace hyperbrowse::ui
                 toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
                 SendMessageW(tooltipControl_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
             }
+
+            TTTOOLINFOW histogramToolInfo{};
+            histogramToolInfo.cbSize = sizeof(histogramToolInfo);
+            histogramToolInfo.uFlags = TTF_SUBCLASS;
+            histogramToolInfo.hwnd = hwnd_;
+            histogramToolInfo.uId = kDetailsPanelHistogramTooltipId;
+            histogramToolInfo.rect = detailsPanelHistogramRect_;
+            histogramToolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+            detailsPanelHistogramTooltipAdded_ = SendMessageW(tooltipControl_,
+                                                               TTM_ADDTOOLW,
+                                                               0,
+                                                               reinterpret_cast<LPARAM>(&histogramToolInfo)) != FALSE;
         }
 
         treePane_ = CreateWindowExW(
@@ -8336,6 +8349,16 @@ namespace hyperbrowse::ui
                 quickAccessDestinationPanelRect_ = RECT{};
                 quickAccessDestinationRows_.clear();
             }
+        }
+
+        if (tooltipControl_ && detailsPanelHistogramTooltipAdded_)
+        {
+            TTTOOLINFOW toolInfo{};
+            toolInfo.cbSize = sizeof(toolInfo);
+            toolInfo.hwnd = hwnd_;
+            toolInfo.uId = kDetailsPanelHistogramTooltipId;
+            toolInfo.rect = detailsPanelHistogramRect_;
+            SendMessageW(tooltipControl_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&toolInfo));
         }
 
         LayoutToolbar();
@@ -18983,6 +19006,12 @@ namespace hyperbrowse::ui
                 if (di->hdr.idFrom == kQuickAccessSortTooltipId)
                 {
                     di->lpszText = const_cast<LPWSTR>(L"Sort Quick Send destinations by hotkey");
+                    return 0;
+                }
+
+                if (di->hdr.idFrom == kDetailsPanelHistogramTooltipId)
+                {
+                    di->lpszText = const_cast<LPWSTR>(L"RGB histogram: shows the distribution of pixel brightness across the red, green, and blue channels.");
                     return 0;
                 }
 
