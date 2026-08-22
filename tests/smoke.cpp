@@ -897,7 +897,15 @@ namespace
          fs::create_directories(root.Root() / L"gamma");
          fs::create_directories(root.Root() / L"alpha");
          fs::create_directories(root.Root() / L"beta");
+         const fs::path hiddenFolder = root.Root() / L"hidden";
+         fs::create_directories(hiddenFolder);
+         Expect(SetFileAttributesW(hiddenFolder.c_str(), FILE_ATTRIBUTE_HIDDEN) != FALSE,
+             "Folder-tree enumeration test could not mark the hidden directory");
          root.WriteFile(L"alpha\\image.jpg", 1);
+
+         SHELLFLAGSTATE shellState{};
+         SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
+         const bool showHiddenFolders = shellState.fShowAllObjects != FALSE;
 
          ResetFolderTreeEnumerationResult(state);
          state->folderTreeEnumerationResult.expectedRequestId = service.EnumerateChildDirectoriesAsync(hwnd, root.Root().wstring());
@@ -907,7 +915,7 @@ namespace
          }, 5000), "Folder-tree enumeration timed out or failed");
          Expect(!state->folderTreeEnumerationResult.failed,
              std::string("Folder-tree enumeration failed: ") + Utf8FromWide(state->folderTreeEnumerationResult.errorMessage));
-         Expect(state->folderTreeEnumerationResult.childFolders.size() == 3,
+         Expect(state->folderTreeEnumerationResult.childFolders.size() == (showHiddenFolders ? 4 : 3),
              "Folder-tree enumeration returned the wrong number of child directories");
          Expect(fs::path(state->folderTreeEnumerationResult.childFolders[0]).filename().wstring() == L"alpha",
              "Folder-tree enumeration did not sort child folders alphabetically");
@@ -915,6 +923,13 @@ namespace
              "Folder-tree enumeration did not preserve the expected alphabetical order");
          Expect(fs::path(state->folderTreeEnumerationResult.childFolders[2]).filename().wstring() == L"gamma",
              "Folder-tree enumeration omitted the last child folder");
+         if (showHiddenFolders)
+         {
+             Expect(fs::path(state->folderTreeEnumerationResult.childFolders[3]).filename().wstring() == L"hidden",
+                 "Folder-tree enumeration omitted a visible hidden child folder");
+         }
+         Expect(SetFileAttributesW(hiddenFolder.c_str(), FILE_ATTRIBUTE_NORMAL) != FALSE,
+             "Folder-tree enumeration test could not restore the hidden directory attributes");
         }
 
     void RunFolderWatchStartStopScenario(HWND hwnd)

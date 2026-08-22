@@ -1,5 +1,7 @@
 #include "services/FolderTreeEnumerationService.h"
 
+#include <shlobj.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cwchar>
@@ -95,6 +97,9 @@ namespace
     {
         try
         {
+            SHELLFLAGSTATE shellState{};
+            SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
+            const bool showHiddenFolders = shellState.fShowAllObjects != FALSE;
             const fs::path basePath(folderPath);
             std::error_code existsError;
             if (!fs::exists(basePath, existsError) || existsError)
@@ -130,6 +135,14 @@ namespace
 
                 std::error_code statusError;
                 if (!iterator->is_directory(statusError) || statusError)
+                {
+                    continue;
+                }
+
+                const DWORD attributes = GetFileAttributesW(iterator->path().c_str());
+                if (attributes != INVALID_FILE_ATTRIBUTES
+                    && (attributes & FILE_ATTRIBUTE_HIDDEN) != 0
+                    && !showHiddenFolders)
                 {
                     continue;
                 }

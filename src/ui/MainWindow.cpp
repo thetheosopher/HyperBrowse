@@ -167,6 +167,24 @@ namespace
 
     std::wstring ToLowercaseCopy(std::wstring value);
     int CountDecimalDigits(std::size_t value);
+    bool ShouldShowFolderInTree(const std::wstring& folderPath)
+    {
+        if (folderPath.size() == 3 && folderPath[1] == L':' && folderPath[2] == L'\\')
+        {
+            return true;
+        }
+
+        const DWORD attributes = GetFileAttributesW(folderPath.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_HIDDEN) == 0)
+        {
+            return true;
+        }
+
+        SHELLFLAGSTATE shellState{};
+        SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
+        return shellState.fShowAllObjects != FALSE;
+    }
+
     bool TryBuildBatchRenamePatternLeafName(std::wstring_view pattern,
                                             const hyperbrowse::browser::BrowserItem& item,
                                             std::size_t ordinal,
@@ -7005,6 +7023,11 @@ namespace hyperbrowse::ui
     HTREEITEM MainWindow::InsertFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath)
     {
         const std::wstring normalizedPath = NormalizeFolderPath(folderPath);
+        if (!ShouldShowFolderInTree(normalizedPath))
+        {
+            return nullptr;
+        }
+
         const ShellTreeItemInfo shellInfo = QueryShellTreeItemInfo(normalizedPath);
 
         auto nodeData = std::make_unique<FolderTreeNodeData>();
@@ -18113,6 +18136,13 @@ namespace hyperbrowse::ui
         }
         case WM_DISPLAYCHANGE:
             HandleDisplaySurfaceChange();
+            return 0;
+        case WM_SETTINGCHANGE:
+            if (lParam == 0
+                || _wcsicmp(reinterpret_cast<const wchar_t*>(lParam), L"ShellState") == 0)
+            {
+                RefreshFolderTree();
+            }
             return 0;
         case WM_WTSSESSION_CHANGE:
             switch (wParam)
