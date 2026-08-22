@@ -322,8 +322,11 @@ namespace
     constexpr int kQuickAccessPanelButtonVerticalInset = 6;
     constexpr int kQuickAccessPanelShortcutWidth = 24;
     constexpr int kQuickAccessPanelShortcutGap = 8;
+    constexpr int kQuickAccessPanelSortButtonSize = 18;
+    constexpr int kQuickAccessPanelSortButtonGap = 6;
     constexpr int kQuickAccessPanelScrollBarGap = 6;
     constexpr UINT kQuickAccessShortcutEditBaseId = 5200;
+    constexpr UINT_PTR kQuickAccessSortTooltipId = static_cast<UINT_PTR>(-1);
     constexpr UINT kQuickSendPopupCommandBase = 5300;
     constexpr UINT kQuickSendPopupBrowseCommand = kQuickSendPopupCommandBase;
     constexpr UINT kQuickSendPopupDestinationBase = kQuickSendPopupCommandBase + 1;
@@ -6419,9 +6422,9 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        // Preserve text-edit backspace behavior in edit/rich-edit controls.
+        // Preserve text-edit backspace/delete behavior in edit/rich-edit controls.
         if (message->message == WM_KEYDOWN
-            && message->wParam == VK_BACK
+            && (message->wParam == VK_BACK || message->wParam == VK_DELETE)
             && IsTextInputControlWindow(message->hwnd))
         {
             return false;
@@ -8058,6 +8061,10 @@ namespace hyperbrowse::ui
         detailsPanelContentRect_ = RECT{};
         detailsPanelHistogramRect_ = RECT{};
         detailsPanelCloseButtonRect_ = RECT{};
+        quickAccessSortButtonRect_ = RECT{};
+        quickAccessSortButtonHot_ = false;
+        quickAccessSortButtonPressed_ = false;
+        UpdateQuickAccessSortTooltip();
         quickAccessDestinationPanelRect_ = RECT{};
         quickAccessDestinationViewportRect_ = RECT{};
         quickAccessDestinationRows_.clear();
@@ -9781,9 +9788,53 @@ namespace hyperbrowse::ui
                             quickAccessDestinationPanelRect_.top,
                             quickAccessDestinationPanelRect_.right,
                             quickAccessDestinationPanelRect_.top + metrics.headerHeight};
+            if (!IsRectEmpty(&quickAccessSortButtonRect_))
+            {
+                headerRect.right = quickAccessSortButtonRect_.left - kQuickAccessPanelSortButtonGap;
+            }
             SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
             SetTextColor(hdc, palette.mutedText);
             DrawTextW(hdc, L"Quick Send", -1, &headerRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
+
+            if (!IsRectEmpty(&quickAccessSortButtonRect_))
+            {
+                const bool hot = quickAccessSortButtonHot_;
+                const bool pressed = quickAccessSortButtonPressed_;
+                if (hot || pressed)
+                {
+                    const COLORREF fillColor = pressed
+                        ? BlendColor(palette.accentFill, palette.accent, themeMode_ == ThemeMode::Dark ? 40 : 18)
+                        : BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 28 : 16);
+                    RECT buttonRect = quickAccessSortButtonRect_;
+                    InflateRect(&buttonRect, -1, -1);
+                    HBRUSH buttonBrush = CreateSolidBrush(fillColor);
+                    HPEN buttonPen = CreatePen(PS_SOLID, 1, palette.accent);
+                    const HGDIOBJ oldSortBrush = SelectObject(hdc, buttonBrush);
+                    const HGDIOBJ oldSortPen = SelectObject(hdc, buttonPen);
+                    RoundRect(hdc, buttonRect.left, buttonRect.top, buttonRect.right, buttonRect.bottom, 8, 8);
+                    SelectObject(hdc, oldSortPen);
+                    SelectObject(hdc, oldSortBrush);
+                    DeleteObject(buttonPen);
+                    DeleteObject(buttonBrush);
+                }
+
+                HDC iconDC = toolbarIconLibrary_ ? CreateCompatibleDC(hdc) : nullptr;
+                if (toolbarIconLibrary_ && iconDC)
+                {
+                    const COLORREF iconColor = hot || pressed ? palette.accentText : palette.mutedText;
+                    const int iconSize = 14;
+                    const int iconX = quickAccessSortButtonRect_.left
+                        + ((quickAccessSortButtonRect_.right - quickAccessSortButtonRect_.left) - iconSize) / 2;
+                    const int iconY = quickAccessSortButtonRect_.top
+                        + ((quickAccessSortButtonRect_.bottom - quickAccessSortButtonRect_.top) - iconSize) / 2;
+                    const HBITMAP sortBitmap = toolbarIconLibrary_->GetBitmap("sort", iconSize, iconColor);
+                    AlphaBlendBitmap(hdc, iconDC, sortBitmap, iconX, iconY, iconSize, iconSize);
+                }
+                if (iconDC)
+                {
+                    DeleteDC(iconDC);
+                }
+            }
 
             const COLORREF rowBackground = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 24 : 12);
             const COLORREF rowBorder = palette.actionStripBorder;
@@ -10226,6 +10277,9 @@ namespace hyperbrowse::ui
         quickAccessDestinationRows_.clear();
         quickAccessDestinationPanelRect_ = RECT{};
         quickAccessDestinationViewportRect_ = RECT{};
+        quickAccessSortButtonRect_ = RECT{};
+        quickAccessSortButtonHot_ = false;
+        quickAccessSortButtonPressed_ = false;
         quickAccessHotRowIndex_ = -1;
         quickAccessHotButtonIndex_ = -1;
         quickAccessPressedRowIndex_ = -1;
@@ -10313,6 +10367,23 @@ namespace hyperbrowse::ui
         quickAccessDestinationViewportRect_ = RECT{innerLeft, viewportTop, contentRight, panelBottom};
         quickAccessScrollOffset_ = std::clamp(quickAccessScrollOffset_, 0, maximumScrollOffset);
 
+        const HFONT headerFont = detailsPanelSummaryFont_
+            ? detailsPanelSummaryFont_
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const int sortButtonSize = std::min(kQuickAccessPanelSortButtonSize, metrics.headerHeight);
+        const int sortButtonLeft = innerLeft
+            + MeasureTextWidth(headerFont, L"Quick Send")
+            + kQuickAccessPanelSortButtonGap;
+        const int sortButtonTop = top + std::max(0, (metrics.headerHeight - sortButtonSize) / 2);
+        if (sortButtonSize > 0 && sortButtonLeft + sortButtonSize <= innerRight)
+        {
+            quickAccessSortButtonRect_ = RECT{sortButtonLeft,
+                                              sortButtonTop,
+                                              sortButtonLeft + sortButtonSize,
+                                              sortButtonTop + sortButtonSize};
+        }
+        UpdateQuickAccessSortTooltip();
+
         int rowTop = viewportTop - quickAccessScrollOffset_;
         for (const auto& [path, favorite] : destinations)
         {
@@ -10351,6 +10422,33 @@ namespace hyperbrowse::ui
         }
 
         UpdateQuickAccessShortcutEditControls();
+    }
+
+    void MainWindow::UpdateQuickAccessSortTooltip()
+    {
+        if (!tooltipControl_ || !hwnd_)
+        {
+            return;
+        }
+
+        TTTOOLINFOW toolInfo{};
+        toolInfo.cbSize = sizeof(toolInfo);
+        toolInfo.uFlags = TTF_SUBCLASS;
+        toolInfo.hwnd = hwnd_;
+        toolInfo.uId = kQuickAccessSortTooltipId;
+        toolInfo.rect = quickAccessSortButtonRect_;
+        toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+        if (!quickAccessSortTooltipAdded_)
+        {
+            quickAccessSortTooltipAdded_ = SendMessageW(tooltipControl_,
+                                                        TTM_ADDTOOLW,
+                                                        0,
+                                                        reinterpret_cast<LPARAM>(&toolInfo)) != FALSE;
+        }
+        else
+        {
+            SendMessageW(tooltipControl_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+        }
     }
 
     void MainWindow::UpdateQuickAccessShortcutEditControls()
@@ -10617,6 +10715,17 @@ namespace hyperbrowse::ui
 
         const POINT point{x, y};
         return PtInRect(&detailsPanelCloseButtonRect_, point) != FALSE ? 0 : -1;
+    }
+
+    int MainWindow::HitTestQuickAccessSortButton(int x, int y) const
+    {
+        if (IsRectEmpty(&quickAccessSortButtonRect_))
+        {
+            return -1;
+        }
+
+        const POINT point{x, y};
+        return PtInRect(&quickAccessSortButtonRect_, point) != FALSE ? 0 : -1;
     }
 
     std::vector<browser::BrowserItem> MainWindow::CollectItemsForScope(bool selectionScope) const
@@ -17470,6 +17579,17 @@ namespace hyperbrowse::ui
             return;
         }
 
+        if (HitTestQuickAccessSortButton(x, y) >= 0)
+        {
+            quickAccessSortButtonPressed_ = true;
+            SetCapture(hwnd_);
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
+            return;
+        }
+
         const int quickAccessButton = HitTestQuickAccessDestinationButton(x, y);
         if (quickAccessButton >= 0)
         {
@@ -17620,6 +17740,30 @@ namespace hyperbrowse::ui
             if (detailsPanelCloseButtonHot_)
             {
                 ToggleDetailsPanelVisibility();
+            }
+            return;
+        }
+
+        if (quickAccessSortButtonPressed_)
+        {
+            quickAccessSortButtonPressed_ = false;
+            ReleaseCapture();
+            if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+            {
+                InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            }
+
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(hwnd_, &point);
+            if (HitTestQuickAccessSortButton(point.x, point.y) >= 0)
+            {
+                SortFavoriteDestinationsByShortcut();
+                if (hwnd_ && detailsStripVisible_)
+                {
+                    LayoutChildren();
+                }
+                UpdateMenuState();
             }
             return;
         }
@@ -17849,10 +17993,14 @@ namespace hyperbrowse::ui
 
         const int quickAccessRowHit = HitTestQuickAccessDestinationRow(x, y);
         const int quickAccessHit = HitTestQuickAccessDestinationButton(x, y);
-        if (quickAccessRowHit != quickAccessHotRowIndex_ || quickAccessHit != quickAccessHotButtonIndex_)
+        const bool quickAccessSortHit = HitTestQuickAccessSortButton(x, y) >= 0;
+        if (quickAccessRowHit != quickAccessHotRowIndex_
+            || quickAccessHit != quickAccessHotButtonIndex_
+            || quickAccessSortHit != quickAccessSortButtonHot_)
         {
             quickAccessHotRowIndex_ = quickAccessRowHit;
             quickAccessHotButtonIndex_ = quickAccessHit;
+            quickAccessSortButtonHot_ = quickAccessSortHit;
             invalidateQuickAccessPanel();
         }
 
@@ -17886,11 +18034,14 @@ namespace hyperbrowse::ui
         else
         {
             SetCursor(LoadCursorW(nullptr,
-                                  IsOverSplitter(x, y)
+                                  (IsOverSplitter(x, y)
                                       ? IDC_SIZEWE
-                                      : ((detailsPanelCloseButtonHit >= 0 || quickAccessRowHit >= 0 || quickAccessHit >= 0)
+                                      : ((detailsPanelCloseButtonHit >= 0
+                                          || quickAccessSortHit
+                                          || quickAccessRowHit >= 0
+                                          || quickAccessHit >= 0)
                                           ? IDC_HAND
-                                          : IDC_ARROW)));
+                                          : IDC_ARROW))));
         }
     }
 
@@ -18382,6 +18533,11 @@ namespace hyperbrowse::ui
                 SetCursor(LoadCursorW(nullptr, IDC_HAND));
                 return TRUE;
             }
+            if (HitTestQuickAccessSortButton(point.x, point.y) >= 0)
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
             if (HitTestQuickAccessDestinationButton(point.x, point.y) >= 0)
             {
                 SetCursor(LoadCursorW(nullptr, IDC_HAND));
@@ -18568,10 +18724,13 @@ namespace hyperbrowse::ui
                     InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
                 }
             }
-            if (quickAccessHotRowIndex_ >= 0 || quickAccessHotButtonIndex_ >= 0)
+            if (quickAccessHotRowIndex_ >= 0
+                || quickAccessHotButtonIndex_ >= 0
+                || quickAccessSortButtonHot_)
             {
                 quickAccessHotRowIndex_ = -1;
                 quickAccessHotButtonIndex_ = -1;
+                quickAccessSortButtonHot_ = false;
                 if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
                 {
                     InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
@@ -18603,6 +18762,12 @@ namespace hyperbrowse::ui
                     }
 
                     di->lpszText = const_cast<wchar_t*>(treeFolderTooltipText_.c_str());
+                    return 0;
+                }
+
+                if (di->hdr.idFrom == kQuickAccessSortTooltipId)
+                {
+                    di->lpszText = const_cast<LPWSTR>(L"Sort Quick Send destinations by hotkey");
                     return 0;
                 }
 
@@ -18654,17 +18819,6 @@ namespace hyperbrowse::ui
                 if (HIWORD(wParam) == EN_SETFOCUS)
                 {
                     PostMessageW(reinterpret_cast<HWND>(lParam), EM_SETSEL, 0, static_cast<LPARAM>(-1));
-                    return 0;
-                }
-
-                if (HIWORD(wParam) == EN_KILLFOCUS)
-                {
-                    SortFavoriteDestinationsByShortcut();
-                    if (hwnd_ && detailsStripVisible_)
-                    {
-                        LayoutChildren();
-                    }
-                    UpdateMenuState();
                     return 0;
                 }
 

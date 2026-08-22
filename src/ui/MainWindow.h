@@ -257,6 +257,7 @@ namespace hyperbrowse::ui
             bool startSlideshow) const;
         bool SyncViewerToBrowserModel(std::wstring_view preferredPath = {});
         void RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top);
+        void UpdateQuickAccessSortTooltip();
         void UpdateQuickAccessShortcutEditControls();
         void HideQuickAccessShortcutEditControls();
         bool IsQuickAccessShortcutEdit(HWND control) const;
@@ -267,6 +268,7 @@ namespace hyperbrowse::ui
         void ToggleDetailsPanelVisibility();
         int HitTestDetailsPanelTab(int x, int y) const;
         int HitTestDetailsPanelCloseButton(int x, int y) const;
+        int HitTestQuickAccessSortButton(int x, int y) const;
         int HitTestQuickAccessDestinationRow(int x, int y) const;
         int HitTestQuickAccessDestinationButton(int x, int y, services::FileOperationType* type = nullptr) const;
         std::vector<browser::BrowserItem> CollectItemsForScope(bool selectionScope) const;
@@ -600,6 +602,10 @@ namespace hyperbrowse::ui
         int detailsPanelPressedTabIndex_{-1};
         bool detailsPanelCloseButtonHot_{};
         bool detailsPanelCloseButtonPressed_{};
+        RECT quickAccessSortButtonRect_{};
+        bool quickAccessSortButtonHot_{};
+        bool quickAccessSortButtonPressed_{};
+        bool quickAccessSortTooltipAdded_{};
         int quickAccessHotRowIndex_{-1};
         int quickAccessHotButtonIndex_{-1};
         int quickAccessPressedRowIndex_{-1};
