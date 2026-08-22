@@ -222,6 +222,15 @@ Invoke-External -Description 'Stage installer release layout' -FilePath $cmakeEx
     '--component', 'Runtime',
     '--prefix', $runtimeDir)
 
+foreach ($layout in @($portableDir, $runtimeDir)) {
+    foreach ($fileName in @('user-guide.html', 'MainWindow.PNG')) {
+        $helpAssetPath = Join-Path (Join-Path $layout 'docs') $fileName
+        if (-not (Test-Path -LiteralPath $helpAssetPath -PathType Leaf)) {
+            throw "Expected user guide asset was not staged: $helpAssetPath"
+        }
+    }
+}
+
 Write-Host '==> Create portable release archive' -ForegroundColor Cyan
 Compress-Archive -Path $portableDir -DestinationPath $portableZip -CompressionLevel Optimal -Force
 

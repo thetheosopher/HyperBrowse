@@ -280,6 +280,7 @@ namespace hyperbrowse::ui
         void ShowBrowserContextMenu(POINT screenPoint);
         bool ShowShellContextMenuForSelection(POINT screenPoint);
         void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
+        void ShowUserGuide() const;
         void ShowAboutDialog() const;
         void ShowSlideshowSettingsDialog();
         void ShowPerformanceSettingsDialog();

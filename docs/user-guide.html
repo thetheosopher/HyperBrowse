@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HyperBrowse User Guide</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --ink: #17232b;
+            --muted: #5e6c73;
+            --paper: #f5f7f4;
+            --panel: #ffffff;
+            --line: #d7dfdb;
+            --accent: #007f86;
+            --accent-dark: #005b61;
+            --warm: #d97732;
+            --code: #edf2f0;
+            --shadow: 0 18px 45px rgba(23, 35, 43, .10);
+        }
+
+        * { box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            margin: 0;
+            background:
+                radial-gradient(circle at 12% 5%, rgba(0, 127, 134, .11), transparent 28rem),
+                radial-gradient(circle at 90% 18%, rgba(217, 119, 50, .10), transparent 24rem),
+                var(--paper);
+            color: var(--ink);
+            font-family: "Segoe UI", "Aptos", sans-serif;
+            line-height: 1.65;
+        }
+
+        a { color: var(--accent-dark); }
+        a:hover { color: var(--warm); }
+
+        .masthead {
+            padding: 64px 24px 48px;
+            border-bottom: 1px solid rgba(0, 127, 134, .18);
+        }
+
+        .masthead-inner, main, .footer-inner {
+            width: min(1080px, 100%);
+            margin: 0 auto;
+        }
+
+        .eyebrow {
+            color: var(--accent-dark);
+            font-size: .78rem;
+            font-weight: 750;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+
+        h1, h2, h3 {
+            font-family: "Bahnschrift", "Segoe UI", sans-serif;
+            line-height: 1.12;
+            margin: 0 0 16px;
+        }
+
+        h1 {
+            max-width: 760px;
+            margin-top: 14px;
+            font-size: 4.8rem;
+            letter-spacing: 0;
+        }
+
+        .lede {
+            max-width: 700px;
+            color: var(--muted);
+            font-size: 1.15rem;
+            margin: 0;
+        }
+
+        .jump-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 9px;
+            margin: 30px 0 0;
+        }
+
+        .jump-list a {
+            display: inline-block;
+            padding: 8px 13px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, .72);
+            text-decoration: none;
+            font-size: .9rem;
+        }
+
+        main { padding: 34px 24px 70px; }
+
+        section {
+            scroll-margin-top: 24px;
+            padding: 38px 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        section:last-child { border-bottom: 0; }
+
+        h2 { font-size: 2rem; }
+        h3 { color: var(--accent-dark); font-size: 1.15rem; margin-top: 28px; }
+
+        p { max-width: 760px; }
+
+        .columns {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 22px 42px;
+        }
+
+        .columns > div { min-width: 0; }
+
+        .callout {
+            margin: 22px 0;
+            padding: 18px 20px;
+            border-left: 4px solid var(--accent);
+            background: var(--panel);
+            box-shadow: var(--shadow);
+        }
+
+        .callout strong { color: var(--accent-dark); }
+
+        ul, ol { padding-left: 24px; }
+        li + li { margin-top: 6px; }
+
+        kbd, code {
+            padding: 2px 6px;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            background: var(--code);
+            font-family: Consolas, monospace;
+            font-size: .9em;
+        }
+
+        figure { margin: 30px 0 8px; }
+
+        figure img {
+            display: block;
+            width: 100%;
+            height: auto;
+            border: 1px solid var(--line);
+            box-shadow: var(--shadow);
+        }
+
+        figcaption {
+            color: var(--muted);
+            font-size: .88rem;
+            margin-top: 9px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: var(--panel);
+            box-shadow: var(--shadow);
+        }
+
+        th, td {
+            padding: 11px 14px;
+            border: 1px solid var(--line);
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            color: var(--accent-dark);
+            background: #eaf1ef;
+            font-weight: 750;
+        }
+
+        .footer {
+            padding: 30px 24px 55px;
+            color: var(--muted);
+            font-size: .9rem;
+        }
+
+        @media (max-width: 720px) {
+            .masthead { padding-top: 42px; }
+            main { padding-top: 12px; }
+            h1 { font-size: 2.7rem; }
+            .columns { grid-template-columns: 1fr; }
+            table { display: block; overflow-x: auto; }
+            th, td { min-width: 150px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="masthead">
+        <div class="masthead-inner">
+            <div class="eyebrow">HyperBrowse / User Guide</div>
+            <h1>Browse faster. See more.</h1>
+            <p class="lede">A practical guide to finding, reviewing, organizing, and viewing images in HyperBrowse. This guide is shipped with the application and works without an internet connection.</p>
+            <nav class="jump-list" aria-label="Guide sections">
+                <a href="#quick-start">Quick start</a>
+                <a href="#browser">Browser</a>
+                <a href="#viewer">Viewer</a>
+                <a href="#file-workflows">File workflows</a>
+                <a href="#quick-send">Quick Send</a>
+                <a href="#shortcuts">Shortcuts</a>
+                <a href="#troubleshooting">Troubleshooting</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section id="quick-start">
+            <h2>Quick start</h2>
+            <ol>
+                <li>Choose <strong>File &gt; Open Folder</strong>, or press <kbd>Ctrl</kbd> + <kbd>O</kbd>.</li>
+                <li>Select a folder in the tree. HyperBrowse shows a loading state immediately, then fills the browser as images are found.</li>
+                <li>Double-click an image, or select it and choose <strong>File &gt; Open</strong>, to open the separate viewer.</li>
+                <li>Use the <strong>Help &gt; User Guide</strong> command or press <kbd>F1</kbd> whenever you need this guide again.</li>
+            </ol>
+            <div class="callout"><strong>Keep the layout together.</strong> Portable builds locate the guide beside the application. Do not separate the <code>docs</code> folder from the executable.</div>
+            <figure>
+                <img src="MainWindow.PNG" alt="HyperBrowse main window showing a folder tree, image thumbnails, and the action strip">
+                <figcaption>The main window combines an Explorer-style folder tree, a browser pane, an action strip, and a status bar.</figcaption>
+            </figure>
+        </section>
+
+        <section id="browser">
+            <h2>Browse and select images</h2>
+            <div class="columns">
+                <div>
+                    <h3>Choose a view</h3>
+                    <ul>
+                        <li><strong>Thumbnail mode</strong> is the fastest way to scan a folder visually. Change the thumbnail size from the action strip or <strong>View &gt; Thumbnail Size</strong>.</li>
+                        <li><strong>Details mode</strong> is useful for comparing filenames, dates, dimensions, file sizes, ratings, and tags.</li>
+                        <li>The details strip shows information for the current selection. It can be toggled from <strong>View &gt; Details Strip</strong>.</li>
+                        <li>Use <strong>View &gt; Show Subfolders</strong> to include folder entries while browsing.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Find and arrange</h3>
+                    <ul>
+                        <li>Type in the filter field to narrow the current folder by filename.</li>
+                        <li>Use <strong>View &gt; Sort</strong> to sort by filename, modified date, file size, dimensions, type, date taken, rating, tags, or random order.</li>
+                        <li>Change sort direction with <strong>View &gt; Sort &gt; Ascending/Descending</strong>.</li>
+                        <li>Turn on <strong>View &gt; Recursive Browsing</strong> when the current folder and its descendants should be treated as one image collection.</li>
+                    </ul>
+                </div>
+            </div>
+            <h3>Selection and drag-and-drop</h3>
+            <p>Use Ctrl-click to add or remove individual items, Shift-click for a range, and <kbd>Ctrl</kbd> + <kbd>A</kbd> to select all visible items. Selected files can be dragged to a folder in the tree or to another shell-aware application such as File Explorer. Dropping files onto HyperBrowse can open an image in the viewer or copy files into the current folder, depending on where they are dropped.</p>
+            <p>Right-click a selection for copy, move, delete, rename, duplicate, properties, ratings, tags, image information, and other actions. Shift-right-click opens the Windows shell context menu.</p>
+        </section>
+
+        <section id="viewer">
+            <h2>Review images in the viewer</h2>
+            <p>The viewer is a separate window so the browser remains available while you review images. Use the left and right arrow keys, the toolbar, or the edge navigation controls to move through the current collection.</p>
+            <div class="columns">
+                <div>
+                    <h3>View controls</h3>
+                    <ul>
+                        <li>Use the mouse wheel or the zoom commands to zoom. <strong>Fit to Window</strong> restores a complete-image view, while <strong>100%</strong> shows pixels at their native size.</li>
+                        <li>Pan a zoomed image by dragging it. Rotate with the viewer rotate commands.</li>
+                        <li>Double-click the viewer or use the fullscreen command for a chrome-free review.</li>
+                        <li>The info overlay shows image state without leaving the viewer. Choose a small, medium, or large overlay size.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Compare and inspect</h3>
+                    <ul>
+                        <li>Select two images and choose <strong>File &gt; Compare Selected</strong> for a side-by-side comparison.</li>
+                        <li>Open the full metadata pane when EXIF, IPTC, or XMP details need more room.</li>
+                        <li>When a RAW file has a paired JPEG, HyperBrowse can include the pair in file operations and apply the selected viewer preference.</li>
+                        <li>Deleting the displayed image advances to the next available image when possible.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="slideshow">
+            <h2>Run a slideshow</h2>
+            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>View &gt; Slideshow &gt; Settings</strong>.</p>
+            <p>Slideshow transitions include cut, crossfade, slide, and Ken Burns styles. Slideshow scope follows the current recursive-browsing setting. The viewer can open on a secondary monitor when that preference is enabled.</p>
+        </section>
+
+        <section id="file-workflows">
+            <h2>Manage files</h2>
+            <div class="columns">
+                <div>
+                    <h3>Everyday operations</h3>
+                    <ul>
+                        <li><strong>Copy</strong> and <strong>Move</strong> use Windows shell operations and can target the current folder, a recent destination, or a favorite destination.</li>
+                        <li><strong>Delete</strong> sends files to the Recycle Bin. Use <kbd>Shift</kbd> + <kbd>Delete</kbd> for permanent deletion.</li>
+                        <li><strong>Rename</strong> supports a selected image or inline folder renaming. <kbd>F2</kbd> starts the common rename action.</li>
+                        <li><strong>Duplicate</strong> copies selected files into the same folder with an automatic numeric suffix.</li>
+                        <li>Use <kbd>Ctrl</kbd> + <kbd>C</kbd> and <kbd>Ctrl</kbd> + <kbd>V</kbd> to copy and paste files through the Windows clipboard.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Image operations</h3>
+                    <ul>
+                        <li>Batch convert a selection or the current folder to JPEG, PNG, or TIFF.</li>
+                        <li>JPEG orientation adjustment changes EXIF orientation metadata. It does not claim to be a lossless pixel rotation.</li>
+                        <li>Use <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> to copy the displayed image pixels to the clipboard.</li>
+                        <li>Use <strong>Edit &gt; Undo</strong> and <strong>Edit &gt; Redo</strong> for recent copy, move, and rename operations. Recycle Bin deletes remain recoverable through Windows.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="callout"><strong>Conflict handling.</strong> When a copy or move encounters an existing filename, choose overwrite or automatic numeric renaming in the conflict prompt. Long operations report progress in the taskbar when supported.</div>
+        </section>
+
+        <section id="quick-send">
+            <h2>Use Quick Send</h2>
+            <p>Quick Send keeps frequently used destinations close to the viewer. Open the Quick Send panel, add favorite folders, and assign each one a key from <kbd>0</kbd> through <kbd>9</kbd> or <kbd>A</kbd> through <kbd>Z</kbd>.</p>
+            <ul>
+                <li>Press <kbd>F7</kbd> to move the displayed image to a favorite destination.</li>
+                <li>Press <kbd>F8</kbd> to copy the displayed image to a favorite destination.</li>
+                <li>The same commands work with selected files in the browser.</li>
+                <li>Paired RAW/JPEG files are included when paired operations are enabled.</li>
+                <li>Assignments are remembered by folder path, even when the favorite list is reordered.</li>
+            </ul>
+        </section>
+
+        <section id="formats">
+            <h2>Formats and metadata</h2>
+            <p>HyperBrowse uses Windows Imaging Component for common formats and LibRaw for supported RAW formats. JPEG, PNG, GIF, and TIFF files use the standard Windows decode path. RAW support includes ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2.</p>
+            <p>JPEG EXIF orientation is applied automatically when images are displayed. Metadata surfaces expose EXIF, IPTC, and XMP information when it is present. GIF and TIFF browsing uses the first frame or page.</p>
+            <div class="callout"><strong>RAW fallback.</strong> The optional out-of-process RAW helper improves isolation. If the helper or optional NVIDIA JPEG runtime is unavailable, HyperBrowse falls back to its other supported decode paths where possible.</div>
+        </section>
+
+        <section id="settings">
+            <h2>Settings and performance</h2>
+            <p>Most preferences live in the <strong>View</strong> menu and are remembered per user. Light and dark themes, thumbnail size, compact layout, thumbnail details, recursive browsing, viewer behavior, slideshow settings, and RAW/JPEG preferences can be changed without restarting.</p>
+            <ul>
+                <li><strong>Help &gt; Performance &gt; Performance Profile</strong> offers Conservative, Balanced, and Performance profiles.</li>
+                <li><strong>Help &gt; Performance &gt; Performance Settings</strong> exposes adaptive cache and worker overrides.</li>
+                <li><strong>View &gt; Advanced &gt; Persistent Thumbnail Cache</strong> enables the disk cache.</li>
+                <li><strong>View &gt; Advanced &gt; Persistent Cache Stats and Cleanup</strong> shows cache usage and provides compact and purge actions.</li>
+                <li><strong>Help &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
+            </ul>
+            <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive.</p>
+        </section>
+
+        <section id="shortcuts">
+            <h2>Keyboard shortcuts</h2>
+            <table>
+                <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+                <tbody>
+                    <tr><td><kbd>F1</kbd></td><td>Open this user guide</td></tr>
+                    <tr><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open folder</td></tr>
+                    <tr><td><kbd>F2</kbd></td><td>Rename the selected item</td></tr>
+                    <tr><td><kbd>F5</kbd></td><td>Refresh the folder tree</td></tr>
+                    <tr><td><kbd>Backspace</kbd></td><td>Return to the previous folder</td></tr>
+                    <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>Select all visible browser items</td></tr>
+                    <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>Copy selected files to the clipboard</td></tr>
+                    <tr><td><kbd>Ctrl</kbd> + <kbd>V</kbd></td><td>Paste files into the current folder</td></tr>
+                    <tr><td><kbd>Ctrl</kbd> + <kbd>D</kbd></td><td>Duplicate the selection</td></tr>
+                    <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Y</kbd></td><td>Undo / redo a supported file operation</td></tr>
+                    <tr><td><kbd>F7</kbd> / <kbd>F8</kbd></td><td>Quick Send: move / copy</td></tr>
+                    <tr><td><kbd>Delete</kbd></td><td>Move the selection to the Recycle Bin</td></tr>
+                    <tr><td><kbd>Shift</kbd> + <kbd>Delete</kbd></td><td>Delete the selection permanently</td></tr>
+                    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td><td>Copy displayed image pixels</td></tr>
+                    <tr><td><kbd>Esc</kbd></td><td>Minimize the main window or close the viewer</td></tr>
+                </tbody>
+            </table>
+            <p>Menu labels show shortcuts where they are available. Some actions also have viewer-specific keyboard behavior; when the viewer has focus, its navigation and zoom commands take priority.</p>
+        </section>
+
+        <section id="troubleshooting">
+            <h2>Troubleshooting</h2>
+            <h3>The guide does not open</h3>
+            <p>Keep the <code>docs</code> folder with the executable. Installed copies normally place the guide in the application <code>docs</code> folder beside <code>bin</code>; portable copies place it in <code>docs</code> beside <code>HyperBrowse.exe</code>. HyperBrowse uses the executable location, not the current working directory, to find it.</p>
+            <h3>An image cannot be decoded</h3>
+            <p>Confirm that the file uses a supported format. For RAW images, check whether the optional helper is present beside the application and try the in-process fallback from <strong>View &gt; Advanced</strong>. Unsupported RAW variants may still show no preview.</p>
+            <h3>Browsing a large folder feels busy</h3>
+            <p>Allow the initial enumeration to finish, then adjust the Performance Profile if needed. Persistent thumbnail cache maintenance is available under <strong>View &gt; Advanced</strong>. The diagnostics snapshot under <strong>Help</strong> can capture state for a bug report.</p>
+            <h3>Where are settings stored?</h3>
+            <p>User settings are stored under <code>HKCU\Software\HyperBrowse</code>. Portable mode does not make settings portable; the application still uses the current Windows user's profile.</p>
+        </section>
+
+        <section id="about-this-guide">
+            <h2>About this guide</h2>
+            <p>This guide is versioned with HyperBrowse and describes the features shipped in the same release. The project source and issue tracker are available at <a href="https://github.com/thetheosopher/HyperBrowse">github.com/thetheosopher/HyperBrowse</a>.</p>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="footer-inner">HyperBrowse is a native Windows image browser and viewer. Keep browsing practical.</div>
+    </footer>
+</body>
+</html>

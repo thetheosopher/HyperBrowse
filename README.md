@@ -32,6 +32,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Display changes and graphics-surface loss trigger redraw and resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
 - Files dropped onto the application can open directly in the viewer or be copied into the current folder through the existing shell-aware workflows.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
+- An offline HTML user guide available from Help > User Guide or by pressing F1.
 
 ## Current Capabilities
 
@@ -164,6 +165,8 @@ The dedicated release-packaging configure preset keeps the static MSVC runtime e
 
 The generated installer supports either current-user or all-users installation, writes the correct Add/Remove Programs entry for the selected scope, creates a Start Menu shortcut automatically, and offers an optional desktop shortcut.
 
+Both the portable package and installer include the offline user guide under `docs/`, along with the main-window screenshot used by the guide. Installed builds place the application executable under `bin/` and the guide under the neighboring `docs/` directory.
+
 When CUDA redistributable bundling is enabled, CMake downloads the official NVIDIA `cuda_cudart` and `libnvjpeg` redistributable archives, verifies their SHA256 hashes, and stages the runtime DLLs and license files beside the application. That keeps nvJPEG deployment self-contained instead of depending on a machine-wide CUDA install or `PATH` setup.
 
 ## Repository Layout
@@ -185,6 +188,7 @@ When CUDA redistributable bundling is enabled, CMake downloads the official NVID
 
 The `specs/` directory tracks both design intent and implementation follow-up. Useful entry points:
 
+- [docs/user-guide.html](docs/user-guide.html) for the practical, user-facing application guide.
 - [specs/01-product-spec.md](specs/01-product-spec.md) for product scope and supported workflows.
 - [specs/02-architecture.md](specs/02-architecture.md) for subsystem layout and pipeline design.
 - [specs/04-ui-behavior.md](specs/04-ui-behavior.md) for the implemented UI contract.

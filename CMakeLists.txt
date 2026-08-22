@@ -24,6 +24,15 @@ endif()
 
 set(HYPERBROWSE_INSTALLER_BIN_DIR "bin")
 set(HYPERBROWSE_INSTALLER_DOC_DIR "docs")
+set(HYPERBROWSE_USER_GUIDE "${CMAKE_CURRENT_SOURCE_DIR}/docs/user-guide.html")
+set(HYPERBROWSE_USER_GUIDE_IMAGE "${CMAKE_CURRENT_SOURCE_DIR}/docs/MainWindow.PNG")
+
+if(NOT EXISTS "${HYPERBROWSE_USER_GUIDE}")
+    message(FATAL_ERROR "HyperBrowse user guide was not found: ${HYPERBROWSE_USER_GUIDE}")
+endif()
+if(NOT EXISTS "${HYPERBROWSE_USER_GUIDE_IMAGE}")
+    message(FATAL_ERROR "HyperBrowse user guide image was not found: ${HYPERBROWSE_USER_GUIDE_IMAGE}")
+endif()
 
 set(HYPERBROWSE_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseVersion.rc")
 set(HYPERBROWSE_BUILD_INFO_HEADER "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseBuildInfo.h")
@@ -225,6 +234,15 @@ set_target_properties(HyperBrowse PROPERTIES
 add_custom_command(TARGET HyperBrowse POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:HyperBrowse>/assets")
 
+add_custom_command(TARGET HyperBrowse POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HyperBrowse>/docs"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${HYPERBROWSE_USER_GUIDE}"
+        "$<TARGET_FILE_DIR:HyperBrowse>/docs/user-guide.html"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${HYPERBROWSE_USER_GUIDE_IMAGE}"
+        "$<TARGET_FILE_DIR:HyperBrowse>/docs/MainWindow.PNG")
+
 if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
     foreach(_hyperbrowse_cuda_runtime_dll IN LISTS HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
         add_custom_command(TARGET HyperBrowse POST_BUILD
@@ -271,6 +289,18 @@ install(FILES "${HYPERBROWSE_RUNTIME_DEPENDENCIES}"
     DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
     COMPONENT Runtime
     RENAME "runtime-dependencies.txt")
+
+install(FILES
+    "${HYPERBROWSE_USER_GUIDE}"
+    "${HYPERBROWSE_USER_GUIDE_IMAGE}"
+    DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
+    COMPONENT Portable)
+
+install(FILES
+    "${HYPERBROWSE_USER_GUIDE}"
+    "${HYPERBROWSE_USER_GUIDE_IMAGE}"
+    DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
+    COMPONENT Runtime)
 
 if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
     install(PROGRAMS ${HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS}

@@ -256,6 +256,7 @@ namespace
     constexpr UINT ID_HELP_PERFORMANCE_PROFILE_BALANCED = 9005;
     constexpr UINT ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE = 9006;
     constexpr UINT ID_HELP_PERFORMANCE_SETTINGS = 9007;
+    constexpr UINT ID_HELP_USER_GUIDE = 9008;
     constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
     constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
     constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
@@ -5080,6 +5081,46 @@ namespace
         return reinterpret_cast<INT_PTR>(result) > 32;
     }
 
+    std::wstring FindUserGuidePath()
+    {
+        std::vector<wchar_t> modulePath(512);
+        DWORD length = 0;
+        while (true)
+        {
+            length = GetModuleFileNameW(nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+            if (length == 0)
+            {
+                return {};
+            }
+            if (length < modulePath.size() - 1)
+            {
+                break;
+            }
+            if (modulePath.size() >= 32768)
+            {
+                return {};
+            }
+            modulePath.resize(modulePath.size() * 2);
+        }
+
+        const fs::path moduleDirectory = fs::path(std::wstring(modulePath.data(), length)).parent_path();
+        const fs::path candidates[] = {
+            moduleDirectory / L"docs" / L"user-guide.html",
+            moduleDirectory.parent_path() / L"docs" / L"user-guide.html",
+        };
+
+        for (const fs::path& candidate : candidates)
+        {
+            std::error_code error;
+            if (fs::is_regular_file(candidate, error))
+            {
+                return candidate.lexically_normal().wstring();
+            }
+        }
+
+        return {};
+    }
+
     bool PromptForCrossDriveDropOperation(HWND ownerWindow,
                                           std::wstring_view destinationFolder,
                                           hyperbrowse::services::FileOperationType* operationType)
@@ -6462,6 +6503,7 @@ namespace hyperbrowse::ui
 
         ACCEL accelerators[] = {
             {FVIRTKEY | FCONTROL, static_cast<WORD>('O'), ID_FILE_OPEN_FOLDER},
+            {FVIRTKEY, VK_F1, ID_HELP_USER_GUIDE},
             {FVIRTKEY, VK_BACK, ID_VIEW_NAVIGATE_BACK_FOLDER},
             {FVIRTKEY, VK_ESCAPE, ID_FILE_MINIMIZE},
             {FVIRTKEY | FCONTROL, static_cast<WORD>('W'), ID_FILE_MINIMIZE},
@@ -6664,6 +6706,7 @@ namespace hyperbrowse::ui
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_SINGLE_INSTANCE, L"Use &Single Instance");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Advanced");
 
+        AppendMenuW(helpMenu, MF_STRING, ID_HELP_USER_GUIDE, L"&User Guide\tF1");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
         AppendMenuW(helpMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE, L"&Conservative");
@@ -11849,6 +11892,27 @@ namespace hyperbrowse::ui
         util::LogInfo(L"Opened diagnostics snapshot window.");
     }
 
+    void MainWindow::ShowUserGuide() const
+    {
+        const std::wstring guidePath = FindUserGuidePath();
+        if (guidePath.empty())
+        {
+            MessageBoxW(hwnd_,
+                        L"The local user guide could not be found. Make sure the application's docs folder is present.",
+                        L"User Guide",
+                        MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        if (!LaunchShellTarget(hwnd_, L"open", guidePath))
+        {
+            MessageBoxW(hwnd_,
+                        L"Windows could not open the local user guide in the default browser.",
+                        L"User Guide",
+                        MB_OK | MB_ICONERROR);
+        }
+    }
+
     void MainWindow::ShowAboutDialog() const
     {
         WNDCLASSEXW windowClass{};
@@ -16825,6 +16889,9 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_SLIDESHOW_FOLDER:
             StartSlideshow(false);
+            return true;
+        case ID_HELP_USER_GUIDE:
+            ShowUserGuide();
             return true;
         case ID_HELP_ABOUT:
             ShowAboutDialog();
