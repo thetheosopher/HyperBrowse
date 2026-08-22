@@ -16,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <future>
+#include <limits>
 #include <memory>
 
 #include "app/resource.h"
@@ -757,6 +758,9 @@ namespace hyperbrowse::viewer
             ReleaseD2DResources();
             hwnd_ = nullptr;
             fullScreen_ = false;
+            windowFitMode_ = WindowFitMode::Regular;
+            hasRegularPlacementBeforeFit_ = false;
+            regularPlacementBeforeFit_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
             windowedStyle_ = 0;
             windowedExStyle_ = 0;
             windowedPlacement_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
@@ -1591,6 +1595,7 @@ namespace hyperbrowse::viewer
         currentSlot_.prefetched = prefetched;
         currentImage_ = currentSlot_.image;
         ClearCurrentMetadata();
+        RefreshWindowFitForCurrentImage();
         if (fullMetadataVisible_)
         {
             LoadMetadataAsyncForIndex(index);
@@ -2252,6 +2257,164 @@ namespace hyperbrowse::viewer
         return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
     }
 
+    void ViewerWindow::SetWindowFitMode(WindowFitMode mode)
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        if (fullScreen_)
+        {
+            SetFullScreen(false);
+        }
+
+        if (mode == windowFitMode_)
+        {
+            if (mode != WindowFitMode::Regular)
+            {
+                RestoreRegularWindowPlacement();
+            }
+            return;
+        }
+
+        if (mode == WindowFitMode::Regular)
+        {
+            RestoreRegularWindowPlacement();
+            return;
+        }
+
+        if (!currentImage_)
+        {
+            return;
+        }
+
+        if (IsIconic(hwnd_) != FALSE)
+        {
+            ShowWindow(hwnd_, SW_RESTORE);
+        }
+
+        if (windowFitMode_ == WindowFitMode::Regular)
+        {
+            regularPlacementBeforeFit_.length = sizeof(WINDOWPLACEMENT);
+            if (GetWindowPlacement(hwnd_, &regularPlacementBeforeFit_) == FALSE)
+            {
+                return;
+            }
+            hasRegularPlacementBeforeFit_ = true;
+        }
+
+        if (IsZoomed(hwnd_) != FALSE)
+        {
+            ShowWindow(hwnd_, SW_RESTORE);
+        }
+
+        if (ResizeWindowForFitMode(mode))
+        {
+            windowFitMode_ = mode;
+        }
+    }
+
+    bool ViewerWindow::ResizeWindowForFitMode(WindowFitMode mode)
+    {
+        if (!hwnd_ || fullScreen_ || mode == WindowFitMode::Regular || !currentImage_)
+        {
+            return false;
+        }
+
+        MONITORINFO monitorInfo{sizeof(MONITORINFO)};
+        const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+        if (!monitor || GetMonitorInfoW(monitor, &monitorInfo) == FALSE)
+        {
+            return false;
+        }
+
+        const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE))
+            & ~(WS_MAXIMIZE | WS_MINIMIZE);
+        const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_EXSTYLE));
+        RECT frameRect{0, 0, 0, 0};
+        if (AdjustWindowRectEx(&frameRect, style, FALSE, exStyle) == FALSE)
+        {
+            return false;
+        }
+
+        const LONG frameWidth = frameRect.right - frameRect.left;
+        const LONG frameHeight = frameRect.bottom - frameRect.top;
+        const LONG workWidth = monitorInfo.rcWork.right - monitorInfo.rcWork.left;
+        const LONG workHeight = monitorInfo.rcWork.bottom - monitorInfo.rcWork.top;
+        const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+        const double imageWidth = static_cast<double>(swapDimensions
+            ? currentImage_->SourceHeight()
+            : currentImage_->SourceWidth());
+        const double imageHeight = static_cast<double>(swapDimensions
+            ? currentImage_->SourceWidth()
+            : currentImage_->SourceHeight());
+        const LONG availableClientWidth = std::max<LONG>(1, workWidth - frameWidth);
+        const LONG availableClientHeight = std::max<LONG>(1, workHeight - frameHeight);
+        LONG clientWidth = availableClientWidth;
+        LONG clientHeight = availableClientHeight;
+        if (mode == WindowFitMode::Height)
+        {
+            clientWidth = std::max<LONG>(1, static_cast<LONG>(std::lround(
+                static_cast<double>(clientHeight) * imageWidth / std::max(1.0, imageHeight))));
+        }
+        else
+        {
+            const LONG aspectHeight = std::max<LONG>(1, static_cast<LONG>(std::lround(
+                static_cast<double>(clientWidth) * imageHeight / std::max(1.0, imageWidth))));
+            clientHeight = std::min(availableClientHeight, aspectHeight);
+        }
+
+        RECT desiredWindowRect{0, 0, clientWidth, clientHeight};
+        if (AdjustWindowRectEx(&desiredWindowRect, style, FALSE, exStyle) == FALSE)
+        {
+            return false;
+        }
+
+        const LONG windowWidth = desiredWindowRect.right - desiredWindowRect.left;
+        const LONG windowHeight = desiredWindowRect.bottom - desiredWindowRect.top;
+        const LONG windowLeft = mode == WindowFitMode::Height
+            ? monitorInfo.rcWork.left + (workWidth - windowWidth) / 2
+            : monitorInfo.rcWork.left;
+        const LONG windowTop = mode == WindowFitMode::Height
+            ? monitorInfo.rcWork.top
+            : monitorInfo.rcWork.top + std::max<LONG>(0, (workHeight - windowHeight) / 2);
+
+        if (SetWindowPos(hwnd_, HWND_TOP,
+                         windowLeft,
+                         windowTop,
+                         windowWidth,
+                         windowHeight,
+                         SWP_FRAMECHANGED | SWP_SHOWWINDOW) == FALSE)
+        {
+            return false;
+        }
+        FitToWindow();
+        return true;
+    }
+
+    void ViewerWindow::RefreshWindowFitForCurrentImage()
+    {
+        if (windowFitMode_ != WindowFitMode::Regular)
+        {
+            ResizeWindowForFitMode(windowFitMode_);
+        }
+    }
+
+    void ViewerWindow::RestoreRegularWindowPlacement()
+    {
+        if (!hwnd_ || !hasRegularPlacementBeforeFit_)
+        {
+            return;
+        }
+
+        SetWindowPlacement(hwnd_, &regularPlacementBeforeFit_);
+        windowFitMode_ = WindowFitMode::Regular;
+        hasRegularPlacementBeforeFit_ = false;
+        regularPlacementBeforeFit_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
+        RequestRepaint();
+    }
+
     void ViewerWindow::SetFullScreen(bool enabled, HMONITOR targetMonitor)
     {
         if (!hwnd_)
@@ -2263,6 +2426,10 @@ namespace hyperbrowse::viewer
         {
             if (!fullScreen_)
             {
+                if (windowFitMode_ != WindowFitMode::Regular)
+                {
+                    RestoreRegularWindowPlacement();
+                }
                 windowedStyle_ = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE));
                 windowedExStyle_ = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_EXSTYLE));
                 windowedPlacement_.length = sizeof(WINDOWPLACEMENT);
@@ -2302,6 +2469,9 @@ namespace hyperbrowse::viewer
         SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         fullScreen_ = false;
+        windowFitMode_ = WindowFitMode::Regular;
+        hasRegularPlacementBeforeFit_ = false;
+        regularPlacementBeforeFit_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
     }
 
     void ViewerWindow::ToggleFullScreen()
@@ -3109,6 +3279,16 @@ namespace hyperbrowse::viewer
     {
         switch (message)
         {
+        case WM_GETMINMAXINFO:
+        {
+            auto* minMaxInfo = reinterpret_cast<MINMAXINFO*>(lParam);
+            if (minMaxInfo)
+            {
+                minMaxInfo->ptMaxTrackSize.x = std::numeric_limits<LONG>::max();
+                minMaxInfo->ptMaxTrackSize.y = std::numeric_limits<LONG>::max();
+            }
+            return 0;
+        }
         case WM_SIZE:
             if (wParam == SIZE_MINIMIZED)
             {
@@ -3281,6 +3461,12 @@ namespace hyperbrowse::viewer
                 {
                     FitToWindow();
                 }
+                return 0;
+            case 'H':
+                SetWindowFitMode(WindowFitMode::Height);
+                return 0;
+            case 'W':
+                SetWindowFitMode(WindowFitMode::Width);
                 return 0;
             case 'L':
                 RotateLeft();
@@ -5024,6 +5210,9 @@ namespace hyperbrowse::viewer
             ReleaseD2DResources();
             asyncState_->targetWindow = nullptr;
             fullScreen_ = false;
+            windowFitMode_ = WindowFitMode::Regular;
+            hasRegularPlacementBeforeFit_ = false;
+            regularPlacementBeforeFit_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
             windowedStyle_ = 0;
             windowedExStyle_ = 0;
             windowedPlacement_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};

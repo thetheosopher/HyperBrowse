@@ -37,3 +37,4 @@ add_custom_command(TARGET HyperBrowseTests POST_BUILD
         "$<TARGET_FILE_DIR:HyperBrowseTests>/assets/toolbar-icons")
 
 add_test(NAME HyperBrowseSmoke COMMAND HyperBrowseTests)
+add_test(NAME HyperBrowseViewerFitSmoke COMMAND HyperBrowseTests --viewer-fit)

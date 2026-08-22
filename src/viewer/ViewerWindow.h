@@ -136,6 +136,13 @@ namespace hyperbrowse::viewer
             Custom,
         };
 
+        enum class WindowFitMode
+        {
+            Regular,
+            Height,
+            Width,
+        };
+
         enum class LoadReason
         {
             Open,
@@ -187,6 +194,10 @@ namespace hyperbrowse::viewer
         void ActivateComparedImage();
         void ToggleInfoOverlays();
         HMONITOR ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept;
+        void SetWindowFitMode(WindowFitMode mode);
+        bool ResizeWindowForFitMode(WindowFitMode mode);
+        void RefreshWindowFitForCurrentImage();
+        void RestoreRegularWindowPlacement();
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
         void ToggleFullScreen();
         void AdvanceSlideshow();
@@ -278,6 +289,9 @@ namespace hyperbrowse::viewer
         bool panning_{};
         POINT lastPanPoint_{};
         bool fullScreen_{};
+        WindowFitMode windowFitMode_{WindowFitMode::Regular};
+        bool hasRegularPlacementBeforeFit_{};
+        WINDOWPLACEMENT regularPlacementBeforeFit_{sizeof(WINDOWPLACEMENT)};
         bool slideshowActive_{};
         UINT slideshowIntervalMs_{3000};
         UINT_PTR slideshowTimerId_{};

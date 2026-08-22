@@ -2049,6 +2049,201 @@ namespace
             "Quick Send assigned a shortcut when all alphanumeric keys were already occupied");
     }
 
+    void RunViewerWindowFitModeChecks(hyperbrowse::viewer::ViewerWindow& viewer)
+    {
+        Expect(viewer.CurrentIndex() == 1, "Viewer fit-mode scenario did not start on the middle image");
+        while (viewer.RotationQuarterTurns() != 0)
+        {
+            SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'L', 0);
+            PumpMessagesFor(100);
+        }
+
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(!viewer.IsFullScreen(), "Viewer double-click did not exit full screen");
+
+        RECT regularViewerRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &regularViewerRect) != FALSE,
+            "Failed to read the regular viewer bounds before testing window fit modes");
+        const DWORD regularViewerStyle = static_cast<DWORD>(GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE));
+        MONITORINFO viewerMonitorInfo{sizeof(MONITORINFO)};
+        const HMONITOR viewerMonitor = MonitorFromWindow(viewer.Hwnd(), MONITOR_DEFAULTTONEAREST);
+        Expect(viewerMonitor != nullptr && GetMonitorInfoW(viewerMonitor, &viewerMonitorInfo) != FALSE,
+            "Failed to read the viewer monitor work area before testing window fit modes");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'H', 0);
+        PumpMessagesFor(100);
+        RECT heightFitRect{};
+        RECT heightFitClientRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &heightFitRect) != FALSE
+                && GetClientRect(viewer.Hwnd(), &heightFitClientRect) != FALSE,
+            "Failed to read the viewer bounds after FitHeight");
+        Expect(heightFitRect.top == viewerMonitorInfo.rcWork.top
+                && heightFitRect.bottom == viewerMonitorInfo.rcWork.bottom,
+            "Viewer FitHeight did not span the monitor work-area height");
+        Expect((GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE) & WS_CAPTION) != 0,
+            "Viewer FitHeight removed the normal title bar");
+        const double heightFitAspect = static_cast<double>(heightFitClientRect.right)
+            / std::max<LONG>(1, heightFitClientRect.bottom);
+        Expect(std::abs(heightFitAspect - 2.0) < 0.02,
+            "Viewer FitHeight did not size the window from the image aspect ratio (client="
+                + std::to_string(heightFitClientRect.right)
+                + "x" + std::to_string(heightFitClientRect.bottom)
+                + ", work=" + std::to_string(viewerMonitorInfo.rcWork.right - viewerMonitorInfo.rcWork.left)
+                + "x" + std::to_string(viewerMonitorInfo.rcWork.bottom - viewerMonitorInfo.rcWork.top)
+                + ")");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer previous-image navigation failed while in FitHeight");
+        RECT previousHeightFitRect{};
+        RECT previousHeightFitClientRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &previousHeightFitRect) != FALSE
+                && GetClientRect(viewer.Hwnd(), &previousHeightFitClientRect) != FALSE,
+            "Failed to read the viewer bounds after FitHeight navigation");
+        Expect(previousHeightFitRect.top == viewerMonitorInfo.rcWork.top
+                && previousHeightFitRect.bottom == viewerMonitorInfo.rcWork.bottom,
+            "Viewer FitHeight navigation changed the work-area height bounds");
+        const double previousHeightFitAspect = static_cast<double>(previousHeightFitClientRect.right)
+            / std::max<LONG>(1, previousHeightFitClientRect.bottom);
+        Expect(std::abs(previousHeightFitAspect - 0.5) < 0.02,
+            "Viewer FitHeight navigation did not resize from the previous image aspect ratio");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer next-image navigation failed while returning from FitHeight");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'H', 0);
+        PumpMessagesFor(100);
+        RECT restoredAfterHeightFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &restoredAfterHeightFitRect) != FALSE,
+            "Failed to read the viewer bounds after leaving FitHeight");
+        Expect(restoredAfterHeightFitRect.right - restoredAfterHeightFitRect.left
+                    == regularViewerRect.right - regularViewerRect.left
+                && restoredAfterHeightFitRect.bottom - restoredAfterHeightFitRect.top
+                    == regularViewerRect.bottom - regularViewerRect.top,
+            "Viewer did not restore the regular window size after leaving FitHeight");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'W', 0);
+        PumpMessagesFor(100);
+        RECT widthFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &widthFitRect) != FALSE,
+            "Failed to read the viewer bounds after FitWidth");
+        Expect(widthFitRect.left == viewerMonitorInfo.rcWork.left
+                && widthFitRect.right == viewerMonitorInfo.rcWork.right,
+            "Viewer FitWidth did not span the monitor work-area width");
+        Expect((GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE) & WS_CAPTION) != 0,
+            "Viewer FitWidth removed the normal title bar");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 2 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer next-image navigation failed while in FitWidth");
+        RECT nextWidthFitRect{};
+        RECT nextWidthFitClientRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &nextWidthFitRect) != FALSE
+                && GetClientRect(viewer.Hwnd(), &nextWidthFitClientRect) != FALSE,
+            "Failed to read the viewer bounds after FitWidth navigation");
+        Expect(nextWidthFitRect.left == viewerMonitorInfo.rcWork.left
+                && nextWidthFitRect.right == viewerMonitorInfo.rcWork.right,
+            "Viewer FitWidth navigation changed the work-area width bounds");
+        const double nextWidthFitAspect = static_cast<double>(nextWidthFitClientRect.right)
+            / std::max<LONG>(1, nextWidthFitClientRect.bottom);
+        Expect(std::abs(nextWidthFitAspect - (40.0 / 16.0)) < 0.02,
+            "Viewer FitWidth navigation did not resize from the next image aspect ratio (client="
+                + std::to_string(nextWidthFitClientRect.right)
+                + "x" + std::to_string(nextWidthFitClientRect.bottom)
+                + ", index=" + std::to_string(viewer.CurrentIndex()) + ")");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 3 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer portrait-image navigation failed while in FitWidth");
+        RECT constrainedWidthFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &constrainedWidthFitRect) != FALSE,
+            "Failed to read the viewer bounds after the portrait FitWidth navigation");
+        Expect(constrainedWidthFitRect.left == viewerMonitorInfo.rcWork.left
+                && constrainedWidthFitRect.right == viewerMonitorInfo.rcWork.right
+                && constrainedWidthFitRect.top == viewerMonitorInfo.rcWork.top
+                && constrainedWidthFitRect.bottom == viewerMonitorInfo.rcWork.bottom,
+            "Viewer FitWidth did not constrain an oversized image height to the monitor work area");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 2 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer previous-image navigation failed after the constrained FitWidth check");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer previous-image navigation failed while returning from FitWidth");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'W', 0);
+        PumpMessagesFor(100);
+        RECT restoredAfterWidthFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &restoredAfterWidthFitRect) != FALSE,
+            "Failed to read the viewer bounds after leaving FitWidth");
+        Expect(restoredAfterWidthFitRect.left == regularViewerRect.left
+                && restoredAfterWidthFitRect.top == regularViewerRect.top
+                && restoredAfterWidthFitRect.right == regularViewerRect.right
+                && restoredAfterWidthFitRect.bottom == regularViewerRect.bottom,
+            "Viewer did not restore the regular window placement after leaving FitWidth");
+        Expect(static_cast<DWORD>(GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE)) == regularViewerStyle,
+            "Viewer did not restore the regular window style after window fitting");
+
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(viewer.IsFullScreen(), "Viewer double-click did not re-enter full screen");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'H', 0);
+        PumpMessagesFor(100);
+        Expect(!viewer.IsFullScreen(), "Viewer FitHeight shortcut did not leave F11 fullscreen");
+        RECT fullScreenHeightFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &fullScreenHeightFitRect) != FALSE,
+            "Failed to read the viewer bounds after the fullscreen FitHeight transition");
+        Expect(fullScreenHeightFitRect.top == viewerMonitorInfo.rcWork.top
+                && fullScreenHeightFitRect.bottom == viewerMonitorInfo.rcWork.bottom
+                && (GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE) & WS_CAPTION) != 0,
+            "Viewer FitHeight shortcut did not enter normal titled FitHeight mode from F11 fullscreen");
+
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(viewer.IsFullScreen(), "Viewer did not re-enter F11 fullscreen before testing FitWidth");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'W', 0);
+        PumpMessagesFor(100);
+        Expect(!viewer.IsFullScreen(), "Viewer FitWidth shortcut did not leave F11 fullscreen");
+        RECT fullScreenWidthFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &fullScreenWidthFitRect) != FALSE,
+            "Failed to read the viewer bounds after the fullscreen FitWidth transition");
+        Expect(fullScreenWidthFitRect.left == viewerMonitorInfo.rcWork.left
+                && fullScreenWidthFitRect.right == viewerMonitorInfo.rcWork.right
+                && (GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE) & WS_CAPTION) != 0,
+            "Viewer FitWidth shortcut did not enter normal titled FitWidth mode from F11 fullscreen");
+    }
+
+    void RunViewerWindowFitModeScenario(HINSTANCE instance, HWND ownerWindow)
+    {
+        TempFolder root(L"HyperBrowsePrompt6ViewerFit");
+        const fs::path firstPath = root.Root() / L"first.jpg";
+        const fs::path secondPath = root.Root() / L"second.png";
+        const fs::path thirdPath = root.Root() / L"third.png";
+        const fs::path tallPath = root.Root() / L"tall.png";
+        WriteTestImage(firstPath, TestImageFormat::Jpeg, 48, 24, 6);
+        WriteTestImage(secondPath, TestImageFormat::Png, 64, 32);
+        WriteTestImage(thirdPath, TestImageFormat::Png, 40, 16);
+        WriteTestImage(tallPath, TestImageFormat::Png, 24, 48);
+
+        std::vector<hyperbrowse::browser::BrowserItem> items;
+        items.push_back(hyperbrowse::browser::BrowserItem{L"first.jpg", firstPath.wstring(), L"JPG", L"2026-04-11 12:00", 1, 10, 256, 256});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"second.png", secondPath.wstring(), L"PNG", L"2026-04-11 12:01", 2, 20, 256, 256});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"third.png", thirdPath.wstring(), L"PNG", L"2026-04-11 12:02", 3, 30, 256, 256});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"tall.png", tallPath.wstring(), L"PNG", L"2026-04-11 12:03", 4, 40, 256, 256});
+
+        hyperbrowse::viewer::ViewerWindow viewer(instance);
+        Expect(viewer.Open(ownerWindow, items, 1, false), "Viewer fit-mode window failed to open");
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer fit-mode window did not finish the initial image decode");
+        Expect(viewer.IsFullScreen(), "Viewer fit-mode window should open in full screen by default");
+        RunViewerWindowFitModeChecks(viewer);
+
+        SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
+        PumpMessagesFor(100);
+    }
+
     void RunViewerWindowScenario(HINSTANCE instance, HWND ownerWindow)
     {
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
@@ -2071,12 +2266,18 @@ namespace
         TempFolder root(L"HyperBrowsePrompt6Viewer");
         const fs::path firstPath = root.Root() / L"first.jpg";
         const fs::path secondPath = root.Root() / L"second.png";
+        const fs::path thirdPath = root.Root() / L"third.png";
+        const fs::path tallPath = root.Root() / L"tall.png";
         WriteTestImage(firstPath, TestImageFormat::Jpeg, 48, 24, 6);
         WriteTestImage(secondPath, TestImageFormat::Png, 64, 32);
+        WriteTestImage(thirdPath, TestImageFormat::Png, 40, 16);
+        WriteTestImage(tallPath, TestImageFormat::Png, 24, 48);
 
         std::vector<hyperbrowse::browser::BrowserItem> items;
         items.push_back(hyperbrowse::browser::BrowserItem{L"first.jpg", firstPath.wstring(), L"JPG", L"2026-04-11 12:00", 1, 10, 256, 256});
         items.push_back(hyperbrowse::browser::BrowserItem{L"second.png", secondPath.wstring(), L"PNG", L"2026-04-11 12:01", 2, 20, 256, 256});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"third.png", thirdPath.wstring(), L"PNG", L"2026-04-11 12:02", 3, 30, 256, 256});
+        items.push_back(hyperbrowse::browser::BrowserItem{L"tall.png", tallPath.wstring(), L"PNG", L"2026-04-11 12:03", 4, 40, 256, 256});
 
         hyperbrowse::viewer::ViewerWindow viewer(instance);
         Expect(viewer.Open(ownerWindow, items, 0, false), "Viewer window failed to open");
@@ -2176,6 +2377,14 @@ namespace
 
         state->viewerQuickSendRequests = 0;
         state->lastViewerQuickSendSource = nullptr;
+        BYTE unmodifiedShortcutKeyboardState[256]{};
+        Expect(GetKeyboardState(unmodifiedShortcutKeyboardState) != FALSE,
+            "Failed to read the keyboard state before testing viewer Quick Send shortcuts");
+        unmodifiedShortcutKeyboardState[VK_CONTROL] &= ~0x80;
+        unmodifiedShortcutKeyboardState[VK_SHIFT] &= ~0x80;
+        unmodifiedShortcutKeyboardState[VK_MENU] &= ~0x80;
+        Expect(SetKeyboardState(unmodifiedShortcutKeyboardState) != FALSE,
+            "Failed to clear modifier state for the viewer Quick Send shortcut test");
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_F7, 0);
         PumpMessagesFor(100);
         Expect(state->viewerQuickSendRequests == 1
@@ -2194,6 +2403,8 @@ namespace
         Expect(state->viewerQuickSendRequests == 2
                 && state->lastViewerQuickSendOperation == hyperbrowse::viewer::QuickSendOperation::Copy,
             "Viewer F8 did not dispatch a Quick Send copy request");
+        Expect(SetKeyboardState(originalKeyboardState) != FALSE,
+            "Failed to restore the keyboard state after testing viewer Quick Send shortcuts");
 
         modifiedKeyboardState[VK_CONTROL] |= 0x80;
         Expect(SetKeyboardState(modifiedKeyboardState) != FALSE,
@@ -2299,12 +2510,7 @@ namespace
          Expect(fitPan.x == 0 && fitPan.y == 0 && viewer.PanOffset().x == 0 && viewer.PanOffset().y == 0,
              "Viewer arrows panned an image while it was fit to the window");
 
-        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
-        PumpMessagesFor(100);
-        Expect(!viewer.IsFullScreen(), "Viewer double-click did not exit full screen");
-        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
-        PumpMessagesFor(100);
-        Expect(viewer.IsFullScreen(), "Viewer double-click did not re-enter full screen");
+        RunViewerWindowFitModeChecks(viewer);
 
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);
@@ -2396,7 +2602,7 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char* argv[])
 {
     try
     {
@@ -2411,30 +2617,38 @@ int main()
         HWND hwnd = CreateTestWindow(&state, instance);
         Expect(hwnd != nullptr, "Failed to create the hidden test window");
 
-        RunEnumerationScenario(hwnd, &state);
-        RunFolderTreeEnumerationScenario(hwnd, &state);
-        RunFolderWatchStartStopScenario(hwnd);
-        RunFolderWatchNotificationParserScenario();
-        RunThumbnailCacheNormalizationScenario();
-        RunDiskThumbnailCacheCorruptionScenario();
-        RunWicDecoderScenario();
-        RunJpegOrientationAdjustmentScenario();
-        RunBatchConvertCancellationScenario(hwnd);
-        RunFileRenameOperationScenario(hwnd, &state);
-        RunFileConflictPlanningScenario();
-        RunThumbnailSchedulerWorkerAllocationScenario();
-        RunThumbnailSchedulerScenario(hwnd, &state);
-        RunThumbnailSchedulerFailureScenario(hwnd, &state);
-        RunThumbnailFailureClassificationScenario();
-        RunImageMetadataServiceScenario();
-        RunSwarmUiMetadataExtractionScenario();
-        RunRawFormatAllowlistScenario();
-        RunRawDecoderScenario();
-        RunBrowserPaneScenario(instance);
-        RunBrowserModelBulkRemovalScenario();
-        RunQuickSendModelScenario();
-        RunViewerWindowScenario(instance, hwnd);
-        RunMainWindowFolderTreeScenario(instance);
+        const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
+        if (viewerFitOnly)
+        {
+            RunViewerWindowFitModeScenario(instance, hwnd);
+        }
+        else
+        {
+            RunEnumerationScenario(hwnd, &state);
+            RunFolderTreeEnumerationScenario(hwnd, &state);
+            RunFolderWatchStartStopScenario(hwnd);
+            RunFolderWatchNotificationParserScenario();
+            RunThumbnailCacheNormalizationScenario();
+            RunDiskThumbnailCacheCorruptionScenario();
+            RunWicDecoderScenario();
+            RunJpegOrientationAdjustmentScenario();
+            RunBatchConvertCancellationScenario(hwnd);
+            RunFileRenameOperationScenario(hwnd, &state);
+            RunFileConflictPlanningScenario();
+            RunThumbnailSchedulerWorkerAllocationScenario();
+            RunThumbnailSchedulerScenario(hwnd, &state);
+            RunThumbnailSchedulerFailureScenario(hwnd, &state);
+            RunThumbnailFailureClassificationScenario();
+            RunImageMetadataServiceScenario();
+            RunSwarmUiMetadataExtractionScenario();
+            RunRawFormatAllowlistScenario();
+            RunRawDecoderScenario();
+            RunBrowserPaneScenario(instance);
+            RunBrowserModelBulkRemovalScenario();
+            RunQuickSendModelScenario();
+            RunViewerWindowScenario(instance, hwnd);
+            RunMainWindowFolderTreeScenario(instance);
+        }
 
         DestroyWindow(hwnd);
         UnregisterClassW(kTestWindowClassName, instance);
