@@ -85,6 +85,7 @@ namespace hyperbrowse::viewer
         static constexpr UINT kQuickSendRequestedMessage = WM_APP + 70;
         static constexpr UINT kContextMenuCommandMessage = WM_APP + 68;
         static constexpr UINT kDroppedFileMessage = WM_APP + 69;
+        static constexpr UINT kCurrentItemChangedMessage = WM_APP + 74;
         static constexpr WPARAM kDeleteRequestPermanent = 0x1;
 
         explicit ViewerWindow(HINSTANCE instance);
@@ -113,6 +114,7 @@ namespace hyperbrowse::viewer
         bool IsCompareModeEnabled() const noexcept;
         void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
+        void SetManualTransitionEnabled(bool enabled);
         void SetInfoOverlaysVisible(bool visible);
         void SetOverlayTextSize(InfoOverlayTextSize size);
         void SetFullMetadataVisible(bool visible);
@@ -168,7 +170,7 @@ namespace hyperbrowse::viewer
         void UpdateWindowTitle() const;
         void LoadCurrentImageAsync(LoadReason reason);
         void Navigate(int delta);
-        void NavigateToIndex(int targetIndex, bool forward);
+        void NavigateToIndex(int targetIndex, bool forward, bool slideshowNavigation = false);
         int NavigationDeltaForPoint(POINT point) const noexcept;
         bool SetNavigationCursorForPoint(POINT point);
         void PrepareForImageChange(bool keepDisplayedImage = false);
@@ -209,7 +211,7 @@ namespace hyperbrowse::viewer
         void ShowContextMenu(POINT screenPoint);
         void DispatchContextMenuCommand(UINT commandId);
         int DisplayedImageIndex() const noexcept;
-        void QueueTransitionFromCurrent(bool forward);
+        void QueueTransitionFromCurrent(bool forward, bool slideshowNavigation = false);
         void BeginTransitionFromPending();
         void StopTransition(bool clearPending = true);
         TransitionStyle ResolveActiveTransitionStyle() noexcept;
@@ -243,6 +245,7 @@ namespace hyperbrowse::viewer
         void RequestRepaint() const;
         void NotifyZoomChanged(int zoomPercent);
         void NotifyActivityChanged(bool isActive) const;
+        void NotifyCurrentItemChanged() const;
         void EnsureD2DRenderTarget();
         void ReleaseD2DResources();
         void RebuildD2DBrushes();
@@ -303,6 +306,7 @@ namespace hyperbrowse::viewer
         TransitionStyle transitionStyle_{TransitionStyle::Crossfade};
         TransitionStyle activeTransitionStyle_{TransitionStyle::Crossfade};
         UINT transitionDurationMs_{350};
+        bool manualTransitionEnabled_{true};
         std::mt19937 transitionRandomEngine_{std::random_device{}()};
         bool transitionActive_{};
         bool transitionForward_{true};

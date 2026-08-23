@@ -403,6 +403,7 @@ namespace hyperbrowse::ui
         LRESULT OnDetailsPanelThumbnailMessage(LPARAM lParam);
         LRESULT OnViewerZoomMessage(LPARAM lParam);
         LRESULT OnViewerActivityMessage(LPARAM lParam);
+        LRESULT OnViewerCurrentItemChangedMessage(WPARAM wParam);
         LRESULT OnViewerDeleteRequested(WPARAM wParam);
         LRESULT OnViewerQuickSendRequest(WPARAM wParam, LPARAM lParam);
         LRESULT OnViewerStartFolderSlideshowMessage(WPARAM wParam);

@@ -842,6 +842,7 @@ namespace hyperbrowse::viewer
 
         SetFullScreen(true, targetMonitor);
         SetForegroundWindow(hwnd_);
+        NotifyCurrentItemChanged();
         LoadCurrentImageAsync(LoadReason::Open);
         return true;
     }
@@ -996,6 +997,15 @@ namespace hyperbrowse::viewer
         activeTransitionStyle_ = transitionStyle_;
 
         if (transitionStyle_ == TransitionStyle::Cut)
+        {
+            StopTransition();
+        }
+    }
+
+    void ViewerWindow::SetManualTransitionEnabled(bool enabled)
+    {
+        manualTransitionEnabled_ = enabled;
+        if (!manualTransitionEnabled_ && !slideshowActive_)
         {
             StopTransition();
         }
@@ -1164,6 +1174,7 @@ namespace hyperbrowse::viewer
 
         items_ = std::move(items);
         currentIndex_ = selectedIndex;
+        NotifyCurrentItemChanged();
         ClearWraparoundMessage();
         if (compareMode_)
         {
@@ -1246,6 +1257,7 @@ namespace hyperbrowse::viewer
         {
             currentIndex_ = static_cast<int>(items_.size()) - 1;
         }
+        NotifyCurrentItemChanged();
         if (compareMode_)
         {
             compareDirection_ = ResolveCompareDirection(compareDirection_);
@@ -1857,7 +1869,7 @@ namespace hyperbrowse::viewer
         NavigateToIndex(nextIndex, delta > 0);
     }
 
-    void ViewerWindow::NavigateToIndex(int targetIndex, bool forward)
+    void ViewerWindow::NavigateToIndex(int targetIndex, bool forward, bool slideshowNavigation)
     {
         slideshowAdvancePending_ = false;
 
@@ -1867,7 +1879,7 @@ namespace hyperbrowse::viewer
         }
 
         const int nextIndex = targetIndex;
-        QueueTransitionFromCurrent(forward);
+        QueueTransitionFromCurrent(forward, slideshowNavigation);
 
         if (forward)
         {
@@ -1877,6 +1889,7 @@ namespace hyperbrowse::viewer
                 SetCurrentImageSlot(nextSlot_.index, nextSlot_.image, true);
                 nextSlot_ = {};
                 currentIndex_ = nextIndex;
+                NotifyCurrentItemChanged();
                 prefetchHitCount_.fetch_add(1, std::memory_order_acq_rel);
                 util::IncrementCounter(L"viewer.prefetch.hit");
                 util::RecordTiming(L"viewer.navigation", 0.0);
@@ -1905,6 +1918,7 @@ namespace hyperbrowse::viewer
                 SetCurrentImageSlot(previousSlot_.index, previousSlot_.image, true);
                 previousSlot_ = {};
                 currentIndex_ = nextIndex;
+                NotifyCurrentItemChanged();
                 prefetchHitCount_.fetch_add(1, std::memory_order_acq_rel);
                 util::IncrementCounter(L"viewer.prefetch.hit");
                 util::RecordTiming(L"viewer.navigation", 0.0);
@@ -1929,6 +1943,7 @@ namespace hyperbrowse::viewer
         prefetchMissCount_.fetch_add(1, std::memory_order_acq_rel);
         util::IncrementCounter(L"viewer.prefetch.miss");
         currentIndex_ = nextIndex;
+        NotifyCurrentItemChanged();
         LoadCurrentImageAsync(LoadReason::Navigation);
     }
 
@@ -2720,11 +2735,12 @@ namespace hyperbrowse::viewer
         const int nextIndex = (currentIndex_ + 1) % static_cast<int>(items_.size());
         if (nextSlot_.index == nextIndex && nextSlot_.image)
         {
-            QueueTransitionFromCurrent(true);
+            QueueTransitionFromCurrent(true, true);
             previousSlot_ = currentSlot_;
             SetCurrentImageSlot(nextSlot_.index, nextSlot_.image, true);
             nextSlot_ = {};
             currentIndex_ = nextIndex;
+            NotifyCurrentItemChanged();
             prefetchHitCount_.fetch_add(1, std::memory_order_acq_rel);
             util::IncrementCounter(L"viewer.prefetch.hit");
             util::RecordTiming(L"viewer.navigation", 0.0);
@@ -2754,13 +2770,14 @@ namespace hyperbrowse::viewer
 
         if (currentIndex_ >= static_cast<int>(items_.size()) - 1)
         {
-            QueueTransitionFromCurrent(true);
+            QueueTransitionFromCurrent(true, true);
             currentIndex_ = 0;
+            NotifyCurrentItemChanged();
             LoadCurrentImageAsync(LoadReason::Navigation);
             return;
         }
 
-        Navigate(+1);
+        NavigateToIndex(nextIndex, true, true);
     }
 
     void ViewerWindow::ShowWraparoundMessage(bool forward)
@@ -2912,10 +2929,12 @@ namespace hyperbrowse::viewer
         return currentIndex_;
     }
 
-    void ViewerWindow::QueueTransitionFromCurrent(bool forward)
+    void ViewerWindow::QueueTransitionFromCurrent(bool forward, bool slideshowNavigation)
     {
         StopTransition(false);
-        activeTransitionStyle_ = ResolveActiveTransitionStyle();
+        activeTransitionStyle_ = (slideshowNavigation || manualTransitionEnabled_)
+            ? ResolveActiveTransitionStyle()
+            : TransitionStyle::Cut;
 
         pendingTransitionFromImage_.reset();
         pendingTransitionFromBitmap_.Reset();
@@ -3231,6 +3250,14 @@ namespace hyperbrowse::viewer
         if (owner_)
         {
             PostMessageW(owner_, kActivityChangedMessage, reinterpret_cast<WPARAM>(hwnd_), static_cast<LPARAM>(isActive ? 1 : 0));
+        }
+    }
+
+    void ViewerWindow::NotifyCurrentItemChanged() const
+    {
+        if (owner_)
+        {
+            PostMessageW(owner_, kCurrentItemChangedMessage, reinterpret_cast<WPARAM>(hwnd_), 0);
         }
     }
 

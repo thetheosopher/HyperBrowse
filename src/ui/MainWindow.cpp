@@ -7302,6 +7302,20 @@ namespace hyperbrowse::ui
             return false;
         }
 
+        if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
+            && message->wParam == VK_ESCAPE
+            && message->hwnd
+            && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
+            && viewerWindow_
+            && viewerWindow_->IsOpen())
+        {
+            const HWND viewerHwnd = viewerWindow_->Hwnd();
+            if (viewerHwnd && PostMessageW(viewerHwnd, WM_CLOSE, 0, 0))
+            {
+                return true;
+            }
+        }
+
         // Preserve text-edit backspace/delete behavior in edit/rich-edit controls.
         if (message->message == WM_KEYDOWN
             && (message->wParam == VK_BACK || message->wParam == VK_DELETE)
@@ -14277,7 +14291,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        OpenItemsInViewer(std::move(items), 0, true);
+        OpenItemsInViewer(std::move(items), 0, true, ShouldDefaultViewerToSecondaryMonitor());
     }
 
     void MainWindow::StartFolderSlideshow(std::wstring_view preferredPath)
@@ -14329,7 +14343,7 @@ namespace hyperbrowse::ui
             selectedIndex = 0;
         }
 
-        OpenItemsInViewer(std::move(items), selectedIndex, true);
+        OpenItemsInViewer(std::move(items), selectedIndex, true, ShouldDefaultViewerToSecondaryMonitor());
     }
 
     void MainWindow::StartBatchConvert(bool selectionScope, services::BatchConvertFormat format)
@@ -16018,8 +16032,9 @@ namespace hyperbrowse::ui
         if (viewerWindow_)
         {
             viewerWindow_->SetTransitionSettings(
-                useSlideshowTransition_ ? slideshowTransitionStyle_ : viewer::TransitionStyle::Cut,
+                slideshowTransitionStyle_,
                 slideshowTransitionDurationMs_);
+            viewerWindow_->SetManualTransitionEnabled(useSlideshowTransition_);
         }
     }
 
@@ -17180,6 +17195,27 @@ namespace hyperbrowse::ui
     {
         viewerWindowActive_ = lParam != 0;
         UpdateStatusText();
+        return 0;
+    }
+
+    LRESULT MainWindow::OnViewerCurrentItemChangedMessage(WPARAM wParam)
+    {
+        if (!viewerWindow_
+            || !viewerWindow_->IsOpen()
+            || reinterpret_cast<HWND>(wParam) != viewerWindow_->Hwnd()
+            || !browserPaneController_)
+        {
+            return 0;
+        }
+
+        const std::wstring currentPath = viewerWindow_->CurrentFilePath();
+        if (currentPath.empty())
+        {
+            return 0;
+        }
+
+        browserPaneController_->RestoreSelectionByFilePaths({currentPath}, currentPath);
+        browserPaneController_->EnsureFocusedItemVisible();
         return 0;
     }
 
@@ -19809,6 +19845,8 @@ namespace hyperbrowse::ui
             return OnViewerZoomMessage(lParam);
         case viewer::ViewerWindow::kActivityChangedMessage:
             return OnViewerActivityMessage(lParam);
+        case viewer::ViewerWindow::kCurrentItemChangedMessage:
+            return OnViewerCurrentItemChangedMessage(wParam);
         case viewer::ViewerWindow::kDeleteRequestedMessage:
             return OnViewerDeleteRequested(wParam);
         case viewer::ViewerWindow::kQuickSendRequestedMessage:
