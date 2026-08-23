@@ -39,8 +39,10 @@
 #include "services/ImageMetadataService.h"
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
+#include "ui/CommandIds.h"
 #include "ui/MainWindow.h"
 #include "ui/QuickSend.h"
+#include "ui/ShortcutCatalog.h"
 #include "util/UiTextSize.h"
 #include "viewer/ViewerWindow.h"
 
@@ -252,6 +254,55 @@ namespace
             throw std::runtime_error(message);
         }
     }
+
+        void RunShortcutCatalogScenario()
+        {
+         using hyperbrowse::ui::ShortcutContext;
+         using hyperbrowse::ui::ShortcutDefinition;
+         using namespace hyperbrowse::ui::command_ids;
+
+         Expect(hyperbrowse::ui::kShortcutCatalogValid,
+             "Main-window shortcut catalog contains duplicate accelerator ownership");
+         Expect(!hyperbrowse::ui::HasDuplicateShortcuts(hyperbrowse::ui::kViewerShortcutCatalog),
+             "Viewer shortcut catalog contains duplicate keyboard behavior");
+
+         const auto hasShortcut = [](std::span<const ShortcutDefinition> catalog,
+                         ShortcutContext context,
+                         UINT commandId,
+                         WORD virtualKey,
+                         BYTE modifiers)
+         {
+             return std::any_of(catalog.begin(),
+                       catalog.end(),
+                       [&](const ShortcutDefinition& shortcut)
+                       {
+                        return shortcut.context == context
+                            && shortcut.commandId == commandId
+                            && shortcut.virtualKey == virtualKey
+                            && shortcut.modifiers == modifiers;
+                       });
+         };
+
+         const auto mainShortcuts = hyperbrowse::ui::MainWindowShortcuts();
+         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_ESCAPE, VK_ESCAPE, 0),
+             "Escape is not owned by the dedicated Escape command");
+         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, 'W', FCONTROL),
+             "Ctrl+W no longer owns the main-window minimize command");
+         Expect(!hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, VK_ESCAPE, 0),
+             "Escape still shares the Ctrl+W minimize command");
+         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_EDIT_CUT, 'X', FCONTROL),
+             "Ctrl+X is missing from the main-window shortcut catalog");
+         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_NAVIGATE_FORWARD_FOLDER, VK_RIGHT, FALT),
+             "Alt+Right is missing from the folder navigation catalog");
+         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_ADD, 0),
+             "Numpad plus is missing from the thumbnail stepping catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
+                      ShortcutContext::Viewer,
+                      ID_FILE_COPY_IMAGE_PIXELS,
+                      'I',
+                      FCONTROL | FSHIFT),
+             "Viewer Copy Image shortcut is missing from the shared catalog");
+        }
 
     void SetRegistryDwordValue(const wchar_t* path, const wchar_t* valueName, DWORD value)
     {
@@ -2823,6 +2874,7 @@ int main(int argc, char* argv[])
         }
         else
         {
+            RunShortcutCatalogScenario();
             RunEnumerationScenario(hwnd, &state);
             RunFolderTreeEnumerationScenario(hwnd, &state);
             RunFolderWatchStartStopScenario(hwnd);

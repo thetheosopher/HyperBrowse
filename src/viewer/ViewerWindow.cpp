@@ -48,6 +48,12 @@ namespace
     constexpr std::size_t kViewerPerformanceBackgroundQueueCapacity = 64;
     constexpr std::size_t kViewerAggressiveBackgroundQueueCapacity = 256;
     constexpr double kKeyboardPanStep = 64.0;
+    constexpr int kContextMenuItemHeight = 28;
+    constexpr int kContextMenuSeparatorHeight = 10;
+    constexpr int kContextMenuCheckColumnWidth = 24;
+    constexpr int kContextMenuTextPadding = 12;
+    constexpr int kContextMenuShortcutGap = 24;
+    constexpr int kContextMenuMeasurementAllowance = 8;
 
     using InfoOverlayTextSize = hyperbrowse::viewer::InfoOverlayTextSize;
 
@@ -193,6 +199,98 @@ namespace
     COLORREF PanelBorderColor(bool darkTheme)
     {
         return darkTheme ? RGB(70, 80, 94) : RGB(206, 215, 225);
+    }
+
+    HFONT CreateViewerMenuFont(hyperbrowse::util::AppTextSize size)
+    {
+        NONCLIENTMETRICSW metrics{};
+        metrics.cbSize = sizeof(metrics);
+        if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0) == FALSE)
+        {
+            return static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
+
+        metrics.lfMessageFont.lfCharSet = DEFAULT_CHARSET;
+        metrics.lfMessageFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
+        metrics.lfMessageFont.lfHeight = static_cast<LONG>(
+            std::lround(static_cast<double>(metrics.lfMessageFont.lfHeight)
+                        * hyperbrowse::util::AppTextSizeScale(size)));
+        return CreateFontIndirectW(&metrics.lfMessageFont);
+    }
+
+    HFONT MenuFontOrDefault(HFONT menuFont)
+    {
+        return menuFont ? menuFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    }
+
+    int MeasureMenuTextWidth(HFONT font, const std::wstring& text)
+    {
+        if (!font || text.empty())
+        {
+            return 0;
+        }
+
+        HDC dc = GetDC(nullptr);
+        if (!dc)
+        {
+            return 0;
+        }
+
+        const HGDIOBJ oldFont = SelectObject(dc, font);
+        SIZE size{};
+        GetTextExtentPoint32W(dc, text.c_str(), static_cast<int>(text.size()), &size);
+        SelectObject(dc, oldFont);
+        ReleaseDC(nullptr, dc);
+        return size.cx;
+    }
+
+    int MeasureMenuTextHeight(HFONT font)
+    {
+        if (!font)
+        {
+            return 0;
+        }
+
+        HDC dc = GetDC(nullptr);
+        if (!dc)
+        {
+            return 0;
+        }
+
+        const HGDIOBJ oldFont = SelectObject(dc, font);
+        TEXTMETRICW metrics{};
+        GetTextMetricsW(dc, &metrics);
+        SelectObject(dc, oldFont);
+        ReleaseDC(nullptr, dc);
+        return metrics.tmHeight;
+    }
+
+    void SplitMenuDisplayText(const std::wstring& text, std::wstring* label, std::wstring* shortcut)
+    {
+        if (!label || !shortcut)
+        {
+            return;
+        }
+
+        const std::size_t separator = text.find(L'\t');
+        if (separator == std::wstring::npos)
+        {
+            *label = text;
+            shortcut->clear();
+            return;
+        }
+
+        *label = text.substr(0, separator);
+        *shortcut = text.substr(separator + 1);
+    }
+
+    COLORREF BlendMenuColor(COLORREF baseColor, COLORREF mixColor, BYTE mixAmount)
+    {
+        const BYTE baseAmount = static_cast<BYTE>(255 - mixAmount);
+        return RGB(
+            (GetRValue(baseColor) * baseAmount + GetRValue(mixColor) * mixAmount) / 255,
+            (GetGValue(baseColor) * baseAmount + GetGValue(mixColor) * mixAmount) / 255,
+            (GetBValue(baseColor) * baseAmount + GetBValue(mixColor) * mixAmount) / 255);
     }
 
     float MetadataPanelFillAlpha(bool darkTheme)
@@ -713,6 +811,7 @@ namespace hyperbrowse::viewer
         , infoOverlayTextSize_(LoadViewerInfoOverlayTextSizeSetting())
         , fullMetadataVisible_(LoadViewerFullMetadataVisibleSetting())
     {
+        menuFont_ = CreateViewerMenuFont(appTextSize_);
         backgroundBrush_ = CreateSolidBrush(BackgroundColor(false));
         statusArt_ = util::LoadPngResourceBitmap(instance_,
                                                  IDB_HYPERBROWSE_BRAND_PNG,
@@ -743,6 +842,11 @@ namespace hyperbrowse::viewer
         if (backgroundBrush_)
         {
             DeleteObject(backgroundBrush_);
+        }
+
+        if (menuFont_ && menuFont_ != GetStockObject(DEFAULT_GUI_FONT))
+        {
+            DeleteObject(menuFont_);
         }
 
         if (previousNavigationCursor_)
@@ -1075,6 +1179,22 @@ namespace hyperbrowse::viewer
         {
             RequestRepaint();
         }
+    }
+
+    void ViewerWindow::SetAppTextSize(util::AppTextSize size)
+    {
+        const util::AppTextSize normalized = util::NormalizeAppTextSize(static_cast<std::uint32_t>(size));
+        if (appTextSize_ == normalized)
+        {
+            return;
+        }
+
+        if (menuFont_ && menuFont_ != GetStockObject(DEFAULT_GUI_FONT))
+        {
+            DeleteObject(menuFont_);
+        }
+        appTextSize_ = normalized;
+        menuFont_ = CreateViewerMenuFont(appTextSize_);
     }
 
     void ViewerWindow::SetFullMetadataVisible(bool visible)
@@ -2602,29 +2722,35 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        constexpr UINT kCopyPathId = 1;
-        constexpr UINT kRevealInExplorerId = 2;
-        constexpr UINT kPropertiesId = 3;
-        constexpr UINT kImageInformationId = 4;
-        constexpr UINT kSetWallpaperId = 5;
-        constexpr UINT kDeleteId = 6;
-        constexpr UINT kDeletePermanentlyId = 7;
-
         HMENU menu = CreatePopupMenu();
         if (!menu)
         {
             return;
         }
 
-        AppendMenuW(menu, MF_STRING, kCopyPathId, L"Copy Pat&h");
-        AppendMenuW(menu, MF_STRING, kRevealInExplorerId, L"Reveal in &Explorer");
-        AppendMenuW(menu, MF_STRING, kImageInformationId, L"Image &Information");
-        AppendMenuW(menu, MF_STRING, kPropertiesId, L"P&roperties");
+        AppendMenuW(menu, MF_STRING, kContextMenuCopyPath, L"Copy Pat&h\tCtrl+Shift+C");
+        AppendMenuW(menu, MF_STRING, kContextMenuCopyImage, L"Copy &Image\tCtrl+Shift+I");
+        AppendMenuW(menu, MF_STRING, kContextMenuRevealInExplorer, L"Reveal in &Explorer");
+        AppendMenuW(menu, MF_STRING, kContextMenuImageInformation, L"Image &Information\tCtrl+I");
+        AppendMenuW(menu, MF_STRING, kContextMenuProperties, L"P&roperties\tAlt+Enter");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, kSetWallpaperId, L"Set as Desktop &Wallpaper");
+        AppendMenuW(menu, MF_STRING, kContextMenuSetWallpaper, L"Set as Desktop &Wallpaper");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, kDeleteId, L"&Delete");
-        AppendMenuW(menu, MF_STRING, kDeletePermanentlyId, L"Delete &Permanently");
+        AppendMenuW(menu, MF_STRING, kContextMenuDelete, L"&Delete\tDel");
+        AppendMenuW(menu, MF_STRING, kContextMenuDeletePermanently, L"Delete &Permanently\tShift+Del");
+
+        std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems;
+        PrepareContextMenuForOwnerDraw(menu, menuDrawItems);
+
+        HBRUSH menuBackgroundBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
+        if (menuBackgroundBrush)
+        {
+            MENUINFO menuInfo{};
+            menuInfo.cbSize = sizeof(menuInfo);
+            menuInfo.fMask = MIM_BACKGROUND;
+            menuInfo.hbrBack = menuBackgroundBrush;
+            SetMenuInfo(menu, &menuInfo);
+        }
 
         SetForegroundWindow(hwnd_);
         const UINT commandId = TrackPopupMenuEx(
@@ -2636,25 +2762,211 @@ namespace hyperbrowse::viewer
             nullptr);
         PostMessageW(hwnd_, WM_NULL, 0, 0);
         DestroyMenu(menu);
+        if (menuBackgroundBrush)
+        {
+            DeleteObject(menuBackgroundBrush);
+        }
 
         if (commandId == 0)
         {
             return;
         }
 
-        if (commandId == kDeleteId || commandId == kDeletePermanentlyId)
+        if (commandId == kContextMenuDelete || commandId == kContextMenuDeletePermanently)
         {
             // Route deletes through the owner's delete pipeline (confirmation,
             // recycle-bin handling, focus restoration) exactly like VK_DELETE.
             if (owner_ && IsWindow(owner_))
             {
-                const WPARAM flags = commandId == kDeletePermanentlyId ? kDeleteRequestPermanent : 0;
+                const WPARAM flags = commandId == kContextMenuDeletePermanently ? kDeleteRequestPermanent : 0;
                 SendMessageW(owner_, kDeleteRequestedMessage, flags, 0);
             }
             return;
         }
 
         DispatchContextMenuCommand(commandId);
+    }
+
+    void ViewerWindow::MeasureContextMenuItem(MEASUREITEMSTRUCT* measureItem) const
+    {
+        if (!measureItem)
+        {
+            return;
+        }
+
+        const auto* drawData = reinterpret_cast<const MenuDrawItemData*>(measureItem->itemData);
+        const auto scaleMenuDimension = [this](int dimension)
+        {
+            return util::ScaleAppTextDimension(dimension, appTextSize_);
+        };
+        if (!drawData)
+        {
+            measureItem->itemWidth = 0;
+            measureItem->itemHeight = static_cast<UINT>(scaleMenuDimension(kContextMenuItemHeight));
+            return;
+        }
+
+        if (drawData->separator)
+        {
+            measureItem->itemWidth = 0;
+            measureItem->itemHeight = static_cast<UINT>(scaleMenuDimension(kContextMenuSeparatorHeight));
+            return;
+        }
+
+        std::wstring label;
+        std::wstring shortcut;
+        SplitMenuDisplayText(drawData->text, &label, &shortcut);
+        const HFONT menuFont = MenuFontOrDefault(menuFont_);
+        const int textPadding = scaleMenuDimension(kContextMenuTextPadding);
+        const int checkColumnWidth = scaleMenuDimension(kContextMenuCheckColumnWidth);
+        const int shortcutGap = scaleMenuDimension(kContextMenuShortcutGap);
+        const int measurementAllowance = scaleMenuDimension(kContextMenuMeasurementAllowance);
+        const int labelWidth = MeasureMenuTextWidth(menuFont, label);
+        const int shortcutWidth = shortcut.empty() ? 0 : MeasureMenuTextWidth(menuFont, shortcut);
+        int itemWidth = checkColumnWidth + (textPadding * 2) + labelWidth + measurementAllowance;
+        if (shortcutWidth > 0)
+        {
+            itemWidth += shortcutGap + shortcutWidth;
+        }
+
+        const int itemHeight = scaleMenuDimension(kContextMenuItemHeight);
+        measureItem->itemWidth = static_cast<UINT>(itemWidth);
+        measureItem->itemHeight = static_cast<UINT>(std::max(
+            itemHeight,
+            MeasureMenuTextHeight(menuFont) + measurementAllowance));
+    }
+
+    void ViewerWindow::DrawContextMenuItem(const DRAWITEMSTRUCT& drawItem) const
+    {
+        const auto* drawData = reinterpret_cast<const MenuDrawItemData*>(drawItem.itemData);
+        if (!drawData)
+        {
+            return;
+        }
+
+        const auto scaleMenuDimension = [this](int dimension)
+        {
+            return util::ScaleAppTextDimension(dimension, appTextSize_);
+        };
+        const COLORREF menuBackground = PanelFillColor(darkTheme_);
+        const COLORREF selectedBackground = darkTheme_
+            ? RGB(54, 68, 84)
+            : RGB(222, 235, 250);
+        const bool selected = (drawItem.itemState & ODS_SELECTED) != 0;
+        const bool disabled = (drawItem.itemState & ODS_DISABLED) != 0;
+        const COLORREF backgroundColor = selected ? selectedBackground : menuBackground;
+        const HBRUSH backgroundBrush = CreateSolidBrush(backgroundColor);
+        FillRect(drawItem.hDC, &drawItem.rcItem, backgroundBrush);
+        DeleteObject(backgroundBrush);
+
+        if (drawData->separator)
+        {
+            const HPEN separatorPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
+            const HGDIOBJ oldPen = SelectObject(drawItem.hDC, separatorPen);
+            const int y = drawItem.rcItem.top + ((drawItem.rcItem.bottom - drawItem.rcItem.top) / 2);
+            MoveToEx(drawItem.hDC,
+                     drawItem.rcItem.left + scaleMenuDimension(kContextMenuCheckColumnWidth),
+                     y,
+                     nullptr);
+            LineTo(drawItem.hDC, drawItem.rcItem.right - scaleMenuDimension(kContextMenuTextPadding), y);
+            SelectObject(drawItem.hDC, oldPen);
+            DeleteObject(separatorPen);
+            return;
+        }
+
+        std::wstring label;
+        std::wstring shortcut;
+        SplitMenuDisplayText(drawData->text, &label, &shortcut);
+        const HFONT menuFont = MenuFontOrDefault(menuFont_);
+        const int textPadding = scaleMenuDimension(kContextMenuTextPadding);
+        const int checkColumnWidth = scaleMenuDimension(kContextMenuCheckColumnWidth);
+        const int shortcutGap = scaleMenuDimension(kContextMenuShortcutGap);
+        const HGDIOBJ oldFont = SelectObject(drawItem.hDC, menuFont);
+        SetBkMode(drawItem.hDC, TRANSPARENT);
+
+        RECT labelRect{drawItem.rcItem.left + checkColumnWidth + textPadding,
+                       drawItem.rcItem.top,
+                       drawItem.rcItem.right - textPadding,
+                       drawItem.rcItem.bottom};
+        if (!shortcut.empty())
+        {
+            labelRect.right -= MeasureMenuTextWidth(menuFont, shortcut) + shortcutGap;
+        }
+
+        SetTextColor(drawItem.hDC, disabled
+            ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
+            : TextColor(darkTheme_));
+        DrawTextW(drawItem.hDC,
+                  label.c_str(),
+                  -1,
+                  &labelRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        if (!shortcut.empty())
+        {
+            RECT shortcutRect{labelRect.right + shortcutGap,
+                              drawItem.rcItem.top,
+                              drawItem.rcItem.right - textPadding,
+                              drawItem.rcItem.bottom};
+            SetTextColor(drawItem.hDC, disabled
+                ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
+                : MutedTextColor(darkTheme_));
+            DrawTextW(drawItem.hDC,
+                      shortcut.c_str(),
+                      -1,
+                      &shortcutRect,
+                      DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
+
+        SelectObject(drawItem.hDC, oldFont);
+    }
+
+    void ViewerWindow::PrepareContextMenuForOwnerDraw(
+        HMENU menu,
+        std::vector<std::unique_ptr<MenuDrawItemData>>& storage) const
+    {
+        if (!menu)
+        {
+            return;
+        }
+
+        const int itemCount = GetMenuItemCount(menu);
+        for (int itemIndex = 0; itemIndex < itemCount; ++itemIndex)
+        {
+            MENUITEMINFOW menuInfo{};
+            menuInfo.cbSize = sizeof(menuInfo);
+            menuInfo.fMask = MIIM_FTYPE;
+            if (!GetMenuItemInfoW(menu, static_cast<UINT>(itemIndex), TRUE, &menuInfo))
+            {
+                continue;
+            }
+
+            auto drawData = std::make_unique<MenuDrawItemData>();
+            drawData->separator = (menuInfo.fType & MFT_SEPARATOR) != 0;
+            if (!drawData->separator)
+            {
+                const int textLength = GetMenuStringW(menu, static_cast<UINT>(itemIndex), nullptr, 0, MF_BYPOSITION);
+                if (textLength > 0)
+                {
+                    std::wstring buffer(static_cast<std::size_t>(textLength) + 1, L'\0');
+                    GetMenuStringW(menu,
+                                   static_cast<UINT>(itemIndex),
+                                   buffer.data(),
+                                   textLength + 1,
+                                   MF_BYPOSITION);
+                    buffer.resize(static_cast<std::size_t>(textLength));
+                    drawData->text = std::move(buffer);
+                }
+            }
+
+            MENUITEMINFOW updateInfo{};
+            updateInfo.cbSize = sizeof(updateInfo);
+            updateInfo.fMask = MIIM_FTYPE | MIIM_DATA;
+            updateInfo.fType = drawData->separator ? (MFT_SEPARATOR | MFT_OWNERDRAW) : MFT_OWNERDRAW;
+            updateInfo.dwItemData = reinterpret_cast<ULONG_PTR>(drawData.get());
+            SetMenuItemInfoW(menu, static_cast<UINT>(itemIndex), TRUE, &updateInfo);
+            storage.push_back(std::move(drawData));
+        }
     }
 
     void ViewerWindow::DispatchContextMenuCommand(UINT commandId)
@@ -2670,21 +2982,15 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        constexpr UINT kCopyPathId = 1;
-        constexpr UINT kRevealInExplorerId = 2;
-        constexpr UINT kPropertiesId = 3;
-        constexpr UINT kImageInformationId = 4;
-        constexpr UINT kSetWallpaperId = 5;
-
         switch (commandId)
         {
-        case kCopyPathId:
+        case kContextMenuCopyPath:
             if (!CopyTextToClipboardLocal(hwnd_, currentPath))
             {
                 MessageBoxW(hwnd_, L"Failed to copy the file path to the clipboard.", L"Copy Path", MB_OK | MB_ICONERROR);
             }
             return;
-        case kRevealInExplorerId:
+        case kContextMenuRevealInExplorer:
         {
             PIDLIST_ABSOLUTE folderPidl = nullptr;
             const std::wstring parentPath = std::filesystem::path(currentPath).parent_path().wstring();
@@ -2705,9 +3011,10 @@ namespace hyperbrowse::viewer
             }
             return;
         }
-        case kImageInformationId:
-        case kPropertiesId:
-        case kSetWallpaperId:
+        case kContextMenuCopyImage:
+        case kContextMenuImageInformation:
+        case kContextMenuProperties:
+        case kContextMenuSetWallpaper:
             if (owner_ && IsWindow(owner_))
             {
                 // Defer to the main window so metadata dialogs and the wallpaper
@@ -3489,6 +3796,26 @@ namespace hyperbrowse::viewer
         case WM_KILLFOCUS:
             RequestRepaint();
             return 0;
+        case WM_MEASUREITEM:
+        {
+            auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
+            if (measureItem && measureItem->CtlType == ODT_MENU)
+            {
+                MeasureContextMenuItem(measureItem);
+                return TRUE;
+            }
+            break;
+        }
+        case WM_DRAWITEM:
+        {
+            const auto* drawItem = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+            if (drawItem && drawItem->CtlType == ODT_MENU)
+            {
+                DrawContextMenuItem(*drawItem);
+                return TRUE;
+            }
+            break;
+        }
         case WM_KEYDOWN:
             if ((wParam == VK_F7 || wParam == VK_F8)
                 && (GetKeyState(VK_CONTROL) & 0x8000) == 0
@@ -3520,6 +3847,17 @@ namespace hyperbrowse::viewer
                 if (owner_ && IsWindow(owner_) != FALSE)
                 {
                     PostMessageW(owner_, kStartFolderSlideshowMessage, reinterpret_cast<WPARAM>(hwnd_), 0);
+                }
+                return 0;
+            }
+
+            if (wParam == static_cast<WPARAM>('I')
+                && (GetKeyState(VK_CONTROL) & 0x8000) != 0
+                && (GetKeyState(VK_SHIFT) & 0x8000) != 0)
+            {
+                if (owner_ && IsWindow(owner_) != FALSE)
+                {
+                    PostMessageW(owner_, kContextMenuCommandMessage, kContextMenuCopyImage, 0);
                 }
                 return 0;
             }

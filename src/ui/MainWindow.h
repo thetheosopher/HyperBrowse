@@ -139,6 +139,13 @@ namespace hyperbrowse::ui
             QuickAccessInternal
         };
 
+        enum class FolderHistoryNavigationDirection
+        {
+            None,
+            Back,
+            Forward,
+        };
+
         struct ThemePalette
         {
             COLORREF windowBackground;
@@ -255,7 +262,7 @@ namespace hyperbrowse::ui
         void SaveWindowState() const;
         bool HandleCommand(UINT commandId);
         void OpenFolder();
-        void LoadFolderAsync(std::wstring folderPath);
+        void LoadFolderAsync(std::wstring folderPath, bool historyNavigation = false);
         void RefreshBrowserPane();
         void OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor = false);
         bool OpenItemsInViewer(std::vector<browser::BrowserItem> items,
@@ -296,6 +303,7 @@ namespace hyperbrowse::ui
         bool ShowShellContextMenuForSelection(POINT screenPoint);
         void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
         void ShowUserGuide() const;
+        void ShowShortcutReference() const;
         void ShowAboutDialog() const;
         void ShowFileAssociationsDialog();
         void ShowSlideshowSettingsDialog();
@@ -343,12 +351,12 @@ namespace hyperbrowse::ui
         void RevealSelectedInExplorer() const;
         void OpenSelectedContainingFolder() const;
         void CopySelectedPathsToClipboard() const;
-        void CopySelectionFilesToClipboard() const;
+        void CopySelectionFilesToClipboard(bool movePreferred = false) const;
         void PasteClipboardFilesIntoCurrentFolder();
         void ShowSelectedFileProperties() const;
         void SetDesktopWallpaperFromImageFile(const std::wstring& imagePath);
         void ShowImageInformationForPath(const std::wstring& filePath);
-        void CopySelectedImagePixelsToClipboard();
+        void CopySelectedImagePixelsToClipboard(std::wstring_view preferredPath = {});
         void StartDuplicateSelection();
         void StartSlideshow(bool selectionScope);
         void StartFolderSlideshow(std::wstring_view preferredPath = {});
@@ -415,6 +423,7 @@ namespace hyperbrowse::ui
         void TryRestorePendingStartupSelectionPath(bool clearIfNotFound);
 
         void SetBrowserMode(BrowserMode mode);
+        void StepThumbnailSize(int direction);
         void ToggleRecursiveBrowsing();
         void ToggleShowSubfoldersInBrowser();
         void ToggleCurrentFolderFavoriteDestination();
@@ -434,6 +443,7 @@ namespace hyperbrowse::ui
         void SyncQuickSendModel();
         void RecordOpenedFolderHistory(std::wstring folderPath);
         bool NavigateBackToLastOpenedFolder();
+        bool NavigateForwardToLastOpenedFolder();
         void RefreshQuickAccessMenus();
         void RefreshPersistentMenuOwnerDraw();
         void PrepareMenuForOwnerDraw(HMENU menu,
@@ -518,6 +528,7 @@ namespace hyperbrowse::ui
         bool applyingUndoRedo_{};
         HMENU menu_{};
         HMENU fileMenu_{};
+        HMENU editMenu_{};
         HMENU viewMenu_{};
         HMENU helpMenu_{};
         HMENU openRecentFolderMenu_{};
@@ -526,7 +537,7 @@ namespace hyperbrowse::ui
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
         int detailsPanelWidth_{340};
-        std::array<CommandBarMenuButton, 3> commandBarMenuButtons_{};
+        std::array<CommandBarMenuButton, 5> commandBarMenuButtons_{};
         int commandBarHotIndex_{-1};
         int commandBarPressedIndex_{-1};
         HWND commandBarPreviousFocus_{};
@@ -543,6 +554,7 @@ namespace hyperbrowse::ui
         RightPaneTab activeRightPaneTab_{RightPaneTab::FileDetails};
         ThemeMode themeMode_{ThemeMode::Light};
         hyperbrowse::util::AppTextSize appTextSize_{hyperbrowse::util::kDefaultAppTextSize};
+        bool closeMainWindowOnEscape_{};
         bool recursiveBrowsingEnabled_{false};
         bool showSubfoldersInBrowser_{false};
         bool rawJpegPairedOperationsEnabled_{false};
@@ -557,6 +569,7 @@ namespace hyperbrowse::ui
         HBRUSH backgroundBrush_{};
         HBRUSH actionFieldBrush_{};
         HBRUSH detailsPanelBrush_{};
+        HBRUSH menuBackgroundBrush_{};
         HFONT appTextUiFont_{};
         HFONT detailsPanelTitleFont_{};
         HFONT detailsPanelSummaryFont_{};
@@ -568,8 +581,8 @@ namespace hyperbrowse::ui
         std::wstring pendingStartupViewerPath_;
         std::vector<std::wstring> openedFolderHistory_;
         std::size_t openedFolderHistoryIndex_{static_cast<std::size_t>(-1)};
-        bool backNavigationPending_{};
-        std::size_t backNavigationTargetHistoryIndex_{static_cast<std::size_t>(-1)};
+        FolderHistoryNavigationDirection pendingFolderHistoryNavigation_{FolderHistoryNavigationDirection::None};
+        std::size_t pendingFolderHistoryTargetIndex_{static_cast<std::size_t>(-1)};
         std::vector<std::wstring> recentFolders_;
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
@@ -588,6 +601,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
         std::unique_ptr<util::BackgroundExecutor> memoryPressureExecutor_;
+        mutable HWND shortcutReferenceWindow_{};
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::unordered_map<std::uint64_t, std::vector<HTREEITEM>> pendingFolderTreeChildPresenceItems_;
         std::wstring pendingTreeSelectionPath_;

@@ -16,6 +16,7 @@
 #include "cache/ThumbnailCache.h"
 #include "util/BackgroundExecutor.h"
 #include "util/ResourceSizing.h"
+#include "util/UiTextSize.h"
 
 namespace hyperbrowse::services
 {
@@ -86,6 +87,14 @@ namespace hyperbrowse::viewer
         static constexpr UINT kContextMenuCommandMessage = WM_APP + 68;
         static constexpr UINT kDroppedFileMessage = WM_APP + 69;
         static constexpr UINT kCurrentItemChangedMessage = WM_APP + 74;
+        static constexpr UINT kContextMenuCopyPath = 1;
+        static constexpr UINT kContextMenuRevealInExplorer = 2;
+        static constexpr UINT kContextMenuProperties = 3;
+        static constexpr UINT kContextMenuImageInformation = 4;
+        static constexpr UINT kContextMenuSetWallpaper = 5;
+        static constexpr UINT kContextMenuDelete = 6;
+        static constexpr UINT kContextMenuDeletePermanently = 7;
+        static constexpr UINT kContextMenuCopyImage = 8;
         static constexpr WPARAM kDeleteRequestPermanent = 0x1;
 
         explicit ViewerWindow(HINSTANCE instance);
@@ -118,6 +127,7 @@ namespace hyperbrowse::viewer
         void SetInfoOverlaysVisible(bool visible);
         void SetOverlayTextSize(InfoOverlayTextSize size);
         void SetFullMetadataVisible(bool visible);
+        void SetAppTextSize(util::AppTextSize size);
         void SetMemoryPressureActive(bool active);
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
         void SetDarkTheme(bool enabled);
@@ -166,6 +176,12 @@ namespace hyperbrowse::viewer
             bool prefetched{};
         };
 
+        struct MenuDrawItemData
+        {
+            std::wstring text;
+            bool separator{};
+        };
+
         bool RegisterWindowClass() const;
         void UpdateWindowTitle() const;
         void LoadCurrentImageAsync(LoadReason reason);
@@ -209,6 +225,11 @@ namespace hyperbrowse::viewer
         void NavigateToBoundary(bool first);
         void ClearWraparoundMessage();
         void ShowContextMenu(POINT screenPoint);
+        void MeasureContextMenuItem(MEASUREITEMSTRUCT* measureItem) const;
+        void DrawContextMenuItem(const DRAWITEMSTRUCT& drawItem) const;
+        void PrepareContextMenuForOwnerDraw(
+            HMENU menu,
+            std::vector<std::unique_ptr<MenuDrawItemData>>& storage) const;
         void DispatchContextMenuCommand(UINT commandId);
         int DisplayedImageIndex() const noexcept;
         void QueueTransitionFromCurrent(bool forward, bool slideshowNavigation = false);
@@ -262,6 +283,8 @@ namespace hyperbrowse::viewer
         std::vector<browser::BrowserItem> items_;
         int currentIndex_{-1};
         bool darkTheme_{};
+        util::AppTextSize appTextSize_{util::kDefaultAppTextSize};
+        HFONT menuFont_{};
         bool loading_{};
         std::wstring errorMessage_;
         util::ResourceProfile resourceProfile_{util::ResourceProfile::Balanced};

@@ -40,6 +40,8 @@
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
 #include "ui/DiagnosticsWindow.h"
+#include "ui/CommandIds.h"
+#include "ui/ShortcutCatalog.h"
 #include "ui/ToolbarIconLibrary.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
@@ -55,6 +57,8 @@
 #include "HyperBrowseBuildInfo.h"
 
 namespace fs = std::filesystem;
+
+using namespace hyperbrowse::ui::command_ids;
 
 namespace
 {
@@ -96,78 +100,13 @@ namespace
     constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
     constexpr wchar_t kRegistryValueShowPressureStateInStatusBar[] = L"ShowPressureStateInStatusBar";
+    constexpr wchar_t kRegistryValueCloseMainWindowOnEscape[] = L"CloseMainWindowOnEscape";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
     constexpr DWORD kDwmBorderColorAttribute = 34;
     constexpr DWORD kDwmCaptionColorAttribute = 35;
     constexpr DWORD kDwmTextColorAttribute = 36;
-
-    constexpr UINT ID_FILE_OPEN_FOLDER = 1000;
-    constexpr UINT ID_FILE_REFRESH_TREE = 1001;
-    constexpr UINT ID_FILE_EXIT = 1002;
-    constexpr UINT ID_FILE_IMAGE_INFORMATION = 1003;
-    constexpr UINT ID_FILE_OPEN_SELECTED = 1004;
-    constexpr UINT ID_FILE_COPY_SELECTION = 1005;
-    constexpr UINT ID_FILE_MOVE_SELECTION = 1006;
-    constexpr UINT ID_FILE_DELETE_SELECTION = 1007;
-    constexpr UINT ID_FILE_DELETE_SELECTION_PERMANENT = 1008;
-    constexpr UINT ID_FILE_REVEAL_IN_EXPLORER = 1009;
-    constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_JPEG = 1010;
-    constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_PNG = 1011;
-    constexpr UINT ID_FILE_BATCH_CONVERT_SELECTION_TIFF = 1012;
-    constexpr UINT ID_FILE_BATCH_CONVERT_FOLDER_JPEG = 1013;
-    constexpr UINT ID_FILE_BATCH_CONVERT_FOLDER_PNG = 1014;
-    constexpr UINT ID_FILE_BATCH_CONVERT_FOLDER_TIFF = 1015;
-    constexpr UINT ID_FILE_BATCH_CONVERT_CANCEL = 1016;
-    constexpr UINT ID_FILE_ROTATE_JPEG_LEFT = 1017;
-    constexpr UINT ID_FILE_ROTATE_JPEG_RIGHT = 1018;
-    constexpr UINT ID_FILE_OPEN_CONTAINING_FOLDER = 1019;
-    constexpr UINT ID_FILE_COPY_PATH = 1020;
-    constexpr UINT ID_FILE_PROPERTIES = 1021;
-    constexpr UINT ID_FILE_VIEW_ON_SECONDARY_MONITOR = 1022;
-    constexpr UINT ID_FILE_RENAME_SELECTED = 1023;
-    constexpr UINT ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION = 1024;
-    constexpr UINT ID_FILE_COMPARE_SELECTED = 1025;
-    constexpr UINT ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS = 1026;
-    constexpr UINT ID_FILE_BATCH_RENAME_SELECTION = 1027;
-    constexpr UINT ID_FILE_CLEAR_FAVORITE_DESTINATIONS = 1028;
-    constexpr UINT ID_FILE_CLEAR_RECENT_FOLDERS = 1029;
-    constexpr UINT ID_FILE_CLEAR_RECENT_DESTINATIONS = 1038;
-    constexpr UINT ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER = 1039;
-    constexpr UINT ID_VIEW_NAVIGATE_BACK_FOLDER = 1049;
-    constexpr UINT ID_FILE_COPY_FILES_TO_CLIPBOARD = 1087;
-    constexpr UINT ID_FILE_PASTE_FILES = 1088;
-    constexpr UINT ID_FILE_SELECT_ALL = 1089;
-    constexpr UINT ID_FILE_MINIMIZE = 1090;
-    constexpr UINT ID_FILE_COPY_IMAGE_PIXELS = 1091;
-    constexpr UINT ID_FILE_DUPLICATE_SELECTION = 1092;
-    constexpr UINT ID_EDIT_UNDO = 1093;
-    constexpr UINT ID_EDIT_REDO = 1094;
-    constexpr UINT ID_FILE_QUICK_SEND_MOVE = 1095;
-    constexpr UINT ID_FILE_QUICK_SEND_COPY = 1096;
-    constexpr UINT ID_FILE_ASSOCIATIONS = 1097;
-    constexpr UINT ID_FILE_SET_RATING_0 = 1080;
-    constexpr UINT ID_FILE_SET_RATING_1 = 1081;
-    constexpr UINT ID_FILE_SET_RATING_2 = 1082;
-    constexpr UINT ID_FILE_SET_RATING_3 = 1083;
-    constexpr UINT ID_FILE_SET_RATING_4 = 1084;
-    constexpr UINT ID_FILE_SET_RATING_5 = 1085;
-    constexpr UINT ID_FILE_EDIT_TAGS = 1086;
-    constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_BASE = 1030;
-    constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_LAST = 1037;
-    constexpr UINT ID_FILE_COPY_SELECTION_BROWSE = 1040;
-    constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_BASE = 1100;
-    constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_LAST = ID_FILE_COPY_SELECTION_FAVORITE_BASE
-        + static_cast<UINT>(hyperbrowse::ui::kQuickSendShortcutCount) - 1;
-    constexpr UINT ID_FILE_COPY_SELECTION_RECENT_BASE = 1140;
-    constexpr UINT ID_FILE_COPY_SELECTION_RECENT_LAST = 1147;
-    constexpr UINT ID_FILE_MOVE_SELECTION_BROWSE = 1060;
-    constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_BASE = 1150;
-    constexpr UINT ID_FILE_MOVE_SELECTION_FAVORITE_LAST = ID_FILE_MOVE_SELECTION_FAVORITE_BASE
-        + static_cast<UINT>(hyperbrowse::ui::kQuickSendShortcutCount) - 1;
-    constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_BASE = 1190;
-    constexpr UINT ID_FILE_MOVE_SELECTION_RECENT_LAST = 1197;
 
     std::wstring ToLowercaseCopy(std::wstring value);
     int CountDecimalDigits(std::size_t value);
@@ -196,77 +135,9 @@ namespace
                                             int defaultNumberWidth,
                                             std::wstring* leafName,
                                             std::wstring* errorMessage);
-    constexpr UINT ID_VIEW_THUMBNAILS = 2001;
-    constexpr UINT ID_VIEW_DETAILS = 2002;
-    constexpr UINT ID_VIEW_RECURSIVE = 2003;
-    constexpr UINT ID_VIEW_THEME_LIGHT = 2101;
-    constexpr UINT ID_VIEW_THEME_DARK = 2102;
-    constexpr UINT ID_VIEW_NVJPEG_ACCELERATION = 2103;
-    constexpr UINT ID_VIEW_LIBRAW_OUT_OF_PROCESS = 2104;
-    constexpr UINT ID_VIEW_PERSISTENT_THUMBNAIL_CACHE = 2105;
-    constexpr UINT ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR = 2106;
-    constexpr UINT ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER = 2107;
-    constexpr UINT ID_VIEW_SINGLE_INSTANCE = 2108;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_96 = 2110;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_128 = 2111;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_160 = 2112;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_192 = 2113;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_256 = 2114;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_320 = 2115;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_360 = 2116;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_420 = 2117;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_480 = 2118;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_560 = 2119;
-    constexpr UINT ID_VIEW_THUMBNAIL_SIZE_640 = 2120;
-    constexpr UINT ID_VIEW_THUMBNAIL_LAYOUT_COMPACT = 2121;
-    constexpr UINT ID_VIEW_THUMBNAIL_DETAILS = 2122;
-    constexpr UINT ID_VIEW_SHOW_SUBFOLDERS = 2123;
-    constexpr UINT ID_VIEW_SORT_FILENAME = 2201;
-    constexpr UINT ID_VIEW_SORT_MODIFIED = 2202;
-    constexpr UINT ID_VIEW_SORT_SIZE = 2203;
-    constexpr UINT ID_VIEW_SORT_DIMENSIONS = 2204;
-    constexpr UINT ID_VIEW_SORT_TYPE = 2205;
-    constexpr UINT ID_VIEW_SORT_RANDOM = 2206;
-    constexpr UINT ID_VIEW_SORT_DATETAKEN = 2207;
-    constexpr UINT ID_VIEW_SORT_RATING = 2208;
-    constexpr UINT ID_VIEW_SORT_TAGS = 2209;
-    constexpr UINT ID_VIEW_SORT_DIRECTION = 2210;
-    constexpr UINT ID_VIEW_DETAILS_STRIP = 2211;
     constexpr int kDetailsPanelCloseButtonSize = 18;
     constexpr int kDetailsPanelCloseButtonMargin = 8;
     constexpr int kDetailsPanelCloseButtonGap = 8;
-    constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM = 2212;
-    constexpr UINT ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE = 2213;
-    constexpr UINT ID_VIEW_VIEWER_DETAIL_OVERLAYS = 2214;
-    constexpr UINT ID_VIEW_PRESSURE_STATE_STATUS = 2215;
-    constexpr UINT ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG = 2216;
-    constexpr UINT ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW = 2217;
-    constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL = 2218;
-    constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_MEDIUM = 2219;
-    constexpr UINT ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE = 2220;
-    constexpr UINT ID_VIEW_VIEWER_FULL_METADATA = 2221;
-    constexpr UINT ID_VIEW_USE_SLIDESHOW_TRANSITION = 2222;
-    constexpr UINT ID_VIEW_APP_TEXT_SIZE_SMALL = 2223;
-    constexpr UINT ID_VIEW_APP_TEXT_SIZE_MEDIUM = 2224;
-    constexpr UINT ID_VIEW_APP_TEXT_SIZE_LARGE = 2225;
-    constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
-    constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
-    constexpr UINT ID_VIEW_SLIDESHOW_SETTINGS = 2307;
-    constexpr UINT ID_ACTION_SORT_MENU = 2401;
-    constexpr UINT ID_ACTION_THUMBNAIL_SIZE_MENU = 2402;
-    constexpr UINT ID_ACTION_THEME_MENU = 2403;
-    constexpr UINT ID_ACTION_FILTER_EDIT = 2404;
-    constexpr UINT ID_HELP_ABOUT = 9001;
-    constexpr UINT ID_HELP_DIAGNOSTICS_SNAPSHOT = 9002;
-    constexpr UINT ID_HELP_DIAGNOSTICS_RESET = 9003;
-    constexpr UINT ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE = 9004;
-    constexpr UINT ID_HELP_PERFORMANCE_PROFILE_BALANCED = 9005;
-    constexpr UINT ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE = 9006;
-    constexpr UINT ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE = 9007;
-    constexpr UINT ID_HELP_PERFORMANCE_SETTINGS = 9008;
-    constexpr UINT ID_HELP_USER_GUIDE = 9009;
-    constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
-    constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
     constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
     constexpr std::size_t kOpenedFolderHistoryLimit = 256;
     constexpr std::size_t kInvalidHistoryIndex = static_cast<std::size_t>(-1);
@@ -286,6 +157,7 @@ namespace
     constexpr int kToolbarItemSize = 32;
     constexpr int kToolbarIconSize = 18;
     constexpr int kToolbarDropdownChevronSize = 10;
+    constexpr int kToolbarTooltipMaxWidth = 300;
     constexpr int kToolbarSeparatorWidth = 9;
     constexpr int kToolbarSeparatorGap = 4;
     constexpr int kToolbarFilterEditHeight = 24;
@@ -346,6 +218,19 @@ namespace
     constexpr UINT_PTR kFolderEnumerationPresentationTimerId = 9102;
     constexpr UINT kFolderEnumerationPresentationIntervalMs = 50;
     constexpr wchar_t kTextInputDialogClassName[] = L"HyperBrowseTextInputDialog";
+    constexpr std::array kThumbnailSizePresets{
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels96,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels128,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels160,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels192,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels256,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels320,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels360,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels420,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels480,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels560,
+        hyperbrowse::browser::ThumbnailSizePreset::Pixels640,
+    };
     constexpr int kTextInputDialogWidth = 440;
     constexpr int kTextInputDialogHeight = 160;
     constexpr int kTextInputDialogMargin = 14;
@@ -365,6 +250,17 @@ namespace
     constexpr int kBatchRenameInstructionControlId = 202;
     constexpr int kBatchRenameHelpControlId = 203;
     constexpr wchar_t kAboutDialogClassName[] = L"HyperBrowseAboutDialog";
+    constexpr wchar_t kShortcutReferenceClassName[] = L"HyperBrowseShortcutReference";
+    constexpr int kShortcutReferenceWidth = 820;
+    constexpr int kShortcutReferenceHeight = 620;
+    constexpr int kShortcutReferenceMinimumWidth = 560;
+    constexpr int kShortcutReferenceMinimumHeight = 360;
+    constexpr int kShortcutReferenceMargin = 18;
+    constexpr int kShortcutReferenceSubtitleHeight = 24;
+    constexpr int kShortcutReferenceControlGap = 8;
+    constexpr int kShortcutReferenceButtonWidth = 88;
+    constexpr int kShortcutReferenceButtonHeight = 28;
+    constexpr int kShortcutReferenceListControlId = 401;
     constexpr wchar_t kAboutDialogGitHubLabel[] = L"GitHub Project";
     constexpr wchar_t kAboutDialogSupportLabel[] = L"Buy Me A Coffee";
 
@@ -435,7 +331,7 @@ namespace
     constexpr UINT kSlideshowMinimumTransitionDurationMs = 100U;
     constexpr UINT kSlideshowMaximumTransitionDurationMs = 5000U;
     constexpr wchar_t kFileAssociationsDialogClassName[] = L"HyperBrowseFileAssociationsDialog";
-    constexpr int kFileAssociationsDialogWidth = 640;
+    constexpr int kFileAssociationsDialogWidth = 760;
     constexpr int kFileAssociationsDialogHeight = 500;
     constexpr int kFileAssociationsDialogMargin = 20;
     constexpr int kFileAssociationsDialogInstructionControlId = 361;
@@ -676,6 +572,26 @@ namespace
         std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> brandArt;
     };
 
+    struct ShortcutReferenceState
+    {
+        HWND ownerWindow{};
+        HWND* windowSlot{};
+        HWND subtitleWindow{};
+        HWND listWindow{};
+        HWND closeButton{};
+        HFONT bodyFont{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
+        UINT dpi{96};
+        bool darkMode{};
+        COLORREF background{};
+        COLORREF listBackground{};
+        COLORREF text{};
+        COLORREF mutedText{};
+        COLORREF border{};
+        HBRUSH backgroundBrush{};
+        HBRUSH listBackgroundBrush{};
+    };
+
     struct PerformanceSettingsDialogState
     {
         HWND ownerWindow{};
@@ -723,10 +639,38 @@ namespace
         bool done{};
     };
 
+    struct FileAssociationsDialogLayoutMetrics
+    {
+        int margin{};
+        int contentWidth{};
+        int instructionTop{};
+        int instructionHeight{};
+        int actionTop{};
+        int actionGap{};
+        int selectAllWidth{};
+        int clearAllWidth{};
+        int defaultAppsButtonWidth{};
+        int buttonHeight{};
+        int defaultAppsButtonHeight{};
+        int formatGroupTop{};
+        int formatGroupHeight{};
+        int formatRowHeight{};
+        int formatGroupContentTop{};
+        int footnoteTop{};
+        int footnoteHeight{};
+        int dividerTop{};
+        int buttonTop{};
+        int buttonRowHeight{};
+        int minimumClientHeight{};
+    };
+
     struct PerformanceSettingsDialogLayoutMetrics
     {
+        int margin{};
         int contentLeft{};
         int contentWidth{};
+        int sectionInset{};
+        int controlGap{};
         int titleTop{};
         int titleHeight{};
         int instructionTop{};
@@ -741,11 +685,21 @@ namespace
         int rowValueLeft{};
         int rowUnitLeft{};
         int rowCheckboxLeft{};
+        int labelWidth{};
+        int editWidth{};
+        int unitWidth{};
+        int checkboxWidth{};
+        int rowHeight{};
+        int checkboxHeight{};
         int firstRowTop{};
         int secondRowTop{};
         int pressureStatusTop{};
         int footnoteTop{};
         int minimumFootnoteHeight{};
+        int buttonHeight{};
+        int applyButtonWidth{};
+        int cancelButtonWidth{};
+        int minimumClientWidth{};
         int minimumClientHeight{};
     };
 
@@ -772,8 +726,34 @@ namespace
         UINT slideshowDurationMs{3000};
         UINT transitionDurationMs{350};
         hyperbrowse::viewer::TransitionStyle transitionStyle{hyperbrowse::viewer::TransitionStyle::Crossfade};
+        int dialogHeight{};
         bool accepted{};
         bool done{};
+    };
+
+    struct SlideshowSettingsDialogLayoutMetrics
+    {
+        int margin{};
+        int contentWidth{};
+        int lineHeight{};
+        int instructionHeight{};
+        int labelWidth{};
+        int valueWidth{};
+        int numericEditWidth{};
+        int spinWidth{};
+        int controlHeight{};
+        int rowGap{};
+        int transitionTop{};
+        int durationTop{};
+        int transitionDurationTop{};
+        int footnoteTop{};
+        int footnoteHeight{};
+        int dividerTop{};
+        int buttonTop{};
+        int buttonHeight{};
+        int applyButtonWidth{};
+        int cancelButtonWidth{};
+        int minimumClientHeight{};
     };
 
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
@@ -1305,6 +1285,38 @@ namespace
         ReleaseDC(nullptr, screenDc);
         const int measuredHeight = static_cast<int>(bounds.bottom - bounds.top);
         return std::max(minimumHeight, measuredHeight);
+    }
+
+    int MeasureDialogButtonWidth(HFONT font, std::wstring_view label, int minimumWidth)
+    {
+        if (label.empty())
+        {
+            return minimumWidth;
+        }
+
+        HDC screenDc = GetDC(nullptr);
+        if (!screenDc)
+        {
+            return minimumWidth;
+        }
+
+        const HFONT effectiveFont = font
+            ? font
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const HGDIOBJ oldFont = effectiveFont ? SelectObject(screenDc, effectiveFont) : nullptr;
+        const std::wstring localText(label);
+        SIZE size{};
+        GetTextExtentPoint32W(screenDc,
+                              localText.c_str(),
+                              static_cast<int>(localText.size()),
+                              &size);
+        if (oldFont)
+        {
+            SelectObject(screenDc, oldFont);
+        }
+        ReleaseDC(nullptr, screenDc);
+
+        return std::max(minimumWidth, static_cast<int>(size.cx) + 24);
     }
 
     TextInputDialogLayoutMetrics BuildTextInputDialogLayoutMetrics(const TextInputDialogState& state)
@@ -2179,54 +2191,109 @@ namespace
                                                                                       const PerformanceSettingsDialogState& state)
     {
         PerformanceSettingsDialogLayoutMetrics metrics;
-        metrics.contentLeft = kTextInputDialogMargin + 2;
+        metrics.margin = hyperbrowse::util::ScaleAppTextDimension(kTextInputDialogMargin, state.appTextSize);
+        metrics.contentLeft = metrics.margin + 2;
         metrics.contentWidth = std::max(0, clientWidth - (metrics.contentLeft * 2));
+        metrics.sectionInset = hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogSectionInset, state.appTextSize);
+        metrics.controlGap = hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogControlGap, state.appTextSize);
 
         const HFONT titleFont = state.titleFont ? state.titleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         const HFONT bodyFont = state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const int lineHeight = MeasureSingleLineTextHeight(bodyFont, 20);
 
-        metrics.titleTop = kTextInputDialogMargin + 4;
+        metrics.titleTop = metrics.margin + hyperbrowse::util::ScaleAppTextDimension(4, state.appTextSize);
         metrics.titleHeight = MeasureTextBlockHeight(titleFont,
                                                      state.title,
                                                      metrics.contentWidth,
                                                      DT_LEFT | DT_NOPREFIX | DT_SINGLELINE,
-                                                     28);
-        metrics.instructionTop = metrics.titleTop + metrics.titleHeight + 6;
+                                                     hyperbrowse::util::ScaleAppTextDimension(28, state.appTextSize));
+        metrics.instructionTop = metrics.titleTop + metrics.titleHeight
+            + hyperbrowse::util::ScaleAppTextDimension(6, state.appTextSize);
         metrics.instructionHeight = MeasureTextBlockHeight(bodyFont,
                                                            state.instruction,
                                                            metrics.contentWidth,
                                                            DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                                           42);
-        metrics.summaryGroupTop = metrics.instructionTop + metrics.instructionHeight + 14;
-        metrics.summaryInnerWidth = std::max(0, metrics.contentWidth - (kPerformanceSettingsDialogSectionInset * 2));
+                                                           hyperbrowse::util::ScaleAppTextDimension(42, state.appTextSize));
+        metrics.summaryGroupTop = metrics.instructionTop + metrics.instructionHeight
+            + hyperbrowse::util::ScaleAppTextDimension(14, state.appTextSize);
+        metrics.summaryInnerWidth = std::max(0, metrics.contentWidth - (metrics.sectionInset * 2));
         metrics.summaryHeight = MeasureTextBlockHeight(bodyFont,
                                                        state.summary,
                                                        metrics.summaryInnerWidth,
                                                        DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                                       52);
-        metrics.summaryGroupHeight = std::max(78, metrics.summaryHeight + 30);
-        metrics.cacheGroupTop = metrics.summaryGroupTop + metrics.summaryGroupHeight + 12;
-        metrics.rowLabelLeft = metrics.contentLeft + kPerformanceSettingsDialogSectionInset;
-        metrics.rowValueLeft = metrics.rowLabelLeft + kPerformanceSettingsDialogLabelWidth + kPerformanceSettingsDialogControlGap;
-        metrics.rowUnitLeft = metrics.rowValueLeft + kPerformanceSettingsDialogEditWidth + 8;
-        metrics.rowCheckboxLeft = metrics.contentLeft + metrics.contentWidth - kPerformanceSettingsDialogSectionInset - kPerformanceSettingsDialogCheckboxWidth;
-        metrics.firstRowTop = metrics.cacheGroupTop + 30;
-        metrics.secondRowTop = metrics.firstRowTop + kTextInputEditHeight + kPerformanceSettingsDialogValueTopGap + 12;
-        metrics.pressureStatusTop = metrics.secondRowTop + kTextInputEditHeight + 18;
-        const int pressureStatusBottom = metrics.pressureStatusTop + 22;
-        metrics.cacheGroupHeight = std::max(136, pressureStatusBottom - metrics.cacheGroupTop + 12);
-        metrics.footnoteTop = metrics.cacheGroupTop + metrics.cacheGroupHeight + 12;
+                                                       hyperbrowse::util::ScaleAppTextDimension(52, state.appTextSize));
+        metrics.summaryGroupHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(78, state.appTextSize),
+            metrics.summaryHeight + hyperbrowse::util::ScaleAppTextDimension(30, state.appTextSize));
+        metrics.cacheGroupTop = metrics.summaryGroupTop + metrics.summaryGroupHeight
+            + hyperbrowse::util::ScaleAppTextDimension(12, state.appTextSize);
+        metrics.labelWidth = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogLabelWidth, state.appTextSize),
+            std::max(MeasureDialogButtonWidth(bodyFont, L"Thumbnail memory cache:", 0),
+                     MeasureDialogButtonWidth(bodyFont, L"Metadata cache:", 0)));
+        metrics.editWidth = hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogEditWidth, state.appTextSize);
+        metrics.unitWidth = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogUnitWidth, state.appTextSize),
+            MeasureDialogButtonWidth(bodyFont, L"entries", 0));
+        metrics.checkboxWidth = MeasureDialogButtonWidth(
+            bodyFont,
+            L"Follow profile",
+            hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogCheckboxWidth, state.appTextSize));
+        metrics.rowHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kTextInputEditHeight, state.appTextSize),
+            lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+        metrics.checkboxHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(22, state.appTextSize),
+            lineHeight + hyperbrowse::util::ScaleAppTextDimension(2, state.appTextSize));
+        metrics.rowLabelLeft = metrics.contentLeft + metrics.sectionInset;
+        metrics.rowValueLeft = metrics.rowLabelLeft + metrics.labelWidth + metrics.controlGap;
+        metrics.rowUnitLeft = metrics.rowValueLeft + metrics.editWidth + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize);
+        metrics.rowCheckboxLeft = metrics.contentLeft + metrics.contentWidth - metrics.sectionInset - metrics.checkboxWidth;
+        metrics.firstRowTop = metrics.cacheGroupTop + hyperbrowse::util::ScaleAppTextDimension(30, state.appTextSize);
+        metrics.secondRowTop = metrics.firstRowTop + metrics.rowHeight
+            + hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogValueTopGap + 12, state.appTextSize);
+        metrics.pressureStatusTop = metrics.secondRowTop + metrics.rowHeight
+            + hyperbrowse::util::ScaleAppTextDimension(18, state.appTextSize);
+        const int pressureStatusBottom = metrics.pressureStatusTop + metrics.checkboxHeight;
+        metrics.cacheGroupHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(136, state.appTextSize),
+            pressureStatusBottom - metrics.cacheGroupTop + hyperbrowse::util::ScaleAppTextDimension(12, state.appTextSize));
+        metrics.footnoteTop = metrics.cacheGroupTop + metrics.cacheGroupHeight
+            + hyperbrowse::util::ScaleAppTextDimension(12, state.appTextSize);
         metrics.minimumFootnoteHeight = MeasureTextBlockHeight(bodyFont,
                                                                state.footnote,
                                                                metrics.contentWidth,
                                                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                                               42);
+                                                               hyperbrowse::util::ScaleAppTextDimension(42, state.appTextSize));
+        metrics.buttonHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonHeight, state.appTextSize),
+            lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+        metrics.applyButtonWidth = MeasureDialogButtonWidth(
+            bodyFont,
+            L"Apply",
+            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonWidth, state.appTextSize));
+        metrics.cancelButtonWidth = MeasureDialogButtonWidth(
+            bodyFont,
+            L"Cancel",
+            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonWidth, state.appTextSize));
+        const int leftRowWidth = metrics.labelWidth
+            + metrics.controlGap
+            + metrics.editWidth
+            + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize)
+            + metrics.unitWidth;
+        metrics.minimumClientWidth = std::max(
+            kPerformanceSettingsDialogWidth,
+            metrics.contentLeft * 2
+                + metrics.sectionInset * 2
+                + leftRowWidth
+                + hyperbrowse::util::ScaleAppTextDimension(24, state.appTextSize)
+                + metrics.checkboxWidth);
         metrics.minimumClientHeight = metrics.footnoteTop
             + metrics.minimumFootnoteHeight
-            + 8
-            + 16
-            + kTextInputButtonHeight
-            + kTextInputDialogMargin;
+            + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize)
+            + hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize)
+            + metrics.buttonHeight
+            + metrics.margin;
         return metrics;
     }
 
@@ -2238,10 +2305,14 @@ namespace
         const int clientWidth = clientRect.right - clientRect.left;
         const int clientHeight = clientRect.bottom - clientRect.top;
         const PerformanceSettingsDialogLayoutMetrics metrics = BuildPerformanceSettingsDialogLayoutMetrics(clientWidth, state);
-        const int buttonTop = clientHeight - kTextInputDialogMargin - kTextInputButtonHeight;
-        const int dividerTop = buttonTop - 16;
-        const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
-        const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
+        const HFONT bodyFont = state.bodyFont
+            ? state.bodyFont
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const int lineHeight = MeasureSingleLineTextHeight(bodyFont, 20);
+        const int buttonTop = clientHeight - metrics.margin - metrics.buttonHeight;
+        const int dividerTop = buttonTop - hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
+        const int cancelLeft = clientWidth - metrics.margin - metrics.cancelButtonWidth;
+        const int okLeft = cancelLeft - metrics.controlGap - metrics.applyButtonWidth;
 
         const HWND titleWindow = GetDlgItem(hwnd, kPerformanceSettingsDialogTitleControlId);
         if (titleWindow)
@@ -2281,39 +2352,79 @@ namespace
         const HWND thumbnailLabel = GetDlgItem(hwnd, kPerformanceSettingsThumbnailLabelControlId);
         if (thumbnailLabel)
         {
-            MoveWindow(thumbnailLabel, metrics.rowLabelLeft, metrics.firstRowTop + 4, kPerformanceSettingsDialogLabelWidth, 20, TRUE);
+            MoveWindow(thumbnailLabel,
+                       metrics.rowLabelLeft,
+                       metrics.firstRowTop + (metrics.rowHeight - lineHeight) / 2,
+                       metrics.labelWidth,
+                       lineHeight,
+                       TRUE);
         }
         if (state.thumbnailEditWindow)
         {
-            MoveWindow(state.thumbnailEditWindow, metrics.rowValueLeft, metrics.firstRowTop, kPerformanceSettingsDialogEditWidth, kTextInputEditHeight, TRUE);
+            MoveWindow(state.thumbnailEditWindow,
+                       metrics.rowValueLeft,
+                       metrics.firstRowTop,
+                       metrics.editWidth,
+                       metrics.rowHeight,
+                       TRUE);
         }
         const HWND thumbnailUnit = GetDlgItem(hwnd, kPerformanceSettingsThumbnailUnitControlId);
         if (thumbnailUnit)
         {
-            MoveWindow(thumbnailUnit, metrics.rowUnitLeft, metrics.firstRowTop + 4, kPerformanceSettingsDialogUnitWidth, 20, TRUE);
+            MoveWindow(thumbnailUnit,
+                       metrics.rowUnitLeft,
+                       metrics.firstRowTop + (metrics.rowHeight - lineHeight) / 2,
+                       metrics.unitWidth,
+                       lineHeight,
+                       TRUE);
         }
         if (state.thumbnailAutoCheckWindow)
         {
-            MoveWindow(state.thumbnailAutoCheckWindow, metrics.rowCheckboxLeft, metrics.firstRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
+            MoveWindow(state.thumbnailAutoCheckWindow,
+                       metrics.rowCheckboxLeft,
+                       metrics.firstRowTop + (metrics.rowHeight - metrics.checkboxHeight) / 2,
+                       metrics.checkboxWidth,
+                       metrics.checkboxHeight,
+                       TRUE);
         }
 
         const HWND metadataLabel = GetDlgItem(hwnd, kPerformanceSettingsMetadataLabelControlId);
         if (metadataLabel)
         {
-            MoveWindow(metadataLabel, metrics.rowLabelLeft, metrics.secondRowTop + 4, kPerformanceSettingsDialogLabelWidth, 20, TRUE);
+            MoveWindow(metadataLabel,
+                       metrics.rowLabelLeft,
+                       metrics.secondRowTop + (metrics.rowHeight - lineHeight) / 2,
+                       metrics.labelWidth,
+                       lineHeight,
+                       TRUE);
         }
         if (state.metadataEditWindow)
         {
-            MoveWindow(state.metadataEditWindow, metrics.rowValueLeft, metrics.secondRowTop, kPerformanceSettingsDialogEditWidth, kTextInputEditHeight, TRUE);
+            MoveWindow(state.metadataEditWindow,
+                       metrics.rowValueLeft,
+                       metrics.secondRowTop,
+                       metrics.editWidth,
+                       metrics.rowHeight,
+                       TRUE);
         }
         const HWND metadataUnit = GetDlgItem(hwnd, kPerformanceSettingsMetadataUnitControlId);
         if (metadataUnit)
         {
-            MoveWindow(metadataUnit, metrics.rowUnitLeft, metrics.secondRowTop + 4, kPerformanceSettingsDialogUnitWidth, 20, TRUE);
+            MoveWindow(metadataUnit,
+                       metrics.rowUnitLeft,
+                       metrics.secondRowTop + (metrics.rowHeight - lineHeight) / 2,
+                       metrics.unitWidth,
+                       lineHeight,
+                       TRUE);
         }
         if (state.metadataAutoCheckWindow)
         {
-            MoveWindow(state.metadataAutoCheckWindow, metrics.rowCheckboxLeft, metrics.secondRowTop + 2, kPerformanceSettingsDialogCheckboxWidth, 22, TRUE);
+            MoveWindow(state.metadataAutoCheckWindow,
+                       metrics.rowCheckboxLeft,
+                       metrics.secondRowTop + (metrics.rowHeight - metrics.checkboxHeight) / 2,
+                       metrics.checkboxWidth,
+                       metrics.checkboxHeight,
+                       TRUE);
         }
 
         if (state.pressureStatusCheckWindow)
@@ -2322,7 +2433,7 @@ namespace
                        metrics.rowLabelLeft,
                        metrics.pressureStatusTop,
                        metrics.contentWidth - (kPerformanceSettingsDialogSectionInset * 2),
-                       22,
+                       metrics.checkboxHeight,
                        TRUE);
         }
 
@@ -2345,13 +2456,13 @@ namespace
 
         if (state.okButton)
         {
-            MoveWindow(state.okButton, okLeft, buttonTop, kTextInputButtonWidth, kTextInputButtonHeight, TRUE);
+            MoveWindow(state.okButton, okLeft, buttonTop, metrics.applyButtonWidth, metrics.buttonHeight, TRUE);
         }
 
         const HWND cancelButton = GetDlgItem(hwnd, IDCANCEL);
         if (cancelButton)
         {
-            MoveWindow(cancelButton, cancelLeft, buttonTop, kTextInputButtonWidth, kTextInputButtonHeight, TRUE);
+            MoveWindow(cancelButton, cancelLeft, buttonTop, metrics.cancelButtonWidth, metrics.buttonHeight, TRUE);
         }
     }
 
@@ -3764,6 +3875,285 @@ namespace
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
 
+    void LayoutShortcutReferenceControls(HWND hwnd, const ShortcutReferenceState& state)
+    {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const int clientWidth = static_cast<int>(client.right);
+        const int clientHeight = static_cast<int>(client.bottom);
+        const int margin = MulDiv(kShortcutReferenceMargin, static_cast<int>(state.dpi), 96);
+        const int gap = MulDiv(kShortcutReferenceControlGap, static_cast<int>(state.dpi), 96);
+        const int subtitleHeight = MulDiv(kShortcutReferenceSubtitleHeight, static_cast<int>(state.dpi), 96);
+        const int buttonWidth = MulDiv(kShortcutReferenceButtonWidth, static_cast<int>(state.dpi), 96);
+        const int buttonHeight = MulDiv(kShortcutReferenceButtonHeight, static_cast<int>(state.dpi), 96);
+        const int listTop = margin + subtitleHeight + gap;
+        const int buttonTop = std::max(listTop + 1, clientHeight - margin - buttonHeight);
+        const int listBottom = std::max(listTop + 1, buttonTop - gap);
+
+        if (state.subtitleWindow)
+        {
+            SetWindowPos(state.subtitleWindow, nullptr, margin, margin,
+                         std::max(1, clientWidth - margin * 2), subtitleHeight,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (state.listWindow)
+        {
+            SetWindowPos(state.listWindow, nullptr, margin, listTop,
+                         std::max(1, clientWidth - margin * 2), std::max(1, listBottom - listTop),
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (state.closeButton)
+        {
+            SetWindowPos(state.closeButton, nullptr, clientWidth - margin - buttonWidth, buttonTop,
+                         buttonWidth, buttonHeight,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+
+    }
+
+    void AutoSizeShortcutReferenceColumns(HWND listWindow)
+    {
+        if (!listWindow)
+        {
+            return;
+        }
+
+        const int columnCount = Header_GetItemCount(ListView_GetHeader(listWindow));
+        for (int column = 0; column < columnCount; ++column)
+        {
+            ListView_SetColumnWidth(listWindow, column, LVSCW_AUTOSIZE_USEHEADER);
+        }
+    }
+
+    void AddShortcutReferenceRows(HWND listWindow)
+    {
+        if (!listWindow)
+        {
+            return;
+        }
+
+        LVCOLUMNW column{};
+        column.mask = LVCF_TEXT | LVCF_WIDTH;
+        column.cx = 170;
+        column.pszText = const_cast<LPWSTR>(L"Category");
+        ListView_InsertColumn(listWindow, 0, &column);
+        column.cx = 130;
+        column.pszText = const_cast<LPWSTR>(L"Shortcut");
+        ListView_InsertColumn(listWindow, 1, &column);
+        column.cx = 430;
+        column.pszText = const_cast<LPWSTR>(L"Action");
+        ListView_InsertColumn(listWindow, 2, &column);
+        column.cx = 110;
+        column.pszText = const_cast<LPWSTR>(L"Context");
+        ListView_InsertColumn(listWindow, 3, &column);
+
+        std::unordered_set<std::wstring> seenRows;
+        const auto appendCatalog = [&](std::span<const hyperbrowse::ui::ShortcutDefinition> catalog)
+        {
+            for (const hyperbrowse::ui::ShortcutDefinition& shortcut : catalog)
+            {
+                std::wstring rowKey(shortcut.group);
+                rowKey.push_back(L'\x1f');
+                rowKey.append(shortcut.displayChord);
+                rowKey.push_back(L'\x1f');
+                rowKey.append(shortcut.action);
+                rowKey.push_back(L'\x1f');
+                rowKey.append(shortcut.context == hyperbrowse::ui::ShortcutContext::MainWindow
+                    ? L"main"
+                    : L"viewer");
+                if (!seenRows.insert(std::move(rowKey)).second)
+                {
+                    continue;
+                }
+
+                const std::wstring category(shortcut.group);
+                const std::wstring chord(shortcut.displayChord);
+                const std::wstring action(shortcut.action);
+                const std::wstring context = shortcut.context == hyperbrowse::ui::ShortcutContext::MainWindow
+                    ? L"Main window"
+                    : L"Viewer";
+                LVITEMW item{};
+                item.mask = LVIF_TEXT;
+                item.iItem = ListView_GetItemCount(listWindow);
+                item.pszText = const_cast<LPWSTR>(category.c_str());
+                const int row = ListView_InsertItem(listWindow, &item);
+                if (row < 0)
+                {
+                    continue;
+                }
+                ListView_SetItemText(listWindow, row, 1, const_cast<LPWSTR>(chord.c_str()));
+                ListView_SetItemText(listWindow, row, 2, const_cast<LPWSTR>(action.c_str()));
+                ListView_SetItemText(listWindow, row, 3, const_cast<LPWSTR>(context.c_str()));
+            }
+        };
+
+        appendCatalog(hyperbrowse::ui::MainWindowShortcuts());
+        appendCatalog(hyperbrowse::ui::ViewerShortcuts());
+        AutoSizeShortcutReferenceColumns(listWindow);
+    }
+
+    LRESULT CALLBACK ShortcutReferenceProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<ShortcutReferenceState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<ShortcutReferenceState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+
+            state->subtitleWindow = CreateWindowExW(
+                0, L"STATIC", L"Main-window and viewer commands, grouped by task.",
+                WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+                0, 0, 0, 0, hwnd, nullptr,
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)), nullptr);
+            state->listWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE, WC_LISTVIEWW, nullptr,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL,
+                0, 0, 0, 0, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kShortcutReferenceListControlId)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)), nullptr);
+            state->closeButton = CreateWindowExW(
+                0, L"BUTTON", L"Close",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                0, 0, 0, 0, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)), nullptr);
+
+            const HFONT bodyFont = state->bodyFont ? state->bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            if (state->subtitleWindow)
+            {
+                SendMessageW(state->subtitleWindow, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont), TRUE);
+            }
+            if (state->listWindow)
+            {
+                SendMessageW(state->listWindow, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont), TRUE);
+                ListView_SetExtendedListViewStyle(state->listWindow, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+                ListView_SetBkColor(state->listWindow, state->listBackground);
+                ListView_SetTextBkColor(state->listWindow, state->listBackground);
+                ListView_SetTextColor(state->listWindow, state->text);
+                AddShortcutReferenceRows(state->listWindow);
+            }
+            if (state->closeButton)
+            {
+                SendMessageW(state->closeButton, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont), TRUE);
+            }
+
+            state->backgroundBrush = CreateSolidBrush(state->background);
+            state->listBackgroundBrush = CreateSolidBrush(state->listBackground);
+            ApplyWindowFrameTheme(hwnd, state->darkMode, state->background, state->text, state->border);
+            LayoutShortcutReferenceControls(hwnd, *state);
+            return 0;
+        }
+        case WM_SIZE:
+            if (state)
+            {
+                LayoutShortcutReferenceControls(hwnd, *state);
+            }
+            return 0;
+        case WM_GETMINMAXINFO:
+            if (state)
+            {
+                auto* sizeInfo = reinterpret_cast<MINMAXINFO*>(lParam);
+                if (sizeInfo)
+                {
+                    const int dpi = static_cast<int>(state->dpi == 0 ? 96 : state->dpi);
+                    sizeInfo->ptMinTrackSize.x = MulDiv(kShortcutReferenceMinimumWidth, dpi, 96);
+                    sizeInfo->ptMinTrackSize.y = MulDiv(kShortcutReferenceMinimumHeight, dpi, 96);
+                    return 0;
+                }
+            }
+            break;
+        case WM_DPICHANGED:
+            if (state)
+            {
+                state->dpi = HIWORD(wParam) == 0 ? 96 : HIWORD(wParam);
+                const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+                if (suggested)
+                {
+                    SetWindowPos(hwnd, nullptr,
+                                 suggested->left, suggested->top,
+                                 suggested->right - suggested->left,
+                                 suggested->bottom - suggested->top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                LayoutShortcutReferenceControls(hwnd, *state);
+            }
+            return 0;
+        case WM_CTLCOLORSTATIC:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetTextColor(dc, state->text);
+                SetBkColor(dc, state->background);
+                SetBkMode(dc, TRANSPARENT);
+                return reinterpret_cast<LRESULT>(state->backgroundBrush);
+            }
+            break;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+            if (state)
+            {
+                PAINTSTRUCT paint{};
+                const HDC dc = BeginPaint(hwnd, &paint);
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                FillRect(dc, &client, state->backgroundBrush);
+                EndPaint(hwnd, &paint);
+                return 0;
+            }
+            break;
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDCANCEL || LOWORD(wParam) == IDOK)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                if (state->windowSlot && *state->windowSlot == hwnd)
+                {
+                    *state->windowSlot = nullptr;
+                }
+                if (state->backgroundBrush)
+                {
+                    DeleteObject(state->backgroundBrush);
+                    state->backgroundBrush = nullptr;
+                }
+                if (state->listBackgroundBrush)
+                {
+                    DeleteObject(state->listBackgroundBrush);
+                    state->listBackgroundBrush = nullptr;
+                }
+                DeleteFontIfOwned(state->bodyFont);
+                state->bodyFont = nullptr;
+                delete state;
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
     bool PromptForPerformanceSettings(HWND ownerWindow,
                                       HINSTANCE instance,
                                       hyperbrowse::util::AppTextSize appTextSize,
@@ -3822,8 +4212,12 @@ namespace
             ? std::to_wstring(currentMetadataCacheCapacityEntries)
             : std::to_wstring(initialMetadataCacheCapacityOverrideEntries);
 
-        const PerformanceSettingsDialogLayoutMetrics layoutMetrics = BuildPerformanceSettingsDialogLayoutMetrics(kPerformanceSettingsDialogWidth, state);
-        RECT windowRect{0, 0, kPerformanceSettingsDialogWidth, std::max(kPerformanceSettingsDialogHeight, layoutMetrics.minimumClientHeight)};
+        const PerformanceSettingsDialogLayoutMetrics initialLayoutMetrics =
+            BuildPerformanceSettingsDialogLayoutMetrics(kPerformanceSettingsDialogWidth, state);
+        const int dialogWidth = std::max(kPerformanceSettingsDialogWidth, initialLayoutMetrics.minimumClientWidth);
+        const PerformanceSettingsDialogLayoutMetrics layoutMetrics =
+            BuildPerformanceSettingsDialogLayoutMetrics(dialogWidth, state);
+        RECT windowRect{0, 0, dialogWidth, std::max(kPerformanceSettingsDialogHeight, layoutMetrics.minimumClientHeight)};
         AdjustWindowRectEx(&windowRect,
                            WS_CAPTION | WS_SYSMENU | WS_POPUP,
                            FALSE,
@@ -3895,42 +4289,100 @@ namespace
         return true;
     }
 
+    FileAssociationsDialogLayoutMetrics BuildFileAssociationsDialogLayoutMetrics(
+        int clientWidth,
+        const FileAssociationsDialogState& state,
+        std::size_t formatCount)
+    {
+        FileAssociationsDialogLayoutMetrics metrics;
+        metrics.margin = hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogMargin, state.appTextSize);
+        metrics.contentWidth = std::max(0, clientWidth - (metrics.margin * 2));
+        const int lineHeight = MeasureSingleLineTextHeight(state.bodyFont, 20);
+        const int scaledGap = hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize);
+        const int formatRowCount = std::max(1, static_cast<int>((formatCount + 1) / 2));
+
+        metrics.instructionTop = hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
+        metrics.instructionHeight = MeasureTextBlockHeight(state.bodyFont,
+                                                           state.instruction,
+                                                           metrics.contentWidth,
+                                                           DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                                           lineHeight + scaledGap / 2);
+        metrics.actionGap = scaledGap;
+        metrics.actionTop = metrics.instructionTop + metrics.instructionHeight + metrics.actionGap;
+        metrics.selectAllWidth = MeasureDialogButtonWidth(
+            state.bodyFont,
+            L"Select all",
+            hyperbrowse::util::ScaleAppTextDimension(92, state.appTextSize));
+        metrics.clearAllWidth = MeasureDialogButtonWidth(
+            state.bodyFont,
+            L"Clear all",
+            hyperbrowse::util::ScaleAppTextDimension(92, state.appTextSize));
+        metrics.defaultAppsButtonWidth = MeasureDialogButtonWidth(
+            state.bodyFont,
+            L"Default Apps...",
+            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogDefaultAppsButtonWidth, state.appTextSize));
+        metrics.buttonHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogButtonHeight, state.appTextSize),
+            lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+        metrics.defaultAppsButtonHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogDefaultAppsButtonHeight, state.appTextSize),
+            lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+        metrics.formatGroupTop = metrics.actionTop + metrics.buttonHeight + metrics.actionGap;
+        metrics.formatRowHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogFormatRowHeight, state.appTextSize),
+            lineHeight + hyperbrowse::util::ScaleAppTextDimension(6, state.appTextSize));
+        metrics.formatGroupContentTop = hyperbrowse::util::ScaleAppTextDimension(26, state.appTextSize);
+        const int formatGroupBottomInset = hyperbrowse::util::ScaleAppTextDimension(10, state.appTextSize);
+        metrics.formatGroupHeight = formatGroupBottomInset
+            + metrics.formatGroupContentTop
+            + formatRowCount * metrics.formatRowHeight;
+        metrics.footnoteTop = metrics.formatGroupTop + metrics.formatGroupHeight + metrics.actionGap;
+        metrics.footnoteHeight = MeasureTextBlockHeight(state.bodyFont,
+                                                        state.footnote,
+                                                        metrics.contentWidth,
+                                                        DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                                        lineHeight);
+        metrics.dividerTop = metrics.footnoteTop + metrics.footnoteHeight + metrics.actionGap;
+        metrics.buttonRowHeight = std::max(metrics.buttonHeight, metrics.defaultAppsButtonHeight);
+        metrics.buttonTop = metrics.dividerTop + metrics.actionGap;
+        metrics.minimumClientHeight = metrics.buttonTop
+            + metrics.buttonRowHeight
+            + metrics.margin;
+        return metrics;
+    }
+
     void LayoutFileAssociationsDialogControls(HWND hwnd, const FileAssociationsDialogState& state)
     {
         RECT clientRect{};
         GetClientRect(hwnd, &clientRect);
         const int clientWidth = clientRect.right - clientRect.left;
         const int clientHeight = clientRect.bottom - clientRect.top;
-        const int contentWidth = std::max(0, clientWidth - (kFileAssociationsDialogMargin * 2));
-        const int selectAllWidth = 92;
-        const int clearAllWidth = 92;
-        const int actionGap = 8;
-        const int instructionTop = 16;
-        const int actionTop = instructionTop + 32;
-        const int formatGroupTop = actionTop + 36;
-        const int formatGroupHeight = 7 * kFileAssociationsDialogFormatRowHeight + 36;
-        const int footnoteTop = formatGroupTop + formatGroupHeight + 14;
-        const int dividerTop = std::max(footnoteTop + 48, clientHeight - 64);
-        const int buttonTop = clientHeight - 50;
-        const int cancelLeft = clientWidth - kFileAssociationsDialogMargin - kFileAssociationsDialogButtonWidth;
-        const int okLeft = cancelLeft - actionGap - kFileAssociationsDialogButtonWidth;
-        const int defaultAppsTop = buttonTop
-            - ((kFileAssociationsDialogDefaultAppsButtonHeight - kFileAssociationsDialogButtonHeight) / 2);
+        const FileAssociationsDialogLayoutMetrics metrics = BuildFileAssociationsDialogLayoutMetrics(
+            clientWidth,
+            state,
+            state.formatCheckWindows.size());
+        const int contentWidth = metrics.contentWidth;
+        const int buttonRowTop = std::max(metrics.buttonTop, clientHeight - metrics.margin - metrics.buttonRowHeight);
+        const int dividerTop = std::max(metrics.dividerTop, buttonRowTop - metrics.actionGap);
+        const int buttonTop = buttonRowTop + (metrics.buttonRowHeight - metrics.buttonHeight) / 2;
+        const int cancelLeft = clientWidth - metrics.margin - kFileAssociationsDialogButtonWidth;
+        const int okLeft = cancelLeft - metrics.actionGap - kFileAssociationsDialogButtonWidth;
+        const int defaultAppsTop = buttonRowTop + (metrics.buttonRowHeight - metrics.defaultAppsButtonHeight) / 2;
 
         const HWND instructionWindow = GetDlgItem(hwnd, kFileAssociationsDialogInstructionControlId);
         if (instructionWindow)
         {
-            MoveWindow(instructionWindow, kFileAssociationsDialogMargin, instructionTop, contentWidth, 28, TRUE);
+            MoveWindow(instructionWindow, metrics.margin, metrics.instructionTop, contentWidth, metrics.instructionHeight, TRUE);
         }
 
         const HWND selectAllButton = GetDlgItem(hwnd, kFileAssociationsDialogSelectAllControlId);
         if (selectAllButton)
         {
             MoveWindow(selectAllButton,
-                       kFileAssociationsDialogMargin,
-                       actionTop,
-                       selectAllWidth,
-                       kFileAssociationsDialogButtonHeight,
+                       metrics.margin,
+                       metrics.actionTop,
+                       metrics.selectAllWidth,
+                       metrics.buttonHeight,
                        TRUE);
         }
 
@@ -3938,10 +4390,10 @@ namespace
         if (clearAllButton)
         {
             MoveWindow(clearAllButton,
-                       kFileAssociationsDialogMargin + selectAllWidth + actionGap,
-                       actionTop,
-                       clearAllWidth,
-                       kFileAssociationsDialogButtonHeight,
+                       metrics.margin + metrics.selectAllWidth + metrics.actionGap,
+                       metrics.actionTop,
+                       metrics.clearAllWidth,
+                       metrics.buttonHeight,
                        TRUE);
         }
 
@@ -3949,29 +4401,31 @@ namespace
         if (formatGroupWindow)
         {
             MoveWindow(formatGroupWindow,
-                       kFileAssociationsDialogMargin,
-                       formatGroupTop,
+                       metrics.margin,
+                       metrics.formatGroupTop,
                        contentWidth,
-                       formatGroupHeight,
+                       metrics.formatGroupHeight,
                        TRUE);
         }
 
-        const int columnGap = 28;
+        const int columnGap = hyperbrowse::util::ScaleAppTextDimension(28, state.appTextSize);
         const int columnWidth = std::max(0, (contentWidth - columnGap) / 2);
-        const int formatLeft = kFileAssociationsDialogMargin + 16;
+        const int formatLeft = metrics.margin + hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
+        const int descriptionRightInset = hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
+        const int formatColumnCount = std::max(1, static_cast<int>((state.formatCheckWindows.size() + 1) / 2));
         for (std::size_t index = 0; index < state.formatCheckWindows.size(); ++index)
         {
-            const int column = index < 7 ? 0 : 1;
-            const int row = static_cast<int>(index % 7);
+            const int column = index < static_cast<std::size_t>(formatColumnCount) ? 0 : 1;
+            const int row = static_cast<int>(index % static_cast<std::size_t>(formatColumnCount));
             const int left = formatLeft + column * (columnWidth + columnGap);
             const HWND formatWindow = state.formatCheckWindows[index];
             if (formatWindow)
             {
                 MoveWindow(formatWindow,
                            left,
-                           formatGroupTop + 26 + row * kFileAssociationsDialogFormatRowHeight,
+                           metrics.formatGroupTop + metrics.formatGroupContentTop + row * metrics.formatRowHeight,
                            kFileAssociationsDialogFormatCheckboxWidth,
-                           22,
+                           metrics.formatRowHeight,
                            TRUE);
             }
             if (index < state.formatDescriptionWindows.size())
@@ -3981,9 +4435,9 @@ namespace
                 {
                     MoveWindow(descriptionWindow,
                                left + kFileAssociationsDialogFormatCheckboxWidth,
-                               formatGroupTop + 28 + row * kFileAssociationsDialogFormatRowHeight,
-                               std::max(0, columnWidth - kFileAssociationsDialogFormatCheckboxWidth - 12),
-                               20,
+                               metrics.formatGroupTop + metrics.formatGroupContentTop + row * metrics.formatRowHeight,
+                               std::max(0, columnWidth - kFileAssociationsDialogFormatCheckboxWidth - descriptionRightInset),
+                               metrics.formatRowHeight,
                                TRUE);
                 }
             }
@@ -3993,17 +4447,17 @@ namespace
         if (footnoteWindow)
         {
             MoveWindow(footnoteWindow,
-                       kFileAssociationsDialogMargin,
-                       footnoteTop,
+                       metrics.margin,
+                       metrics.footnoteTop,
                        contentWidth,
-                       std::max(0, dividerTop - footnoteTop - 8),
+                       std::max(metrics.footnoteHeight, dividerTop - metrics.footnoteTop - metrics.actionGap),
                        TRUE);
         }
 
         const HWND dividerWindow = GetDlgItem(hwnd, kFileAssociationsDialogDividerControlId);
         if (dividerWindow)
         {
-            MoveWindow(dividerWindow, kFileAssociationsDialogMargin, dividerTop, contentWidth, 2, TRUE);
+            MoveWindow(dividerWindow, metrics.margin, dividerTop, contentWidth, 2, TRUE);
         }
 
         if (state.okButton)
@@ -4012,7 +4466,7 @@ namespace
                        okLeft,
                        buttonTop,
                        kFileAssociationsDialogButtonWidth,
-                       kFileAssociationsDialogButtonHeight,
+                       metrics.buttonHeight,
                        TRUE);
         }
 
@@ -4020,10 +4474,10 @@ namespace
         if (defaultAppsButton)
         {
             MoveWindow(defaultAppsButton,
-                       kFileAssociationsDialogMargin,
+                       metrics.margin,
                        defaultAppsTop,
-                       kFileAssociationsDialogDefaultAppsButtonWidth,
-                       kFileAssociationsDialogDefaultAppsButtonHeight,
+                       metrics.defaultAppsButtonWidth,
+                       metrics.defaultAppsButtonHeight,
                        TRUE);
         }
 
@@ -4034,7 +4488,7 @@ namespace
                        cancelLeft,
                        buttonTop,
                        kFileAssociationsDialogButtonWidth,
-                       kFileAssociationsDialogButtonHeight,
+                       metrics.buttonHeight,
                        TRUE);
         }
     }
@@ -4217,7 +4671,7 @@ namespace
                     0,
                     L"STATIC",
                     fileType.description,
-                    WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+                    WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS,
                     0,
                     0,
                     100,
@@ -4462,7 +4916,13 @@ namespace
         state.footnote = L"Checked formats become defaults; unchecked formats are left unchanged. Windows may protect an existing choice; use Default apps if a format is rejected.";
         state.initialDefaults = initialDefaults;
 
-        RECT windowRect{0, 0, kFileAssociationsDialogWidth, kFileAssociationsDialogHeight};
+        const FileAssociationsDialogLayoutMetrics layoutMetrics = BuildFileAssociationsDialogLayoutMetrics(
+            kFileAssociationsDialogWidth,
+            state,
+            hyperbrowse::decode::SupportedFileTypes().size());
+        RECT windowRect{0, 0,
+                        kFileAssociationsDialogWidth,
+                        std::max(kFileAssociationsDialogHeight, layoutMetrics.minimumClientHeight)};
         AdjustWindowRectEx(&windowRect,
                            WS_CAPTION | WS_SYSMENU | WS_POPUP,
                            FALSE,
@@ -4591,6 +5051,69 @@ namespace
         return true;
     }
 
+    SlideshowSettingsDialogLayoutMetrics BuildSlideshowSettingsDialogLayoutMetrics(
+        const SlideshowSettingsDialogState& state)
+    {
+        SlideshowSettingsDialogLayoutMetrics metrics;
+        metrics.margin = hyperbrowse::util::ScaleAppTextDimension(kTextInputDialogMargin, state.appTextSize);
+        metrics.contentWidth = kSlideshowSettingsDialogWidth - metrics.margin * 2;
+        metrics.lineHeight = MeasureSingleLineTextHeight(state.bodyFont, 20);
+        metrics.instructionHeight = MeasureTextBlockHeight(state.bodyFont,
+                                                           state.instruction,
+                                                           metrics.contentWidth,
+                                                           DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                                           metrics.lineHeight + hyperbrowse::util::ScaleAppTextDimension(4, state.appTextSize));
+        metrics.instructionHeight = std::max(
+            metrics.instructionHeight,
+            hyperbrowse::util::ScaleAppTextDimension(44, state.appTextSize));
+        metrics.labelWidth = std::max(
+            170,
+            std::max(MeasureDialogButtonWidth(state.bodyFont, L"Transition type:", 0),
+                     MeasureDialogButtonWidth(state.bodyFont, L"Transition duration:", 0)));
+        metrics.valueWidth = 300;
+        metrics.numericEditWidth = 120;
+        metrics.spinWidth = 22;
+        metrics.controlHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kTextInputEditHeight, state.appTextSize),
+            metrics.lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+        metrics.rowGap = hyperbrowse::util::ScaleAppTextDimension(10, state.appTextSize);
+        metrics.transitionTop = metrics.margin + std::max(
+            hyperbrowse::util::ScaleAppTextDimension(56, state.appTextSize),
+            metrics.instructionHeight + hyperbrowse::util::ScaleAppTextDimension(12, state.appTextSize));
+        metrics.durationTop = metrics.transitionTop + metrics.controlHeight + metrics.rowGap;
+        metrics.transitionDurationTop = metrics.durationTop + metrics.controlHeight + metrics.rowGap;
+        metrics.footnoteTop = metrics.transitionDurationTop
+            + metrics.controlHeight
+            + hyperbrowse::util::ScaleAppTextDimension(20, state.appTextSize);
+        metrics.footnoteHeight = MeasureTextBlockHeight(state.bodyFont,
+                                                        state.footnote,
+                                                        metrics.contentWidth,
+                                                        DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                                        metrics.lineHeight);
+        metrics.footnoteHeight = std::max(
+            metrics.footnoteHeight,
+            hyperbrowse::util::ScaleAppTextDimension(54, state.appTextSize));
+        metrics.dividerTop = metrics.footnoteTop
+            + metrics.footnoteHeight
+            + hyperbrowse::util::ScaleAppTextDimension(56, state.appTextSize);
+        metrics.buttonHeight = std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonHeight, state.appTextSize),
+            metrics.lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+        metrics.applyButtonWidth = MeasureDialogButtonWidth(
+            state.bodyFont,
+            L"Apply",
+            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonWidth, state.appTextSize));
+        metrics.cancelButtonWidth = MeasureDialogButtonWidth(
+            state.bodyFont,
+            L"Cancel",
+            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonWidth, state.appTextSize));
+        metrics.buttonTop = metrics.dividerTop + hyperbrowse::util::ScaleAppTextDimension(20, state.appTextSize);
+        metrics.minimumClientHeight = metrics.buttonTop
+            + metrics.buttonHeight
+            + hyperbrowse::util::ScaleAppTextDimension(26, state.appTextSize);
+        return metrics;
+    }
+
     LRESULT CALLBACK SlideshowSettingsDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         auto* state = reinterpret_cast<SlideshowSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -4615,20 +5138,23 @@ namespace
                 ? state->bodyFont
                 : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
-            const int contentLeft = kTextInputDialogMargin;
-            const int contentWidth = kSlideshowSettingsDialogWidth - (kTextInputDialogMargin * 2);
-            const int labelWidth = 170;
-            const int valueWidth = 300;
-            const int transitionTop = kTextInputDialogMargin + 56;
-            const int durationTop = transitionTop + 38;
-            const int transitionDurationTop = durationTop + 38;
-            const int footnoteTop = transitionDurationTop + 44;
-            const int dividerTop = kSlideshowSettingsDialogHeight - 70;
-            const int buttonTop = kSlideshowSettingsDialogHeight - 50;
-            const int cancelLeft = kSlideshowSettingsDialogWidth - kTextInputDialogMargin - kTextInputButtonWidth;
-            const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
-            const int numericEditWidth = 120;
-            const int spinWidth = 22;
+            const SlideshowSettingsDialogLayoutMetrics metrics = BuildSlideshowSettingsDialogLayoutMetrics(*state);
+            const int contentLeft = metrics.margin;
+            const int contentWidth = metrics.contentWidth;
+            const int labelWidth = metrics.labelWidth;
+            const int valueWidth = metrics.valueWidth;
+            const int transitionTop = metrics.transitionTop;
+            const int durationTop = metrics.durationTop;
+            const int transitionDurationTop = metrics.transitionDurationTop;
+            const int footnoteTop = metrics.footnoteTop;
+            const int dividerTop = metrics.dividerTop;
+            const int buttonTop = metrics.buttonTop;
+            const int cancelLeft = kSlideshowSettingsDialogWidth - metrics.margin - metrics.cancelButtonWidth;
+            const int okLeft = cancelLeft - metrics.rowGap - metrics.applyButtonWidth;
+            const int numericEditWidth = metrics.numericEditWidth;
+            const int spinWidth = metrics.spinWidth;
+            const int labelTopOffset = (metrics.controlHeight - metrics.lineHeight) / 2;
+            const int footnoteHeight = metrics.footnoteHeight;
 
             const HWND instructionWindow = CreateWindowExW(
                 0,
@@ -4636,9 +5162,9 @@ namespace
                 state->instruction.c_str(),
                 WS_CHILD | WS_VISIBLE,
                 contentLeft,
-                kTextInputDialogMargin,
+                metrics.margin,
                 contentWidth,
-                44,
+                metrics.instructionHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsInstructionControlId)),
                 hInstance,
@@ -4649,9 +5175,9 @@ namespace
                 L"Transition type:",
                 WS_CHILD | WS_VISIBLE,
                 contentLeft,
-                transitionTop + 4,
+                transitionTop + labelTopOffset,
                 labelWidth,
-                20,
+                metrics.lineHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionLabelControlId)),
                 hInstance,
@@ -4675,9 +5201,9 @@ namespace
                 L"Slide duration:",
                 WS_CHILD | WS_VISIBLE,
                 contentLeft,
-                durationTop + 4,
+                durationTop + labelTopOffset,
                 labelWidth,
-                20,
+                metrics.lineHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationLabelControlId)),
                 hInstance,
@@ -4690,7 +5216,7 @@ namespace
                 contentLeft + labelWidth,
                 durationTop,
                 numericEditWidth,
-                kTextInputEditHeight,
+                metrics.controlHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationEditControlId)),
                 hInstance,
@@ -4703,7 +5229,7 @@ namespace
                 contentLeft + labelWidth + numericEditWidth,
                 durationTop,
                 spinWidth,
-                kTextInputEditHeight,
+                metrics.controlHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationSpinControlId)),
                 hInstance,
@@ -4714,9 +5240,9 @@ namespace
                 L"ms",
                 WS_CHILD | WS_VISIBLE,
                 contentLeft + labelWidth + numericEditWidth + spinWidth + 8,
-                durationTop + 4,
+                durationTop + labelTopOffset,
                 36,
-                20,
+                metrics.lineHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationUnitControlId)),
                 hInstance,
@@ -4727,9 +5253,9 @@ namespace
                 L"Transition duration:",
                 WS_CHILD | WS_VISIBLE,
                 contentLeft,
-                transitionDurationTop + 4,
+                transitionDurationTop + labelTopOffset,
                 labelWidth,
-                20,
+                metrics.lineHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationLabelControlId)),
                 hInstance,
@@ -4742,7 +5268,7 @@ namespace
                 contentLeft + labelWidth,
                 transitionDurationTop,
                 numericEditWidth,
-                kTextInputEditHeight,
+                metrics.controlHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationEditControlId)),
                 hInstance,
@@ -4755,7 +5281,7 @@ namespace
                 contentLeft + labelWidth + numericEditWidth,
                 transitionDurationTop,
                 spinWidth,
-                kTextInputEditHeight,
+                metrics.controlHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationSpinControlId)),
                 hInstance,
@@ -4766,9 +5292,9 @@ namespace
                 L"ms",
                 WS_CHILD | WS_VISIBLE,
                 contentLeft + labelWidth + numericEditWidth + spinWidth + 8,
-                transitionDurationTop + 4,
+                transitionDurationTop + labelTopOffset,
                 36,
-                20,
+                metrics.lineHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationUnitControlId)),
                 hInstance,
@@ -4781,7 +5307,7 @@ namespace
                 contentLeft,
                 footnoteTop,
                 contentWidth,
-                54,
+                footnoteHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsFootnoteControlId)),
                 hInstance,
@@ -4806,8 +5332,8 @@ namespace
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
                 okLeft,
                 buttonTop,
-                kTextInputButtonWidth,
-                kTextInputButtonHeight,
+                metrics.applyButtonWidth,
+                metrics.buttonHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
                 hInstance,
@@ -4819,8 +5345,8 @@ namespace
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                 cancelLeft,
                 buttonTop,
-                kTextInputButtonWidth,
-                kTextInputButtonHeight,
+                metrics.cancelButtonWidth,
+                metrics.buttonHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
                 hInstance,
@@ -5057,7 +5583,9 @@ namespace
                                   kSlideshowMaximumTransitionDurationMs);
         state.transitionStyle = initialTransitionStyle;
 
-        RECT windowRect{0, 0, kSlideshowSettingsDialogWidth, kSlideshowSettingsDialogHeight};
+        const SlideshowSettingsDialogLayoutMetrics layoutMetrics = BuildSlideshowSettingsDialogLayoutMetrics(state);
+        state.dialogHeight = std::max(kSlideshowSettingsDialogHeight, layoutMetrics.minimumClientHeight);
+        RECT windowRect{0, 0, kSlideshowSettingsDialogWidth, state.dialogHeight};
         AdjustWindowRectEx(&windowRect,
                            WS_CAPTION | WS_SYSMENU | WS_POPUP,
                            FALSE,
@@ -6999,6 +7527,12 @@ namespace hyperbrowse::ui
 
     MainWindow::~MainWindow()
     {
+        if (shortcutReferenceWindow_ && IsWindow(shortcutReferenceWindow_))
+        {
+            DestroyWindow(shortcutReferenceWindow_);
+            shortcutReferenceWindow_ = nullptr;
+        }
+
         if (externalDropTarget_)
         {
             if (hwnd_)
@@ -7042,6 +7576,11 @@ namespace hyperbrowse::ui
         if (detailsPanelBrush_)
         {
             DeleteObject(detailsPanelBrush_);
+        }
+
+        if (menuBackgroundBrush_)
+        {
+            DeleteObject(menuBackgroundBrush_);
         }
 
         DeleteFontIfOwned(appTextUiFont_);
@@ -7279,6 +7818,14 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (shortcutReferenceWindow_ && IsWindow(shortcutReferenceWindow_)
+            && message->hwnd
+            && (message->hwnd == shortcutReferenceWindow_ || IsChild(shortcutReferenceWindow_, message->hwnd))
+            && IsDialogMessageW(shortcutReferenceWindow_, message))
+        {
+            return true;
+        }
+
         if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
             && message->hwnd
             && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
@@ -7295,7 +7842,7 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        // Do not translate the Escape accelerator (ID_FILE_MINIMIZE) when a folder drag is active.
+        // Do not translate the Escape accelerator when a folder drag is active.
         // The drag operation should have exclusive control over the Escape key to cancel itself.
         if (treeFolderDragActive_ && message->message == WM_KEYDOWN && message->wParam == VK_ESCAPE)
         {
@@ -7316,10 +7863,17 @@ namespace hyperbrowse::ui
             }
         }
 
-        // Preserve text-edit backspace/delete behavior in edit/rich-edit controls.
+        // Preserve standard text-edit behavior in edit/rich-edit controls.
         if (message->message == WM_KEYDOWN
-            && (message->wParam == VK_BACK || message->wParam == VK_DELETE)
-            && IsTextInputControlWindow(message->hwnd))
+            && IsTextInputControlWindow(message->hwnd)
+            && (message->wParam == VK_BACK || message->wParam == VK_DELETE
+                || ((message->wParam == static_cast<WPARAM>('A')
+                     || message->wParam == static_cast<WPARAM>('C')
+                     || message->wParam == static_cast<WPARAM>('V')
+                     || message->wParam == static_cast<WPARAM>('X')
+                     || message->wParam == static_cast<WPARAM>('Y')
+                     || message->wParam == static_cast<WPARAM>('Z'))
+                    && (GetKeyState(VK_CONTROL) & 0x8000) != 0)))
         {
             return false;
         }
@@ -7354,43 +7908,22 @@ namespace hyperbrowse::ui
             accelerators_ = nullptr;
         }
 
-        ACCEL accelerators[] = {
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('O'), ID_FILE_OPEN_FOLDER},
-            {FVIRTKEY, VK_F1, ID_HELP_USER_GUIDE},
-            {FVIRTKEY, VK_BACK, ID_VIEW_NAVIGATE_BACK_FOLDER},
-            {FVIRTKEY, VK_ESCAPE, ID_FILE_MINIMIZE},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('W'), ID_FILE_MINIMIZE},
-            {FVIRTKEY, VK_F5, ID_FILE_REFRESH_TREE},
-            {FVIRTKEY, VK_F2, ID_FILE_RENAME_SELECTED},
-            {FVIRTKEY, VK_F7, ID_FILE_QUICK_SEND_MOVE},
-            {FVIRTKEY, VK_F8, ID_FILE_QUICK_SEND_COPY},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('I'), ID_FILE_IMAGE_INFORMATION},
-            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('C'), ID_FILE_COPY_PATH},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('C'), ID_FILE_COPY_FILES_TO_CLIPBOARD},
-            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('I'), ID_FILE_COPY_IMAGE_PIXELS},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('V'), ID_FILE_PASTE_FILES},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('A'), ID_FILE_SELECT_ALL},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('D'), ID_FILE_DUPLICATE_SELECTION},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('Z'), ID_EDIT_UNDO},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('Y'), ID_EDIT_REDO},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('E'), ID_FILE_REVEAL_IN_EXPLORER},
-            {FVIRTKEY | FALT, VK_RETURN, ID_FILE_PROPERTIES},
-            {FVIRTKEY, VK_DELETE, ID_FILE_DELETE_SELECTION},
-            {FVIRTKEY | FSHIFT, VK_DELETE, ID_FILE_DELETE_SELECTION_PERMANENT},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('1'), ID_VIEW_THUMBNAILS},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('2'), ID_VIEW_DETAILS},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('3'), ID_VIEW_DETAILS_STRIP},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('R'), ID_VIEW_RECURSIVE},
-            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('S'), ID_VIEW_SLIDESHOW_SELECTION},
-            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('F'), ID_VIEW_SLIDESHOW_FOLDER},
-            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('T'), ID_VIEW_SLIDESHOW_SETTINGS},
-            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('D'), ID_HELP_DIAGNOSTICS_SNAPSHOT},
-            {FVIRTKEY | FCONTROL | FSHIFT, static_cast<WORD>('X'), ID_HELP_DIAGNOSTICS_RESET},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('L'), ID_VIEW_THEME_LIGHT},
-            {FVIRTKEY | FCONTROL, static_cast<WORD>('D'), ID_VIEW_THEME_DARK},
-        };
+        if (!kShortcutCatalogValid)
+        {
+            return false;
+        }
 
-        accelerators_ = CreateAcceleratorTableW(accelerators, static_cast<int>(std::size(accelerators)));
+        std::vector<ACCEL> accelerators;
+        accelerators.reserve(MainWindowShortcuts().size());
+        for (const ShortcutDefinition& shortcut : MainWindowShortcuts())
+        {
+            accelerators.push_back(ACCEL{
+                static_cast<BYTE>(FVIRTKEY | shortcut.modifiers),
+                shortcut.virtualKey,
+                static_cast<WORD>(shortcut.commandId)});
+        }
+
+        accelerators_ = CreateAcceleratorTableW(accelerators.data(), static_cast<int>(accelerators.size()));
         return accelerators_ != nullptr;
     }
 
@@ -7398,6 +7931,7 @@ namespace hyperbrowse::ui
     {
         menu_ = CreateMenu();
         fileMenu_ = CreatePopupMenu();
+        editMenu_ = CreatePopupMenu();
         viewMenu_ = CreatePopupMenu();
         helpMenu_ = CreatePopupMenu();
         openRecentFolderMenu_ = CreatePopupMenu();
@@ -7410,6 +7944,9 @@ namespace hyperbrowse::ui
         HMENU batchConvertFolderMenu = CreatePopupMenu();
         HMENU ratingMenu = CreatePopupMenu();
         HMENU viewMenu = viewMenu_;
+        HMENU editMenu = editMenu_;
+        HMENU settingsMenu = CreatePopupMenu();
+        HMENU behaviorSettingsMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
         HMENU slideshowMenu = CreatePopupMenu();
@@ -7425,7 +7962,7 @@ namespace hyperbrowse::ui
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !appTextSizeMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !settingsMenu || !behaviorSettingsMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !appTextSizeMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -7445,13 +7982,18 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_FILES_TO_CLIPBOARD, L"&Copy\tCtrl+C");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_IMAGE_PIXELS, L"Copy &Image\tCtrl+Shift+I");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PASTE_FILES, L"&Paste\tCtrl+V");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
-        AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu_, MF_STRING, ID_EDIT_UNDO, L"&Undo\tCtrl+Z");
-        AppendMenuW(fileMenu_, MF_STRING, ID_EDIT_REDO, L"&Redo\tCtrl+Y");
+        AppendMenuW(editMenu, MF_STRING, ID_EDIT_UNDO, L"&Undo\tCtrl+Z");
+        AppendMenuW(editMenu, MF_STRING, ID_EDIT_REDO, L"&Redo\tCtrl+Y");
+        AppendMenuW(editMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(editMenu, MF_STRING, ID_EDIT_CUT, L"Cu&t\tCtrl+X");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_COPY_FILES_TO_CLIPBOARD, L"&Copy\tCtrl+C");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_COPY_IMAGE_PIXELS, L"Copy &Image\tCtrl+Shift+I");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_PASTE_FILES, L"&Paste\tCtrl+V");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_SELECT_ALL, L"Select &All\tCtrl+A");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_QUICK_SEND_MOVE, L"Quick Send &Move\tF7");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_QUICK_SEND_COPY, L"Quick Send &Copy\tF8");
+        AppendMenuW(editMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_2, L"&2 Stars");
@@ -7460,12 +8002,11 @@ namespace hyperbrowse::ui
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_5, L"&5 Stars");
         AppendMenuW(fileMetadataMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set &Rating");
         AppendMenuW(fileMetadataMenu, MF_STRING, ID_FILE_EDIT_TAGS, L"Edit &Tags...");
-        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMetadataMenu), L"&Metadata");
+        AppendMenuW(editMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMetadataMenu), L"&Metadata");
 
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...\tF2");
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_DUPLICATE_SELECTION, L"Dup&licate\tCtrl+D");
-        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_SELECT_ALL, L"Select &All\tCtrl+A");
         AppendMenuW(fileOrganizeMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To");
         AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To");
@@ -7473,7 +8014,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileOrganizeMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete\tDel");
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_DELETE_SELECTION_PERMANENT, L"Delete &Permanently\tShift+Del");
-        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileOrganizeMenu), L"&Organize");
+        AppendMenuW(editMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(fileOrganizeMenu), L"&Organize");
 
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_JPEG, L"Selection to &JPEG");
         AppendMenuW(batchConvertSelectionMenu, MF_STRING, ID_FILE_BATCH_CONVERT_SELECTION_PNG, L"Selection to &PNG");
@@ -7491,12 +8032,15 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileConvertMenu), L"&Convert");
 
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_MINIMIZE, L"&Minimize\tEsc");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ESCAPE, closeMainWindowOnEscape_ ? L"&Close\tEsc" : L"&Minimize\tEsc");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_EXIT, L"E&xit");
 
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode\tCtrl+1");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS, L"&Details Mode\tCtrl+2");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_RECURSIVE, L"&Recursive Browsing\tCtrl+R");
+        AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_BACK_FOLDER, L"Navigate &Back\tBackspace / Alt+Left");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_FORWARD_FOLDER, L"Navigate &Forward\tAlt+Right");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By &Filename");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_MODIFIED, L"By &Modified Date");
@@ -7510,6 +8054,9 @@ namespace hyperbrowse::ui
         AppendMenuW(sortMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_DIRECTION, L"&Descending");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(sortMenu), L"&Sort By");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_INCREASE, L"Increase Size\t+ / =");
+        AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_DECREASE, L"Decrease Size\t- / _");
+        AppendMenuW(thumbnailSizeMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_96, L"&96 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_128, L"1&28 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_160, L"1&60 px");
@@ -7527,14 +8074,13 @@ namespace hyperbrowse::ui
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"From &Selection\tCtrl+Shift+S");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"From &Folder\tCtrl+Shift+F");
         AppendMenuW(slideshowMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SETTINGS, L"&Settings...	Ctrl+Shift+T");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowMenu), L"S&lideshow");
 
         AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_SMALL, L"&Small");
         AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_MEDIUM, L"&Medium");
         AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_LARGE, L"&Large");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(appTextSizeMenu), L"App Text Si&ze");
+        AppendMenuW(themeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(appTextSizeMenu), L"App Text Si&ze");
 
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM, L"&Zoom");
         AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE, L"&Next/Previous Image");
@@ -7550,48 +8096,58 @@ namespace hyperbrowse::ui
         AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Detail &Overlays");
         AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_FULL_METADATA, L"Show Full &Metadata");
         AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerOverlayTextSizeMenu), L"Overlay Text Si&ze");
-        AppendMenuW(viewerMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(viewerMenu, MF_STRING, ID_FILE_ASSOCIATIONS, L"File &Associations...");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMenu), L"&Viewer");
+        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMenu), L"&Viewer");
 
-        AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light\tCtrl+L");
-        AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark\tCtrl+D");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(themeMenu), L"&Theme");
-        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE, L"Persistent Thumbnail &Cache");
-        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
-        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_PRESSURE_STATE_STATUS, L"Show Memory Pressure &Status");
-        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_SHOW_SUBFOLDERS, L"Show Subfolders in Browser");
-        AppendMenuW(advancedViewMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
-        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
+        AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light");
+        AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark");
+        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(themeMenu), L"&Appearance");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SHOW_SUBFOLDERS, L"Show &Subfolders in Browser");
+
+        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE, L"Persistent Thumbnail &Cache");
+        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
+        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_PRESSURE_STATE_STATUS, L"Show Memory Pressure &Status");
+        AppendMenuW(performanceMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
+        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
+
+        AppendMenuW(advancedViewMenu, MF_STRING, ID_FILE_ASSOCIATIONS, L"File &Associations...");
         AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_SINGLE_INSTANCE, L"Use &Single Instance");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Advanced");
+        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Integration");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_USER_GUIDE, L"&User Guide\tF1");
+        AppendMenuW(helpMenu, MF_STRING, ID_HELP_KEYBOARD_SHORTCUTS, L"&Keyboard Shortcuts...");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
-        AppendMenuW(helpMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE, L"&Conservative");
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_BALANCED, L"&Balanced");
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE, L"&Performance");
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE, L"&Aggressive");
         AppendMenuW(performanceMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceProfileMenu), L"Performance &Profile");
         AppendMenuW(performanceMenu, MF_STRING, ID_HELP_PERFORMANCE_SETTINGS, L"Performance &Settings...");
-        AppendMenuW(helpMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
+        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"&Snapshot\tCtrl+Shift+D");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"&Reset\tCtrl+Shift+X");
-        AppendMenuW(helpMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
+        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
+        AppendMenuW(settingsMenu, MF_STRING, ID_VIEW_SLIDESHOW_SETTINGS, L"&Slideshow Settings...\tCtrl+Shift+T");
+        AppendMenuW(behaviorSettingsMenu, MF_STRING, ID_EDIT_CLOSE_MAIN_WINDOW_ON_ESCAPE, L"Close Main Window on Esc");
+        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(behaviorSettingsMenu), L"&Behavior");
 
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu_), L"&File");
+        AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(editMenu), L"&Edit");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(viewMenu), L"&View");
+        AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(settingsMenu), L"Se&ttings");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"&Help");
 
         RefreshPersistentMenuOwnerDraw();
         commandBarMenuButtons_[0].label = L"File";
         commandBarMenuButtons_[0].menu = fileMenu_;
-        commandBarMenuButtons_[1].label = L"View";
-        commandBarMenuButtons_[1].menu = viewMenu_;
-        commandBarMenuButtons_[2].label = L"Help";
-        commandBarMenuButtons_[2].menu = helpMenu_;
+        commandBarMenuButtons_[1].label = L"Edit";
+        commandBarMenuButtons_[1].menu = editMenu_;
+        commandBarMenuButtons_[2].label = L"View";
+        commandBarMenuButtons_[2].menu = viewMenu_;
+        commandBarMenuButtons_[3].label = L"Settings";
+        commandBarMenuButtons_[3].menu = settingsMenu;
+        commandBarMenuButtons_[4].label = L"Help";
+        commandBarMenuButtons_[4].menu = helpMenu_;
 
         SetMenu(hwnd_, nullptr);
         DrawMenuBar(hwnd_);
@@ -7643,9 +8199,13 @@ namespace hyperbrowse::ui
             nullptr);
         if (tooltipControl_)
         {
+            SendMessageW(tooltipControl_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
             SendMessageW(tooltipControl_, TTM_SETDELAYTIME, TTDT_INITIAL, MAKELPARAM(400, 0));
             SendMessageW(tooltipControl_, TTM_SETDELAYTIME, TTDT_RESHOW, MAKELPARAM(100, 0));
-            SendMessageW(tooltipControl_, TTM_SETMAXTIPWIDTH, 0, 300);
+            SendMessageW(tooltipControl_,
+                         TTM_SETMAXTIPWIDTH,
+                         0,
+                         hyperbrowse::util::ScaleAppTextDimension(kToolbarTooltipMaxWidth, appTextSize_));
 
             for (int index = 0; index < static_cast<int>(toolbarItems_.size()); ++index)
             {
@@ -9394,25 +9954,35 @@ namespace hyperbrowse::ui
         std::wstring shortcut;
         SplitMenuDisplayText(drawData->text, &label, &shortcut);
 
-        const HFONT menuFont = detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const auto scaleMenuDimension = [this](int dimension)
+        {
+            return hyperbrowse::util::ScaleAppTextDimension(dimension, appTextSize_);
+        };
+        const int itemHeight = scaleMenuDimension(kMenuPopupItemHeight);
+        const int checkColumnWidth = scaleMenuDimension(kMenuPopupCheckColumnWidth);
+        const int textPadding = scaleMenuDimension(kMenuPopupTextPadding);
+        const int shortcutGap = scaleMenuDimension(kMenuPopupShortcutGap);
+        const int measurementAllowance = scaleMenuDimension(kMenuPopupMeasurementAllowance);
+        const int arrowWidth = scaleMenuDimension(kMenuPopupArrowWidth);
+        const HFONT menuFont = appTextUiFont_ ? appTextUiFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         const int labelWidth = MeasureTextWidth(menuFont, label);
         const int shortcutWidth = shortcut.empty() ? 0 : MeasureTextWidth(menuFont, shortcut);
-        int itemWidth = kMenuPopupCheckColumnWidth + (kMenuPopupTextPadding * 2) + labelWidth;
+        int itemWidth = checkColumnWidth + (textPadding * 2) + labelWidth;
         if (shortcutWidth > 0)
         {
-            itemWidth += kMenuPopupShortcutGap + shortcutWidth;
+            itemWidth += shortcutGap + shortcutWidth;
         }
-        itemWidth += hyperbrowse::util::ScaleAppTextDimension(kMenuPopupMeasurementAllowance, appTextSize_);
+        itemWidth += measurementAllowance;
         if (drawData->hasSubmenu)
         {
-            itemWidth += kMenuPopupArrowWidth;
+            itemWidth += arrowWidth;
         }
 
         measureItem->itemWidth = static_cast<UINT>(itemWidth);
         measureItem->itemHeight = static_cast<UINT>(std::max(
-            kMenuPopupItemHeight,
-            MeasureSingleLineTextHeight(menuFont, kMenuPopupItemHeight - kMenuPopupMeasurementAllowance)
-                + kMenuPopupMeasurementAllowance));
+            itemHeight,
+            MeasureSingleLineTextHeight(menuFont, itemHeight - measurementAllowance)
+                + measurementAllowance));
     }
 
     void MainWindow::DrawOwnerDrawMenuItem(const DRAWITEMSTRUCT& drawItem) const
@@ -9452,15 +10022,28 @@ namespace hyperbrowse::ui
         std::wstring shortcut;
         SplitMenuDisplayText(drawData->text, &label, &shortcut);
 
+        const auto scaleMenuDimension = [this](int dimension)
+        {
+            return hyperbrowse::util::ScaleAppTextDimension(dimension, appTextSize_);
+        };
+        const int checkColumnWidth = scaleMenuDimension(kMenuPopupCheckColumnWidth);
+        const int textPadding = scaleMenuDimension(kMenuPopupTextPadding);
+        const int shortcutGap = scaleMenuDimension(kMenuPopupShortcutGap);
+
         if (checked)
         {
-            RECT checkRect{itemRect.left + 4, itemRect.top + 4, itemRect.left + kMenuPopupCheckColumnWidth - 4, itemRect.bottom - 4};
+            const int checkInset = scaleMenuDimension(4);
+            RECT checkRect{itemRect.left + checkInset,
+                           itemRect.top + checkInset,
+                           itemRect.left + checkColumnWidth - checkInset,
+                           itemRect.bottom - checkInset};
             const COLORREF checkFill = selected ? palette.accent : BlendColor(palette.accentFill, backgroundColor, 24);
             const HBRUSH checkBrush = CreateSolidBrush(checkFill);
             const HPEN checkPen = CreatePen(PS_SOLID, 1, selected ? palette.accent : palette.accentFill);
             const HGDIOBJ oldBrush = SelectObject(drawItem.hDC, checkBrush);
             const HGDIOBJ oldCheckPen = SelectObject(drawItem.hDC, checkPen);
-            RoundRect(drawItem.hDC, checkRect.left, checkRect.top, checkRect.right, checkRect.bottom, 8, 8);
+            const int checkCorner = scaleMenuDimension(8);
+            RoundRect(drawItem.hDC, checkRect.left, checkRect.top, checkRect.right, checkRect.bottom, checkCorner, checkCorner);
             SelectObject(drawItem.hDC, oldCheckPen);
             SelectObject(drawItem.hDC, oldBrush);
             DeleteObject(checkPen);
@@ -9468,9 +10051,13 @@ namespace hyperbrowse::ui
 
             const HPEN markPen = CreatePen(PS_SOLID, 2, palette.accentText);
             const HGDIOBJ oldMarkPen = SelectObject(drawItem.hDC, markPen);
-            MoveToEx(drawItem.hDC, checkRect.left + 5, checkRect.top + ((checkRect.bottom - checkRect.top) / 2), nullptr);
-            LineTo(drawItem.hDC, checkRect.left + 9, checkRect.bottom - 6);
-            LineTo(drawItem.hDC, checkRect.right - 5, checkRect.top + 6);
+            const int checkMarkInset = scaleMenuDimension(5);
+            MoveToEx(drawItem.hDC,
+                     checkRect.left + checkMarkInset,
+                     checkRect.top + ((checkRect.bottom - checkRect.top) / 2),
+                     nullptr);
+            LineTo(drawItem.hDC, checkRect.left + scaleMenuDimension(9), checkRect.bottom - scaleMenuDimension(6));
+            LineTo(drawItem.hDC, checkRect.right - checkMarkInset, checkRect.top + scaleMenuDimension(6));
             SelectObject(drawItem.hDC, oldMarkPen);
             DeleteObject(markPen);
         }
@@ -9482,16 +10069,16 @@ namespace hyperbrowse::ui
         const COLORREF shortcutColor = disabled
             ? BlendColor(palette.mutedText, backgroundColor, 128)
             : (selected ? palette.text : palette.mutedText);
-        const HGDIOBJ oldFont = SelectObject(drawItem.hDC, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        const HFONT menuFont = appTextUiFont_ ? appTextUiFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const HGDIOBJ oldFont = SelectObject(drawItem.hDC, menuFont);
 
-        RECT labelRect{itemRect.left + kMenuPopupCheckColumnWidth + kMenuPopupTextPadding,
+        RECT labelRect{itemRect.left + checkColumnWidth + textPadding,
                        itemRect.top,
-                       itemRect.right - kMenuPopupTextPadding,
+                       itemRect.right - textPadding,
                        itemRect.bottom};
         if (!shortcut.empty())
         {
-            labelRect.right -= MeasureTextWidth(detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)), shortcut)
-                + kMenuPopupShortcutGap;
+            labelRect.right -= MeasureTextWidth(menuFont, shortcut) + shortcutGap;
         }
         SetTextColor(drawItem.hDC, labelColor);
         DrawTextW(drawItem.hDC,
@@ -9502,9 +10089,9 @@ namespace hyperbrowse::ui
 
         if (!shortcut.empty())
         {
-            RECT shortcutRect{labelRect.right + kMenuPopupShortcutGap,
+            RECT shortcutRect{labelRect.right + shortcutGap,
                               itemRect.top,
-                              itemRect.right - kMenuPopupTextPadding,
+                              itemRect.right - textPadding,
                               itemRect.bottom};
             SetTextColor(drawItem.hDC, shortcutColor);
             DrawTextW(drawItem.hDC,
@@ -9759,11 +10346,11 @@ namespace hyperbrowse::ui
             return;
         }
 
-        if (backNavigationPending_)
+        if (pendingFolderHistoryNavigation_ != FolderHistoryNavigationDirection::None)
         {
-            const std::size_t targetIndex = backNavigationTargetHistoryIndex_;
-            backNavigationPending_ = false;
-            backNavigationTargetHistoryIndex_ = kInvalidHistoryIndex;
+            const std::size_t targetIndex = pendingFolderHistoryTargetIndex_;
+            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::None;
+            pendingFolderHistoryTargetIndex_ = kInvalidHistoryIndex;
 
             if (targetIndex < openedFolderHistory_.size())
             {
@@ -9825,9 +10412,48 @@ namespace hyperbrowse::ui
                 continue;
             }
 
-            backNavigationPending_ = true;
-            backNavigationTargetHistoryIndex_ = candidateIndex;
-            LoadFolderAsync(resolvedFolderPath);
+            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::Back;
+            pendingFolderHistoryTargetIndex_ = candidateIndex;
+            LoadFolderAsync(resolvedFolderPath, true);
+            return true;
+        }
+
+        return false;
+    }
+
+    bool MainWindow::NavigateForwardToLastOpenedFolder()
+    {
+        if (!browserModel_ || openedFolderHistory_.empty() || openedFolderHistoryIndex_ == kInvalidHistoryIndex)
+        {
+            return false;
+        }
+
+        if (openedFolderHistoryIndex_ + 1 >= openedFolderHistory_.size())
+        {
+            return false;
+        }
+
+        const std::wstring currentFolderPath = NormalizeFolderPath(browserModel_->FolderPath());
+        std::size_t candidateIndex = openedFolderHistoryIndex_;
+        while (candidateIndex + 1 < openedFolderHistory_.size())
+        {
+            ++candidateIndex;
+            const std::wstring& candidate = openedFolderHistory_[candidateIndex];
+
+            const std::wstring resolvedFolderPath = FindExistingFolderAncestor(fs::path(candidate));
+            if (resolvedFolderPath.empty())
+            {
+                continue;
+            }
+
+            if (!currentFolderPath.empty() && FolderPathsEqual(currentFolderPath, resolvedFolderPath))
+            {
+                continue;
+            }
+
+            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::Forward;
+            pendingFolderHistoryTargetIndex_ = candidateIndex;
+            LoadFolderAsync(resolvedFolderPath, true);
             return true;
         }
 
@@ -11200,6 +11826,7 @@ namespace hyperbrowse::ui
 
         ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
+        viewerWindow_->SetAppTextSize(appTextSize_);
         viewerWindow_->SetResourceProfile(resourceProfile_);
         viewerWindow_->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
@@ -12902,6 +13529,89 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ShowShortcutReference() const
+    {
+        if (shortcutReferenceWindow_ && IsWindow(shortcutReferenceWindow_))
+        {
+            ShowWindow(shortcutReferenceWindow_, SW_RESTORE);
+            SetForegroundWindow(shortcutReferenceWindow_);
+            return;
+        }
+        shortcutReferenceWindow_ = nullptr;
+
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance_, kShortcutReferenceClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &ShortcutReferenceProc;
+            windowClass.hInstance = instance_;
+            windowClass.lpszClassName = kShortcutReferenceClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return;
+            }
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        auto state = std::make_unique<ShortcutReferenceState>();
+        state->ownerWindow = hwnd_;
+        state->windowSlot = &shortcutReferenceWindow_;
+        state->appTextSize = appTextSize_;
+        state->darkMode = themeMode_ == ThemeMode::Dark;
+        state->dpi = hwnd_ ? GetDpiForWindow(hwnd_) : 96;
+        state->background = palette.windowBackground;
+        state->listBackground = palette.paneBackground;
+        state->text = palette.text;
+        state->mutedText = palette.mutedText;
+        state->border = palette.actionStripBorder;
+        state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize);
+        if (!state->bodyFont)
+        {
+            state->bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
+
+        const int dpi = static_cast<int>(state->dpi == 0 ? 96 : state->dpi);
+        constexpr DWORD shortcutReferenceWindowStyle =
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_CLIPCHILDREN;
+        constexpr DWORD shortcutReferenceWindowExStyle = WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT;
+        RECT windowRect{0, 0,
+                MulDiv(kShortcutReferenceWidth, dpi, 96),
+                MulDiv(kShortcutReferenceHeight, dpi, 96)};
+        AdjustWindowRectEx(&windowRect,
+                           shortcutReferenceWindowStyle,
+                           FALSE,
+                           shortcutReferenceWindowExStyle);
+
+        HWND dialogWindow = CreateWindowExW(
+            shortcutReferenceWindowExStyle,
+            kShortcutReferenceClassName,
+            L"Keyboard Shortcuts - HyperBrowse",
+            shortcutReferenceWindowStyle,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            hwnd_,
+            nullptr,
+            instance_,
+            state.get());
+
+        if (!dialogWindow)
+        {
+            DeleteFontIfOwned(state->bodyFont);
+            return;
+        }
+
+        shortcutReferenceWindow_ = dialogWindow;
+        state.release();
+        SetWindowTextW(dialogWindow, L"Keyboard Shortcuts - HyperBrowse");
+        CenterWindowOnOwner(dialogWindow, hwnd_);
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+    }
+
     void MainWindow::ShowAboutDialog() const
     {
         WNDCLASSEXW windowClass{};
@@ -13839,7 +14549,7 @@ namespace hyperbrowse::ui
         }
     }
 
-    void MainWindow::CopySelectionFilesToClipboard() const
+    void MainWindow::CopySelectionFilesToClipboard(bool movePreferred) const
     {
         if (!browserPaneController_)
         {
@@ -13849,7 +14559,10 @@ namespace hyperbrowse::ui
         const std::vector<std::wstring> selectedPaths = SelectedFileOperationPathsSnapshot();
         if (selectedPaths.empty())
         {
-            MessageBoxW(hwnd_, L"Select one or more images first.", L"Copy", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(hwnd_,
+                        L"Select one or more images first.",
+                        movePreferred ? L"Cut" : L"Copy",
+                        MB_OK | MB_ICONINFORMATION);
             return;
         }
 
@@ -13865,7 +14578,10 @@ namespace hyperbrowse::ui
         HGLOBAL buffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, totalBytes);
         if (!buffer)
         {
-            MessageBoxW(hwnd_, L"Failed to allocate the clipboard data.", L"Copy", MB_OK | MB_ICONERROR);
+            MessageBoxW(hwnd_,
+                        L"Failed to allocate the clipboard data.",
+                        movePreferred ? L"Cut" : L"Copy",
+                        MB_OK | MB_ICONERROR);
             return;
         }
 
@@ -13873,7 +14589,10 @@ namespace hyperbrowse::ui
         if (!dropFiles)
         {
             GlobalFree(buffer);
-            MessageBoxW(hwnd_, L"Failed to lock the clipboard data.", L"Copy", MB_OK | MB_ICONERROR);
+            MessageBoxW(hwnd_,
+                        L"Failed to lock the clipboard data.",
+                        movePreferred ? L"Cut" : L"Copy",
+                        MB_OK | MB_ICONERROR);
             return;
         }
 
@@ -13887,13 +14606,13 @@ namespace hyperbrowse::ui
         }
         GlobalUnlock(buffer);
 
-        // Signal "copy" semantics (as opposed to cut) via CFSTR_PREFERREDDROPEFFECT.
+        // Signal copy or cut semantics so Paste can reuse the shell's move contract.
         HGLOBAL effectBuffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
         if (effectBuffer)
         {
             if (DWORD* effect = static_cast<DWORD*>(GlobalLock(effectBuffer)))
             {
-                *effect = DROPEFFECT_COPY;
+                *effect = movePreferred ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
                 GlobalUnlock(effectBuffer);
             }
         }
@@ -13905,7 +14624,10 @@ namespace hyperbrowse::ui
             {
                 GlobalFree(effectBuffer);
             }
-            MessageBoxW(hwnd_, L"Failed to open the clipboard.", L"Copy", MB_OK | MB_ICONERROR);
+            MessageBoxW(hwnd_,
+                        L"Failed to open the clipboard.",
+                        movePreferred ? L"Cut" : L"Copy",
+                        MB_OK | MB_ICONERROR);
             return;
         }
 
@@ -13930,7 +14652,11 @@ namespace hyperbrowse::ui
 
         if (!success)
         {
-            MessageBoxW(hwnd_, L"Failed to copy the selected files to the clipboard.", L"Copy", MB_OK | MB_ICONERROR);
+            MessageBoxW(hwnd_,
+                        movePreferred ? L"Failed to cut the selected files to the clipboard."
+                                      : L"Failed to copy the selected files to the clipboard.",
+                        movePreferred ? L"Cut" : L"Copy",
+                        MB_OK | MB_ICONERROR);
         }
     }
 
@@ -14022,14 +14748,16 @@ namespace hyperbrowse::ui
         }
     }
 
-    void MainWindow::CopySelectedImagePixelsToClipboard()
+    void MainWindow::CopySelectedImagePixelsToClipboard(std::wstring_view preferredPath)
     {
         if (!browserPaneController_ || !browserModel_)
         {
             return;
         }
 
-        const int modelIndex = browserPaneController_->PrimarySelectedModelIndex();
+        const int modelIndex = preferredPath.empty()
+            ? browserPaneController_->PrimarySelectedModelIndex()
+            : browserModel_->FindItemIndexByPath(preferredPath);
         if (modelIndex < 0 || modelIndex >= static_cast<int>(browserModel_->Items().size()))
         {
             MessageBoxW(hwnd_, L"Select a single image first.", L"Copy Image", MB_OK | MB_ICONINFORMATION);
@@ -15513,6 +16241,16 @@ namespace hyperbrowse::ui
         const bool thumbnailDetailsVisible = browserPaneController_
             ? browserPaneController_->AreThumbnailDetailsVisible()
             : thumbnailDetailsVisible_;
+        const bool historyNavigationSettled = !folderEnumerationActive_
+            && pendingFolderHistoryNavigation_ == FolderHistoryNavigationDirection::None;
+        const bool canNavigateBack = hasFolder && historyNavigationSettled
+            && openedFolderHistoryIndex_ != kInvalidHistoryIndex
+            && openedFolderHistoryIndex_ > 0;
+        const bool canNavigateForward = hasFolder && historyNavigationSettled
+            && openedFolderHistoryIndex_ != kInvalidHistoryIndex
+            && openedFolderHistoryIndex_ + 1 < openedFolderHistory_.size();
+        const bool thumbnailSteppingEnabled = hasFolder && browserMode_ == BrowserMode::Thumbnails
+            && !folderEnumerationActive_;
 
         EnableMenuItem(menu_, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COMPARE_SELECTED, MF_BYCOMMAND | (hasCompareSelection ? MF_ENABLED : MF_GRAYED));
@@ -15523,6 +16261,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_FILE_OPEN_CONTAINING_FOLDER, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_PATH, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_FILES_TO_CLIPBOARD, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_EDIT_CUT, MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_IMAGE_PIXELS, MF_BYCOMMAND | (hasSingleSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_PASTE_FILES, MF_BYCOMMAND | (hasFolder && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_DUPLICATE_SELECTION, MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
@@ -15570,6 +16309,10 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_FOLDER, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_SETTINGS, MF_BYCOMMAND | MF_ENABLED);
+        EnableMenuItem(menu_, ID_VIEW_NAVIGATE_BACK_FOLDER, MF_BYCOMMAND | (canNavigateBack ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_VIEW_NAVIGATE_FORWARD_FOLDER, MF_BYCOMMAND | (canNavigateForward ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_VIEW_THUMBNAIL_SIZE_INCREASE, MF_BYCOMMAND | (thumbnailSteppingEnabled ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_VIEW_THUMBNAIL_SIZE_DECREASE, MF_BYCOMMAND | (thumbnailSteppingEnabled ? MF_ENABLED : MF_GRAYED));
 
         CheckMenuRadioItem(
             menu_,
@@ -15693,6 +16436,10 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_PRESSURE_STATE_STATUS,
             MF_BYCOMMAND | (showPressureStateInStatusBar_ ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_EDIT_CLOSE_MAIN_WINDOW_ON_ESCAPE,
+            MF_BYCOMMAND | (closeMainWindowOnEscape_ ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuRadioItem(
             menu_,
             ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE,
@@ -15738,7 +16485,16 @@ namespace hyperbrowse::ui
             case ID_VIEW_NAVIGATE_BACK_FOLDER:
                 item.enabled = browserModel_
                     && openedFolderHistoryIndex_ != kInvalidHistoryIndex
-                    && openedFolderHistoryIndex_ > 0;
+                    && openedFolderHistoryIndex_ > 0
+                    && pendingFolderHistoryNavigation_ == FolderHistoryNavigationDirection::None
+                    && !folderEnumerationActive_;
+                break;
+            case ID_VIEW_NAVIGATE_FORWARD_FOLDER:
+                item.enabled = browserModel_
+                    && openedFolderHistoryIndex_ != kInvalidHistoryIndex
+                    && openedFolderHistoryIndex_ + 1 < openedFolderHistory_.size()
+                    && pendingFolderHistoryNavigation_ == FolderHistoryNavigationDirection::None
+                    && !folderEnumerationActive_;
                 break;
             case ID_VIEW_RECURSIVE:
                 item.checked = recursiveBrowsingEnabled_;
@@ -15899,6 +16655,15 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (tooltipControl_)
+        {
+            SendMessageW(tooltipControl_, WM_SETFONT, reinterpret_cast<WPARAM>(appTextUiFont_), TRUE);
+            SendMessageW(tooltipControl_,
+                         TTM_SETMAXTIPWIDTH,
+                         0,
+                         hyperbrowse::util::ScaleAppTextDimension(kToolbarTooltipMaxWidth, appTextSize_));
+        }
+
         if (detailsPanelText_)
         {
             SendMessageW(detailsPanelText_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
@@ -15926,6 +16691,10 @@ namespace hyperbrowse::ui
         if (diagnosticsWindow_)
         {
             diagnosticsWindow_->SetAppTextSize(appTextSize_);
+        }
+        if (viewerWindow_)
+        {
+            viewerWindow_->SetAppTextSize(appTextSize_);
         }
         if (menu_)
         {
@@ -15966,6 +16735,21 @@ namespace hyperbrowse::ui
         backgroundBrush_ = CreateSolidBrush(palette.windowBackground);
         actionFieldBrush_ = CreateSolidBrush(palette.actionFieldBackground);
         detailsPanelBrush_ = CreateSolidBrush(palette.paneBackground);
+
+        if (menuBackgroundBrush_)
+        {
+            DeleteObject(menuBackgroundBrush_);
+            menuBackgroundBrush_ = nullptr;
+        }
+        menuBackgroundBrush_ = CreateSolidBrush(palette.paneBackground);
+        if (menu_ && menuBackgroundBrush_)
+        {
+            MENUINFO menuInfo{};
+            menuInfo.cbSize = sizeof(menuInfo);
+            menuInfo.fMask = MIM_BACKGROUND | MIM_APPLYTOSUBMENUS;
+            menuInfo.hbrBack = menuBackgroundBrush_;
+            SetMenuInfo(menu_, &menuInfo);
+        }
 
         if (hwnd_)
         {
@@ -16557,6 +17341,11 @@ namespace hyperbrowse::ui
                 showPressureStateInStatusBar_ = value != 0;
             }
 
+            if (TryReadDwordValue(key, kRegistryValueCloseMainWindowOnEscape, &value))
+            {
+                closeMainWindowOnEscape_ = value != 0;
+            }
+
             RegCloseKey(key);
         }
 
@@ -16697,17 +17486,24 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, persistentThumbnailCacheEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueResourceProfile, static_cast<DWORD>(resourceProfile_));
             WriteDwordValue(key, kRegistryValueShowPressureStateInStatusBar, showPressureStateInStatusBar_ ? 1UL : 0UL);
+            WriteDwordValue(key, kRegistryValueCloseMainWindowOnEscape, closeMainWindowOnEscape_ ? 1UL : 0UL);
             WriteQwordValue(key, kRegistryValueThumbnailCacheCapacityOverrideBytes, static_cast<std::uint64_t>(thumbnailCacheCapacityOverrideBytes_));
             WriteQwordValue(key, kRegistryValueMetadataCacheCapacityOverrideEntries, static_cast<std::uint64_t>(metadataCacheCapacityOverrideEntries_));
             RegCloseKey(key);
         }
     }
 
-    void MainWindow::LoadFolderAsync(std::wstring folderPath)
+    void MainWindow::LoadFolderAsync(std::wstring folderPath, bool historyNavigation)
     {
         if (folderPath.empty() || !browserModel_ || !folderEnumerationService_)
         {
             return;
+        }
+
+        if (!historyNavigation)
+        {
+            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::None;
+            pendingFolderHistoryTargetIndex_ = kInvalidHistoryIndex;
         }
 
         folderPath = NormalizeFolderPath(std::move(folderPath));
@@ -16819,8 +17615,8 @@ namespace hyperbrowse::ui
         case services::FolderEnumerationUpdateKind::Failed:
             browserModel_->Fail(update->message);
             folderEnumerationActive_ = false;
-            backNavigationPending_ = false;
-            backNavigationTargetHistoryIndex_ = kInvalidHistoryIndex;
+            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::None;
+            pendingFolderHistoryTargetIndex_ = kInvalidHistoryIndex;
             util::LogError(update->message);
             break;
         default:
@@ -17263,6 +18059,17 @@ namespace hyperbrowse::ui
                         label.c_str());
         }
 
+        std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems;
+        PrepareMenuForOwnerDraw(popupMenu, menuDrawItems, true);
+        if (menuBackgroundBrush_)
+        {
+            MENUINFO menuInfo{};
+            menuInfo.cbSize = sizeof(menuInfo);
+            menuInfo.fMask = MIM_BACKGROUND;
+            menuInfo.hbrBack = menuBackgroundBrush_;
+            SetMenuInfo(popupMenu, &menuInfo);
+        }
+
         quickSendPopupActive_ = true;
         const int selectedCommand = TrackPopupMenuEx(
             popupMenu,
@@ -17538,19 +18345,18 @@ namespace hyperbrowse::ui
             return 0;
         }
 
-        constexpr UINT kImageInformationId = 4;
-        constexpr UINT kSetWallpaperId = 5;
-        constexpr UINT kPropertiesId = 3;
-
         switch (static_cast<UINT>(wParam))
         {
-        case kImageInformationId:
+        case viewer::ViewerWindow::kContextMenuCopyImage:
+            CopySelectedImagePixelsToClipboard(currentPath);
+            break;
+        case viewer::ViewerWindow::kContextMenuImageInformation:
             ShowImageInformationForPath(currentPath);
             break;
-        case kSetWallpaperId:
+        case viewer::ViewerWindow::kContextMenuSetWallpaper:
             SetDesktopWallpaperFromImageFile(currentPath);
             break;
-        case kPropertiesId:
+        case viewer::ViewerWindow::kContextMenuProperties:
         {
             SHELLEXECUTEINFOW executeInfo{};
             executeInfo.cbSize = sizeof(executeInfo);
@@ -17758,6 +18564,9 @@ namespace hyperbrowse::ui
         case ID_VIEW_NAVIGATE_BACK_FOLDER:
             NavigateBackToLastOpenedFolder();
             return true;
+        case ID_VIEW_NAVIGATE_FORWARD_FOLDER:
+            NavigateForwardToLastOpenedFolder();
+            return true;
         case ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION:
             ToggleCurrentFolderFavoriteDestination();
             return true;
@@ -17773,8 +18582,28 @@ namespace hyperbrowse::ui
         case ID_FILE_EXIT:
             PostMessageW(hwnd_, WM_CLOSE, 0, 0);
             return true;
+        case ID_FILE_ESCAPE:
+            if (closeMainWindowOnEscape_)
+            {
+                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+            }
+            else
+            {
+                ShowWindow(hwnd_, SW_MINIMIZE);
+            }
+            return true;
         case ID_FILE_MINIMIZE:
             ShowWindow(hwnd_, SW_MINIMIZE);
+            return true;
+        case ID_EDIT_CLOSE_MAIN_WINDOW_ON_ESCAPE:
+            closeMainWindowOnEscape_ = !closeMainWindowOnEscape_;
+            ModifyMenuW(fileMenu_,
+                        ID_FILE_ESCAPE,
+                        MF_BYCOMMAND | MF_STRING,
+                        ID_FILE_ESCAPE,
+                        closeMainWindowOnEscape_ ? L"&Close\tEsc" : L"&Minimize\tEsc");
+            RefreshPersistentMenuOwnerDraw();
+            UpdateMenuState();
             return true;
         case ID_FILE_REFRESH_TREE:
             RefreshFolderTree();
@@ -17846,6 +18675,9 @@ namespace hyperbrowse::ui
             return true;
         case ID_FILE_COPY_FILES_TO_CLIPBOARD:
             CopySelectionFilesToClipboard();
+            return true;
+        case ID_EDIT_CUT:
+            CopySelectionFilesToClipboard(true);
             return true;
         case ID_FILE_COPY_IMAGE_PIXELS:
             CopySelectedImagePixelsToClipboard();
@@ -18023,6 +18855,12 @@ namespace hyperbrowse::ui
             UpdateStatusText();
             UpdateMenuState();
             return true;
+        case ID_VIEW_THUMBNAIL_SIZE_INCREASE:
+            StepThumbnailSize(1);
+            return true;
+        case ID_VIEW_THUMBNAIL_SIZE_DECREASE:
+            StepThumbnailSize(-1);
+            return true;
         case ID_VIEW_THUMBNAIL_DETAILS:
             thumbnailDetailsVisible_ = !thumbnailDetailsVisible_;
             ApplyThumbnailDisplaySettings();
@@ -18092,6 +18930,9 @@ namespace hyperbrowse::ui
         case ID_HELP_USER_GUIDE:
             ShowUserGuide();
             return true;
+        case ID_HELP_KEYBOARD_SHORTCUTS:
+            ShowShortcutReference();
+            return true;
         case ID_HELP_ABOUT:
             ShowAboutDialog();
             return true;
@@ -18149,6 +18990,42 @@ namespace hyperbrowse::ui
         UpdateStatusText();
         UpdateMenuState();
         UpdateWindowTitle();
+    }
+
+    void MainWindow::StepThumbnailSize(int direction)
+    {
+        if (direction == 0 || browserMode_ != BrowserMode::Thumbnails || !browserPaneController_)
+        {
+            return;
+        }
+
+        const browser::ThumbnailSizePreset currentPreset = browserPaneController_->GetThumbnailSizePreset();
+        const auto currentIterator = std::find(kThumbnailSizePresets.begin(), kThumbnailSizePresets.end(), currentPreset);
+        if (currentIterator == kThumbnailSizePresets.end())
+        {
+            return;
+        }
+
+        std::size_t currentIndex = static_cast<std::size_t>(currentIterator - kThumbnailSizePresets.begin());
+        if (direction > 0)
+        {
+            currentIndex = std::min(currentIndex + 1, kThumbnailSizePresets.size() - 1);
+        }
+        else
+        {
+            currentIndex = currentIndex == 0 ? 0 : currentIndex - 1;
+        }
+
+        const browser::ThumbnailSizePreset nextPreset = kThumbnailSizePresets[currentIndex];
+        if (nextPreset == currentPreset)
+        {
+            return;
+        }
+
+        thumbnailSizePreset_ = nextPreset;
+        ApplyThumbnailDisplaySettings();
+        UpdateStatusText();
+        UpdateMenuState();
     }
 
     void MainWindow::ToggleRecursiveBrowsing()
@@ -18271,6 +19148,7 @@ namespace hyperbrowse::ui
 
         // Left group 1: Navigation
         addIcon(ID_VIEW_NAVIGATE_BACK_FOLDER, "back", L"Back to Previous Folder (Backspace)");
+        addIcon(ID_VIEW_NAVIGATE_FORWARD_FOLDER, "forward", L"Forward to Next Folder (Alt+Right)");
         addIcon(ID_FILE_OPEN_FOLDER, "open-folder", L"Open Folder (Ctrl+O)");
         addIcon(ID_VIEW_RECURSIVE, "recursive", L"Recursive Browsing (Ctrl+R)", ToolbarItemKind::IconToggle);
 

@@ -278,7 +278,7 @@
 
         <section id="slideshow">
             <h2>Run a slideshow</h2>
-            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>View &gt; Slideshow &gt; Settings</strong>.</p>
+            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>Edit &gt; Settings &gt; Slideshow Settings</strong>.</p>
             <p>Slideshow transitions include cut, crossfade, slide, and Ken Burns styles. Slideshow scope follows the current recursive-browsing setting. The viewer can open on a secondary monitor when that preference is enabled.</p>
         </section>
 
@@ -329,39 +329,61 @@
 
         <section id="settings">
             <h2>Settings and performance</h2>
-            <p>Most preferences live in the <strong>View</strong> menu and are remembered per user. Light and dark themes, app text size, thumbnail size, compact layout, thumbnail details, recursive browsing, viewer behavior, slideshow settings, and RAW/JPEG preferences can be changed without restarting.</p>
+            <p>Preferences are grouped under <strong>Edit &gt; Settings</strong> and are remembered per user. Appearance, app text size, thumbnail size, viewer behavior, slideshow settings, performance, diagnostics, integration, and RAW/JPEG preferences can be changed without restarting.</p>
             <ul>
-                <li><strong>View &gt; App Text Size</strong> changes HyperBrowse's browser, details-panel, native-control, diagnostic, and custom-dialog text. Choose Small, Medium, or Large; Medium preserves the default size.</li>
-                <li><strong>View &gt; Viewer &gt; Overlay Text Size</strong> is independent from the app text size and changes only the information overlay inside the viewer.</li>
-                <li><strong>Help &gt; Performance &gt; Performance Profile</strong> offers Conservative, Balanced, Performance, and Aggressive profiles. Aggressive uses more lookahead, worker queue capacity, and adaptive cache space for systems with spare memory.</li>
-                <li><strong>Help &gt; Performance &gt; Performance Settings</strong> exposes adaptive cache and worker overrides.</li>
-                <li><strong>View &gt; Advanced &gt; Persistent Thumbnail Cache</strong> enables the disk cache.</li>
-                <li><strong>View &gt; Advanced &gt; Persistent Cache Stats and Cleanup</strong> shows cache usage and provides compact and purge actions.</li>
-                <li><strong>Help &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
+                <li><strong>Edit &gt; Settings &gt; Appearance</strong> contains the light/dark theme and app text size. Choose Small, Medium, or Large; Medium preserves the default size.</li>
+                <li><strong>Edit &gt; Settings &gt; Viewer</strong> contains mouse-wheel behavior, overlay text size, detail overlays, full metadata, secondary-monitor defaults, slideshow transition, and RAW/JPEG display preferences.</li>
+                <li><strong>Edit &gt; Settings &gt; Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
+                <li><strong>Edit &gt; Settings &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
+                <li><strong>Edit &gt; Settings &gt; Integration</strong> contains file associations and single-instance behavior.</li>
+                <li><strong>Edit &gt; Settings &gt; Behavior</strong> can make Esc close the main window instead of minimizing it. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> continues to minimize.</li>
+                <li><strong>View &gt; Thumbnail Size</strong> provides fixed presets and keyboard stepping. <strong>Edit &gt; Settings &gt; Slideshow Settings</strong> controls slideshow timing and transitions.</li>
             </ul>
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
         </section>
 
         <section id="shortcuts">
             <h2>Keyboard shortcuts</h2>
+            <p>Use <strong>Help &gt; Keyboard Shortcuts</strong> for the same reference inside the application. The table below includes main-window and viewer behavior.</p>
             <table>
-                <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+                <thead><tr><th>Context</th><th>Shortcut</th><th>Action</th></tr></thead>
                 <tbody>
-                    <tr><td><kbd>F1</kbd></td><td>Open this user guide</td></tr>
-                    <tr><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open folder</td></tr>
-                    <tr><td><kbd>F2</kbd></td><td>Rename the selected item</td></tr>
-                    <tr><td><kbd>F5</kbd></td><td>Refresh the folder tree</td></tr>
-                    <tr><td><kbd>Backspace</kbd></td><td>Return to the previous folder</td></tr>
-                    <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>Select all visible browser items</td></tr>
-                    <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>Copy selected files to the clipboard</td></tr>
-                    <tr><td><kbd>Ctrl</kbd> + <kbd>V</kbd></td><td>Paste files into the current folder</td></tr>
-                    <tr><td><kbd>Ctrl</kbd> + <kbd>D</kbd></td><td>Duplicate the selection</td></tr>
-                    <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Y</kbd></td><td>Undo / redo a supported file operation</td></tr>
-                    <tr><td><kbd>F7</kbd> / <kbd>F8</kbd></td><td>Quick Send: move / copy</td></tr>
-                    <tr><td><kbd>Delete</kbd></td><td>Move the selection to the Recycle Bin</td></tr>
-                    <tr><td><kbd>Shift</kbd> + <kbd>Delete</kbd></td><td>Delete the selection permanently</td></tr>
-                    <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td><td>Copy displayed image pixels</td></tr>
-                    <tr><td><kbd>Esc</kbd></td><td>Minimize the main window or close the viewer</td></tr>
+                    <tr><th colspan="3">Main window</th></tr>
+                    <tr><td>File</td><td><kbd>F1</kbd></td><td>Open this user guide</td></tr>
+                    <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open a folder</td></tr>
+                    <tr><td>File</td><td><kbd>F2</kbd></td><td>Rename the selected item</td></tr>
+                    <tr><td>File</td><td><kbd>F5</kbd></td><td>Refresh the folder tree</td></tr>
+                    <tr><td>File</td><td><kbd>Esc</kbd></td><td>Minimize, or close when enabled in Settings</td></tr>
+                    <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td>Minimize the main window</td></tr>
+                    <tr><td>Navigation</td><td><kbd>Backspace</kbd> / <kbd>Alt</kbd> + <kbd>Left</kbd></td><td>Navigate to the previous folder</td></tr>
+                    <tr><td>Navigation</td><td><kbd>Alt</kbd> + <kbd>Right</kbd></td><td>Navigate to the next folder</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>Select all visible browser items</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>X</kbd></td><td>Copy / cut selected files</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>V</kbd></td><td>Paste files into the current folder</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd></td><td>Copy selected paths</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>E</kbd></td><td>Reveal the selection in Explorer</td></tr>
+                    <tr><td>Selection</td><td><kbd>Alt</kbd> + <kbd>Enter</kbd></td><td>Show file properties</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>I</kbd></td><td>Show image information</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td><td>Copy displayed image pixels</td></tr>
+                    <tr><td>Selection</td><td><kbd>Del</kbd> / <kbd>Shift</kbd> + <kbd>Del</kbd></td><td>Recycle / permanently delete the selection</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>D</kbd></td><td>Duplicate the selection</td></tr>
+                    <tr><td>Selection</td><td><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Y</kbd></td><td>Undo / redo a supported file operation</td></tr>
+                    <tr><td>Quick Send</td><td><kbd>F7</kbd> / <kbd>F8</kbd></td><td>Move / copy to a quick destination</td></tr>
+                    <tr><td>View</td><td><kbd>Ctrl</kbd> + <kbd>1</kbd> / <kbd>Ctrl</kbd> + <kbd>2</kbd></td><td>Thumbnail / details mode</td></tr>
+                    <tr><td>View</td><td><kbd>Ctrl</kbd> + <kbd>3</kbd></td><td>Toggle the details panel</td></tr>
+                    <tr><td>View</td><td><kbd>Ctrl</kbd> + <kbd>R</kbd></td><td>Toggle recursive browsing</td></tr>
+                    <tr><td>View</td><td><kbd>+</kbd> / <kbd>=</kbd> / Numpad <kbd>+</kbd></td><td>Increase thumbnail size</td></tr>
+                    <tr><td>View</td><td><kbd>-</kbd> / <kbd>_</kbd> / Numpad <kbd>-</kbd></td><td>Decrease thumbnail size</td></tr>
+                    <tr><td>Slideshow</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> / <kbd>F</kbd></td><td>Start from selection / folder</td></tr>
+                    <tr><td>Slideshow</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd></td><td>Open slideshow settings</td></tr>
+                    <tr><td>Diagnostics</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd> / <kbd>X</kbd></td><td>Snapshot / reset diagnostics</td></tr>
+                    <tr><th colspan="3">Viewer</th></tr>
+                    <tr><td>Viewer</td><td><kbd>Esc</kbd> / <kbd>Ctrl</kbd> + <kbd>W</kbd></td><td>Close the viewer</td></tr>
+                    <tr><td>Viewer</td><td>Arrow keys</td><td>Navigate, or pan when zoomed</td></tr>
+                    <tr><td>Viewer</td><td><kbd>Shift</kbd> + Arrow keys</td><td>Navigate the comparison pair</td></tr>
+                    <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>Home</kbd> / <kbd>Ctrl</kbd> + <kbd>End</kbd></td><td>Go to the first / last image</td></tr>
+                    <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td><td>Copy the displayed image</td></tr>
+                    <tr><td>Viewer</td><td><kbd>Del</kbd> / <kbd>Shift</kbd> + <kbd>Del</kbd></td><td>Recycle / permanently delete the displayed file</td></tr>
                 </tbody>
             </table>
             <p>Menu labels show shortcuts where they are available. Some actions also have viewer-specific keyboard behavior; when the viewer has focus, its navigation and zoom commands take priority.</p>
@@ -372,9 +394,9 @@
             <h3>The guide does not open</h3>
             <p>Keep the <code>docs</code> folder with the executable. Installed copies normally place the guide in the application <code>docs</code> folder beside <code>bin</code>; portable copies place it in <code>docs</code> beside <code>HyperBrowse.exe</code>. HyperBrowse uses the executable location, not the current working directory, to find it.</p>
             <h3>An image cannot be decoded</h3>
-            <p>Confirm that the file uses a supported format. For RAW images, check whether the optional helper is present beside the application and try the in-process fallback from <strong>View &gt; Advanced</strong>. Unsupported RAW variants may still show no preview.</p>
+            <p>Confirm that the file uses a supported format. For RAW images, check whether the optional helper is present beside the application and try the in-process fallback from <strong>Edit &gt; Settings &gt; Performance</strong>. Unsupported RAW variants may still show no preview.</p>
             <h3>Browsing a large folder feels busy</h3>
-            <p>Allow the initial enumeration to finish, then adjust the Performance Profile if needed. Persistent thumbnail cache maintenance is available under <strong>View &gt; Advanced</strong>. The diagnostics snapshot under <strong>Help</strong> can capture state for a bug report.</p>
+            <p>Allow the initial enumeration to finish, then adjust the Performance Profile if needed. Persistent thumbnail cache maintenance is available under <strong>Edit &gt; Settings &gt; Performance</strong>. The diagnostics snapshot under <strong>Edit &gt; Settings &gt; Diagnostics</strong> can capture state for a bug report.</p>
             <h3>Where are settings stored?</h3>
             <p>User settings are stored under <code>HKCU\Software\HyperBrowse</code>. Portable mode does not make settings portable; the application still uses the current Windows user's profile.</p>
         </section>
