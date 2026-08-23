@@ -2364,7 +2364,7 @@ namespace
         const fs::path thirdPath = root.Root() / L"third.png";
         const fs::path tallPath = root.Root() / L"tall.png";
         WriteTestImage(firstPath, TestImageFormat::Jpeg, 48, 24, 6);
-        WriteTestImage(secondPath, TestImageFormat::Png, 64, 32);
+        WriteTestImage(secondPath, TestImageFormat::Png, 640, 320);
         WriteTestImage(thirdPath, TestImageFormat::Png, 40, 16);
         WriteTestImage(tallPath, TestImageFormat::Png, 24, 48);
 
@@ -2529,8 +2529,8 @@ namespace
         const int secondImageFitZoomPercent = std::max(
             1,
             static_cast<int>(std::lround(std::min(
-                static_cast<double>(secondImageClientRect.right) / 64.0,
-                static_cast<double>(secondImageClientRect.bottom) / 32.0) * 100.0)));
+                static_cast<double>(secondImageClientRect.right) / 640.0,
+                static_cast<double>(secondImageClientRect.bottom) / 320.0) * 100.0)));
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RETURN, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() == 100; }, 1000),
@@ -2561,8 +2561,9 @@ namespace
         PumpMessagesFor(100);
         Expect(viewer.RotationQuarterTurns() == 1, "Viewer rotate-right command failed");
 
+        const int panFitZoomPercent = viewer.CurrentZoomPercent();
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
-        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 100; }, 1000),
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > panFitZoomPercent; }, 1000),
                "Viewer zoom-in command failed");
 
         const POINT initialPan = viewer.PanOffset();

@@ -17562,6 +17562,10 @@ namespace hyperbrowse::ui
             browserPaneController_->RestoreSelectionByFilePaths({viewerPath}, viewerPath);
             browserPaneController_->EnsureFocusedItemVisible();
         }
+        if (browserPaneController_ && browserPaneController_->Hwnd())
+        {
+            SetFocus(browserPaneController_->Hwnd());
+        }
 
         viewerWindowActive_ = false;
         viewerZoomPercent_ = 0;
