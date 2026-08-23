@@ -49,6 +49,7 @@ namespace
     constexpr std::size_t kViewerPerformanceBackgroundQueueCapacity = 64;
     constexpr std::size_t kViewerAggressiveBackgroundQueueCapacity = 256;
     constexpr double kKeyboardPanStep = 64.0;
+    constexpr double kMaximumZoomScale = 64.0;
     constexpr int kContextMenuItemHeight = 28;
     constexpr int kContextMenuSeparatorHeight = 10;
     constexpr int kContextMenuCheckColumnWidth = 24;
@@ -2367,7 +2368,7 @@ namespace hyperbrowse::viewer
             + L", hitRate=" + std::to_wstring(hitRate) + L"%");
     }
 
-    void ViewerWindow::ZoomBy(double factor)
+    void ViewerWindow::ZoomBy(double factor, const POINT* anchorPoint)
     {
         if (!currentImage_ || factor <= 0.0 || !hwnd_)
         {
@@ -2377,11 +2378,14 @@ namespace hyperbrowse::viewer
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
         const double fitScale = FitScaleForClient(clientRect);
-        const double baseScale = smoothZoomTimerId_
+        const bool smoothZoomActive = smoothZoomTimerId_ != 0;
+        const double baseScale = smoothZoomActive
             ? smoothZoomTarget_
             : (zoomMode_ == ZoomMode::Fit ? fitScale : customZoomScale_);
+        double targetPanX = panOffsetX_;
+        double targetPanY = panOffsetY_;
 
-        double targetScale = std::clamp(baseScale * factor, std::min(baseScale, fitScale), 16.0);
+        double targetScale = std::clamp(baseScale * factor, std::min(baseScale, fitScale), kMaximumZoomScale);
 
         if (factor < 1.0 && std::abs(targetScale - fitScale) < 0.0001)
         {
@@ -2394,12 +2398,25 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        const double currentScale = smoothZoomTimerId_
+        const double currentScale = smoothZoomActive
             ? smoothZoomCurrent_
             : (zoomMode_ == ZoomMode::Fit ? fitScale : customZoomScale_);
+
+        if (anchorPoint)
+        {
+            const double centerX = static_cast<double>(clientRect.right - clientRect.left) / 2.0;
+            const double centerY = static_cast<double>(clientRect.bottom - clientRect.top) / 2.0;
+            const double imagePointX = (static_cast<double>(anchorPoint->x) - centerX - panOffsetX_) / std::max(0.01, currentScale);
+            const double imagePointY = (static_cast<double>(anchorPoint->y) - centerY - panOffsetY_) / std::max(0.01, currentScale);
+            targetPanX = static_cast<double>(anchorPoint->x) - centerX - (imagePointX * targetScale);
+            targetPanY = static_cast<double>(anchorPoint->y) - centerY - (imagePointY * targetScale);
+        }
+
         zoomMode_ = ZoomMode::Custom;
         smoothZoomTarget_ = targetScale;
         smoothZoomCurrent_ = currentScale;
+        smoothZoomTargetPanX_ = targetPanX;
+        smoothZoomTargetPanY_ = targetPanY;
         customZoomScale_ = smoothZoomCurrent_;
 
         if (!smoothZoomTimerId_)
@@ -3196,6 +3213,8 @@ namespace hyperbrowse::viewer
         }
         smoothZoomTarget_ = 1.0;
         smoothZoomCurrent_ = 1.0;
+        smoothZoomTargetPanX_ = 0.0;
+        smoothZoomTargetPanY_ = 0.0;
     }
 
     void ViewerWindow::CalculatePanLimits(double& maxPanX, double& maxPanY) const
@@ -4129,10 +4148,12 @@ namespace hyperbrowse::viewer
             }
             else
             {
+                POINT zoomPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                const bool hasZoomPoint = ScreenToClient(hwnd_, &zoomPoint) != FALSE;
                 const double zoomFactor = wheelDelta > 0 ? 1.1 : 0.9;
                 for (int step = 0; step < stepCount; ++step)
                 {
-                    ZoomBy(zoomFactor);
+                    ZoomBy(zoomFactor, hasZoomPoint ? &zoomPoint : nullptr);
                 }
             }
             return 0;
@@ -4283,6 +4304,8 @@ namespace hyperbrowse::viewer
                 {
                     customZoomScale_ = smoothZoomTarget_;
                     smoothZoomCurrent_ = smoothZoomTarget_;
+                    panOffsetX_ = smoothZoomTargetPanX_;
+                    panOffsetY_ = smoothZoomTargetPanY_;
                     KillTimer(hwnd_, kSmoothZoomTimerId);
                     smoothZoomTimerId_ = 0;
                 }
@@ -4290,6 +4313,8 @@ namespace hyperbrowse::viewer
                 {
                     smoothZoomCurrent_ += diff * 0.22;
                     customZoomScale_ = smoothZoomCurrent_;
+                    panOffsetX_ += (smoothZoomTargetPanX_ - panOffsetX_) * 0.22;
+                    panOffsetY_ += (smoothZoomTargetPanY_ - panOffsetY_) * 0.22;
                 }
                 ClampPanOffsets();
                 RequestRepaint();

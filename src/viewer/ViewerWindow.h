@@ -204,7 +204,7 @@ namespace hyperbrowse::viewer
         void ReapCompletedBackgroundTasks();
         void WaitForBackgroundTasks();
         void LogPrefetchStats() const;
-        void ZoomBy(double factor);
+        void ZoomBy(double factor, const POINT* anchorPoint = nullptr);
         void FitToWindow();
         void SetActualSize();
         void RotateLeft();
@@ -304,6 +304,8 @@ namespace hyperbrowse::viewer
         int rotationQuarterTurns_{};
         double panOffsetX_{};
         double panOffsetY_{};
+        double smoothZoomTargetPanX_{};
+        double smoothZoomTargetPanY_{};
         bool compareMode_{};
         CompareDirection compareDirection_{CompareDirection::Next};
         int pendingNavigationDelta_{};
