@@ -33,9 +33,11 @@ namespace
     constexpr std::size_t kDefaultMetadataCacheCapacityEntries = 512;
     constexpr std::size_t kConservativeMetadataCacheCapacityEntries = 2048;
     constexpr std::size_t kPerformanceMetadataCacheCapacityEntries = 8192;
+    constexpr std::size_t kAggressiveMetadataCacheCapacityEntries = 16384;
     constexpr std::uint64_t kMinimumMetadataCacheCapacityEntries = 2048;
     constexpr std::uint64_t kConservativeMaximumMetadataCacheCapacityEntries = 8192;
     constexpr std::uint64_t kMaximumMetadataCacheCapacityEntries = 65536;
+    constexpr std::uint64_t kAggressiveMaximumMetadataCacheCapacityEntries = 131072;
 
     std::size_t ResolveMetadataWorkerCount(std::size_t requestedWorkerCount,
                                            hyperbrowse::util::ResourceProfile resourceProfile)
@@ -58,6 +60,8 @@ namespace
             return std::clamp<std::size_t>(normalized / 8U, 1U, 4U);
         case hyperbrowse::util::ResourceProfile::Performance:
             return std::clamp<std::size_t>(normalized / 2U, kMinimumMetadataWorkerCount, kMaximumMetadataWorkerCount);
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            return std::clamp<std::size_t>(normalized * 3U / 4U, kMinimumMetadataWorkerCount, 12U);
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:
         {
@@ -86,6 +90,8 @@ namespace
                 return kConservativeMetadataCacheCapacityEntries;
             case hyperbrowse::util::ResourceProfile::Performance:
                 return kPerformanceMetadataCacheCapacityEntries;
+            case hyperbrowse::util::ResourceProfile::Aggressive:
+                return kAggressiveMetadataCacheCapacityEntries;
             case hyperbrowse::util::ResourceProfile::Balanced:
             default:
                 return kDefaultMetadataCacheCapacityEntries;
@@ -102,6 +108,10 @@ namespace
             break;
         case hyperbrowse::util::ResourceProfile::Performance:
             preferredEntryCount = memorySnapshot.availablePhysicalBytes / (128ULL * 1024ULL);
+            break;
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            preferredEntryCount = memorySnapshot.availablePhysicalBytes / (64ULL * 1024ULL);
+            maximumEntryCount = kAggressiveMaximumMetadataCacheCapacityEntries;
             break;
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:

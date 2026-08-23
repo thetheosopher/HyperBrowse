@@ -22,7 +22,8 @@ namespace hyperbrowse::util
     class BackgroundExecutor
     {
     public:
-        explicit BackgroundExecutor(std::size_t workerCount)
+        explicit BackgroundExecutor(std::size_t workerCount, std::size_t maxPendingTaskCount = 0)
+            : maxPendingTaskCount_(maxPendingTaskCount)
         {
             const std::size_t resolvedWorkerCount = workerCount == 0 ? std::size_t{1} : workerCount;
             workers_.reserve(resolvedWorkerCount);
@@ -63,7 +64,8 @@ namespace hyperbrowse::util
 
             {
                 std::scoped_lock lock(mutex_);
-                if (shuttingDown_)
+                if (shuttingDown_
+                    || (maxPendingTaskCount_ != 0 && tasks_.size() >= maxPendingTaskCount_))
                 {
                     return false;
                 }
@@ -71,6 +73,12 @@ namespace hyperbrowse::util
             }
             condition_.notify_one();
             return true;
+        }
+
+        void SetMaxPendingTaskCount(std::size_t maxPendingTaskCount)
+        {
+            std::scoped_lock lock(mutex_);
+            maxPendingTaskCount_ = maxPendingTaskCount;
         }
 
         std::size_t WorkerCount() const noexcept
@@ -106,6 +114,7 @@ namespace hyperbrowse::util
         std::condition_variable condition_;
         std::deque<std::function<void()>> tasks_;
         std::vector<std::thread> workers_;
+        std::size_t maxPendingTaskCount_{};
         bool shuttingDown_{false};
     };
 }

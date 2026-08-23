@@ -75,9 +75,10 @@ namespace hyperbrowse::cache
         void Insert(ThumbnailCacheKey key, std::shared_ptr<const CachedThumbnail> thumbnail);
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
         void TrimToBytes(std::size_t targetBytes);
+        void SetCapacityBytes(std::size_t capacityBytes);
         void Clear();
         std::size_t CurrentBytes() const;
-        std::size_t CapacityBytes() const noexcept;
+        std::size_t CapacityBytes() const;
 
     private:
         struct Entry
@@ -91,7 +92,7 @@ namespace hyperbrowse::cache
         void EvictToEntryCount();
         void EvictToBytes(std::size_t targetBytes);
 
-        const std::size_t capacityBytes_{};
+        std::size_t capacityBytes_{};
         mutable std::mutex mutex_;
         std::size_t currentBytes_{};
         mutable std::list<ThumbnailCacheKey> lruOrder_;

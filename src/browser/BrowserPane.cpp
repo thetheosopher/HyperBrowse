@@ -68,6 +68,8 @@ namespace
             return 3;
         case hyperbrowse::util::ResourceProfile::Performance:
             return 7;
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            return 10;
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:
             return 5;
@@ -82,6 +84,8 @@ namespace
             return 1;
         case hyperbrowse::util::ResourceProfile::Performance:
             return 3;
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            return 5;
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:
             return 2;
@@ -96,6 +100,8 @@ namespace
             return 4;
         case hyperbrowse::util::ResourceProfile::Performance:
             return 8;
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            return 12;
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:
             return 6;
@@ -110,6 +116,8 @@ namespace
             return 2;
         case hyperbrowse::util::ResourceProfile::Performance:
             return 4;
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            return 6;
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:
             return 3;

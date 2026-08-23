@@ -43,7 +43,10 @@ namespace
     constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
     constexpr int kPlaceholderBrandArtSize = 256;
     constexpr bool kEnableFullImagePrefetch = false;
-    constexpr std::size_t kViewerFullImageCacheBytes = 256ULL * 1024ULL * 1024ULL;
+    constexpr std::size_t kViewerConservativeBackgroundQueueCapacity = 16;
+    constexpr std::size_t kViewerBalancedBackgroundQueueCapacity = 32;
+    constexpr std::size_t kViewerPerformanceBackgroundQueueCapacity = 64;
+    constexpr std::size_t kViewerAggressiveBackgroundQueueCapacity = 256;
     constexpr double kKeyboardPanStep = 64.0;
 
     using InfoOverlayTextSize = hyperbrowse::viewer::InfoOverlayTextSize;
@@ -87,8 +90,35 @@ namespace
 
     hyperbrowse::cache::ThumbnailCache& ViewerFullImageCache()
     {
-        static hyperbrowse::cache::ThumbnailCache cache(kViewerFullImageCacheBytes);
+        static hyperbrowse::cache::ThumbnailCache cache(
+            hyperbrowse::util::ResolveViewerFullImageCacheCapacityBytes(
+                hyperbrowse::util::ResourceProfile::Balanced));
         return cache;
+    }
+
+    std::size_t ViewerBackgroundQueueCapacity(hyperbrowse::util::ResourceProfile profile) noexcept
+    {
+        switch (profile)
+        {
+        case hyperbrowse::util::ResourceProfile::Conservative:
+            return kViewerConservativeBackgroundQueueCapacity;
+        case hyperbrowse::util::ResourceProfile::Performance:
+            return kViewerPerformanceBackgroundQueueCapacity;
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            return kViewerAggressiveBackgroundQueueCapacity;
+        case hyperbrowse::util::ResourceProfile::Balanced:
+        default:
+            return kViewerBalancedBackgroundQueueCapacity;
+        }
+    }
+
+    std::size_t EffectiveViewerFullImageCacheCapacity(hyperbrowse::util::ResourceProfile profile,
+                                                       bool memoryPressureActive) noexcept
+    {
+        const std::size_t resolvedCapacity = hyperbrowse::util::ResolveViewerFullImageCacheCapacityBytes(profile);
+        return memoryPressureActive
+            ? std::max<std::size_t>(1, resolvedCapacity / 2)
+            : resolvedCapacity;
     }
 
     float SmoothStep(float value)
@@ -691,7 +721,9 @@ namespace hyperbrowse::viewer
         // Six workers: one for foreground image decode, up to four for adjacent prefetches,
         // one spare. This allows prefetch to degrade gracefully without starving the main
         // image load when many adjacent images need decoding during rapid delete sequences.
-        backgroundExecutor_ = std::make_unique<util::BackgroundExecutor>(6);
+        backgroundExecutor_ = std::make_unique<util::BackgroundExecutor>(
+            6,
+            ViewerBackgroundQueueCapacity(resourceProfile_));
     }
 
     ViewerWindow::~ViewerWindow()
@@ -1071,10 +1103,8 @@ namespace hyperbrowse::viewer
             + std::wstring(memoryPressureActive_ ? L"entered" : L"cleared")
             + L"; prefetch radius=" + std::to_wstring(EffectivePrefetchRadius()));
 
-        if (memoryPressureActive_)
-        {
-            ViewerFullImageCache().TrimToBytes(std::max<std::size_t>(1, kViewerFullImageCacheBytes / 2));
-        }
+        ViewerFullImageCache().SetCapacityBytes(
+            EffectiveViewerFullImageCacheCapacity(resourceProfile_, memoryPressureActive_));
 
         slideshowNextPrefetchIndex_ = -1;
         slideshowNextPrefetchGeneration_ = 0;
@@ -1093,6 +1123,12 @@ namespace hyperbrowse::viewer
         }
 
         resourceProfile_ = profile;
+        ViewerFullImageCache().SetCapacityBytes(
+            EffectiveViewerFullImageCacheCapacity(resourceProfile_, memoryPressureActive_));
+        if (backgroundExecutor_)
+        {
+            backgroundExecutor_->SetMaxPendingTaskCount(ViewerBackgroundQueueCapacity(resourceProfile_));
+        }
         if (hwnd_ && currentImage_ && !pendingLoadActive_)
         {
             const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -1576,10 +1612,12 @@ namespace hyperbrowse::viewer
         case util::ResourceProfile::Conservative:
             return 1;
         case util::ResourceProfile::Performance:
-            return 3;
+            return 6;
+        case util::ResourceProfile::Aggressive:
+            return 10;
         case util::ResourceProfile::Balanced:
         default:
-            return 3;  // Increased from 2 to 3 for better rapid-delete performance
+            return 3;
         }
     }
 
@@ -1745,7 +1783,7 @@ namespace hyperbrowse::viewer
         ReapCompletedBackgroundTasks();
         if (backgroundExecutor_)
         {
-            backgroundExecutor_->Post([asyncState, item, selectedIndex, requestId, navigationGeneration]()
+            if (!backgroundExecutor_->Post([asyncState, item, selectedIndex, requestId, navigationGeneration]()
             {
                 std::wstring errorMessage;
                 auto image = decode::DecodeFullImage(item, &errorMessage);
@@ -1770,7 +1808,16 @@ namespace hyperbrowse::viewer
                 }
 
                 update.release();
-            });
+            }))
+            {
+                loading_ = false;
+                pendingLoadActive_ = false;
+                errorMessage_ = L"Image loading is unavailable.";
+                if (hwnd_)
+                {
+                    RequestRepaint();
+                }
+            }
         }
     }
 
@@ -2093,7 +2140,7 @@ namespace hyperbrowse::viewer
         {
             return;
         }
-        backgroundExecutor_->Post([asyncState, item, index, navigationGeneration]()
+        if (!backgroundExecutor_->Post([asyncState, item, index, navigationGeneration]()
         {
             std::wstring errorMessage;
             auto image = decode::DecodeFullImage(item, &errorMessage);
@@ -2121,7 +2168,11 @@ namespace hyperbrowse::viewer
             }
 
             update.release();
-        });
+        }) && slideshowNextPrefetch)
+        {
+            slideshowNextPrefetchIndex_ = -1;
+            slideshowNextPrefetchGeneration_ = 0;
+        }
     }
 
     void ViewerWindow::LogPrefetchStats() const

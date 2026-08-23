@@ -158,6 +158,13 @@ namespace hyperbrowse::cache
         EvictToBytes(targetBytes);
     }
 
+    void ThumbnailCache::SetCapacityBytes(std::size_t capacityBytes)
+    {
+        std::scoped_lock lock(mutex_);
+        capacityBytes_ = capacityBytes;
+        EvictToBytes(capacityBytes_);
+    }
+
     void ThumbnailCache::Clear()
     {
         std::scoped_lock lock(mutex_);
@@ -172,8 +179,9 @@ namespace hyperbrowse::cache
         return currentBytes_;
     }
 
-    std::size_t ThumbnailCache::CapacityBytes() const noexcept
+    std::size_t ThumbnailCache::CapacityBytes() const
     {
+        std::scoped_lock lock(mutex_);
         return capacityBytes_;
     }
 

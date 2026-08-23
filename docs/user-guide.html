@@ -333,13 +333,13 @@
             <ul>
                 <li><strong>View &gt; App Text Size</strong> changes HyperBrowse's browser, details-panel, native-control, diagnostic, and custom-dialog text. Choose Small, Medium, or Large; Medium preserves the default size.</li>
                 <li><strong>View &gt; Viewer &gt; Overlay Text Size</strong> is independent from the app text size and changes only the information overlay inside the viewer.</li>
-                <li><strong>Help &gt; Performance &gt; Performance Profile</strong> offers Conservative, Balanced, and Performance profiles.</li>
+                <li><strong>Help &gt; Performance &gt; Performance Profile</strong> offers Conservative, Balanced, Performance, and Aggressive profiles. Aggressive uses more lookahead, worker queue capacity, and adaptive cache space for systems with spare memory.</li>
                 <li><strong>Help &gt; Performance &gt; Performance Settings</strong> exposes adaptive cache and worker overrides.</li>
                 <li><strong>View &gt; Advanced &gt; Persistent Thumbnail Cache</strong> enables the disk cache.</li>
                 <li><strong>View &gt; Advanced &gt; Persistent Cache Stats and Cleanup</strong> shows cache usage and provides compact and purge actions.</li>
                 <li><strong>Help &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
             </ul>
-            <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive.</p>
+            <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
         </section>
 
         <section id="shortcuts">

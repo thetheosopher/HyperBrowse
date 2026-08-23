@@ -25,10 +25,12 @@ namespace
     constexpr std::uint64_t kDefaultThumbnailCacheCapacityBytes = 96ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kConservativeThumbnailCacheCapacityBytes = 128ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kPerformanceThumbnailCacheCapacityBytes = 256ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kAggressiveThumbnailCacheCapacityBytes = 512ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kMinimumThumbnailCacheCapacityBytes = 128ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kConservativeMaximumThumbnailCacheCapacityBytes = 256ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kMaximumThumbnailCacheCapacityBytes = 1024ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t kPerformanceMaximumThumbnailCacheCapacityBytes = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t kAggressiveMaximumThumbnailCacheCapacityBytes = 8ULL * 1024ULL * 1024ULL * 1024ULL;
 
     std::size_t ResolveThumbnailCacheCapacityBytes(std::size_t requestedCapacityBytes,
                                                    hyperbrowse::util::ResourceProfile resourceProfile)
@@ -47,6 +49,8 @@ namespace
                 return static_cast<std::size_t>(kConservativeThumbnailCacheCapacityBytes);
             case hyperbrowse::util::ResourceProfile::Performance:
                 return static_cast<std::size_t>(kPerformanceThumbnailCacheCapacityBytes);
+            case hyperbrowse::util::ResourceProfile::Aggressive:
+                return static_cast<std::size_t>(kAggressiveThumbnailCacheCapacityBytes);
             case hyperbrowse::util::ResourceProfile::Balanced:
             default:
                 return static_cast<std::size_t>(kDefaultThumbnailCacheCapacityBytes);
@@ -69,6 +73,12 @@ namespace
             totalBudget = memorySnapshot.totalPhysicalBytes / 4ULL;
             minimumBudget = kPerformanceThumbnailCacheCapacityBytes;
             maximumBudget = kPerformanceMaximumThumbnailCacheCapacityBytes;
+            break;
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            availabilityBudget = memorySnapshot.availablePhysicalBytes / 2ULL;
+            totalBudget = memorySnapshot.totalPhysicalBytes / 2ULL;
+            minimumBudget = kAggressiveThumbnailCacheCapacityBytes;
+            maximumBudget = kAggressiveMaximumThumbnailCacheCapacityBytes;
             break;
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:
@@ -95,6 +105,9 @@ namespace
         case hyperbrowse::util::ResourceProfile::Conservative:
             return std::max<std::size_t>(normalized / 4U, kMinWorkerCount);
         case hyperbrowse::util::ResourceProfile::Performance:
+            return std::max<std::size_t>(normalized, kMinWorkerCount);
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            return std::max<std::size_t>(normalized + (normalized / 2U), kMinWorkerCount);
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:
             return std::max<std::size_t>(normalized, kMinWorkerCount);
@@ -116,6 +129,7 @@ namespace
             rawWorkerDivisor = kConservativeRawWorkerDivisor;
             break;
         case hyperbrowse::util::ResourceProfile::Performance:
+        case hyperbrowse::util::ResourceProfile::Aggressive:
             rawWorkerDivisor = kPerformanceRawWorkerDivisor;
             break;
         case hyperbrowse::util::ResourceProfile::Balanced:

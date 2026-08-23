@@ -262,8 +262,9 @@ namespace
     constexpr UINT ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE = 9004;
     constexpr UINT ID_HELP_PERFORMANCE_PROFILE_BALANCED = 9005;
     constexpr UINT ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE = 9006;
-    constexpr UINT ID_HELP_PERFORMANCE_SETTINGS = 9007;
-    constexpr UINT ID_HELP_USER_GUIDE = 9008;
+    constexpr UINT ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE = 9007;
+    constexpr UINT ID_HELP_PERFORMANCE_SETTINGS = 9008;
+    constexpr UINT ID_HELP_USER_GUIDE = 9009;
     constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
     constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
     constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
@@ -6536,6 +6537,9 @@ namespace
         case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Performance):
             *resourceProfile = hyperbrowse::util::ResourceProfile::Performance;
             return true;
+        case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Aggressive):
+            *resourceProfile = hyperbrowse::util::ResourceProfile::Aggressive;
+            return true;
         default:
             return false;
         }
@@ -6549,6 +6553,8 @@ namespace
             return hyperbrowse::util::ResourceProfile::Conservative;
         case ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE:
             return hyperbrowse::util::ResourceProfile::Performance;
+        case ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE:
+            return hyperbrowse::util::ResourceProfile::Aggressive;
         case ID_HELP_PERFORMANCE_PROFILE_BALANCED:
         default:
             return hyperbrowse::util::ResourceProfile::Balanced;
@@ -6563,6 +6569,8 @@ namespace
             return ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE;
         case hyperbrowse::util::ResourceProfile::Performance:
             return ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE;
+        case hyperbrowse::util::ResourceProfile::Aggressive:
+            return ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE;
         case hyperbrowse::util::ResourceProfile::Balanced:
         default:
             return ID_HELP_PERFORMANCE_PROFILE_BALANCED;
@@ -7551,6 +7559,7 @@ namespace hyperbrowse::ui
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE, L"&Conservative");
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_BALANCED, L"&Balanced");
         AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE, L"&Performance");
+        AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE, L"&Aggressive");
         AppendMenuW(performanceMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceProfileMenu), L"Performance &Profile");
         AppendMenuW(performanceMenu, MF_STRING, ID_HELP_PERFORMANCE_SETTINGS, L"Performance &Settings...");
         AppendMenuW(helpMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
@@ -15673,7 +15682,7 @@ namespace hyperbrowse::ui
         CheckMenuRadioItem(
             menu_,
             ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE,
-            ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE,
+            ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE,
             CommandIdFromResourceProfile(resourceProfile_),
             MF_BYCOMMAND);
         EnableMenuItem(
@@ -18056,6 +18065,7 @@ namespace hyperbrowse::ui
         case ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE:
         case ID_HELP_PERFORMANCE_PROFILE_BALANCED:
         case ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE:
+        case ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE:
         {
             const util::ResourceProfile requestedProfile = ResourceProfileFromCommandId(commandId);
             if (resourceProfile_ != requestedProfile)
