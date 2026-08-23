@@ -41,33 +41,38 @@ Completed in the working tree:
    event, reject remote clients, and use an explicit current-user ACL.
 - Persistent thumbnail-cache index parsing rejects malformed numeric fields and
    unsafe cache filenames; index replacement is atomic; path-traversal
-   regression coverage is present.
+   regression coverage is present. The loaded index is authoritative in memory,
+   access-order persistence is asynchronous and batched instead of rewriting
+   the whole index on every cache hit, and statistics, compaction, and purge
+   operations run off the UI thread with completion/error reporting.
 - RAW helper payloads use checked dimensions and byte counts, exact file-length
    validation, bounded allocation, and malformed-payload regression coverage.
 - Viewer, thumbnail, metadata, file-operation, batch-conversion, and shared
    executor paths contain unexpected exceptions instead of terminating the
    process. The viewer target HWND is synchronized across worker threads.
+- Close during a shell file operation requests cancellation, keeps the main
+   window alive for the completion update, and discards queued viewer deletes
+   during shutdown. Batch conversion uses the same deferred-close behavior.
 - Viewer `0` and `1` shortcuts, folder-filter reset, status details, and the
    compact-thumbnail toggle are implemented and smoke-tested.
 - Installer association refresh is enabled and user metadata writes use atomic
    replacement.
 - Undo refuses incomplete source/destination mappings, and batch conversion
-   reports filename exhaustion instead of reusing an occupied base path.
+   reports filename exhaustion instead of reusing an occupied base path. Undo
+   and redo history now changes only after a complete inverse operation succeeds.
 - The offline guide and UI behavior specification now use the current Settings
    hierarchy and shortcut/slideshow behavior.
 
 Still open before the release gate can be marked green:
 
-- Add an idle-client single-instance shutdown test and verify the ACL manually
-   across multiple Windows sessions.
-- Make cache maintenance asynchronous and replace whole-index rewrite-on-hit
-   behavior with a bounded persistence strategy.
-- Define cancellation/close behavior for shell file operations and make undo /
-   redo history transactional after inverse-operation completion.
-- Add malformed-index, RAW-helper, file-operation, watcher, and install/upgrade
-   coverage to automated CI; stabilize the intermittent viewer-fit test.
-- Add package manifest checks, nonzero startup-budget gating, optional code
-   signing, and final 2.0.0 version/tag/package verification.
+- Verify the single-instance ACL manually across multiple Windows sessions.
+- Validate the committed CI workflow on hosted Windows runners, add remaining
+   malformed-index, RAW-helper, file-operation, watcher, and install/upgrade
+   coverage there, and stabilize the intermittent viewer-fit test.
+- Validate the committed CI workflow, add nonzero startup-budget gating,
+   optional code signing, and final 2.0.0
+   version/tag/package verification. Package manifest checks are implemented
+   in the release packaging script.
 
 ## Release Gate
 
@@ -94,7 +99,9 @@ The following items are required before publishing 2.0.0.
 3. Apply an explicit security descriptor and reject remote pipe clients where
    supported. Validate forwarded launch paths before filesystem probing.
 4. Add a test or manual harness for a client that connects, writes nothing,
-   and keeps the pipe open while the primary application exits.
+   and keeps the pipe open while the primary application exits. The smoke test
+   now covers this lifecycle. The client and ACL use concrete file access
+   masks, with the pipe restricted to the current user SID.
 
 ### B. Persistent cache hardening and scalability
 
@@ -106,16 +113,19 @@ The following items are required before publishing 2.0.0.
 3. Replace in-place index truncation with temporary-file write plus flush,
    close, and atomic replacement.
 4. Keep cache maintenance off the UI thread and expose failures in diagnostics.
-5. Follow up with an authoritative in-memory index and asynchronous access
-   journaling so cache hits do not reparse and rewrite the complete TSV index.
+5. Keep the loaded index authoritative in memory and persist access-order
+   updates asynchronously so cache hits do not reparse the complete TSV index.
+   Access-order writes are bounded to one persistence update per 64 hits. All
+   cache maintenance remains off the UI thread.
 
 ### C. Async work and shutdown
 
 1. Add exception boundaries at executor and worker entry points. Record the
    failure and post a completion/error update when a worker owns an active UI
    operation.
-2. Define close-during-copy/move/delete/conversion behavior. Prefer canceling
-   shell work where possible; otherwise keep a clear bounded shutdown state.
+2. Shell copy/move/delete/rename and batch conversion now request cancellation
+   during close and keep the owner window alive until completion. Add direct
+   close-during-operation coverage to the test matrix.
 3. Make viewer async target-window publication synchronized with request and
    navigation generation checks.
 4. Replace per-request `std::async` use in enumeration, conversion, and file
@@ -123,9 +133,9 @@ The following items are required before publishing 2.0.0.
 
 ### D. File workflows and user data
 
-1. Make undo/redo transactional: retain exact source/destination pairs, only
-   journal operations with complete inverse information, and change the undo
-   and redo stacks after the inverse operation succeeds.
+1. Retain exact source/destination pairs, only journal operations with complete
+   inverse information, and change the undo and redo stacks after the inverse
+   operation succeeds.
 2. Prevent batch conversion from returning an existing filename after numeric
    suffix exhaustion.
 3. Move multi-file JPEG orientation adjustment and full-image clipboard decode
@@ -151,8 +161,9 @@ changing the contract consistently in the specs, README, and offline guide:
 
 ### F. Release engineering and distribution
 
-1. Add committed CI for configure, Debug/Release builds, CTest, startup
-   budgets, and package validation.
+1. The committed CI workflow configures Debug/Release builds, runs CTest,
+   applies nonzero startup budgets, and validates the release package. Run it
+   on hosted Windows runners and expand its coverage as remaining tests land.
 2. Use nonzero benchmark budgets after measuring a stable baseline and define
    an explicit variance policy for hosted runners.
 3. Add package manifest checks so stale PDBs, libraries, debug artifacts, or
@@ -216,3 +227,22 @@ to the 2.0 candidate without a separate product decision.
   explicit startup budgets, and current viewer-fit test flakiness.
 - 2026-08-23: Implemented and validated the first IPC, cache, RAW protocol,
   exception, UI contract, persistence, and file-workflow hardening slices.
+- 2026-08-23: Added malformed persistent-cache index coverage and made
+   asynchronous undo/redo history transitions transactional.
+- 2026-08-23: Added cooperative shell file-operation cancellation and deferred
+   main-window shutdown until active operation completion.
+- 2026-08-23: Bounded persistent-cache access-order writes and added single-hit
+   and threshold-flush regression coverage.
+- 2026-08-23: Extended deferred close and cancellation handling to batch
+   conversion.
+- 2026-08-23: Added an end-to-end idle-client single-instance shutdown smoke
+   test.
+- 2026-08-23: Corrected named-pipe client/ACL access masks and validated the
+   idle-client shutdown test against the Release application.
+- 2026-08-23: Made the persistent cache index authoritative per cache instance,
+   moved access-order persistence to a background writer, and updated cache
+   regression coverage for asynchronous flushes.
+- 2026-08-23: Added portable and installer-layout manifest checks to release
+   packaging and validated ZIP and Inno Setup artifact creation.
+- 2026-08-23: Added the committed Windows CI workflow for Debug/Release
+   validation, startup budgets, and release packaging.

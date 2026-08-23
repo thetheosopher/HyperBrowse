@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <new>
 #include <string>
 #include <system_error>
@@ -139,6 +140,14 @@ namespace
     constexpr int kDetailsPanelCloseButtonMargin = 8;
     constexpr int kDetailsPanelCloseButtonGap = 8;
     constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
+    constexpr UINT kPersistentThumbnailCacheMaintenanceMessage = WM_APP + 75;
+    enum class PersistentThumbnailCacheMaintenanceOperation : unsigned int
+    {
+        Statistics = 0,
+        Compact = 1,
+        Purge = 2,
+    };
+    constexpr unsigned int kPersistentThumbnailCacheMaintenanceSuccessFlag = 4;
     constexpr std::size_t kOpenedFolderHistoryLimit = 256;
     constexpr std::size_t kInvalidHistoryIndex = static_cast<std::size_t>(-1);
     constexpr UINT_PTR kMemoryPressureTimerId = 9101;
@@ -269,6 +278,7 @@ namespace
         bool pressureDetected{};
         bool recoveryCandidate{};
     };
+
     constexpr wchar_t kAboutDialogGitHubUrl[] = L"https://github.com/thetheosopher/HyperBrowse";
     constexpr wchar_t kAboutDialogSupportUrl[] = L"https://buymeacoffee.com/theosopher";
     constexpr int kAboutDialogWidth = 1180;
@@ -7391,6 +7401,12 @@ namespace
 
 namespace hyperbrowse::ui
 {
+    struct PersistentThumbnailCacheMaintenanceState
+    {
+        std::mutex mutex;
+        cache::DiskThumbnailCache::Statistics statistics;
+    };
+
     // OLE drop target that gives real drag-over feedback (copy/move cursor and folder
     // highlight) for external file drags onto the main window. It reuses the window's
     // quick-access row / tree hit-testing so a drop lands where the cursor is.
@@ -7527,6 +7543,8 @@ namespace hyperbrowse::ui
 
     MainWindow::~MainWindow()
     {
+        cacheMaintenanceExecutor_.reset();
+
         if (shortcutReferenceWindow_ && IsWindow(shortcutReferenceWindow_))
         {
             DestroyWindow(shortcutReferenceWindow_);
@@ -7561,6 +7579,11 @@ namespace hyperbrowse::ui
         if (batchConvertService_)
         {
             batchConvertService_->Cancel();
+        }
+
+        if (fileOperationService_)
+        {
+            fileOperationService_->Cancel();
         }
 
         if (backgroundBrush_)
@@ -7703,6 +7726,8 @@ namespace hyperbrowse::ui
             memoryPressureTimerId_ = SetTimer(hwnd_, kMemoryPressureTimerId, kMemoryPressureIntervalMs, nullptr);
             QueueMemoryPressureSample();
         }
+        cacheMaintenanceState_ = std::make_shared<PersistentThumbnailCacheMaintenanceState>();
+        cacheMaintenanceExecutor_ = std::make_unique<util::BackgroundExecutor>(1, 1);
 
         ApplyPersistentThumbnailCacheSetting();
         ApplyTheme();
@@ -15274,30 +15299,29 @@ namespace hyperbrowse::ui
             return;
         }
 
-        UndoableOperation operation = std::move(undoStack_.back());
-        undoStack_.pop_back();
+        const UndoableOperation& operation = undoStack_.back();
 
         const auto type = static_cast<services::FileOperationType>(operation.type);
         std::vector<std::wstring> undoSources;
         std::wstring undoDestination;
         std::vector<std::wstring> undoLeafNames;
+        bool started = false;
 
         if (type == services::FileOperationType::Copy)
         {
             // Undo a copy = delete the created copies (recycle bin for safety).
             if (operation.createdPaths.empty())
             {
-                applyingUndoRedo_ = false;
-                UpdateUndoRedoMenuState();
                 return;
             }
             undoSources = operation.createdPaths;
             applyingUndoRedo_ = true;
-            StartFileOperation(services::FileOperationType::DeleteRecycleBin,
-                               undoSources,
-                               {},
-                               services::FileConflictPolicy::PromptShell,
-                               {});
+            pendingUndoRedoOperation_ = UndoRedoOperation::Undo;
+            started = StartFileOperation(services::FileOperationType::DeleteRecycleBin,
+                                         undoSources,
+                                         {},
+                                         services::FileConflictPolicy::PromptShell,
+                                         {});
         }
         else if (type == services::FileOperationType::Move)
         {
@@ -15306,17 +15330,16 @@ namespace hyperbrowse::ui
             // original source's parent folder.
             if (operation.createdPaths.empty())
             {
-                applyingUndoRedo_ = false;
-                UpdateUndoRedoMenuState();
                 return;
             }
             const std::wstring originalFolder = fs::path(operation.sourcePaths.front()).parent_path().wstring();
             applyingUndoRedo_ = true;
-            StartFileOperation(services::FileOperationType::Move,
-                               operation.createdPaths,
-                               originalFolder,
-                               services::FileConflictPolicy::PromptShell,
-                               {});
+            pendingUndoRedoOperation_ = UndoRedoOperation::Undo;
+            started = StartFileOperation(services::FileOperationType::Move,
+                                         operation.createdPaths,
+                                         originalFolder,
+                                         services::FileConflictPolicy::PromptShell,
+                                         {});
         }
         else // Rename
         {
@@ -15328,14 +15351,19 @@ namespace hyperbrowse::ui
                 originalLeafNames.push_back(fs::path(sourcePath).filename().wstring());
             }
             applyingUndoRedo_ = true;
-            StartFileOperation(services::FileOperationType::Rename,
-                               operation.createdPaths,
-                               {},
-                               services::FileConflictPolicy::PromptShell,
-                               originalLeafNames);
+            pendingUndoRedoOperation_ = UndoRedoOperation::Undo;
+            started = StartFileOperation(services::FileOperationType::Rename,
+                                         operation.createdPaths,
+                                         {},
+                                         services::FileConflictPolicy::PromptShell,
+                                         originalLeafNames);
         }
 
-        redoStack_.push_back(std::move(operation));
+        if (!started)
+        {
+            applyingUndoRedo_ = false;
+            pendingUndoRedoOperation_ = UndoRedoOperation::None;
+        }
         UpdateUndoRedoMenuState();
     }
 
@@ -15346,26 +15374,27 @@ namespace hyperbrowse::ui
             return;
         }
 
-        UndoableOperation operation = std::move(redoStack_.back());
-        redoStack_.pop_back();
+        const UndoableOperation& operation = redoStack_.back();
 
         const auto type = static_cast<services::FileOperationType>(operation.type);
         applyingUndoRedo_ = true;
+        pendingUndoRedoOperation_ = UndoRedoOperation::Redo;
+        bool started = false;
         if (type == services::FileOperationType::Copy)
         {
-            StartFileOperation(services::FileOperationType::Copy,
-                               operation.sourcePaths,
-                               operation.destinationFolder,
-                               services::FileConflictPolicy::PromptShell,
-                               {});
+            started = StartFileOperation(services::FileOperationType::Copy,
+                                         operation.sourcePaths,
+                                         operation.destinationFolder,
+                                         services::FileConflictPolicy::PromptShell,
+                                         {});
         }
         else if (type == services::FileOperationType::Move)
         {
-            StartFileOperation(services::FileOperationType::Move,
-                               operation.sourcePaths,
-                               operation.destinationFolder,
-                               services::FileConflictPolicy::PromptShell,
-                               {});
+            started = StartFileOperation(services::FileOperationType::Move,
+                                         operation.sourcePaths,
+                                         operation.destinationFolder,
+                                         services::FileConflictPolicy::PromptShell,
+                                         {});
         }
         else // Rename: redo renames back to the new leaf names.
         {
@@ -15375,14 +15404,18 @@ namespace hyperbrowse::ui
             {
                 newLeafNames.push_back(fs::path(createdPath).filename().wstring());
             }
-            StartFileOperation(services::FileOperationType::Rename,
-                               operation.sourcePaths,
-                               {},
-                               services::FileConflictPolicy::PromptShell,
-                               newLeafNames);
+            started = StartFileOperation(services::FileOperationType::Rename,
+                                         operation.sourcePaths,
+                                         {},
+                                         services::FileConflictPolicy::PromptShell,
+                                         newLeafNames);
         }
 
-        undoStack_.push_back(std::move(operation));
+        if (!started)
+        {
+            applyingUndoRedo_ = false;
+            pendingUndoRedoOperation_ = UndoRedoOperation::None;
+        }
         UpdateUndoRedoMenuState();
     }
 
@@ -15402,6 +15435,7 @@ namespace hyperbrowse::ui
     void MainWindow::ApplyCompletedFileOperation(const services::FileOperationUpdate& update)
     {
         util::ScopedTimer applyTimer(L"MainWindow::ApplyCompletedFileOperation");
+        const UndoRedoOperation completedUndoRedoOperation = pendingUndoRedoOperation_;
         fileOperationActive_ = false;
         activeFileOperationLabel_.clear();
         applyingUndoRedo_ = false;
@@ -15967,6 +16001,30 @@ namespace hyperbrowse::ui
             LoadFolderAsync(browserModel_->FolderPath());
         }
 
+        if (completedUndoRedoOperation != UndoRedoOperation::None)
+        {
+            const bool undoRedoSucceeded = update.finished
+                && !update.aborted
+                && update.failedCount == 0
+                && update.succeededSourcePaths.size() == update.requestedCount;
+            if (undoRedoSucceeded)
+            {
+                if (completedUndoRedoOperation == UndoRedoOperation::Undo && !undoStack_.empty())
+                {
+                    redoStack_.push_back(std::move(undoStack_.back()));
+                    undoStack_.pop_back();
+                }
+                else if (completedUndoRedoOperation == UndoRedoOperation::Redo && !redoStack_.empty())
+                {
+                    undoStack_.push_back(std::move(redoStack_.back()));
+                    redoStack_.pop_back();
+                }
+            }
+
+            pendingUndoRedoOperation_ = UndoRedoOperation::None;
+            applyingUndoRedo_ = false;
+        }
+
         UpdateStatusText();
         UpdateMenuState();
 
@@ -15997,7 +16055,12 @@ namespace hyperbrowse::ui
         // operation slot is free.  Use the viewer's current path as the sync
         // target so we never navigate the viewer back to an image it has already
         // advanced past.
-        if (!pendingViewerDeletes_.empty())
+        if (closePending_)
+        {
+            pendingViewerDeletes_.clear();
+            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+        }
+        else if (!pendingViewerDeletes_.empty())
         {
             PendingViewerDelete next = std::move(pendingViewerDeletes_.front());
             pendingViewerDeletes_.pop_front();
@@ -17013,93 +17076,227 @@ namespace hyperbrowse::ui
 
     void MainWindow::ShowPersistentThumbnailCacheDialog()
     {
+        if (cacheMaintenanceActive_ || !cacheMaintenanceState_)
+        {
+            return;
+        }
+
+        StartPersistentThumbnailCacheStatistics();
+    }
+
+    void MainWindow::ShowPersistentThumbnailCacheDialogContents(std::wstring content,
+                                                                 std::wstring expandedInformation)
+    {
+
         constexpr int kCompactPersistentCacheButtonId = 1001;
         constexpr int kPurgePersistentCacheButtonId = 1002;
 
-        for (;;)
+        TASKDIALOG_BUTTON buttons[] = {
+            {kCompactPersistentCacheButtonId, L"Compact cache\nRepair the saved index, remove orphaned thumbnails, and trim the cache to its storage budget."},
+            {kPurgePersistentCacheButtonId, L"Purge cache\nDelete every persistent thumbnail and clear the saved cache index."},
+        };
+
+        TASKDIALOGCONFIG config{};
+        config.cbSize = sizeof(config);
+        config.hwndParent = hwnd_;
+        config.hInstance = instance_;
+        config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+        config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
+        config.pszWindowTitle = L"Persistent Thumbnail Cache";
+        config.pszMainIcon = MAKEINTRESOURCEW(IDI_HYPERBROWSE);
+        config.pszMainInstruction = L"Inspect or clean the persistent thumbnail cache.";
+        config.pszContent = content.c_str();
+        config.pszExpandedInformation = expandedInformation.c_str();
+        config.pszCollapsedControlText = L"Show Cache Details";
+        config.pszExpandedControlText = L"Hide Cache Details";
+        config.cButtons = static_cast<UINT>(std::size(buttons));
+        config.pButtons = buttons;
+        config.nDefaultButton = kCompactPersistentCacheButtonId;
+
+        int clickedButton = 0;
+        const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
+        if (FAILED(dialogResult))
         {
-            cache::DiskThumbnailCache persistentCache;
-            const cache::DiskThumbnailCache::Statistics statistics = persistentCache.QueryStatistics();
+            MessageBoxW(hwnd_,
+                        L"Failed to open the persistent thumbnail cache dialog.",
+                        L"Persistent Thumbnail Cache",
+                        MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        if (clickedButton == kCompactPersistentCacheButtonId)
+        {
+            StartPersistentThumbnailCacheMaintenance(false);
+            return;
+        }
+
+        if (clickedButton == kPurgePersistentCacheButtonId)
+        {
+            const int confirmResult = MessageBoxW(hwnd_,
+                                                  L"Delete all thumbnails saved in the persistent cache? This does not delete your images.",
+                                                  L"Purge Persistent Thumbnail Cache",
+                                                  MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+            if (confirmResult == IDYES)
+            {
+                StartPersistentThumbnailCacheMaintenance(true);
+            }
+        }
+    }
+
+    void MainWindow::StartPersistentThumbnailCacheStatistics()
+    {
+        if (cacheMaintenanceActive_ || !cacheMaintenanceExecutor_ || !cacheMaintenanceState_ || !hwnd_)
+        {
+            return;
+        }
+
+        cacheMaintenanceActive_ = true;
+        const HWND targetWindow = hwnd_;
+        const auto state = cacheMaintenanceState_;
+        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, state]()
+        {
+            bool succeeded = true;
+            try
+            {
+                cache::DiskThumbnailCache persistentCache;
+                auto statistics = persistentCache.QueryStatistics();
+                {
+                    std::scoped_lock lock(state->mutex);
+                    state->statistics = std::move(statistics);
+                }
+            }
+            catch (...)
+            {
+                succeeded = false;
+            }
+
+            if (!PostMessageW(targetWindow,
+                              kPersistentThumbnailCacheMaintenanceMessage,
+                              static_cast<WPARAM>(succeeded ? 4u : 0u),
+                              0))
+            {
+                return;
+            }
+        });
+
+        if (!queued)
+        {
+            cacheMaintenanceActive_ = false;
+            MessageBoxW(hwnd_,
+                        L"The persistent thumbnail cache operation could not be started.",
+                        L"Persistent Thumbnail Cache",
+                        MB_OK | MB_ICONERROR);
+        }
+    }
+
+    void MainWindow::StartPersistentThumbnailCacheMaintenance(bool purge)
+    {
+        if (cacheMaintenanceActive_ || !cacheMaintenanceExecutor_ || !hwnd_)
+        {
+            return;
+        }
+
+        cacheMaintenanceActive_ = true;
+        const HWND targetWindow = hwnd_;
+        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, purge]()
+        {
+            bool succeeded = true;
+            try
+            {
+                cache::DiskThumbnailCache persistentCache;
+                if (purge)
+                {
+                    persistentCache.Clear();
+                }
+                else
+                {
+                    succeeded = persistentCache.Compact();
+                }
+            }
+            catch (...)
+            {
+                succeeded = false;
+            }
+
+            if (!PostMessageW(targetWindow,
+                              kPersistentThumbnailCacheMaintenanceMessage,
+                              static_cast<WPARAM>(static_cast<unsigned int>(purge
+                                                                                 ? PersistentThumbnailCacheMaintenanceOperation::Purge
+                                                                                 : PersistentThumbnailCacheMaintenanceOperation::Compact)
+                                                 | (succeeded ? kPersistentThumbnailCacheMaintenanceSuccessFlag : 0u)),
+                              0))
+            {
+                return;
+            }
+        });
+
+        if (!queued)
+        {
+            cacheMaintenanceActive_ = false;
+            MessageBoxW(hwnd_,
+                        L"The persistent thumbnail cache operation could not be started.",
+                        L"Persistent Thumbnail Cache",
+                        MB_OK | MB_ICONERROR);
+        }
+    }
+
+    LRESULT MainWindow::OnPersistentThumbnailCacheMaintenanceMessage(WPARAM wParam)
+    {
+        cacheMaintenanceActive_ = false;
+        const auto operation = static_cast<PersistentThumbnailCacheMaintenanceOperation>(wParam & 3u);
+        const bool succeeded = (wParam & kPersistentThumbnailCacheMaintenanceSuccessFlag) != 0;
+
+        if (operation == PersistentThumbnailCacheMaintenanceOperation::Statistics)
+        {
+            if (!succeeded || !cacheMaintenanceState_)
+            {
+                MessageBoxW(hwnd_,
+                            L"Failed to inspect the persistent thumbnail cache.",
+                            L"Persistent Thumbnail Cache",
+                            MB_OK | MB_ICONERROR);
+                return 0;
+            }
+
+            cache::DiskThumbnailCache::Statistics statistics;
+            {
+                std::scoped_lock lock(cacheMaintenanceState_->mutex);
+                statistics = cacheMaintenanceState_->statistics;
+            }
             if (statistics.cacheDirectory.empty())
             {
                 MessageBoxW(hwnd_,
                             L"The persistent thumbnail cache folder could not be resolved.",
                             L"Persistent Thumbnail Cache",
                             MB_OK | MB_ICONERROR);
-                return;
+                return 0;
             }
 
-            std::wstring content = BuildPersistentThumbnailCacheSummary(statistics, persistentThumbnailCacheEnabled_);
-            std::wstring expandedInformation = BuildPersistentThumbnailCacheDetails(statistics);
-
-            TASKDIALOG_BUTTON buttons[] = {
-                {kCompactPersistentCacheButtonId, L"Compact cache\nRepair the saved index, remove orphaned thumbnails, and trim the cache to its storage budget."},
-                {kPurgePersistentCacheButtonId, L"Purge cache\nDelete every persistent thumbnail and clear the saved cache index."},
-            };
-
-            TASKDIALOGCONFIG config{};
-            config.cbSize = sizeof(config);
-            config.hwndParent = hwnd_;
-            config.hInstance = instance_;
-            config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
-            config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-            config.pszWindowTitle = L"Persistent Thumbnail Cache";
-            config.pszMainIcon = MAKEINTRESOURCEW(IDI_HYPERBROWSE);
-            config.pszMainInstruction = L"Inspect or clean the persistent thumbnail cache.";
-            config.pszContent = content.c_str();
-            config.pszExpandedInformation = expandedInformation.c_str();
-            config.pszCollapsedControlText = L"Show Cache Details";
-            config.pszExpandedControlText = L"Hide Cache Details";
-            config.cButtons = static_cast<UINT>(std::size(buttons));
-            config.pButtons = buttons;
-            config.nDefaultButton = kCompactPersistentCacheButtonId;
-
-            int clickedButton = 0;
-            const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
-            if (FAILED(dialogResult))
-            {
-                MessageBoxW(hwnd_,
-                            L"Failed to open the persistent thumbnail cache dialog.",
-                            L"Persistent Thumbnail Cache",
-                            MB_OK | MB_ICONERROR);
-                return;
-            }
-
-            if (clickedButton == IDCANCEL || clickedButton == IDCLOSE || clickedButton == 0)
-            {
-                return;
-            }
-
-            if (clickedButton == kCompactPersistentCacheButtonId)
-            {
-                if (!persistentCache.Compact())
-                {
-                    MessageBoxW(hwnd_,
-                                L"Failed to compact the persistent thumbnail cache.",
-                                L"Persistent Thumbnail Cache",
-                                MB_OK | MB_ICONERROR);
-                    return;
-                }
-                continue;
-            }
-
-            if (clickedButton == kPurgePersistentCacheButtonId)
-            {
-                const int confirmResult = MessageBoxW(hwnd_,
-                                                      L"Delete all thumbnails saved in the persistent cache? This does not delete your images.",
-                                                      L"Purge Persistent Thumbnail Cache",
-                                                      MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
-                if (confirmResult != IDYES)
-                {
-                    continue;
-                }
-
-                persistentCache.Clear();
-                continue;
-            }
-
-            return;
+            ShowPersistentThumbnailCacheDialogContents(
+                BuildPersistentThumbnailCacheSummary(statistics, persistentThumbnailCacheEnabled_),
+                BuildPersistentThumbnailCacheDetails(statistics));
+            return 0;
         }
+
+        const bool purge = operation == PersistentThumbnailCacheMaintenanceOperation::Purge;
+
+        if (!succeeded)
+        {
+            MessageBoxW(hwnd_,
+                        purge
+                            ? L"Failed to purge the persistent thumbnail cache."
+                            : L"Failed to compact the persistent thumbnail cache.",
+                        L"Persistent Thumbnail Cache",
+                        MB_OK | MB_ICONERROR);
+            return 0;
+        }
+
+        NotifyLongOperationComplete(
+            purge ? L"Persistent Thumbnail Cache Purged" : L"Persistent Thumbnail Cache Compacted",
+            purge
+                ? L"All saved thumbnails were removed from the persistent cache."
+                : L"The persistent thumbnail cache index and storage were repaired.");
+        ShowPersistentThumbnailCacheDialog();
+        return 0;
     }
 
     void MainWindow::ApplyRawJpegPairingSettings()
@@ -17990,6 +18187,11 @@ namespace hyperbrowse::ui
                     MessageBoxW(hwnd_, summary.c_str(), L"Batch Convert", MB_OK | MB_ICONWARNING);
                 }
             }
+        }
+
+        if (update->finished && closePending_)
+        {
+            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
         }
 
         UpdateStatusText();
@@ -20528,6 +20730,26 @@ namespace hyperbrowse::ui
     {
         switch (message)
         {
+        case WM_CLOSE:
+            if (fileOperationActive_ || batchConvertActive_)
+            {
+                closePending_ = true;
+                if (fileOperationActive_ && fileOperationService_)
+                {
+                    fileOperationService_->Cancel();
+                }
+                if (batchConvertActive_ && batchConvertService_)
+                {
+                    batchConvertService_->Cancel();
+                }
+                activeFileOperationLabel_ = fileOperationActive_
+                    ? L"Cancelling file operation"
+                    : L"Cancelling batch conversion";
+                UpdateStatusText();
+                UpdateMenuState();
+                return 0;
+            }
+            return DefWindowProcW(hwnd_, message, wParam, lParam);
         case WM_GETMINMAXINFO:
             OnGetMinMaxInfo(reinterpret_cast<MINMAXINFO*>(lParam));
             return 0;
@@ -20812,6 +21034,8 @@ namespace hyperbrowse::ui
             return OnViewerClosedMessage();
         case kMemoryPressureSampledMessage:
             return OnMemoryPressureSampleMessage(lParam);
+        case kPersistentThumbnailCacheMaintenanceMessage:
+            return OnPersistentThumbnailCacheMaintenanceMessage(wParam);
         case kDeferredMenuStateMessage:
             menuStateRefreshPosted_ = false;
             if (!menuLoopActive_ && menuStateRefreshPending_)

@@ -2,9 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -30,6 +32,10 @@ namespace hyperbrowse::cache
         };
 
         explicit DiskThumbnailCache(std::size_t capacityBytes = 0, std::wstring cacheDirectory = {});
+        ~DiskThumbnailCache();
+
+        DiskThumbnailCache(const DiskThumbnailCache&) = delete;
+        DiskThumbnailCache& operator=(const DiskThumbnailCache&) = delete;
 
         std::shared_ptr<const CachedThumbnail> TryLoad(const ThumbnailCacheKey& key);
         void Store(const ThumbnailCacheKey& key, std::shared_ptr<const CachedThumbnail> thumbnail);
@@ -52,6 +58,7 @@ namespace hyperbrowse::cache
         void ReloadIndexLocked();
         bool LoadIndexLocked();
         void SaveIndexLocked() const;
+        void AccessPersistenceLoop();
         void EvictIfNeededLocked();
         std::wstring EnsureCacheDirectoryLocked();
 
@@ -61,6 +68,10 @@ namespace hyperbrowse::cache
         std::wstring cacheDirectory_;
         std::size_t currentBytes_{};
         std::uint64_t nextAccessOrdinal_{1};
+        mutable std::size_t pendingAccessUpdates_{};
         std::unordered_map<ThumbnailCacheKey, Entry, ThumbnailCacheKeyHasher> entries_;
+        std::condition_variable accessPersistenceAvailable_;
+        std::thread accessPersistenceThread_;
+        bool shuttingDown_{};
     };
 }

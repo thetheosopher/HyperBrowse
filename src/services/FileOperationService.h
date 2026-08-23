@@ -72,6 +72,8 @@ namespace hyperbrowse::services
         FileOperationService() = default;
         ~FileOperationService();
 
+        void Cancel() noexcept;
+
         std::uint64_t Start(HWND targetWindow,
                             HWND ownerWindow,
                             FileOperationType type,
@@ -86,5 +88,6 @@ namespace hyperbrowse::services
 
         std::vector<std::future<void>> workers_;
         std::atomic_uint64_t nextRequestId_{0};
+        std::atomic_bool cancellationRequested_{false};
     };
 }

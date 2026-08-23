@@ -28,6 +28,7 @@
 
 #include "browser/BrowserModel.h"
 #include "browser/BrowserPane.h"
+#include "app/Application.h"
 #include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
 #include "decode/RawHelperProtocol.h"
@@ -255,6 +256,144 @@ namespace
         {
             throw std::runtime_error(message);
         }
+    }
+
+    void RunSingleInstanceIdleClientScenario()
+    {
+        constexpr wchar_t kSingleInstancePipeName[] = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch";
+        constexpr wchar_t kMainWindowClassName[] = L"HyperBrowseMainWindow";
+
+        ScopedRegistryDwordBackup singleInstanceBackup(
+            kRegistryPath,
+            L"SingleInstanceEnabled");
+        hyperbrowse::app::Application::SetSingleInstanceEnabled(true);
+
+        wchar_t modulePath[MAX_PATH]{};
+        const DWORD modulePathLength = GetModuleFileNameW(nullptr, modulePath, static_cast<DWORD>(std::size(modulePath)));
+        Expect(modulePathLength > 0 && modulePathLength < std::size(modulePath),
+               "Failed to locate the smoke-test executable");
+
+        const fs::path testDirectory = fs::path(modulePath).parent_path();
+        const fs::path applicationPath = testDirectory.parent_path().parent_path()
+            / testDirectory.filename()
+            / L"HyperBrowse.exe";
+        Expect(fs::exists(applicationPath), "Failed to locate the HyperBrowse executable for IPC testing");
+
+        std::wstring commandLine = L"\"" + applicationPath.wstring() + L"\"";
+        std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+        mutableCommandLine.push_back(L'\0');
+
+        STARTUPINFOW startupInfo{};
+        startupInfo.cb = sizeof(startupInfo);
+        PROCESS_INFORMATION processInfo{};
+        Expect(CreateProcessW(applicationPath.c_str(),
+                               mutableCommandLine.data(),
+                               nullptr,
+                               nullptr,
+                               FALSE,
+                               0,
+                               nullptr,
+                               applicationPath.parent_path().c_str(),
+                               &startupInfo,
+                               &processInfo) != FALSE,
+               "Failed to launch HyperBrowse for IPC testing");
+
+        HANDLE pipe = INVALID_HANDLE_VALUE;
+        const auto cleanup = [&]()
+        {
+            if (pipe != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(pipe);
+                pipe = INVALID_HANDLE_VALUE;
+            }
+            if (processInfo.hProcess)
+            {
+                if (WaitForSingleObject(processInfo.hProcess, 0) == WAIT_TIMEOUT)
+                {
+                    TerminateProcess(processInfo.hProcess, 1);
+                    WaitForSingleObject(processInfo.hProcess, 5000);
+                }
+                CloseHandle(processInfo.hProcess);
+                processInfo.hProcess = nullptr;
+            }
+            if (processInfo.hThread)
+            {
+                CloseHandle(processInfo.hThread);
+                processInfo.hThread = nullptr;
+            }
+        };
+        const auto require = [&](bool condition, const char* message)
+        {
+            if (!condition)
+            {
+                cleanup();
+                throw std::runtime_error(message);
+            }
+        };
+
+        HWND mainWindow = nullptr;
+        const ULONGLONG windowDeadline = GetTickCount64() + 10000;
+        while (GetTickCount64() < windowDeadline)
+        {
+            if (WaitForSingleObject(processInfo.hProcess, 0) != WAIT_TIMEOUT)
+            {
+                break;
+            }
+
+            HWND candidate = FindWindowW(kMainWindowClassName, nullptr);
+            DWORD candidateProcessId = 0;
+            if (candidate)
+            {
+                GetWindowThreadProcessId(candidate, &candidateProcessId);
+            }
+            if (candidate && candidateProcessId == processInfo.dwProcessId)
+            {
+                mainWindow = candidate;
+                break;
+            }
+            Sleep(25);
+        }
+        require(mainWindow != nullptr, "HyperBrowse did not create its main window for IPC testing");
+
+        DWORD pipeError = ERROR_SUCCESS;
+        const ULONGLONG pipeDeadline = GetTickCount64() + 10000;
+        while (GetTickCount64() < pipeDeadline)
+        {
+            pipe = CreateFileW(kSingleInstancePipeName,
+                               FILE_WRITE_DATA,
+                               0,
+                               nullptr,
+                               OPEN_EXISTING,
+                               0,
+                               nullptr);
+            if (pipe != INVALID_HANDLE_VALUE)
+            {
+                break;
+            }
+            pipeError = GetLastError();
+            if (pipeError != ERROR_PIPE_BUSY && pipeError != ERROR_FILE_NOT_FOUND)
+            {
+                break;
+            }
+            WaitNamedPipeW(kSingleInstancePipeName, 100);
+        }
+        if (pipe == INVALID_HANDLE_VALUE)
+        {
+            cleanup();
+            throw std::runtime_error(
+                "Failed to connect an idle single-instance client (Win32 error "
+                + std::to_string(pipeError)
+                + ")");
+        }
+        require(PostMessageW(mainWindow, WM_CLOSE, 0, 0) != FALSE,
+                "Failed to request HyperBrowse shutdown during idle-client testing");
+        require(WaitForSingleObject(processInfo.hProcess, 5000) == WAIT_OBJECT_0,
+                "An idle single-instance client prevented HyperBrowse from shutting down");
+
+        DWORD exitCode = 1;
+        require(GetExitCodeProcess(processInfo.hProcess, &exitCode) != FALSE && exitCode == 0,
+                "HyperBrowse exited unsuccessfully during idle-client testing");
+        cleanup();
     }
 
         void RunShortcutCatalogScenario()
@@ -1270,7 +1409,43 @@ namespace
 
         hyperbrowse::cache::DiskThumbnailCache cache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
         cache.Store(key, thumbnail);
+         std::wstring indexLineBeforeHit;
+         {
+             std::wifstream indexStream(cacheRoot / L"index.tsv");
+             Expect(static_cast<bool>(std::getline(indexStream, indexLineBeforeHit)),
+                 "Persistent thumbnail cache did not write an index row");
+         }
         Expect(cache.TryLoad(key) != nullptr, "Persistent thumbnail cache did not round-trip a valid entry");
+         std::wstring indexLineAfterHit;
+         {
+             std::wifstream indexStream(cacheRoot / L"index.tsv");
+             Expect(static_cast<bool>(std::getline(indexStream, indexLineAfterHit)),
+                 "Persistent thumbnail cache lost its index row after a cache hit");
+         }
+         Expect(indexLineBeforeHit == indexLineAfterHit,
+             "Persistent thumbnail cache rewrote the index on a single cache hit");
+         for (int hit = 1; hit < 64; ++hit)
+         {
+             Expect(cache.TryLoad(key) != nullptr,
+                 "Persistent thumbnail cache failed during bounded access persistence testing");
+         }
+         std::wstring indexLineAfterBatch;
+         bool accessMetadataPersisted = false;
+         for (int attempt = 0; attempt < 100 && !accessMetadataPersisted; ++attempt)
+         {
+             indexLineAfterBatch.clear();
+             std::wifstream indexStream(cacheRoot / L"index.tsv");
+             if (std::getline(indexStream, indexLineAfterBatch))
+             {
+                 accessMetadataPersisted = indexLineAfterBatch != indexLineBeforeHit;
+             }
+             if (!accessMetadataPersisted)
+             {
+                 Sleep(10);
+             }
+         }
+         Expect(accessMetadataPersisted,
+             "Persistent thumbnail cache did not persist batched access metadata");
 
 #pragma pack(push, 1)
         struct TestDiskThumbnailHeader
@@ -1330,6 +1505,41 @@ namespace
 
         corruptEntry(validHeader, static_cast<std::size_t>(validHeader.pixelBytes - 1), "Persistent thumbnail cache accepted a truncated payload");
 
+        cache.Store(key, thumbnail);
+        fs::path validCacheFile;
+        for (const fs::directory_entry& entry : fs::directory_iterator(cacheRoot))
+        {
+            if (entry.path().extension() == L".thumb")
+            {
+                validCacheFile = entry.path();
+                break;
+            }
+        }
+        Expect(!validCacheFile.empty(), "Persistent thumbnail cache did not recreate a valid entry");
+        std::wstring validIndexLine;
+        {
+            std::wifstream indexStream(cacheRoot / L"index.tsv");
+            Expect(static_cast<bool>(std::getline(indexStream, validIndexLine)) && !validIndexLine.empty(),
+                   "Persistent thumbnail cache did not serialize a valid index row");
+        }
+        {
+            std::wofstream indexStream(cacheRoot / L"index.tsv", std::ios::trunc);
+            indexStream << validIndexLine << L'\n'
+                        << L"C:\\invalid\\overflow.jpg\t18446744073709551616\t29\t29\t0123456789abcdef.thumb\t100\t1\n"
+                        << L"C:\\invalid\\text.jpg\tnot-a-number\t29\t29\t0123456789abcdef.thumb\t100\t1\n"
+                        << L"C:\\invalid\\zero-width.jpg\t1\t0\t29\t0123456789abcdef.thumb\t100\t1\n"
+                        << L"C:\\invalid\\unsafe-name.jpg\t1\t29\t29\t..\\outside.thumb\t100\t1\n";
+        }
+
+         {
+             hyperbrowse::cache::DiskThumbnailCache reloadedCache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
+             const auto statistics = reloadedCache.QueryStatistics();
+             Expect(statistics.indexedEntryCount == 1,
+                 "Persistent thumbnail cache did not skip malformed index rows");
+             Expect(reloadedCache.TryLoad(key) != nullptr,
+                 "Persistent thumbnail cache discarded a valid row beside malformed index rows");
+         }
+
         const fs::path outsideCacheFile = root.Root() / L"outside.thumb";
         {
             std::ofstream outsideStream(outsideCacheFile, std::ios::binary | std::ios::trunc);
@@ -1347,8 +1557,9 @@ namespace
                         << L"\t1\n";
         }
 
-        Expect(cache.TryLoad(key) == nullptr,
-               "Persistent thumbnail cache accepted an unsafe index file name");
+         hyperbrowse::cache::DiskThumbnailCache reloadedCache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
+         Expect(reloadedCache.TryLoad(key) == nullptr,
+             "Persistent thumbnail cache accepted an unsafe index file name");
         Expect(fs::exists(outsideCacheFile),
                "Persistent thumbnail cache cleanup escaped its cache directory");
     }
@@ -3011,6 +3222,7 @@ int main(int argc, char* argv[])
         {
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
+            RunSingleInstanceIdleClientScenario();
             RunEnumerationScenario(hwnd, &state);
             RunFolderTreeEnumerationScenario(hwnd, &state);
             RunFolderWatchStartStopScenario(hwnd);

@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-1.2.8-2EA043)
+![Version](https://img.shields.io/badge/Version-2.0.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -32,6 +32,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Display changes and graphics-surface loss trigger redraw and resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
 - Files dropped onto the application can open directly in the viewer or be copied into the current folder through the existing shell-aware workflows.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
+- A committed Windows CI workflow that builds Debug and Release, runs CTest and startup-budget checks, validates release manifests, and publishes build artifacts.
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
 
 ## Current Capabilities
@@ -43,7 +44,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 | Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, viewer prefetch, folder watch refresh, and optional GPU-assisted JPEG decode |
-| Distribution | Debug and Release presets, smoke tests, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode |
+| Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
 
 ### Viewer Quick Send
 
@@ -139,13 +140,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-1.2.8-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.0.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-1.2.8-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.0.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -209,11 +210,26 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **1.2.8**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-1.2.8-portable-win64.zip` and `HyperBrowse-1.2.8-installer.exe`).
+Current release: **2.0.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.0.0-portable-win64.zip` and `HyperBrowse-2.0.0-installer.exe`).
 
-Release **1.2.8** adds keyboard navigation improvements, display-change redraw handling, and graphics-surface recovery for the main window, viewer, diagnostics window, and thumbnail pipeline. It also supports opening dropped files in the viewer and copying dropped files into the current folder.
+Release **2.0.0** expands HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It adds richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.0.0
+
+- Added a redesigned command bar and reorganized menus with clearer browser, viewer, slideshow, metadata, organize, convert, and advanced workflows.
+- Added native Windows drag-and-drop in both directions: drag selected images to folders, File Explorer, mail clients, or other shell-aware applications, and drop files onto HyperBrowse to open them in the viewer or copy them into the current folder.
+- Added clipboard copy and paste for files, image-pixel copying, duplicate-to-same-folder, shell context menus, multi-file Properties, and taskbar progress for long-running file operations.
+- Added favorite destinations, recent-folder integration, Quick Send move/copy shortcuts, folder-history navigation, inline folder rename and creation, guarded folder moves, and improved folder-tree feedback.
+- Added bounded undo and redo for copy, move, and rename workflows, with completion-aware history updates that never journal incomplete operations.
+- Added viewer context actions, scalable overlay text, full metadata presentation, multi-monitor opening, improved keyboard and focus behavior, persistent slideshow settings, and richer transition controls.
+- Added opt-in single-instance launch forwarding through a current-user named pipe, with overlapped shutdown-safe IPC, remote-client rejection, and current-user ACL enforcement.
+- Added tray notifications for background operation completion and display/resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
+- Hardened asynchronous services and worker boundaries so decode, metadata, enumeration, watching, file operations, conversion, scheduling, and UI-owned failures are contained and reported.
+- Hardened RAW-helper and persistent-thumbnail-cache boundaries with checked dimensions and byte counts, exact payload validation, strict index parsing, safe cache paths, atomic index replacement, authoritative in-memory indexing, asynchronous access journaling, and off-UI-thread cache maintenance.
+- Improved large-folder and large-selection performance with coalesced enumeration presentation, early result batches, bulk normalized path removal, hashed fallback checks, and asynchronous persistent-cache invalidation.
+- Added release packaging manifest checks and committed Windows CI covering Debug and Release builds, CTest, startup benchmark budgets, package generation, portable staging, and installer artifacts.
 
 ### 1.2.8
 

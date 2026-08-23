@@ -88,7 +88,7 @@ namespace
             if (!InitializeAcl(reinterpret_cast<PACL>(aclBuffer_.data()), aclSize, ACL_REVISION)
                 || !AddAccessAllowedAce(reinterpret_cast<PACL>(aclBuffer_.data()),
                                         ACL_REVISION,
-                                        GENERIC_WRITE,
+                                        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
                                         tokenUser->User.Sid)
                 || !InitializeSecurityDescriptor(&securityDescriptor_, SECURITY_DESCRIPTOR_REVISION)
                 || !SetSecurityDescriptorDacl(&securityDescriptor_,
@@ -256,7 +256,7 @@ namespace hyperbrowse::app
         if (!launchPath.empty())
         {
             HANDLE pipe = CreateFileW(kSingleInstancePipeName,
-                                      GENERIC_WRITE,
+                                      FILE_WRITE_DATA,
                                       0,
                                       nullptr,
                                       OPEN_EXISTING,

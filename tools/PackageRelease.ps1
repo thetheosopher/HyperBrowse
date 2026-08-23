@@ -143,6 +143,42 @@ function Remove-PathWithRetry {
     }
 }
 
+function Assert-ReleaseLayoutManifest {
+    param(
+        [string]$Layout,
+        [string[]]$RequiredRelativePaths,
+        [string]$ComponentName
+    )
+
+    foreach ($relativePath in $RequiredRelativePaths) {
+        $path = Join-Path $Layout $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "$ComponentName layout is missing required file: $relativePath"
+        }
+    }
+
+    $forbiddenExtensions = @(
+        '.pdb', '.lib', '.obj', '.exp', '.ilk', '.iobj', '.ipdb', '.tlog',
+        '.vcxproj', '.sln', '.slnx', '.cmake', '.log'
+    )
+    $forbiddenFiles = Get-ChildItem -LiteralPath $Layout -File -Recurse | Where-Object {
+        $forbiddenExtensions -contains $_.Extension.ToLowerInvariant()
+    }
+    if ($forbiddenFiles) {
+        $names = ($forbiddenFiles | ForEach-Object { $_.FullName }) -join ', '
+        throw "$ComponentName layout contains build artifacts: $names"
+    }
+
+    $allowedRuntimeDllPattern = '^(cudart64_12|nvjpeg64_12|msvcp[0-9]+|vcruntime[0-9]+|concrt[0-9]+|ucrtbase|api-ms-win-crt-[^ ]+)\.dll$'
+    $unexpectedDlls = Get-ChildItem -LiteralPath $Layout -File -Recurse | Where-Object {
+        $_.Extension -ieq '.dll' -and $_.Name -notmatch $allowedRuntimeDllPattern
+    }
+    if ($unexpectedDlls) {
+        $names = ($unexpectedDlls | ForEach-Object { $_.FullName }) -join ', '
+        throw "$ComponentName layout contains unexpected DLLs: $names"
+    }
+}
+
 $projectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $buildDir = [System.IO.Path]::GetFullPath($BuildDir)
 $cmakeListsPath = Join-Path $projectRoot 'CMakeLists.txt'
@@ -230,6 +266,32 @@ foreach ($layout in @($portableDir, $runtimeDir)) {
         }
     }
 }
+
+$portableManifest = @(
+    'HyperBrowse.exe',
+    'README.txt',
+    'RUNTIME-DEPENDENCIES.txt',
+    'docs\user-guide.html',
+    'docs\MainWindow.PNG'
+)
+$runtimeManifest = @(
+    'bin\HyperBrowse.exe',
+    'docs\README-portable.txt',
+    'docs\runtime-dependencies.txt',
+    'docs\user-guide.html',
+    'docs\MainWindow.PNG'
+)
+$portableRawHelper = Join-Path $portableDir 'HyperBrowseRawHelper.exe'
+$runtimeRawHelper = Join-Path $runtimeDir 'bin\HyperBrowseRawHelper.exe'
+if (Test-Path -LiteralPath $portableRawHelper -PathType Leaf) {
+    $portableManifest += 'HyperBrowseRawHelper.exe'
+    if (-not (Test-Path -LiteralPath $runtimeRawHelper -PathType Leaf)) {
+        throw 'Runtime layout is missing HyperBrowseRawHelper.exe while the portable layout contains it.'
+    }
+    $runtimeManifest += 'bin\HyperBrowseRawHelper.exe'
+}
+Assert-ReleaseLayoutManifest -Layout $portableDir -RequiredRelativePaths $portableManifest -ComponentName 'Portable'
+Assert-ReleaseLayoutManifest -Layout $runtimeDir -RequiredRelativePaths $runtimeManifest -ComponentName 'Runtime'
 
 Write-Host '==> Create portable release archive' -ForegroundColor Cyan
 Compress-Archive -Path $portableDir -DestinationPath $portableZip -CompressionLevel Optimal -Force

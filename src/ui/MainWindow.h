@@ -309,6 +309,9 @@ namespace hyperbrowse::ui
         void ShowSlideshowSettingsDialog();
         void ShowPerformanceSettingsDialog();
         void ShowPersistentThumbnailCacheDialog();
+        void ShowPersistentThumbnailCacheDialogContents(std::wstring content, std::wstring expandedInformation);
+        void StartPersistentThumbnailCacheStatistics();
+        void StartPersistentThumbnailCacheMaintenance(bool purge);
         void ShowDiagnosticsSnapshot();
         void ResetDiagnosticsState();
         void ShowImageInformation();
@@ -419,6 +422,7 @@ namespace hyperbrowse::ui
         LRESULT OnViewerDroppedFileMessage(LPARAM lParam);
         LRESULT OnViewerClosedMessage();
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
+        LRESULT OnPersistentThumbnailCacheMaintenanceMessage(WPARAM wParam);
         void TryOpenPendingStartupViewerPath(bool clearIfNotFound);
         void TryRestorePendingStartupSelectionPath(bool clearIfNotFound);
 
@@ -523,8 +527,15 @@ namespace hyperbrowse::ui
             std::wstring destinationFolder;
             std::wstring description;
         };
+        enum class UndoRedoOperation
+        {
+            None,
+            Undo,
+            Redo,
+        };
         std::deque<UndoableOperation> undoStack_;
         std::deque<UndoableOperation> redoStack_;
+        UndoRedoOperation pendingUndoRedoOperation_{UndoRedoOperation::None};
         bool applyingUndoRedo_{};
         HMENU menu_{};
         HMENU fileMenu_{};
@@ -601,6 +612,8 @@ namespace hyperbrowse::ui
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
         std::unique_ptr<util::BackgroundExecutor> memoryPressureExecutor_;
+        std::unique_ptr<util::BackgroundExecutor> cacheMaintenanceExecutor_;
+        std::shared_ptr<struct PersistentThumbnailCacheMaintenanceState> cacheMaintenanceState_;
         mutable HWND shortcutReferenceWindow_{};
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::unordered_map<std::uint64_t, std::vector<HTREEITEM>> pendingFolderTreeChildPresenceItems_;
@@ -660,6 +673,8 @@ namespace hyperbrowse::ui
         HWND foregroundWindowAtFileOperationStart_{};
         bool batchConvertActive_{};
         bool fileOperationActive_{};
+        bool cacheMaintenanceActive_{};
+        bool closePending_{};
         bool folderEnumerationActive_{};
         bool folderEnumerationFirstBatchPresented_{};
         bool folderEnumerationPresentationPending_{};

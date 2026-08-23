@@ -142,6 +142,11 @@ namespace
     class FileOperationProgressSink final : public IFileOperationProgressSink
     {
     public:
+        void SetCancellationToken(const std::atomic_bool* cancellationRequested) noexcept
+        {
+            cancellationRequested_ = cancellationRequested;
+        }
+
         void SetProgressTarget(HWND targetWindow, std::uint64_t requestId) noexcept
         {
             progressTargetWindow_ = targetWindow;
@@ -208,7 +213,7 @@ namespace
 
         HRESULT STDMETHODCALLTYPE PreRenameItem(DWORD, IShellItem*, LPCWSTR) override
         {
-            return S_OK;
+            return IsCancellationRequested() ? E_ABORT : S_OK;
         }
 
         HRESULT STDMETHODCALLTYPE PostRenameItem(DWORD,
@@ -223,7 +228,7 @@ namespace
 
         HRESULT STDMETHODCALLTYPE PreMoveItem(DWORD, IShellItem*, IShellItem*, LPCWSTR) override
         {
-            return S_OK;
+            return IsCancellationRequested() ? E_ABORT : S_OK;
         }
 
         HRESULT STDMETHODCALLTYPE PostMoveItem(DWORD,
@@ -239,7 +244,7 @@ namespace
 
         HRESULT STDMETHODCALLTYPE PreCopyItem(DWORD, IShellItem*, IShellItem*, LPCWSTR) override
         {
-            return S_OK;
+            return IsCancellationRequested() ? E_ABORT : S_OK;
         }
 
         HRESULT STDMETHODCALLTYPE PostCopyItem(DWORD,
@@ -255,6 +260,11 @@ namespace
 
         HRESULT STDMETHODCALLTYPE PreDeleteItem(DWORD, IShellItem* item) override
         {
+            if (IsCancellationRequested())
+            {
+                return E_ABORT;
+            }
+
             pendingDeleteSourcePaths_.push_back(PathFromShellItem(item));
             return S_OK;
         }
@@ -289,6 +299,11 @@ namespace
 
         HRESULT STDMETHODCALLTYPE UpdateProgress(UINT workCompleted, UINT workTotal) override
         {
+            if (IsCancellationRequested())
+            {
+                return E_ABORT;
+            }
+
             if (progressTargetWindow_ && workTotal > 0)
             {
                 auto* progress = new hyperbrowse::services::FileOperationProgress();
@@ -322,6 +337,11 @@ namespace
         }
 
     private:
+        bool IsCancellationRequested() const noexcept
+        {
+            return cancellationRequested_ && cancellationRequested_->load(std::memory_order_acquire);
+        }
+
         void RecordResult(IShellItem* sourceItem,
                           HRESULT result,
                           IShellItem* newlyCreated,
@@ -358,6 +378,7 @@ namespace
         std::vector<std::wstring> pendingDeleteSourcePaths_;
         std::size_t nextPendingDeleteSourcePathIndex_{};
         std::size_t failedCount_{};
+        const std::atomic_bool* cancellationRequested_{};
     };
 
     std::wstring BuildCompletionMessage(hyperbrowse::services::FileOperationType type,
@@ -501,6 +522,11 @@ namespace hyperbrowse::services
         WaitForWorkers();
     }
 
+    void FileOperationService::Cancel() noexcept
+    {
+        cancellationRequested_.store(true, std::memory_order_release);
+    }
+
     std::uint64_t FileOperationService::Start(HWND targetWindow,
                                               HWND ownerWindow,
                                               FileOperationType type,
@@ -510,6 +536,7 @@ namespace hyperbrowse::services
                                               std::vector<std::wstring> targetLeafNames)
     {
         ReapCompletedWorkers();
+        cancellationRequested_.store(false, std::memory_order_release);
 
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
         if (targetLeafNames.size() != sourcePaths.size())
@@ -525,6 +552,7 @@ namespace hyperbrowse::services
              destinationFolder = std::move(destinationFolder),
              conflictPolicy,
              targetLeafNames = std::move(targetLeafNames),
+             cancellationRequested = &cancellationRequested_,
              requestId]() mutable
         {
             auto update = std::make_unique<FileOperationUpdate>();
@@ -539,6 +567,14 @@ namespace hyperbrowse::services
             if (sourcePaths.empty())
             {
                 update->message = L"No files were selected for the requested file operation.";
+                PostUpdate(targetWindow, std::move(update));
+                return;
+            }
+
+            if (cancellationRequested->load(std::memory_order_acquire))
+            {
+                update->aborted = true;
+                update->message = L"The file operation was cancelled.";
                 PostUpdate(targetWindow, std::move(update));
                 return;
             }
@@ -575,6 +611,7 @@ namespace hyperbrowse::services
             }
 
             auto* sink = new FileOperationProgressSink();
+            sink->SetCancellationToken(cancellationRequested);
             sink->SetProgressTarget(targetWindow, requestId);
             DWORD sinkCookie = 0;
             result = operation->Advise(sink, &sinkCookie);
@@ -654,7 +691,8 @@ namespace hyperbrowse::services
             operation->GetAnyOperationsAborted(&aborted);
             operation->Unadvise(sinkCookie);
 
-            update->aborted = aborted != FALSE;
+            update->aborted = aborted != FALSE
+                || cancellationRequested->load(std::memory_order_acquire);
             update->failedCount = queueFailures + sink->FailedCount();
             update->succeededSourcePaths = sink->SucceededSourcePaths();
             update->createdPaths = sink->CreatedPaths();
