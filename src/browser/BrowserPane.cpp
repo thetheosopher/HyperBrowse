@@ -32,7 +32,7 @@ namespace
     namespace fs = std::filesystem;
 
     constexpr int kWheelScrollAmount = 72;
-    constexpr double kThumbnailWheelRowsPerNotch = 2.5;
+    constexpr double kThumbnailWheelRowsPerNotch = 1.0;
     constexpr float kThumbnailPreviewAspectRatio = 0.72f;
     constexpr int kVisiblePriority = 0;
     constexpr int kNearVisiblePriority = 1;
@@ -4943,7 +4943,8 @@ namespace hyperbrowse::browser
                 const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
                 const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
                 const int wheelScrollDistance = layout.itemHeight + layout.cellPadding;
-                const double scrollAmount = static_cast<double>(delta / WHEEL_DELTA)
+                const double wheelNotches = static_cast<double>(delta) / static_cast<double>(WHEEL_DELTA);
+                const double scrollAmount = wheelNotches
                     * wheelScrollDistance
                     * kThumbnailWheelRowsPerNotch;
 
