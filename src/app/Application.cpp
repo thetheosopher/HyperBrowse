@@ -4,7 +4,10 @@
 #include <shellapi.h>
 #include <shobjidl.h>
 
+#include <array>
+#include <limits>
 #include <string_view>
+#include <vector>
 
 #include "ui/MainWindow.h"
 #include "util/Diagnostics.h"
@@ -28,6 +31,92 @@ namespace
     {
         StartupBenchmarkOptions benchmark;
         std::wstring launchPath;
+    };
+
+    class CurrentUserPipeSecurity
+    {
+    public:
+        bool Initialize()
+        {
+            HANDLE token = nullptr;
+            if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+            {
+                return false;
+            }
+
+            DWORD tokenUserSize = 0;
+            const bool sizeQuerySucceeded = GetTokenInformation(
+                token,
+                TokenUser,
+                nullptr,
+                0,
+                &tokenUserSize) != FALSE;
+            if (sizeQuerySucceeded || GetLastError() != ERROR_INSUFFICIENT_BUFFER || tokenUserSize == 0)
+            {
+                CloseHandle(token);
+                return false;
+            }
+
+            tokenUserBuffer_.resize(tokenUserSize);
+            if (!GetTokenInformation(token,
+                                     TokenUser,
+                                     tokenUserBuffer_.data(),
+                                     tokenUserSize,
+                                     &tokenUserSize))
+            {
+                CloseHandle(token);
+                return false;
+            }
+
+            const auto* tokenUser = reinterpret_cast<const TOKEN_USER*>(tokenUserBuffer_.data());
+            if (!IsValidSid(tokenUser->User.Sid))
+            {
+                CloseHandle(token);
+                return false;
+            }
+
+            const DWORD sidLength = GetLengthSid(tokenUser->User.Sid);
+            if (sidLength == 0
+                || sidLength > (std::numeric_limits<DWORD>::max() - sizeof(ACL) - sizeof(ACCESS_ALLOWED_ACE) + sizeof(DWORD)))
+            {
+                CloseHandle(token);
+                return false;
+            }
+
+            const DWORD aclSize = sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + sidLength;
+            aclBuffer_.resize(aclSize);
+            if (!InitializeAcl(reinterpret_cast<PACL>(aclBuffer_.data()), aclSize, ACL_REVISION)
+                || !AddAccessAllowedAce(reinterpret_cast<PACL>(aclBuffer_.data()),
+                                        ACL_REVISION,
+                                        GENERIC_WRITE,
+                                        tokenUser->User.Sid)
+                || !InitializeSecurityDescriptor(&securityDescriptor_, SECURITY_DESCRIPTOR_REVISION)
+                || !SetSecurityDescriptorDacl(&securityDescriptor_,
+                                              TRUE,
+                                              reinterpret_cast<PACL>(aclBuffer_.data()),
+                                              FALSE))
+            {
+                CloseHandle(token);
+                return false;
+            }
+
+            attributes_.nLength = sizeof(attributes_);
+            attributes_.lpSecurityDescriptor = &securityDescriptor_;
+            attributes_.bInheritHandle = FALSE;
+            CloseHandle(token);
+            return true;
+        }
+
+        SECURITY_ATTRIBUTES* Attributes() noexcept
+        {
+            return &attributes_;
+        }
+
+    private:
+        SECURITY_ATTRIBUTES attributes_{};
+        SECURITY_DESCRIPTOR securityDescriptor_{};
+        std::vector<BYTE> tokenUserBuffer_;
+        std::vector<BYTE> aclBuffer_;
     };
 
     StartupOptions ParseStartupOptions()
@@ -204,6 +293,11 @@ namespace hyperbrowse::app
         }
 
         listenerStopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!listenerStopEvent_)
+        {
+            return;
+        }
+
         listenerThread_ = std::thread([this]()
         {
             InstanceListenerLoop();
@@ -231,14 +325,20 @@ namespace hyperbrowse::app
     {
         while (true)
         {
+            CurrentUserPipeSecurity pipeSecurity;
+            if (!pipeSecurity.Initialize())
+            {
+                return;
+            }
+
             HANDLE pipe = CreateNamedPipeW(kSingleInstancePipeName,
                                            PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
-                                           PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                                           PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                                            1,
                                            4096,
                                            4096,
                                            0,
-                                           nullptr);
+                                           pipeSecurity.Attributes());
             if (pipe == INVALID_HANDLE_VALUE)
             {
                 return;
@@ -246,6 +346,12 @@ namespace hyperbrowse::app
 
             OVERLAPPED overlapped{};
             overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!overlapped.hEvent)
+            {
+                CloseHandle(pipe);
+                return;
+            }
+
             BOOL connected = ConnectNamedPipe(pipe, &overlapped);
             if (!connected)
             {
@@ -272,26 +378,55 @@ namespace hyperbrowse::app
 
             if (connected)
             {
-                wchar_t buffer[2048]{};
+                std::array<wchar_t, 32768> buffer{};
                 DWORD bytesRead = 0;
-                if (ReadFile(pipe, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead >= sizeof(wchar_t))
+                OVERLAPPED readOverlapped{};
+                readOverlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+                if (readOverlapped.hEvent)
                 {
-                    std::wstring path(buffer, bytesRead / sizeof(wchar_t));
-                    while (!path.empty() && path.back() == L'\0')
+                    BOOL readCompleted = ReadFile(pipe,
+                                                  buffer.data(),
+                                                  static_cast<DWORD>(sizeof(buffer)),
+                                                  &bytesRead,
+                                                  &readOverlapped);
+                    if (!readCompleted && GetLastError() == ERROR_IO_PENDING)
                     {
-                        path.pop_back();
-                    }
-                    if (!path.empty() && mainWindow_ && mainWindow_->Hwnd())
-                    {
-                        auto* payload = new std::wstring(std::move(path));
-                        if (!PostMessageW(mainWindow_->Hwnd(),
-                                          ui::MainWindow::kExternalLaunchMessage,
-                                          0,
-                                          reinterpret_cast<LPARAM>(payload)))
+                        HANDLE waitHandles[] = {readOverlapped.hEvent, listenerStopEvent_};
+                        const DWORD waitResult = WaitForMultipleObjects(2, waitHandles, FALSE, INFINITE);
+                        if (waitResult == WAIT_OBJECT_0)
                         {
-                            delete payload;
+                            readCompleted = GetOverlappedResult(pipe, &readOverlapped, &bytesRead, FALSE);
+                        }
+                        else if (waitResult == WAIT_OBJECT_0 + 1)
+                        {
+                            CancelIoEx(pipe, &readOverlapped);
+                            DWORD ignoredBytes = 0;
+                            GetOverlappedResult(pipe, &readOverlapped, &ignoredBytes, TRUE);
+                            readCompleted = FALSE;
                         }
                     }
+
+                    if (readCompleted && bytesRead >= sizeof(wchar_t) && bytesRead <= sizeof(buffer))
+                    {
+                        std::wstring path(buffer.data(), bytesRead / sizeof(wchar_t));
+                        while (!path.empty() && path.back() == L'\0')
+                        {
+                            path.pop_back();
+                        }
+                        if (!path.empty() && mainWindow_ && mainWindow_->Hwnd())
+                        {
+                            auto* payload = new std::wstring(std::move(path));
+                            if (!PostMessageW(mainWindow_->Hwnd(),
+                                              ui::MainWindow::kExternalLaunchMessage,
+                                              0,
+                                              reinterpret_cast<LPARAM>(payload)))
+                            {
+                                delete payload;
+                            }
+                        }
+                    }
+
+                    CloseHandle(readOverlapped.hEvent);
                 }
             }
 

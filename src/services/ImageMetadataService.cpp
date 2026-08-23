@@ -11,6 +11,7 @@
 #include <condition_variable>
 #include <cwctype>
 #include <cstring>
+#include <exception>
 #include <string_view>
 #include <thread>
 
@@ -1655,7 +1656,19 @@ namespace hyperbrowse::services
             }
 
             std::wstring errorMessage;
-            std::shared_ptr<const ImageMetadata> metadata = extractor_(job.workItem.item, &errorMessage);
+            std::shared_ptr<const ImageMetadata> metadata;
+            try
+            {
+                metadata = extractor_(job.workItem.item, &errorMessage);
+            }
+            catch (const std::exception&)
+            {
+                errorMessage = L"Metadata extraction failed unexpectedly.";
+            }
+            catch (...)
+            {
+                errorMessage = L"Metadata extraction failed unexpectedly.";
+            }
 
             bool shouldNotify = false;
             {

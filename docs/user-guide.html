@@ -232,7 +232,7 @@
                     <ul>
                         <li><strong>Thumbnail mode</strong> is the fastest way to scan a folder visually. Change the thumbnail size from the action strip or <strong>View &gt; Thumbnail Size</strong>.</li>
                         <li><strong>Details mode</strong> is useful for comparing filenames, dates, dimensions, file sizes, ratings, and tags.</li>
-                        <li>The details strip shows information for the current selection. It can be toggled from <strong>View &gt; Details Strip</strong>.</li>
+                        <li>The details panel shows information for the current selection. It can be toggled from <strong>View &gt; Show Details Panel</strong>.</li>
                         <li>Use <strong>View &gt; Show Subfolders</strong> to include folder entries while browsing.</li>
                     </ul>
                 </div>
@@ -241,7 +241,7 @@
                     <ul>
                         <li>Type in the filter field to narrow the current folder by filename.</li>
                         <li>Use <strong>View &gt; Sort</strong> to sort by filename, modified date, file size, dimensions, type, date taken, rating, tags, or random order.</li>
-                        <li>Change sort direction with <strong>View &gt; Sort &gt; Ascending/Descending</strong>.</li>
+                        <li>Toggle <strong>View &gt; Sort &gt; Descending</strong> to switch between ascending and descending order.</li>
                         <li>Turn on <strong>View &gt; Recursive Browsing</strong> when the current folder and its descendants should be treated as one image collection.</li>
                     </ul>
                 </div>
@@ -278,7 +278,7 @@
 
         <section id="slideshow">
             <h2>Run a slideshow</h2>
-            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>Edit &gt; Settings &gt; Slideshow Settings</strong>.</p>
+            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>Settings &gt; Slideshow Settings</strong>.</p>
             <p>Slideshow transitions include cut, crossfade, slide, and Ken Burns styles. Slideshow scope follows the current recursive-browsing setting. The viewer can open on a secondary monitor when that preference is enabled.</p>
         </section>
 
@@ -329,15 +329,15 @@
 
         <section id="settings">
             <h2>Settings and performance</h2>
-            <p>Preferences are grouped under <strong>Edit &gt; Settings</strong> and are remembered per user. Appearance, app text size, thumbnail size, viewer behavior, slideshow settings, performance, diagnostics, integration, and RAW/JPEG preferences can be changed without restarting.</p>
+            <p>Preferences are grouped under the top-level <strong>Settings</strong> menu and are remembered per user. Appearance, app text size, thumbnail size, viewer behavior, slideshow settings, performance, diagnostics, integration, and RAW/JPEG preferences can be changed without restarting.</p>
             <ul>
-                <li><strong>Edit &gt; Settings &gt; Appearance</strong> contains the light/dark theme and app text size. Choose Small, Medium, or Large; Medium preserves the default size.</li>
-                <li><strong>Edit &gt; Settings &gt; Viewer</strong> contains mouse-wheel behavior, overlay text size, detail overlays, full metadata, secondary-monitor defaults, slideshow transition, and RAW/JPEG display preferences.</li>
-                <li><strong>Edit &gt; Settings &gt; Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
-                <li><strong>Edit &gt; Settings &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
-                <li><strong>Edit &gt; Settings &gt; Integration</strong> contains file associations and single-instance behavior.</li>
-                <li><strong>Edit &gt; Settings &gt; Behavior</strong> can make Esc close the main window instead of minimizing it. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> continues to minimize.</li>
-                <li><strong>View &gt; Thumbnail Size</strong> provides fixed presets and keyboard stepping. <strong>Edit &gt; Settings &gt; Slideshow Settings</strong> controls slideshow timing and transitions.</li>
+                <li><strong>Settings &gt; Appearance</strong> contains the light/dark theme and app text size. Choose Small, Medium, or Large; Medium preserves the default size.</li>
+                <li><strong>Settings &gt; Viewer</strong> contains mouse-wheel behavior, overlay text size, detail overlays, full metadata, secondary-monitor defaults, slideshow transition, and RAW/JPEG display preferences.</li>
+                <li><strong>Settings &gt; Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
+                <li><strong>Settings &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
+                <li><strong>Settings &gt; Integration</strong> contains file associations and single-instance behavior.</li>
+                <li><strong>Settings &gt; Behavior</strong> can make Esc close the main window instead of minimizing it. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> continues to minimize.</li>
+                <li><strong>View &gt; Thumbnail Size</strong> provides fixed presets and keyboard stepping. <strong>Settings &gt; Slideshow Settings</strong> controls slideshow timing and transitions.</li>
             </ul>
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
         </section>
@@ -394,9 +394,9 @@
             <h3>The guide does not open</h3>
             <p>Keep the <code>docs</code> folder with the executable. Installed copies normally place the guide in the application <code>docs</code> folder beside <code>bin</code>; portable copies place it in <code>docs</code> beside <code>HyperBrowse.exe</code>. HyperBrowse uses the executable location, not the current working directory, to find it.</p>
             <h3>An image cannot be decoded</h3>
-            <p>Confirm that the file uses a supported format. For RAW images, check whether the optional helper is present beside the application and try the in-process fallback from <strong>Edit &gt; Settings &gt; Performance</strong>. Unsupported RAW variants may still show no preview.</p>
+            <p>Confirm that the file uses a supported format. For RAW images, check whether the optional helper is present beside the application and try the in-process fallback from <strong>Settings &gt; Performance</strong>. Unsupported RAW variants may still show no preview.</p>
             <h3>Browsing a large folder feels busy</h3>
-            <p>Allow the initial enumeration to finish, then adjust the Performance Profile if needed. Persistent thumbnail cache maintenance is available under <strong>Edit &gt; Settings &gt; Performance</strong>. The diagnostics snapshot under <strong>Edit &gt; Settings &gt; Diagnostics</strong> can capture state for a bug report.</p>
+            <p>Allow the initial enumeration to finish, then adjust the Performance Profile if needed. Persistent thumbnail cache maintenance is available under <strong>Settings &gt; Performance</strong>. The diagnostics snapshot under <strong>Settings &gt; Diagnostics</strong> can capture state for a bug report.</p>
             <h3>Where are settings stored?</h3>
             <p>User settings are stored under <code>HKCU\Software\HyperBrowse</code>. Portable mode does not make settings portable; the application still uses the current Windows user's profile.</p>
         </section>

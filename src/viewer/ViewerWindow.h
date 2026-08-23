@@ -166,7 +166,7 @@ namespace hyperbrowse::viewer
             std::atomic_uint64_t activeRequestId{0};
             std::atomic_uint64_t navigationGeneration{0};
             std::atomic_bool shutdown{false};
-            HWND targetWindow{};
+            std::atomic<HWND> targetWindow{nullptr};
         };
 
         struct CachedImageSlot

@@ -8070,6 +8070,7 @@ namespace hyperbrowse::ui
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"6&40 px");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"Compact Thumbnail &Layout");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel\tCtrl+3");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"From &Selection\tCtrl+Shift+S");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"From &Folder\tCtrl+Shift+F");
@@ -8406,7 +8407,7 @@ namespace hyperbrowse::ui
         }
 
         browserPaneController_->SetThumbnailSizePreset(thumbnailSizePreset_);
-        browserPaneController_->SetCompactThumbnailLayout(true);
+        browserPaneController_->SetCompactThumbnailLayout(compactThumbnailLayout_);
         browserPaneController_->SetThumbnailDetailsVisible(thumbnailDetailsVisible_);
         browserPaneController_->SetAppTextSize(appTextSize_);
     }
@@ -9832,9 +9833,28 @@ namespace hyperbrowse::ui
         const std::uint64_t folderBytes = browserModel_ && !browserModel_->FolderPath().empty()
             ? browserModel_->TotalBytes()
             : 0;
-        statusPrimaryText_ = L"Folder: " + std::to_wstring(folderCount)
+        const bool hasActiveFilter = browserPaneController_ && browserPaneController_->HasActiveFilter();
+        const std::uint64_t displayedCount = hasActiveFilter
+            ? browserPaneController_->DisplayedItemCount()
+            : folderCount;
+        statusPrimaryText_ = L"Folder: " + std::to_wstring(displayedCount)
+            + (hasActiveFilter ? L" of " + std::to_wstring(folderCount) : L"")
             + (showSubfoldersInBrowser_ ? L" items | " : L" files | ")
             + browser::FormatByteSize(folderBytes);
+
+        if (fileOperationActive_ && !activeFileOperationLabel_.empty())
+        {
+            statusPrimaryText_ = activeFileOperationLabel_ + L"  |  " + statusPrimaryText_;
+        }
+        else if (batchConvertActive_)
+        {
+            statusPrimaryText_ = L"Converting: "
+                + std::to_wstring(batchConvertCompleted_)
+                + L" / "
+                + std::to_wstring(batchConvertTotal_)
+                + L"  |  "
+                + statusPrimaryText_;
+        }
 
         const std::uint64_t selectedCount = browserPaneController_ ? browserPaneController_->SelectedCount() : 0;
         const std::uint64_t selectedBytes = browserPaneController_ ? browserPaneController_->SelectedBytes() : 0;
@@ -9862,6 +9882,12 @@ namespace hyperbrowse::ui
         {
             statusSecondaryText_.append(L"  |  Pressure: ");
             statusSecondaryText_.append(thumbnailMemoryPressureActive_ ? L"Adaptive throttling active" : L"Normal");
+        }
+        if (viewerWindowActive_ && viewerZoomPercent_ > 0)
+        {
+            statusSecondaryText_.append(L"  |  Viewer zoom: ");
+            statusSecondaryText_.append(std::to_wstring(viewerZoomPercent_));
+            statusSecondaryText_.push_back(L'%');
         }
 
         const bool folderTreeEnumerationActive = !pendingFolderTreeEnumerationItems_.empty()
@@ -15205,11 +15231,29 @@ namespace hyperbrowse::ui
         operation.destinationFolder = update.destinationFolder;
         operation.description = services::FileOperationTypeToActivityLabel(type);
 
-        // Renames and moves produce one created path per source; copies always create
-        // a destination file. Without created paths we cannot compute the inverse.
-        if (isRename && operation.createdPaths.empty())
+        // Every reversible operation needs a complete source/destination mapping.
+        // Without it, an inverse could target an unrelated source path.
+        if (operation.createdPaths.size() != operation.sourcePaths.size())
         {
             return;
+        }
+
+        if (isMove)
+        {
+            const std::wstring sourceFolder = NormalizeFolderPath(
+                fs::path(operation.sourcePaths.front()).parent_path().wstring());
+            if (sourceFolder.empty()
+                || std::any_of(operation.sourcePaths.begin() + 1,
+                               operation.sourcePaths.end(),
+                               [&](const std::wstring& sourcePath)
+                               {
+                                   return !FolderPathsEqual(
+                                       NormalizeFolderPath(fs::path(sourcePath).parent_path().wstring()),
+                                       sourceFolder);
+                               }))
+            {
+                return;
+            }
         }
 
         undoStack_.push_back(std::move(operation));
@@ -15241,7 +15285,13 @@ namespace hyperbrowse::ui
         if (type == services::FileOperationType::Copy)
         {
             // Undo a copy = delete the created copies (recycle bin for safety).
-            undoSources = operation.createdPaths.empty() ? operation.sourcePaths : operation.createdPaths;
+            if (operation.createdPaths.empty())
+            {
+                applyingUndoRedo_ = false;
+                UpdateUndoRedoMenuState();
+                return;
+            }
+            undoSources = operation.createdPaths;
             applyingUndoRedo_ = true;
             StartFileOperation(services::FileOperationType::DeleteRecycleBin,
                                undoSources,
@@ -16241,6 +16291,9 @@ namespace hyperbrowse::ui
         const bool thumbnailDetailsVisible = browserPaneController_
             ? browserPaneController_->AreThumbnailDetailsVisible()
             : thumbnailDetailsVisible_;
+        const bool compactThumbnailLayout = browserPaneController_
+            ? browserPaneController_->IsCompactThumbnailLayoutEnabled()
+            : compactThumbnailLayout_;
         const bool historyNavigationSettled = !folderEnumerationActive_
             && pendingFolderHistoryNavigation_ == FolderHistoryNavigationDirection::None;
         const bool canNavigateBack = hasFolder && historyNavigationSettled
@@ -16329,6 +16382,10 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_SHOW_SUBFOLDERS,
             MF_BYCOMMAND | (showSubfoldersInBrowser_ ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_THUMBNAIL_LAYOUT_COMPACT,
+            MF_BYCOMMAND | (compactThumbnailLayout ? MF_CHECKED : MF_UNCHECKED));
 
         CheckMenuRadioItem(
             menu_,
@@ -17200,6 +17257,11 @@ namespace hyperbrowse::ui
                 TryParseThumbnailSizePreset(value, &thumbnailSizePreset_);
             }
 
+            if (TryReadDwordValue(key, kRegistryValueCompactThumbnailLayout, &value))
+            {
+                compactThumbnailLayout_ = value != 0;
+            }
+
             if (TryReadDwordValue(key, kRegistryValueThumbnailDetailsVisible, &value))
             {
                 thumbnailDetailsVisible_ = value != 0;
@@ -17443,7 +17505,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueNvJpegEnabled, nvJpegEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueLibRawOutOfProcessEnabled, libRawOutOfProcessEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueThumbnailSizePreset, static_cast<DWORD>(thumbnailSizePreset_));
-            RegDeleteValueW(key, kRegistryValueCompactThumbnailLayout);
+            WriteDwordValue(key, kRegistryValueCompactThumbnailLayout, compactThumbnailLayout_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueShowSubfoldersInBrowser, showSubfoldersInBrowser_ ? 1UL : 0UL);
             if (!selectedFolderPath.empty())
@@ -17526,6 +17588,11 @@ namespace hyperbrowse::ui
         {
             browserPaneController_->BeginFolderLoad();
             browserPaneController_->ClearSelection();
+            browserPaneController_->SetFilterQuery({});
+        }
+        if (filterEdit_)
+        {
+            SetWindowTextW(filterEdit_, L"");
         }
         RefreshBrowserPane();
         UpdateStatusText();
@@ -18863,6 +18930,12 @@ namespace hyperbrowse::ui
             return true;
         case ID_VIEW_THUMBNAIL_DETAILS:
             thumbnailDetailsVisible_ = !thumbnailDetailsVisible_;
+            ApplyThumbnailDisplaySettings();
+            UpdateStatusText();
+            UpdateMenuState();
+            return true;
+        case ID_VIEW_THUMBNAIL_LAYOUT_COMPACT:
+            compactThumbnailLayout_ = !compactThumbnailLayout_;
             ApplyThumbnailDisplaySettings();
             UpdateStatusText();
             UpdateMenuState();

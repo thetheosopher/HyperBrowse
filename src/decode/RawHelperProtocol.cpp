@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 namespace fs = std::filesystem;
 
@@ -9,6 +10,8 @@ namespace
 {
     constexpr std::uint32_t kRawHelperMagic = 0x52425748; // 'HWBR'
     constexpr std::uint32_t kRawHelperVersion = 1;
+    constexpr std::uint32_t kMaximumBitmapDimension = 32768;
+    constexpr std::uint64_t kMaximumPixelBytes = 512ULL * 1024ULL * 1024ULL;
 
     struct RawHelperFileHeader
     {
@@ -20,6 +23,39 @@ namespace
         std::uint32_t sourceHeight{};
         std::uint64_t pixelBytes{};
     };
+
+    bool TryComputePixelBytes(std::uint64_t width,
+                              std::uint64_t height,
+                              std::uint64_t* pixelBytes) noexcept
+    {
+        if (!pixelBytes
+            || width == 0
+            || height == 0
+            || width > kMaximumBitmapDimension
+            || height > kMaximumBitmapDimension
+            || width > std::numeric_limits<std::uint64_t>::max() / height)
+        {
+            return false;
+        }
+
+        const std::uint64_t pixelCount = width * height;
+        if (pixelCount > kMaximumPixelBytes / 4ULL)
+        {
+            return false;
+        }
+
+        *pixelBytes = pixelCount * 4ULL;
+        return true;
+    }
+
+    bool SetError(std::wstring* errorMessage, const wchar_t* message)
+    {
+        if (errorMessage)
+        {
+            *errorMessage = message;
+        }
+        return false;
+    }
 }
 
 namespace hyperbrowse::decode
@@ -28,25 +64,22 @@ namespace hyperbrowse::decode
                                const RawHelperDecodedPixels& payload,
                                std::wstring* errorMessage)
     {
-        if (payload.bitmapWidth <= 0 || payload.bitmapHeight <= 0)
+        std::uint64_t expectedBytes = 0;
+        if (!TryComputePixelBytes(static_cast<std::uint64_t>(payload.bitmapWidth),
+                                  static_cast<std::uint64_t>(payload.bitmapHeight),
+                                  &expectedBytes))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"The RAW helper payload does not contain valid bitmap dimensions.";
-            }
-            return false;
+            return SetError(errorMessage, L"The RAW helper payload does not contain valid or supported bitmap dimensions.");
         }
 
-        const std::size_t expectedBytes = static_cast<std::size_t>(payload.bitmapWidth)
-            * static_cast<std::size_t>(payload.bitmapHeight)
-            * 4U;
-        if (payload.bgraPixels.size() != expectedBytes)
+        if (payload.sourceWidth < 0
+            || payload.sourceHeight < 0
+            || payload.sourceWidth > static_cast<int>(kMaximumBitmapDimension)
+            || payload.sourceHeight > static_cast<int>(kMaximumBitmapDimension)
+            || expectedBytes > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            || payload.bgraPixels.size() != static_cast<std::size_t>(expectedBytes))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"The RAW helper payload pixel buffer does not match the bitmap dimensions.";
-            }
-            return false;
+            return SetError(errorMessage, L"The RAW helper payload pixel buffer does not match the bitmap dimensions.");
         }
 
         std::ofstream output(fs::path(filePath), std::ios::binary | std::ios::trunc);
@@ -129,32 +162,44 @@ namespace hyperbrowse::decode
             return false;
         }
 
-        if (header.bitmapWidth == 0 || header.bitmapHeight == 0)
+        std::uint64_t expectedBytes = 0;
+        if (!TryComputePixelBytes(header.bitmapWidth, header.bitmapHeight, &expectedBytes)
+            || header.sourceWidth > kMaximumBitmapDimension
+            || header.sourceHeight > kMaximumBitmapDimension
+            || header.sourceWidth > static_cast<std::uint32_t>(std::numeric_limits<int>::max())
+            || header.sourceHeight > static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"The RAW helper output file does not contain valid bitmap dimensions.";
-            }
-            return false;
+            return SetError(errorMessage, L"The RAW helper output file does not contain valid or supported bitmap dimensions.");
         }
 
-        const std::uint64_t expectedBytes = static_cast<std::uint64_t>(header.bitmapWidth)
-            * static_cast<std::uint64_t>(header.bitmapHeight)
-            * 4ULL;
         if (header.pixelBytes != expectedBytes)
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"The RAW helper output payload size does not match the bitmap dimensions.";
-            }
-            return false;
+            return SetError(errorMessage, L"The RAW helper output payload size does not match the bitmap dimensions.");
         }
 
-        payload->bitmapWidth = static_cast<int>(header.bitmapWidth);
-        payload->bitmapHeight = static_cast<int>(header.bitmapHeight);
-        payload->sourceWidth = static_cast<int>(header.sourceWidth);
-        payload->sourceHeight = static_cast<int>(header.sourceHeight);
-        payload->bgraPixels.resize(static_cast<std::size_t>(header.pixelBytes));
+        input.seekg(0, std::ios::end);
+        const std::streamoff fileSize = input.tellg();
+        if (fileSize < 0
+            || static_cast<std::uint64_t>(fileSize) != sizeof(RawHelperFileHeader) + expectedBytes)
+        {
+            return SetError(errorMessage, L"The RAW helper output file length does not match its header.");
+        }
+
+        input.seekg(static_cast<std::streamoff>(sizeof(RawHelperFileHeader)), std::ios::beg);
+        if (!input)
+        {
+            return SetError(errorMessage, L"The RAW helper output file could not be positioned for reading.");
+        }
+
+        try
+        {
+            payload->bgraPixels.resize(static_cast<std::size_t>(expectedBytes));
+        }
+        catch (const std::exception&)
+        {
+            payload->bgraPixels.clear();
+            return SetError(errorMessage, L"The RAW helper output payload is too large to load.");
+        }
 
         input.read(reinterpret_cast<char*>(payload->bgraPixels.data()),
                    static_cast<std::streamsize>(payload->bgraPixels.size()));
@@ -168,6 +213,10 @@ namespace hyperbrowse::decode
             return false;
         }
 
+        payload->bitmapWidth = static_cast<int>(header.bitmapWidth);
+        payload->bitmapHeight = static_cast<int>(header.bitmapHeight);
+        payload->sourceWidth = static_cast<int>(header.sourceWidth);
+        payload->sourceHeight = static_cast<int>(header.sourceHeight);
         return true;
     }
 }

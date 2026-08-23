@@ -18,6 +18,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <exception>
 
 #include "app/resource.h"
 #include "decode/ImageDecoder.h"
@@ -829,7 +830,7 @@ namespace hyperbrowse::viewer
     {
         asyncState_->shutdown.store(true, std::memory_order_release);
         asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
-        asyncState_->targetWindow = nullptr;
+        asyncState_->targetWindow.store(nullptr, std::memory_order_release);
         WaitForBackgroundTasks();
 
         ReleaseD2DResources();
@@ -1807,13 +1808,25 @@ namespace hyperbrowse::viewer
 
         const browser::BrowserItem item = items_[static_cast<std::size_t>(index)];
         const std::uint64_t requestId = metadataRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
-        asyncState_->targetWindow = hwnd_;
+        asyncState_->targetWindow.store(hwnd_, std::memory_order_release);
 
         if (!backgroundExecutor_
             || !backgroundExecutor_->Post([asyncState = asyncState_, metadataRequestId = &metadataRequestId_, item, index, requestId]()
             {
                 std::wstring errorMessage;
-                auto metadata = hyperbrowse::services::ExtractImageMetadata(item, &errorMessage);
+                std::shared_ptr<const hyperbrowse::services::ImageMetadata> metadata;
+                try
+                {
+                    metadata = hyperbrowse::services::ExtractImageMetadata(item, &errorMessage);
+                }
+                catch (const std::exception&)
+                {
+                    errorMessage = L"Metadata extraction failed unexpectedly.";
+                }
+                catch (...)
+                {
+                    errorMessage = L"Metadata extraction failed unexpectedly.";
+                }
 
                 if (asyncState->shutdown.load(std::memory_order_acquire)
                     || metadataRequestId->load(std::memory_order_acquire) != requestId)
@@ -1827,7 +1840,7 @@ namespace hyperbrowse::viewer
                 update->metadata = std::move(metadata);
                 update->text = BuildMetadataOverlayText(item, update->metadata.get(), errorMessage);
 
-                HWND targetWindow = asyncState->targetWindow;
+                const HWND targetWindow = asyncState->targetWindow.load(std::memory_order_acquire);
                 if (!targetWindow || !PostMessageW(targetWindow, ViewerWindow::kMetadataReadyMessage, 0, reinterpret_cast<LPARAM>(update.get())))
                 {
                     return;
@@ -1877,7 +1890,7 @@ namespace hyperbrowse::viewer
         const browser::BrowserItem item = items_[static_cast<std::size_t>(selectedIndex)];
         const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         const std::uint64_t requestId = asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel) + 1;
-        asyncState_->targetWindow = hwnd_;
+        asyncState_->targetWindow.store(hwnd_, std::memory_order_release);
         util::LogInfo(L"ViewerWindow::LoadCurrentImageAsync requestId="
             + std::to_wstring(requestId)
             + L", generation=" + std::to_wstring(navigationGeneration)
@@ -1918,7 +1931,19 @@ namespace hyperbrowse::viewer
             if (!backgroundExecutor_->Post([asyncState, item, selectedIndex, requestId, navigationGeneration]()
             {
                 std::wstring errorMessage;
-                auto image = decode::DecodeFullImage(item, &errorMessage);
+                std::shared_ptr<const cache::CachedThumbnail> image;
+                try
+                {
+                    image = decode::DecodeFullImage(item, &errorMessage);
+                }
+                catch (const std::exception&)
+                {
+                    errorMessage = L"Image decoding failed unexpectedly.";
+                }
+                catch (...)
+                {
+                    errorMessage = L"Image decoding failed unexpectedly.";
+                }
 
                 if (asyncState->shutdown.load(std::memory_order_acquire)
                     || asyncState->activeRequestId.load(std::memory_order_acquire) != requestId)
@@ -1933,7 +1958,7 @@ namespace hyperbrowse::viewer
                 update->image = std::move(image);
                 update->errorMessage = std::move(errorMessage);
 
-                HWND targetWindow = asyncState->targetWindow;
+                const HWND targetWindow = asyncState->targetWindow.load(std::memory_order_acquire);
                 if (!targetWindow || !PostMessageW(targetWindow, kDecodedImageMessage, 0, reinterpret_cast<LPARAM>(update.get())))
                 {
                     return;
@@ -2255,7 +2280,7 @@ namespace hyperbrowse::viewer
             update->index = index;
             update->image = cachedImage;
 
-            HWND targetWindow = asyncState->targetWindow;
+            const HWND targetWindow = asyncState->targetWindow.load(std::memory_order_acquire);
             if (!targetWindow || !PostMessageW(targetWindow, ViewerWindow::kPrefetchImageMessage, 0, reinterpret_cast<LPARAM>(update.get())))
             {
                 if (slideshowNextPrefetch)
@@ -2278,7 +2303,19 @@ namespace hyperbrowse::viewer
         if (!backgroundExecutor_->Post([asyncState, item, index, navigationGeneration]()
         {
             std::wstring errorMessage;
-            auto image = decode::DecodeFullImage(item, &errorMessage);
+            std::shared_ptr<const cache::CachedThumbnail> image;
+            try
+            {
+                image = decode::DecodeFullImage(item, &errorMessage);
+            }
+            catch (const std::exception&)
+            {
+                errorMessage = L"Image decoding failed unexpectedly.";
+            }
+            catch (...)
+            {
+                errorMessage = L"Image decoding failed unexpectedly.";
+            }
 
             if (asyncState->shutdown.load(std::memory_order_acquire))
             {
@@ -2296,7 +2333,7 @@ namespace hyperbrowse::viewer
             update->image = std::move(image);
             update->errorMessage = std::move(errorMessage);
 
-            HWND targetWindow = asyncState->targetWindow;
+            const HWND targetWindow = asyncState->targetWindow.load(std::memory_order_acquire);
             if (!targetWindow || !PostMessageW(targetWindow, ViewerWindow::kPrefetchImageMessage, 0, reinterpret_cast<LPARAM>(update.get())))
             {
                 return;
@@ -3978,6 +4015,12 @@ namespace hyperbrowse::viewer
                 {
                     FitToWindow();
                 }
+                return 0;
+            case '0':
+                FitToWindow();
+                return 0;
+            case '1':
+                SetActualSize();
                 return 0;
             case 'H':
                 SetWindowFitMode(WindowFitMode::Height);
@@ -5772,7 +5815,7 @@ namespace hyperbrowse::viewer
         case WM_CLOSE:
             util::LogInfo(L"ViewerWindow WM_CLOSE hwnd=" + FormatWindowHandle(hwnd));
             asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
-            asyncState_->targetWindow = nullptr;
+            asyncState_->targetWindow.store(nullptr, std::memory_order_release);
             DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
@@ -5786,7 +5829,7 @@ namespace hyperbrowse::viewer
                 ReleaseCapture();
             }
             ReleaseD2DResources();
-            asyncState_->targetWindow = nullptr;
+            asyncState_->targetWindow.store(nullptr, std::memory_order_release);
             fullScreen_ = false;
             windowFitMode_ = WindowFitMode::Regular;
             hasRegularPlacementBeforeFit_ = false;
@@ -5828,7 +5871,7 @@ namespace hyperbrowse::viewer
             auto* createStruct = reinterpret_cast<CREATESTRUCTW*>(lParam);
             self = static_cast<ViewerWindow*>(createStruct->lpCreateParams);
             self->hwnd_ = hwnd;
-            self->asyncState_->targetWindow = hwnd;
+            self->asyncState_->targetWindow.store(hwnd, std::memory_order_release);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
         }
         else

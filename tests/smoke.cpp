@@ -30,6 +30,7 @@
 #include "browser/BrowserPane.h"
 #include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
+#include "decode/RawHelperProtocol.h"
 #include "decode/WicThumbnailDecoder.h"
 #include "services/BatchConvertService.h"
 #include "services/FileOperationService.h"
@@ -43,6 +44,7 @@
 #include "ui/MainWindow.h"
 #include "ui/QuickSend.h"
 #include "ui/ShortcutCatalog.h"
+#include "util/BackgroundExecutor.h"
 #include "util/UiTextSize.h"
 #include "viewer/ViewerWindow.h"
 
@@ -302,7 +304,44 @@ namespace
                       'I',
                       FCONTROL | FSHIFT),
              "Viewer Copy Image shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
+                      ShortcutContext::Viewer,
+                      0,
+                      '0',
+                      0),
+             "Viewer 0 fit shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
+                      ShortcutContext::Viewer,
+                      0,
+                      '1',
+                      0),
+             "Viewer 1 actual-size shortcut is missing from the shared catalog");
         }
+
+    void RunBackgroundExecutorExceptionScenario()
+    {
+        hyperbrowse::util::BackgroundExecutor executor(1, 2);
+        std::mutex completionMutex;
+        std::condition_variable completionCondition;
+        bool completed = false;
+
+        Expect(executor.Post([]()
+        {
+            throw std::runtime_error("intentional background executor test failure");
+        }), "Background executor rejected the exception-isolation test task");
+        Expect(executor.Post([&]()
+        {
+            {
+                std::scoped_lock lock(completionMutex);
+                completed = true;
+            }
+            completionCondition.notify_one();
+        }), "Background executor rejected the post-exception recovery task");
+
+        std::unique_lock lock(completionMutex);
+        Expect(completionCondition.wait_for(lock, std::chrono::seconds(2), [&]() { return completed; }),
+               "Background executor did not continue after a task exception");
+    }
 
     void SetRegistryDwordValue(const wchar_t* path, const wchar_t* valueName, DWORD value)
     {
@@ -1290,6 +1329,28 @@ namespace
         corruptEntry(wrongByteCount, static_cast<std::size_t>(wrongByteCount.pixelBytes), "Persistent thumbnail cache accepted a mismatched pixel byte count");
 
         corruptEntry(validHeader, static_cast<std::size_t>(validHeader.pixelBytes - 1), "Persistent thumbnail cache accepted a truncated payload");
+
+        const fs::path outsideCacheFile = root.Root() / L"outside.thumb";
+        {
+            std::ofstream outsideStream(outsideCacheFile, std::ios::binary | std::ios::trunc);
+            outsideStream << "keep";
+        }
+
+        {
+            std::wofstream indexStream(cacheRoot / L"index.tsv", std::ios::trunc);
+            indexStream << hyperbrowse::util::NormalizePathForComparison(key.filePath)
+                        << L'\t' << key.modifiedTimestampUtc
+                        << L'\t' << key.targetWidth
+                        << L'\t' << key.targetHeight
+                        << L"\t..\\outside.thumb\t"
+                        << (sizeof(TestDiskThumbnailHeader) + key.targetWidth * key.targetHeight * 4)
+                        << L"\t1\n";
+        }
+
+        Expect(cache.TryLoad(key) == nullptr,
+               "Persistent thumbnail cache accepted an unsafe index file name");
+        Expect(fs::exists(outsideCacheFile),
+               "Persistent thumbnail cache cleanup escaped its cache directory");
     }
 
     void RunWicDecoderScenario()
@@ -1818,6 +1879,80 @@ namespace
                "The RAW allowlist unexpectedly includes ORF before it was requested");
     }
 
+        void RunRawHelperProtocolScenario()
+        {
+         TempFolder root(L"HyperBrowseRawHelperProtocol");
+         const fs::path payloadPath = root.Root() / L"payload.bin";
+
+         hyperbrowse::decode::RawHelperDecodedPixels payload;
+         payload.bitmapWidth = 32;
+         payload.bitmapHeight = 16;
+         payload.sourceWidth = 64;
+         payload.sourceHeight = 32;
+         payload.bgraPixels.assign(32U * 16U * 4U, 0x7f);
+
+         std::wstring errorMessage;
+         Expect(hyperbrowse::decode::WriteRawHelperPayload(payloadPath.wstring(), payload, &errorMessage),
+             "RAW helper protocol failed to write a valid payload");
+
+         hyperbrowse::decode::RawHelperDecodedPixels loaded;
+         Expect(hyperbrowse::decode::ReadRawHelperPayload(payloadPath.wstring(), &loaded, &errorMessage),
+             "RAW helper protocol failed to read a valid payload");
+         Expect(loaded.bitmapWidth == payload.bitmapWidth
+              && loaded.bitmapHeight == payload.bitmapHeight
+              && loaded.sourceWidth == payload.sourceWidth
+              && loaded.sourceHeight == payload.sourceHeight
+              && loaded.bgraPixels == payload.bgraPixels,
+             "RAW helper protocol did not preserve a valid payload");
+
+    #pragma pack(push, 1)
+         struct TestRawHelperFileHeader
+         {
+             std::uint32_t magic{};
+             std::uint32_t version{};
+             std::uint32_t bitmapWidth{};
+             std::uint32_t bitmapHeight{};
+             std::uint32_t sourceWidth{};
+             std::uint32_t sourceHeight{};
+             std::uint64_t pixelBytes{};
+         };
+    #pragma pack(pop)
+
+         TestRawHelperFileHeader validHeader{
+             0x52425748,
+             1,
+             32,
+             16,
+             64,
+             32,
+             32ULL * 16ULL * 4ULL,
+         };
+         const auto writeHeaderAndPayload = [&](const TestRawHelperFileHeader& header, std::size_t payloadBytes)
+         {
+             std::ofstream stream(payloadPath, std::ios::binary | std::ios::trunc);
+             stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
+             std::vector<unsigned char> bytes(payloadBytes, 0x7f);
+             stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+         };
+
+         TestRawHelperFileHeader oversizedHeader = validHeader;
+         oversizedHeader.bitmapWidth = UINT32_MAX;
+         writeHeaderAndPayload(oversizedHeader, 0);
+         loaded = {};
+         Expect(!hyperbrowse::decode::ReadRawHelperPayload(payloadPath.wstring(), &loaded, &errorMessage),
+             "RAW helper protocol accepted oversized dimensions");
+
+         writeHeaderAndPayload(validHeader, static_cast<std::size_t>(validHeader.pixelBytes - 1));
+         loaded = {};
+         Expect(!hyperbrowse::decode::ReadRawHelperPayload(payloadPath.wstring(), &loaded, &errorMessage),
+             "RAW helper protocol accepted a truncated payload");
+
+         writeHeaderAndPayload(validHeader, static_cast<std::size_t>(validHeader.pixelBytes + 1));
+         loaded = {};
+         Expect(!hyperbrowse::decode::ReadRawHelperPayload(payloadPath.wstring(), &loaded, &errorMessage),
+             "RAW helper protocol accepted trailing payload data");
+        }
+
     void RunRawDecoderScenario()
     {
         const fs::path fixtureRoot = TestSourceDirectory() / L"fixtures" / L"raw";
@@ -1940,8 +2075,8 @@ namespace
          SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(40, 40));
          Expect(browserPane.GetThumbnailSizePreset() == hyperbrowse::browser::ThumbnailSizePreset::Pixels320,
              "BrowserPane did not store the large thumbnail size preset");
-         Expect(browserPane.IsCompactThumbnailLayoutEnabled(),
-             "BrowserPane should remain in the compact thumbnail layout");
+         Expect(!browserPane.IsCompactThumbnailLayoutEnabled(),
+             "BrowserPane did not disable the compact thumbnail layout");
          Expect(browserPane.AreThumbnailDetailsVisible(),
              "BrowserPane did not restore thumbnail details visibility");
          Expect(browserPane.SelectedCount() == 1,
@@ -2875,6 +3010,7 @@ int main(int argc, char* argv[])
         else
         {
             RunShortcutCatalogScenario();
+            RunBackgroundExecutorExceptionScenario();
             RunEnumerationScenario(hwnd, &state);
             RunFolderTreeEnumerationScenario(hwnd, &state);
             RunFolderWatchStartStopScenario(hwnd);
@@ -2893,6 +3029,7 @@ int main(int argc, char* argv[])
             RunImageMetadataServiceScenario();
             RunSwarmUiMetadataExtractionScenario();
             RunRawFormatAllowlistScenario();
+            RunRawHelperProtocolScenario();
             RunRawDecoderScenario();
             RunBrowserPaneScenario(instance);
             RunBrowserModelBulkRemovalScenario();

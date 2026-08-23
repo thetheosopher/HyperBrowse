@@ -1051,7 +1051,6 @@ namespace hyperbrowse::browser
 
     void BrowserPane::SetCompactThumbnailLayout(bool enabled)
     {
-        enabled = true;
         if (compactThumbnailLayout_ == enabled)
         {
             return;
@@ -1068,7 +1067,7 @@ namespace hyperbrowse::browser
 
     bool BrowserPane::IsCompactThumbnailLayoutEnabled() const noexcept
     {
-        return true;
+        return compactThumbnailLayout_;
     }
 
     void BrowserPane::SetThumbnailDetailsVisible(bool visible)

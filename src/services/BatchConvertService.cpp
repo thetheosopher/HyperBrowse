@@ -279,22 +279,32 @@ namespace
                                   hyperbrowse::services::BatchConvertFormat format)
     {
         const fs::path basePath = outputFolder / (fs::path(item.fileName).stem().wstring() + hyperbrowse::services::BatchConvertFormatExtension(format));
-        if (!fs::exists(basePath))
+        std::error_code existsError;
+        if (!fs::exists(basePath, existsError) && !existsError)
         {
             return basePath;
+        }
+        if (existsError)
+        {
+            return {};
         }
 
         for (int suffix = 1; suffix < 1000; ++suffix)
         {
             const fs::path candidate = outputFolder
                 / (fs::path(item.fileName).stem().wstring() + L"_" + std::to_wstring(suffix) + hyperbrowse::services::BatchConvertFormatExtension(format));
-            if (!fs::exists(candidate))
+            existsError.clear();
+            if (!fs::exists(candidate, existsError) && !existsError)
             {
                 return candidate;
             }
+            if (existsError)
+            {
+                return {};
+            }
         }
 
-        return basePath;
+        return {};
     }
 }
 
@@ -358,6 +368,8 @@ namespace hyperbrowse::services
              format,
              requestId]() mutable
         {
+            try
+            {
             const auto isCancelled = [&]()
             {
                 return sharedState->shutdown.load(std::memory_order_acquire)
@@ -419,7 +431,12 @@ namespace hyperbrowse::services
                 else
                 {
                     const fs::path outputPath = MakeUniqueOutputPath(outputFolder, item, format);
-                    if (isCancelled())
+                    if (outputPath.empty())
+                    {
+                        ++failedCount;
+                        errorMessage = L"No available output filename could be selected.";
+                    }
+                    else if (isCancelled())
                     {
                         postCancelled(completedCount, failedCount);
                         return;
@@ -449,6 +466,33 @@ namespace hyperbrowse::services
                 progress->message = errorMessage;
                 progress->finished = completedCount == items.size();
                 PostUpdate(targetWindow, std::move(progress));
+            }
+            }
+            catch (const std::exception&)
+            {
+                auto update = std::make_unique<BatchConvertUpdate>();
+                update->requestId = requestId;
+                update->completedCount = 0;
+                update->totalCount = items.size();
+                update->failedCount = items.size();
+                update->format = format;
+                update->outputFolder = outputFolder;
+                update->finished = true;
+                update->message = L"Batch conversion failed unexpectedly.";
+                PostUpdate(targetWindow, std::move(update));
+            }
+            catch (...)
+            {
+                auto update = std::make_unique<BatchConvertUpdate>();
+                update->requestId = requestId;
+                update->completedCount = 0;
+                update->totalCount = items.size();
+                update->failedCount = items.size();
+                update->format = format;
+                update->outputFolder = outputFolder;
+                update->finished = true;
+                update->message = L"Batch conversion failed unexpectedly.";
+                PostUpdate(targetWindow, std::move(update));
             }
         }));
         return requestId;

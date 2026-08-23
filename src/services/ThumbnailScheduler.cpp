@@ -1,9 +1,10 @@
 #include "services/ThumbnailScheduler.h"
 
 #include <algorithm>
-#include <limits>
 #include <cwctype>
+#include <exception>
 #include <filesystem>
+#include <limits>
 #include <unordered_set>
 
 #include "decode/ImageDecoder.h"
@@ -636,14 +637,25 @@ namespace hyperbrowse::services
             missingKeys.reserve(jobs.size());
             for (std::size_t index = 0; index < jobs.size(); ++index)
             {
-                thumbnails[index] = cache_.Find(jobs[index].workItem.cacheKey);
-                if (!thumbnails[index] && useDiskCache)
+                try
                 {
-                    thumbnails[index] = diskCache_.TryLoad(jobs[index].workItem.cacheKey);
-                    if (thumbnails[index])
+                    thumbnails[index] = cache_.Find(jobs[index].workItem.cacheKey);
+                    if (!thumbnails[index] && useDiskCache)
                     {
-                        cache_.Insert(jobs[index].workItem.cacheKey, thumbnails[index]);
+                        thumbnails[index] = diskCache_.TryLoad(jobs[index].workItem.cacheKey);
+                        if (thumbnails[index])
+                        {
+                            cache_.Insert(jobs[index].workItem.cacheKey, thumbnails[index]);
+                        }
                     }
+                }
+                catch (const std::exception&)
+                {
+                    failureKinds[index] = decode::ThumbnailDecodeFailureKind::DecodeFailed;
+                }
+                catch (...)
+                {
+                    failureKinds[index] = decode::ThumbnailDecodeFailureKind::DecodeFailed;
                 }
                 if (!thumbnails[index])
                 {
@@ -687,28 +699,47 @@ namespace hyperbrowse::services
                 missingIndices.clear();
             }
 
-            if (missingKeys.size() > 1)
+            try
             {
-                std::vector<decode::ThumbnailDecodeFailureKind> decodedFailureKinds;
-                std::vector<std::shared_ptr<const cache::CachedThumbnail>> decodedBatch = decode::DecodeThumbnailBatch(missingKeys, nullptr, &decodedFailureKinds);
-                for (std::size_t index = 0; index < missingIndices.size(); ++index)
+                if (missingKeys.size() > 1)
                 {
-                    thumbnails[missingIndices[index]] = std::move(decodedBatch[index]);
-                    failureKinds[missingIndices[index]] = decodedFailureKinds[index];
+                    std::vector<decode::ThumbnailDecodeFailureKind> decodedFailureKinds;
+                    std::vector<std::shared_ptr<const cache::CachedThumbnail>> decodedBatch = decode::DecodeThumbnailBatch(missingKeys, nullptr, &decodedFailureKinds);
+                    for (std::size_t index = 0; index < missingIndices.size(); ++index)
+                    {
+                        thumbnails[missingIndices[index]] = std::move(decodedBatch[index]);
+                        failureKinds[missingIndices[index]] = decodedFailureKinds[index];
+                    }
+                }
+                else if (missingKeys.size() == 1)
+                {
+                    decode::ThumbnailDecodeFailureKind failureKind = decode::ThumbnailDecodeFailureKind::None;
+                    if (jobs.front().workItem.preferCpu)
+                    {
+                        thumbnails[missingIndices.front()] = decode::DecodeThumbnailCpuOnly(missingKeys.front(), nullptr, &failureKind);
+                    }
+                    else
+                    {
+                        thumbnails[missingIndices.front()] = decode::DecodeThumbnail(missingKeys.front(), nullptr, &failureKind);
+                    }
+                    failureKinds[missingIndices.front()] = failureKind;
                 }
             }
-            else if (missingKeys.size() == 1)
+            catch (const std::exception&)
             {
-                decode::ThumbnailDecodeFailureKind failureKind = decode::ThumbnailDecodeFailureKind::None;
-                if (jobs.front().workItem.preferCpu)
+                util::IncrementCounter(L"thumbnail.decode.exception");
+                for (const std::size_t index : missingIndices)
                 {
-                    thumbnails[missingIndices.front()] = decode::DecodeThumbnailCpuOnly(missingKeys.front(), nullptr, &failureKind);
+                    failureKinds[index] = decode::ThumbnailDecodeFailureKind::DecodeFailed;
                 }
-                else
+            }
+            catch (...)
+            {
+                util::IncrementCounter(L"thumbnail.decode.unknown_exception");
+                for (const std::size_t index : missingIndices)
                 {
-                    thumbnails[missingIndices.front()] = decode::DecodeThumbnail(missingKeys.front(), nullptr, &failureKind);
+                    failureKinds[index] = decode::ThumbnailDecodeFailureKind::DecodeFailed;
                 }
-                failureKinds[missingIndices.front()] = failureKind;
             }
 
             for (std::size_t index = 0; index < jobs.size(); ++index)
@@ -716,10 +747,21 @@ namespace hyperbrowse::services
                 const std::shared_ptr<const cache::CachedThumbnail>& thumbnail = thumbnails[index];
                 if (thumbnail)
                 {
-                    cache_.Insert(jobs[index].workItem.cacheKey, thumbnail);
-                    if (allowDiskCacheStore)
+                    try
                     {
-                        diskCache_.Store(jobs[index].workItem.cacheKey, thumbnail);
+                        cache_.Insert(jobs[index].workItem.cacheKey, thumbnail);
+                        if (allowDiskCacheStore)
+                        {
+                            diskCache_.Store(jobs[index].workItem.cacheKey, thumbnail);
+                        }
+                    }
+                    catch (const std::exception&)
+                    {
+                        util::IncrementCounter(L"thumbnail.cache_store.exception");
+                    }
+                    catch (...)
+                    {
+                        util::IncrementCounter(L"thumbnail.cache_store.unknown_exception");
                     }
                 }
 

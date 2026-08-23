@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -39,6 +40,8 @@ namespace
 #pragma pack(pop)
 
     constexpr std::array<char, 8> kDiskThumbnailMagic{{'H', 'B', 'T', 'H', 'M', 'B', '0', '1'}};
+    constexpr std::uint64_t kMaximumThumbnailFileBytes = sizeof(DiskThumbnailHeader)
+        + kMaximumThumbnailPixelBytes;
 
     struct ParsedIndexEntry
     {
@@ -295,6 +298,74 @@ namespace
             + L"\t" + std::to_wstring(lastAccessOrdinal);
     }
 
+    bool TryParseUnsignedField(std::wstring_view value, std::uint64_t* parsedValue) noexcept
+    {
+        if (!parsedValue || value.empty())
+        {
+            return false;
+        }
+
+        std::uint64_t result = 0;
+        for (const wchar_t character : value)
+        {
+            if (character < L'0' || character > L'9')
+            {
+                return false;
+            }
+
+            const std::uint64_t digit = static_cast<std::uint64_t>(character - L'0');
+            if (result > (std::numeric_limits<std::uint64_t>::max() - digit) / 10U)
+            {
+                return false;
+            }
+
+            result = result * 10U + digit;
+        }
+
+        *parsedValue = result;
+        return true;
+    }
+
+    bool TryParsePositiveIntField(std::wstring_view value, int* parsedValue) noexcept
+    {
+        std::uint64_t parsed = 0;
+        if (!parsedValue
+            || !TryParseUnsignedField(value, &parsed)
+            || parsed == 0
+            || parsed > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+        {
+            return false;
+        }
+
+        *parsedValue = static_cast<int>(parsed);
+        return true;
+    }
+
+    bool IsSafeCacheFileName(std::wstring_view fileName) noexcept
+    {
+        constexpr std::size_t kHashCharacterCount = 16;
+        constexpr std::wstring_view kSuffix = L".thumb";
+        if (fileName.size() != kHashCharacterCount + kSuffix.size()
+            || fileName.compare(kHashCharacterCount, kSuffix.size(), kSuffix) != 0)
+        {
+            return false;
+        }
+
+        for (std::size_t index = 0; index < kHashCharacterCount; ++index)
+        {
+            const wchar_t character = fileName[index];
+            const bool isDecimal = character >= L'0' && character <= L'9';
+            const bool isLowerHex = character >= L'a' && character <= L'f';
+            const bool isUpperHex = character >= L'A' && character <= L'F';
+            if (!isDecimal && !isLowerHex && !isUpperHex)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     bool TryParseIndexEntry(const std::wstring& line, ParsedIndexEntry* entry)
     {
         if (!entry || line.empty())
@@ -308,14 +379,34 @@ namespace
             return false;
         }
 
+        std::uint64_t modifiedTimestampUtc = 0;
+        std::uint64_t fileBytes = 0;
+        std::uint64_t lastAccessOrdinal = 0;
+        int targetWidth = 0;
+        int targetHeight = 0;
+        if (!TryParseUnsignedField(fields[1], &modifiedTimestampUtc)
+            || !TryParsePositiveIntField(fields[2], &targetWidth)
+            || !TryParsePositiveIntField(fields[3], &targetHeight)
+            || !IsSafeCacheFileName(fields[4])
+            || !TryParseUnsignedField(fields[5], &fileBytes)
+            || !TryParseUnsignedField(fields[6], &lastAccessOrdinal)
+            || fileBytes < sizeof(DiskThumbnailHeader)
+            || fileBytes > kMaximumThumbnailFileBytes
+            || fileBytes > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
+            || lastAccessOrdinal == 0
+            || lastAccessOrdinal == std::numeric_limits<std::uint64_t>::max())
+        {
+            return false;
+        }
+
         ParsedIndexEntry parsed;
         parsed.key.filePath = fields[0];
-        parsed.key.modifiedTimestampUtc = _wcstoui64(fields[1].c_str(), nullptr, 10);
-        parsed.key.targetWidth = _wtoi(fields[2].c_str());
-        parsed.key.targetHeight = _wtoi(fields[3].c_str());
+        parsed.key.modifiedTimestampUtc = modifiedTimestampUtc;
+        parsed.key.targetWidth = targetWidth;
+        parsed.key.targetHeight = targetHeight;
         parsed.cacheFileName = fields[4];
-        parsed.fileBytes = static_cast<std::size_t>(_wcstoui64(fields[5].c_str(), nullptr, 10));
-        parsed.lastAccessOrdinal = _wcstoui64(fields[6].c_str(), nullptr, 10);
+        parsed.fileBytes = static_cast<std::size_t>(fileBytes);
+        parsed.lastAccessOrdinal = lastAccessOrdinal;
         *entry = std::move(parsed);
         return true;
     }
@@ -825,9 +916,19 @@ namespace hyperbrowse::cache
             entry.cacheFileName = std::move(parsedEntry.cacheFileName);
             entry.fileBytes = parsedEntry.fileBytes;
             entry.lastAccessOrdinal = parsedEntry.lastAccessOrdinal;
-            nextAccessOrdinal_ = std::max(nextAccessOrdinal_, entry.lastAccessOrdinal + 1);
-            currentBytes_ += entry.fileBytes;
-            entries_.emplace(std::move(parsedEntry.key), std::move(entry));
+            if (entry.fileBytes > std::numeric_limits<std::size_t>::max() - currentBytes_)
+            {
+                continue;
+            }
+
+            const auto [iterator, inserted] = entries_.emplace(std::move(parsedEntry.key), std::move(entry));
+            if (!inserted)
+            {
+                continue;
+            }
+
+            currentBytes_ += iterator->second.fileBytes;
+            nextAccessOrdinal_ = std::max(nextAccessOrdinal_, iterator->second.lastAccessOrdinal + 1);
         }
 
         return true;
@@ -835,8 +936,14 @@ namespace hyperbrowse::cache
 
     void DiskThumbnailCache::SaveIndexLocked() const
     {
+        if (cacheDirectory_.empty())
+        {
+            return;
+        }
+
         const fs::path indexPath = fs::path(cacheDirectory_) / kIndexFileName;
-        std::wofstream stream(indexPath, std::ios::trunc);
+        const fs::path temporaryPath = fs::path(indexPath.wstring() + L".tmp." + std::to_wstring(GetCurrentProcessId()));
+        std::wofstream stream(temporaryPath, std::ios::trunc);
         if (!stream)
         {
             return;
@@ -845,6 +952,24 @@ namespace hyperbrowse::cache
         for (const auto& [key, entry] : entries_)
         {
             stream << BuildIndexLine(key, entry.cacheFileName, entry.fileBytes, entry.lastAccessOrdinal) << L'\n';
+        }
+
+        stream.flush();
+        if (!stream)
+        {
+            stream.close();
+            std::error_code error;
+            fs::remove(temporaryPath, error);
+            return;
+        }
+
+        stream.close();
+        if (!MoveFileExW(temporaryPath.c_str(),
+                         indexPath.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            std::error_code error;
+            fs::remove(temporaryPath, error);
         }
     }
 

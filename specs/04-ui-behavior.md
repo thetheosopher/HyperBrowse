@@ -60,24 +60,19 @@ Keep menus compact and practical.
 - Sort By (submenu: Filename, Modified Date, File Size, Dimensions, Type, Random)
 - Slideshow from Selection
 - Slideshow from Folder
-- Slideshow Transition (Cut / Crossfade / Slide / Ken Burns, duration presets: 200 / 350 / 500 / 800 / 1200 / 2000 ms)
-- Theme (Light / Dark)
-- Enable NVIDIA JPEG Acceleration
-- Use Out-of-Process LibRaw Fallback
+- Slideshow transition style and timing are configured under Settings > Slideshow Settings.
+- Theme (Light / Dark) under Settings > Appearance
+- Enable NVIDIA JPEG Acceleration under Settings > Performance
+- Use Out-of-Process LibRaw Fallback under Settings > Performance
 
 Sort Direction (ascending/descending) is implemented and persisted to the registry as `SortAscending`.
 
-### Image
-- Open in Viewer
-- Next / Previous
-- Rotate Left / Rotate Right (viewer)
-- Adjust JPEG Orientation Left / Right (EXIF metadata-only)
-- Slideshow
-- Image Information
+### Settings
+- Appearance, Viewer, Performance, Diagnostics, Integration, Behavior, and Slideshow Settings
 
 Note: "Lossless JPEG Rotate" from the original spec was replaced with EXIF-only orientation adjustment.
 
-Note: The Tools menu from the original spec was not implemented. Refresh is available via F5 in the File menu. Settings are managed through View menu toggles and persisted to the Windows registry.
+Note: The Tools menu from the original spec was not implemented. Refresh is available via F5 in the File menu. Preferences are managed through the top-level Settings menu and persisted to the Windows registry.
 
 ### Help
 - About
@@ -232,11 +227,11 @@ Status bar should update incrementally and never block UI.
 - respect recursive mode when appropriate
 - allow next/previous during slideshow
 - support full-screen slideshow mode
-- default interval 3000 ms (minimum 1000 ms)
+- default interval 3000 ms (minimum 250 ms)
 - Space bar toggles slideshow on/off in the viewer
 - Ctrl+Shift+F in the viewer starts a current-folder slideshow from the currently displayed image
 
-Note: Configurable slideshow interval is not yet exposed in the UI. The API accepts an interval parameter but there is no settings surface for it. Pause/resume is currently handled by the Space bar toggle (stop/start).
+Slideshow interval, transition style, and transition duration are exposed through Settings > Slideshow Settings. Pause/resume is handled by the Space bar toggle (stop/start).
 
 ## 10. Theme Behavior
 
@@ -265,8 +260,8 @@ Note: Configurable slideshow interval is not yet exposed in the UI. The API acce
 - `Ctrl+R`: recursive browsing toggle
 - `Ctrl+Shift+S`: slideshow from selection
 - `Ctrl+Shift+F`: slideshow from folder
-- `Ctrl+L`: light theme
-- `Ctrl+D`: dark theme
+- `Ctrl+A`: select all visible browser items
+- `F2`: rename the selected item
 - `Ctrl+Shift+D`: diagnostics snapshot
 - `Ctrl+Shift+X`: reset diagnostics
 
@@ -279,13 +274,9 @@ Note: Configurable slideshow interval is not yet exposed in the UI. The API acce
 - `L`: rotate left
 - `R`: rotate right
 - `F11`: toggle fullscreen
-- `Escape`: exit fullscreen
+- `Escape`: close the viewer
 - `Space`: toggle slideshow
 - `Tab`: toggle info overlay HUD
-
-### Not yet implemented
-- `Ctrl+A`: select all (implemented in browser via menu, no dedicated accelerator)
-- `F2`: rename in place
 
 ## 12. Error UX
 

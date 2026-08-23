@@ -83,6 +83,8 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_HOME, FCONTROL, L"Ctrl+Home", L"Go to the first image", L"Viewer navigation"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_END, FCONTROL, L"Ctrl+End", L"Go to the last image", L"Viewer navigation"},
         ShortcutDefinition{ShortcutContext::Viewer, command_ids::ID_FILE_COPY_IMAGE_PIXELS, static_cast<WORD>('I'), FCONTROL | FSHIFT, L"Ctrl+Shift+I", L"Copy the displayed image", L"Viewer compare and display"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('0'), 0, L"0", L"Fit the image to the window", L"Viewer compare and display"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('1'), 0, L"1", L"Show the image at actual size", L"Viewer compare and display"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_DELETE, 0, L"Del", L"Move the displayed file to the Recycle Bin", L"Viewer delete and exit"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_DELETE, FSHIFT, L"Shift+Del", L"Delete the displayed file permanently", L"Viewer delete and exit"},
     };

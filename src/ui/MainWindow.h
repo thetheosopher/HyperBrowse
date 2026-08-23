@@ -713,7 +713,7 @@ namespace hyperbrowse::ui
         browser::ThumbnailSizePreset thumbnailSizePreset_{static_cast<browser::ThumbnailSizePreset>(192)};
         browser::BrowserSortMode sortMode_{static_cast<browser::BrowserSortMode>(0)};
         bool sortAscending_{true};
-        bool compactThumbnailLayout_{};
+        bool compactThumbnailLayout_{true};
         bool thumbnailDetailsVisible_{true};
         UINT slideshowIntervalMs_{3000};
         viewer::TransitionStyle slideshowTransitionStyle_{};

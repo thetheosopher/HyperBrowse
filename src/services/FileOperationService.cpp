@@ -534,6 +534,8 @@ namespace hyperbrowse::services
             update->destinationFolder = destinationFolder;
             update->finished = true;
 
+            try
+            {
             if (sourcePaths.empty())
             {
                 update->message = L"No files were selected for the requested file operation.";
@@ -672,6 +674,19 @@ namespace hyperbrowse::services
                                                      update->failedCount,
                                                      update->aborted);
             PostUpdate(targetWindow, std::move(update));
+            }
+            catch (const std::exception&)
+            {
+                update->failedCount = update->requestedCount;
+                update->message = L"The file operation failed unexpectedly.";
+                PostUpdate(targetWindow, std::move(update));
+            }
+            catch (...)
+            {
+                update->failedCount = update->requestedCount;
+                update->message = L"The file operation failed unexpectedly.";
+                PostUpdate(targetWindow, std::move(update));
+            }
         }));
 
         return requestId;

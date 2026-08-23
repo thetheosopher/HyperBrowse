@@ -189,7 +189,10 @@ namespace
             return;
         }
 
-        std::wofstream stream(metadataPath, std::ios::trunc);
+        const fs::path temporaryPath = fs::path(metadataPath.wstring()
+            + L".tmp."
+            + std::to_wstring(GetCurrentProcessId()));
+        std::wofstream stream(temporaryPath, std::ios::trunc);
         if (!stream)
         {
             return;
@@ -206,6 +209,24 @@ namespace
                    << L'\t' << entry.rating
                    << L'\t' << EscapeField(entry.tags)
                    << L'\n';
+        }
+
+        stream.flush();
+        if (!stream)
+        {
+            stream.close();
+            std::error_code error;
+            fs::remove(temporaryPath, error);
+            return;
+        }
+
+        stream.close();
+        if (!MoveFileExW(temporaryPath.c_str(),
+                         metadataPath.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            std::error_code error;
+            fs::remove(temporaryPath, error);
         }
     }
 }

@@ -1,9 +1,12 @@
 #pragma once
 
+#include <windows.h>
+
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -105,7 +108,18 @@ namespace hyperbrowse::util
 
                 if (task)
                 {
-                    task();
+                    try
+                    {
+                        task();
+                    }
+                    catch (const std::exception&)
+                    {
+                        OutputDebugStringW(L"HyperBrowse background task threw an exception.\n");
+                    }
+                    catch (...)
+                    {
+                        OutputDebugStringW(L"HyperBrowse background task threw an unknown exception.\n");
+                    }
                 }
             }
         }

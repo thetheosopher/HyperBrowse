@@ -143,6 +143,7 @@ target_include_directories(HyperBrowseCore
 )
 
 target_link_libraries(HyperBrowseCore PUBLIC
+    advapi32
     comctl32
     dwmapi
     d2d1
