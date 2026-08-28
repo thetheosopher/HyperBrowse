@@ -1242,13 +1242,12 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::SetFullMetadataVisible(bool visible)
     {
-        if (fullMetadataVisible_ == visible)
+        if (fullMetadataVisible_ != visible)
         {
-            return;
+            fullMetadataVisible_ = visible;
+            SaveViewerFullMetadataVisibleSetting(fullMetadataVisible_);
         }
 
-        fullMetadataVisible_ = visible;
-        SaveViewerFullMetadataVisibleSetting(fullMetadataVisible_);
         if (fullMetadataVisible_)
         {
             LoadMetadataAsyncForIndex(currentIndex_);
@@ -5546,6 +5545,7 @@ namespace hyperbrowse::viewer
                         }
                     }
 
+                    const bool fullMetadataShown = fullMetadataVisible_ && infoOverlaysVisible_;
                     if (infoOverlaysVisible_)
                     {
                         const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
@@ -5584,7 +5584,7 @@ namespace hyperbrowse::viewer
                                 : L"  |  Loading compare image...");
                         }
 
-                        const float availablePanelWidth = fullMetadataVisible_
+                        const float availablePanelWidth = fullMetadataShown
                             ? std::max(120.0f, (clientWidth * (2.0f / 3.0f)) - 32.0f)
                             : std::max(120.0f, clientWidth - 32.0f);
                         const float topPanelWidth = std::min((compareLayout ? 760.0f : 560.0f) * overlayMetrics.overlayWidthScale, availablePanelWidth);
@@ -5594,14 +5594,15 @@ namespace hyperbrowse::viewer
                             + overlayMetrics.topInfoHeight;
                         const float bottomPanelHeight = (overlayMetrics.bottomPanelPaddingY * 2.0f)
                             + overlayMetrics.bottomInfoHeight;
-                        const float bottomPanelLeft = fullMetadataVisible_
-                            ? 16.0f
-                            : clientWidth - 16.0f - bottomPanelWidth;
+                        const float bottomPanelLeft = clientWidth - 16.0f - bottomPanelWidth;
+                        const float bottomPanelTop = fullMetadataShown
+                            ? clientHeight - 16.0f - bottomPanelHeight
+                            : 16.0f;
                         D2D1_RECT_F topPanel = D2D1::RectF(16, 16, 16 + topPanelWidth, 16 + topPanelHeight);
                         D2D1_RECT_F bottomPanel = D2D1::RectF(bottomPanelLeft,
-                                                              clientHeight - 16 - bottomPanelHeight,
+                                                              bottomPanelTop,
                                                               bottomPanelLeft + bottomPanelWidth,
-                                                              clientHeight - 16);
+                                                              bottomPanelTop + bottomPanelHeight);
 
                         const D2D1_ROUNDED_RECT roundedTop = D2D1::RoundedRect(topPanel, 8.0f, 8.0f);
                         const D2D1_ROUNDED_RECT roundedBottom = D2D1::RoundedRect(bottomPanel, 8.0f, 8.0f);
@@ -5644,7 +5645,7 @@ namespace hyperbrowse::viewer
                         }
                     }
 
-                    if (fullMetadataVisible_)
+                    if (fullMetadataShown)
                     {
                         const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
                         const float metadataLeft = std::max(16.0f, (clientWidth * (2.0f / 3.0f)) + 8.0f);

@@ -2899,6 +2899,22 @@ namespace
         Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithOverlays),
             "Failed to sample the visible metadata pane");
 
+        viewer.SetInfoOverlaysVisible(true);
+        viewer.SetFullMetadataVisible(false);
+        PumpMessagesFor(100);
+        Expect(viewer.AreInfoOverlaysVisible() && !viewer.IsFullMetadataVisible(),
+            "Viewer did not apply the overlays-on and full-metadata-off state");
+        COLORREF metadataPixelWithoutFullMetadata{};
+        Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithoutFullMetadata),
+            "Failed to sample the viewer with full metadata hidden");
+        Expect(metadataPixelWithoutFullMetadata != metadataPixelWithOverlays,
+            "Viewer full metadata pane remained visible when full metadata was disabled");
+
+        viewer.SetFullMetadataVisible(true);
+        PumpMessagesFor(100);
+        Expect(viewer.IsFullMetadataVisible(),
+            "Viewer did not re-enable the full metadata pane");
+
         state->viewerStartFolderSlideshowRequests = 0;
         state->lastViewerStartFolderSlideshowSource = nullptr;
         BYTE originalKeyboardState[256]{};
@@ -2976,8 +2992,8 @@ namespace
         COLORREF metadataPixelWithoutOverlays{};
         Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithoutOverlays),
             "Failed to sample the metadata pane with info overlays hidden");
-        Expect(metadataPixelWithoutOverlays == metadataPixelWithOverlays,
-            "Viewer full metadata pane disappeared when info overlays were hidden");
+        Expect(metadataPixelWithoutOverlays != metadataPixelWithOverlays,
+            "Viewer full metadata pane remained visible when info overlays were hidden");
 
         RECT secondImageClientRect{};
         Expect(GetClientRect(viewer.Hwnd(), &secondImageClientRect) != FALSE,
