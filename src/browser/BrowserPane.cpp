@@ -21,6 +21,7 @@
 #include "cache/ThumbnailCache.h"
 #include "decode/ImageDecoder.h"
 #include "render/D2DRenderer.h"
+#include "render/GdiText.h"
 #include "services/ImageMetadataService.h"
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
@@ -4160,28 +4161,25 @@ namespace hyperbrowse::browser
             }
         }
 
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, colors_.text);
-        HGDIOBJ oldTitleFont = placeholderTitleFont_
-            ? SelectObject(hdc, placeholderTitleFont_)
-            : static_cast<HGDIOBJ>(nullptr);
-        DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        if (oldTitleFont)
-        {
-            SelectObject(hdc, oldTitleFont);
-        }
+        render::DrawGdiText(hdc,
+                            placeholderTitleFont_,
+                            title.c_str(),
+                            -1,
+                            titleRect,
+                            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                            colors_.text,
+                            colors_.placeholderBackground);
 
         if (!text.empty())
         {
-            SetTextColor(hdc, colors_.mutedText);
-            HGDIOBJ oldBodyFont = placeholderBodyFont_
-                ? SelectObject(hdc, placeholderBodyFont_)
-                : static_cast<HGDIOBJ>(nullptr);
-            DrawTextW(hdc, text.c_str(), -1, &bodyRect, DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
-            if (oldBodyFont)
-            {
-                SelectObject(hdc, oldBodyFont);
-            }
+            render::DrawGdiText(hdc,
+                                placeholderBodyFont_,
+                                text.c_str(),
+                                -1,
+                                bodyRect,
+                                DT_CENTER | DT_TOP | DT_WORDBREAK | DT_NOPREFIX,
+                                colors_.mutedText,
+                                colors_.placeholderBackground);
         }
     }
 
@@ -4227,7 +4225,6 @@ namespace hyperbrowse::browser
             ratingStripWidth += 2;
         }
 
-        SetBkMode(hdc, TRANSPARENT);
         for (int viewIndex = firstIndex; viewIndex < lastIndex; ++viewIndex)
         {
             const BrowserItem* item = ItemFromViewIndex(viewIndex);
@@ -4291,26 +4288,21 @@ namespace hyperbrowse::browser
 
             if (thumbnailDetailsVisible_ && !item->isDirectory)
             {
-                SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
+                const COLORREF cellBackground = selected ? colors_.accentFill : colors_.surfaceBackground;
                 const int titleTop = previewRect.bottom + layout.titleTopGap;
-                HGDIOBJ oldFont = thumbnailTitleFont_
-                    ? SelectObject(hdc, thumbnailTitleFont_)
-                    : static_cast<HGDIOBJ>(nullptr);
                 RECT nameRect{cellRect.left + layout.textInset,
                               titleTop,
                               cellRect.right - layout.textInset,
                               titleTop + layout.titleHeight};
                 const std::wstring displayTitle = BuildThumbnailDisplayTitle(*item);
-                DrawTextW(hdc,
-                          displayTitle.c_str(),
-                          -1,
-                          &nameRect,
-                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-                SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
-                if (oldFont)
-                {
-                    SelectObject(hdc, oldFont);
-                }
+                render::DrawGdiText(hdc,
+                                    thumbnailTitleFont_,
+                                    displayTitle.c_str(),
+                                    -1,
+                                    nameRect,
+                                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                                    selected ? colors_.selectionText : colors_.text,
+                                    cellBackground);
 
                 RECT infoRect{cellRect.left + layout.textInset,
                               cellRect.bottom - layout.infoBottomInset - layout.infoHeight,
@@ -4335,45 +4327,45 @@ namespace hyperbrowse::browser
                 const std::wstring typeLabel = BuildDisplayFileTypeLabel(*item, modelIndex);
                 const std::wstring dimensionLabel = item->isDirectory ? std::wstring{} : FormatDimensionsForItem(*item);
                 const int rating = item->isDirectory ? 0 : ThumbnailRatingForItem(userMetadataStore_, *item);
-                HGDIOBJ footerFont = thumbnailMetaFont_
-                    ? SelectObject(hdc, thumbnailMetaFont_)
-                    : static_cast<HGDIOBJ>(nullptr);
+                render::DrawGdiText(hdc,
+                                    thumbnailMetaFont_,
+                                    dimensionLabel.c_str(),
+                                    -1,
+                                    dimensionsRect,
+                                    DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                                    selected ? colors_.selectionText : colors_.mutedText,
+                                    cellBackground);
 
-                SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
-                DrawTextW(hdc,
-                          dimensionLabel.c_str(),
-                          -1,
-                          &dimensionsRect,
-                          DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-
-                SetTextColor(hdc, colors_.mutedText);
-                DrawTextW(hdc,
-                          kThumbnailRatingStars.data(),
-                          static_cast<int>(kThumbnailRatingStars.size()),
-                          &ratingRect,
-                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                render::DrawGdiText(hdc,
+                                    thumbnailMetaFont_,
+                                    kThumbnailRatingStars.data(),
+                                    static_cast<int>(kThumbnailRatingStars.size()),
+                                    ratingRect,
+                                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                                    colors_.mutedText,
+                                    cellBackground);
                 if (rating > 0)
                 {
-                    SetTextColor(hdc, kThumbnailRatingGold);
-                    DrawTextW(hdc,
-                              kThumbnailRatingStars.data(),
-                              rating,
-                              &ratingRect,
-                              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    render::DrawGdiText(hdc,
+                                        thumbnailMetaFont_,
+                                        kThumbnailRatingStars.data(),
+                                        rating,
+                                        ratingRect,
+                                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                                        kThumbnailRatingGold,
+                                        cellBackground);
                 }
 
                 if (typeRect.right > typeRect.left)
                 {
-                    SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
-                    DrawTextW(hdc,
-                              typeLabel.c_str(),
-                              -1,
-                              &typeRect,
-                              DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-                }
-                if (footerFont)
-                {
-                    SelectObject(hdc, footerFont);
+                    render::DrawGdiText(hdc,
+                                        thumbnailMetaFont_,
+                                        typeLabel.c_str(),
+                                        -1,
+                                        typeRect,
+                                        DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                                        selected ? colors_.selectionText : colors_.text,
+                                        cellBackground);
                 }
             }
 
@@ -4419,10 +4411,6 @@ namespace hyperbrowse::browser
                 labelTop += iconSize + 6;
             }
 
-            SetTextColor(hdc, selected ? colors_.selectionText : colors_.text);
-            HGDIOBJ oldFont = folderTitleFont_
-                ? SelectObject(hdc, folderTitleFont_)
-                : static_cast<HGDIOBJ>(nullptr);
             RECT folderRect{
                 previewRect.left + layout.textInset,
                 labelTop,
@@ -4430,15 +4418,14 @@ namespace hyperbrowse::browser
                 labelTop + labelHeight,
             };
             const std::wstring displayTitle = BuildThumbnailDisplayTitle(item);
-            DrawTextW(hdc,
-                      displayTitle.c_str(),
-                      -1,
-                      &folderRect,
-                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            if (oldFont)
-            {
-                SelectObject(hdc, oldFont);
-            }
+            render::DrawGdiText(hdc,
+                                folderTitleFont_,
+                                displayTitle.c_str(),
+                                -1,
+                                folderRect,
+                                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                                selected ? colors_.selectionText : colors_.text,
+                                selected ? colors_.selectedPreviewBackground : colors_.previewBackground);
             return;
         }
 
@@ -4454,16 +4441,14 @@ namespace hyperbrowse::browser
                               previewRect.right - layout.textInset,
                               previewRect.top + std::max(34, layout.previewInset + layout.metaHeight)};
             const std::wstring placeholder = decode::IsRawFileType(item.fileType) ? item.fileType : std::wstring(L"IMAGE");
-            SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
-            HGDIOBJ oldFont = thumbnailStatusFont_
-                ? SelectObject(hdc, thumbnailStatusFont_)
-                : static_cast<HGDIOBJ>(nullptr);
-            DrawTextW(hdc, placeholder.c_str(), -1, &iconTextRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
-
-            if (oldFont)
-            {
-                SelectObject(hdc, oldFont);
-            }
+            render::DrawGdiText(hdc,
+                                thumbnailStatusFont_,
+                                placeholder.c_str(),
+                                -1,
+                                iconTextRect,
+                                DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX,
+                                selected ? colors_.selectionText : colors_.mutedText,
+                                selected ? colors_.selectedPreviewBackground : colors_.previewBackground);
             return;
         }
 
@@ -4487,20 +4472,18 @@ namespace hyperbrowse::browser
                 DrawIconEx(hdc, iconX, iconY, waitCursor, iconSize, iconSize, 0, nullptr, DI_NORMAL);
             }
 
-            const COLORREF statusColor = selected ? colors_.selectionText : colors_.mutedText;
-            SetTextColor(hdc, statusColor);
-            HGDIOBJ oldFont = thumbnailStatusFont_
-                ? SelectObject(hdc, thumbnailStatusFont_)
-                : static_cast<HGDIOBJ>(nullptr);
             RECT statusRect{previewRect.left + layout.textInset,
                             iconY + iconSize + std::max(6, layout.metaTopGap),
                             previewRect.right - layout.textInset,
                             previewRect.bottom - layout.previewInset};
-            DrawTextW(hdc, L"Loading thumbnail", -1, &statusRect, DT_CENTER | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-            if (oldFont)
-            {
-                SelectObject(hdc, oldFont);
-            }
+            render::DrawGdiText(hdc,
+                                thumbnailStatusFont_,
+                                L"Loading thumbnail",
+                                -1,
+                                statusRect,
+                                DT_CENTER | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                                selected ? colors_.selectionText : colors_.mutedText,
+                                selected ? colors_.selectedPreviewBackground : colors_.previewBackground);
             return;
         }
 
@@ -4561,23 +4544,18 @@ namespace hyperbrowse::browser
         }
 
         const wchar_t* message = UnavailableThumbnailMessage(failureKind);
-        SetTextColor(hdc, selected ? colors_.selectionText : colors_.mutedText);
-        HGDIOBJ oldFont = thumbnailStatusFont_
-            ? SelectObject(hdc, thumbnailStatusFont_)
-            : static_cast<HGDIOBJ>(nullptr);
         RECT statusRect{previewRect.left + layout.textInset,
                         textTop,
                         previewRect.right - layout.textInset,
                         previewRect.bottom - layout.previewInset};
-        DrawTextW(hdc,
-              message,
-              -1,
-                  &statusRect,
-                  DT_CENTER | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
-        if (oldFont)
-        {
-            SelectObject(hdc, oldFont);
-        }
+        render::DrawGdiText(hdc,
+                            thumbnailStatusFont_,
+                            message,
+                            -1,
+                            statusRect,
+                            DT_CENTER | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX,
+                            selected ? colors_.selectionText : colors_.mutedText,
+                            selected ? colors_.selectedPreviewBackground : colors_.previewBackground);
     }
 
     std::wstring BrowserPane::BuildListText(int viewIndex, int subItem) const

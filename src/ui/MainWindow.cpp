@@ -52,6 +52,7 @@
 #include "util/StringConvert.h"
 #include "util/Timing.h"
 #include "util/UiTextSize.h"
+#include "render/GdiText.h"
 #include "viewer/ViewerWindow.h"
 
 #include "app/resource.h"
@@ -1803,18 +1804,16 @@ namespace
         DeleteObject(borderPen);
         DeleteObject(fillBrush);
 
-        SetBkMode(drawItem.hDC, TRANSPARENT);
-        SetTextColor(drawItem.hDC, palette.text);
-        const HGDIOBJ oldFont = SelectObject(drawItem.hDC,
-                                             state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
         RECT textRect = pillRect;
         InflateRect(&textRect, -12, -6);
-        DrawTextW(drawItem.hDC,
-                  GetAboutDialogLinkLabel(drawItem.CtlID),
-                  -1,
-                  &textRect,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        SelectObject(drawItem.hDC, oldFont);
+        hyperbrowse::render::DrawGdiText(drawItem.hDC,
+                    state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    GetAboutDialogLinkLabel(drawItem.CtlID),
+                    -1,
+                    textRect,
+                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                    palette.text,
+                    palette.fill);
 
         if ((drawItem.itemState & ODS_FOCUS) != 0)
         {
@@ -3812,8 +3811,6 @@ namespace
         SelectObject(hdc, oldPen);
         DeleteObject(borderPen);
 
-        SetBkMode(hdc, TRANSPARENT);
-
         if (state.heroIcon)
         {
             DrawIconEx(hdc, iconLeft, iconTop, state.heroIcon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
@@ -3839,47 +3836,65 @@ namespace
         RECT subtitleRect{textLeft, subtitleTop, textRight, subtitleTop + subtitleHeight};
         RECT introRect{textLeft, introTop, textRight, introTop + introHeight};
 
-        HGDIOBJ oldFont = SelectObject(hdc, state.titleFont ? state.titleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-        SetTextColor(hdc, state.text);
-        DrawTextW(hdc, state.title.c_str(), -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        hyperbrowse::render::DrawGdiText(hdc,
+                    state.titleFont ? state.titleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    state.title.c_str(),
+                    -1,
+                    titleRect,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                    state.text,
+                    state.headerBackground);
 
-        SelectObject(hdc, state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-        SetTextColor(hdc, state.accent);
-        DrawTextW(hdc, state.subtitle.c_str(), -1, &subtitleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        hyperbrowse::render::DrawGdiText(hdc,
+                    state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    state.subtitle.c_str(),
+                    -1,
+                    subtitleRect,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                    state.accent,
+                    state.headerBackground);
 
-        SelectObject(hdc, state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-        SetTextColor(hdc, state.mutedText);
-        DrawTextW(hdc,
-                  state.intro.c_str(),
-                  -1,
-                  &introRect,
-                  DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+        hyperbrowse::render::DrawGdiText(hdc,
+                    state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    state.intro.c_str(),
+                    -1,
+                    introRect,
+                    DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                    state.mutedText,
+                    state.headerBackground);
 
         RECT headingRect{kAboutDialogMargin, bodyRect.top + 24, clientRect.right - kAboutDialogMargin, bodyRect.top + 24 + headingHeight};
-        SetTextColor(hdc, state.accent);
-        DrawTextW(hdc, state.bodyHeading.c_str(), -1, &headingRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+        hyperbrowse::render::DrawGdiText(hdc,
+                    state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    state.bodyHeading.c_str(),
+                    -1,
+                    headingRect,
+                    DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX,
+                    state.accent,
+                    state.panelBackground);
 
         RECT bodyTextRect{kAboutDialogMargin, headingRect.bottom + 12, clientRect.right - kAboutDialogMargin, footerRect.top - 18};
-        SetTextColor(hdc, state.text);
-        DrawTextW(hdc,
-                  state.bodyContent.c_str(),
-                  -1,
-                  &bodyTextRect,
-                  DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+        hyperbrowse::render::DrawGdiText(hdc,
+                    state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    state.bodyContent.c_str(),
+                    -1,
+                    bodyTextRect,
+                    DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                    state.text,
+                    state.panelBackground);
 
         RECT footerTextRect{kAboutDialogMargin,
                     footerRect.top + 18,
                     std::max(kAboutDialogMargin + 200, AboutDialogFooterButtonsLeft(clientRect, state) - 20),
                     footerRect.bottom - 16};
-        SelectObject(hdc, state.footerFont ? state.footerFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-        SetTextColor(hdc, state.mutedText);
-        DrawTextW(hdc,
-                  state.footer.c_str(),
-                  -1,
-                  &footerTextRect,
-                  DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
-
-        SelectObject(hdc, oldFont);
+        hyperbrowse::render::DrawGdiText(hdc,
+                    state.footerFont ? state.footerFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    state.footer.c_str(),
+                    -1,
+                    footerTextRect,
+                    DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                    state.mutedText,
+                    state.footerBackground);
     }
 
     LRESULT CALLBACK AboutDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -10860,32 +10875,31 @@ namespace hyperbrowse::ui
         SelectObject(drawItem.hDC, oldPen);
         DeleteObject(borderPen);
 
-        SetBkMode(drawItem.hDC, TRANSPARENT);
-        const HGDIOBJ oldFont = SelectObject(drawItem.hDC, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-
         RECT primaryRect{clientRect.left + kStatusStripHorizontalPadding,
                          clientRect.top,
                          clientRect.left + firstPartWidth - kStatusStripHorizontalPadding,
                          clientRect.bottom};
-        SetTextColor(drawItem.hDC, palette.text);
-        DrawTextW(drawItem.hDC,
-                  statusPrimaryText_.c_str(),
-                  -1,
-                  &primaryRect,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        render::DrawGdiText(drawItem.hDC,
+                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    statusPrimaryText_.c_str(),
+                    -1,
+                    primaryRect,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
+                    palette.text,
+                    backgroundColor);
 
         RECT secondaryRect{clientRect.left + firstPartWidth + kStatusStripHorizontalPadding,
                            clientRect.top,
                            clientRect.right - kStatusStripHorizontalPadding,
                            clientRect.bottom};
-        SetTextColor(drawItem.hDC, palette.mutedText);
-        DrawTextW(drawItem.hDC,
-                  statusSecondaryText_.c_str(),
-                  -1,
-                  &secondaryRect,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        SelectObject(drawItem.hDC, oldFont);
+        render::DrawGdiText(drawItem.hDC,
+                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                    statusSecondaryText_.c_str(),
+                    -1,
+                    secondaryRect,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
+                    palette.mutedText,
+                    backgroundColor);
     }
 
     void MainWindow::MeasureOwnerDrawMenuItem(MEASUREITEMSTRUCT* measureItem) const
@@ -11022,7 +11036,6 @@ namespace hyperbrowse::ui
             DeleteObject(markPen);
         }
 
-        SetBkMode(drawItem.hDC, TRANSPARENT);
         const COLORREF labelColor = disabled
             ? BlendColor(palette.mutedText, backgroundColor, 128)
             : (selected ? palette.text : palette.text);
@@ -11030,7 +11043,6 @@ namespace hyperbrowse::ui
             ? BlendColor(palette.mutedText, backgroundColor, 128)
             : (selected ? palette.text : palette.mutedText);
         const HFONT menuFont = appTextUiFont_ ? appTextUiFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        const HGDIOBJ oldFont = SelectObject(drawItem.hDC, menuFont);
 
         RECT labelRect{itemRect.left + checkColumnWidth + textPadding,
                        itemRect.top,
@@ -11040,12 +11052,14 @@ namespace hyperbrowse::ui
         {
             labelRect.right -= MeasureTextWidth(menuFont, shortcut) + shortcutGap;
         }
-        SetTextColor(drawItem.hDC, labelColor);
-        DrawTextW(drawItem.hDC,
-                  label.c_str(),
-                  -1,
-                  &labelRect,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        render::DrawGdiText(drawItem.hDC,
+                            menuFont,
+                            label.c_str(),
+                            -1,
+                            labelRect,
+                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                            labelColor,
+                            backgroundColor);
 
         if (!shortcut.empty())
         {
@@ -11053,15 +11067,15 @@ namespace hyperbrowse::ui
                               itemRect.top,
                               itemRect.right - textPadding,
                               itemRect.bottom};
-            SetTextColor(drawItem.hDC, shortcutColor);
-            DrawTextW(drawItem.hDC,
-                      shortcut.c_str(),
-                      -1,
-                      &shortcutRect,
-                      DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                        render::DrawGdiText(drawItem.hDC,
+                                                                menuFont,
+                                                                shortcut.c_str(),
+                                                                -1,
+                                                                shortcutRect,
+                                                                DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                                                                shortcutColor,
+                                                                backgroundColor);
         }
-
-        SelectObject(drawItem.hDC, oldFont);
     }
 
     int MainWindow::CommandBarMenuHitTest(int x, int y) const
@@ -12189,8 +12203,6 @@ namespace hyperbrowse::ui
         SelectObject(hdc, oldPen);
         DeleteObject(borderPen);
 
-        SetBkMode(hdc, TRANSPARENT);
-        const HGDIOBJ oldFont = SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
         if (!IsRectEmpty(&detailsPanelTabStripRect_))
         {
             const COLORREF inactiveFill = BlendColor(palette.actionFieldBackground,
@@ -12244,12 +12256,14 @@ namespace hyperbrowse::ui
                 DeleteObject(tabBrush);
 
                 RECT textRect = tabRect;
-                SetTextColor(hdc, textColor);
-                DrawTextW(hdc,
-                          labels[index],
-                          -1,
-                          &textRect,
-                          DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+                hyperbrowse::render::DrawGdiText(hdc,
+                                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                    labels[index],
+                                    -1,
+                                    textRect,
+                                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
+                                    textColor,
+                                    fillColor);
             }
         }
 
@@ -12311,8 +12325,14 @@ namespace hyperbrowse::ui
                                                            22);
             RECT titleRect{innerLeft, detailsPanelContentRect_.top, innerRight, detailsPanelContentRect_.top + titleHeight};
 
-            SetTextColor(hdc, palette.text);
-            DrawTextW(hdc, title.c_str(), -1, &titleRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+            hyperbrowse::render::DrawGdiText(hdc,
+                                detailsPanelTitleFont_ ? detailsPanelTitleFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                title.c_str(),
+                                -1,
+                                titleRect,
+                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                palette.text,
+                                palette.paneBackground);
 
             const int summaryTop = titleRect.bottom + 6;
             if (!detailsPanelSummaryText_.empty())
@@ -12323,9 +12343,14 @@ namespace hyperbrowse::ui
                                                                  DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
                                                                  18);
                 RECT summaryRect{innerLeft, summaryTop, innerRight, summaryTop + summaryHeight};
-                SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-                SetTextColor(hdc, palette.mutedText);
-                DrawTextW(hdc, detailsPanelSummaryText_.c_str(), -1, &summaryRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+                hyperbrowse::render::DrawGdiText(hdc,
+                                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                    detailsPanelSummaryText_.c_str(),
+                                    -1,
+                                    summaryRect,
+                                    DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                    palette.mutedText,
+                                    palette.paneBackground);
             }
 
             if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_) && !IsRectEmpty(&detailsPanelHistogramRect_))
@@ -12347,17 +12372,27 @@ namespace hyperbrowse::ui
 
                 RECT histogramTextRect = detailsPanelHistogramRect_;
                 InflateRect(&histogramTextRect, -8, -8);
-                SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-
                 if (detailsPanelHistogramLoading_)
                 {
-                    SetTextColor(hdc, palette.mutedText);
-                    DrawTextW(hdc, L"Loading histogram...", -1, &histogramTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    hyperbrowse::render::DrawGdiText(hdc,
+                                        detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                        L"Loading histogram...",
+                                        -1,
+                                        histogramTextRect,
+                                        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                                        palette.mutedText,
+                                        histogramBackground);
                 }
                 else if (!detailsPanelHistogramVisible_ || detailsPanelHistogramPeak_ == 0)
                 {
-                    SetTextColor(hdc, palette.mutedText);
-                    DrawTextW(hdc, L"Histogram unavailable", -1, &histogramTextRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    render::DrawGdiText(hdc,
+                                        detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                        L"Histogram unavailable",
+                                        -1,
+                                        histogramTextRect,
+                                        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                                        palette.mutedText,
+                                        histogramBackground);
                 }
                 else
                 {
@@ -12410,9 +12445,14 @@ namespace hyperbrowse::ui
             {
                 headerRect.right = quickAccessSortButtonRect_.left - kQuickAccessPanelSortButtonGap;
             }
-            SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-            SetTextColor(hdc, palette.mutedText);
-            DrawTextW(hdc, L"Quick Send", -1, &headerRect, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE);
+            render::DrawGdiText(hdc,
+                                detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                L"Quick Send",
+                                -1,
+                                headerRect,
+                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE,
+                                palette.mutedText,
+                                palette.paneBackground);
 
             if (!IsRectEmpty(&quickAccessSortButtonRect_))
             {
@@ -12485,9 +12525,15 @@ namespace hyperbrowse::ui
                 DeleteObject(buttonPen);
                 DeleteObject(buttonBrush);
 
-                SetTextColor(hdc, textColor);
                 RECT textRect = rect;
-                DrawTextW(hdc, label, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                render::DrawGdiText(hdc,
+                                    detailsPanelBodyFont_ ? detailsPanelBodyFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                    label,
+                                    -1,
+                                    textRect,
+                                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                                    textColor,
+                                    fillColor);
             };
 
             const int savedDC = SaveDC(hdc);
@@ -12523,18 +12569,28 @@ namespace hyperbrowse::ui
                 labelRect.top += metrics.labelTopInset;
                 labelRect.right = row.shortcutRect.left - 10;
                 labelRect.bottom = labelRect.top + metrics.labelHeight;
-                SetTextColor(hdc, rowEnabled ? palette.text : palette.mutedText);
-                SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-                DrawTextW(hdc, row.displayLabel.c_str(), -1, &labelRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                render::DrawGdiText(hdc,
+                                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                    row.displayLabel.c_str(),
+                                    -1,
+                                    labelRect,
+                                    DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                                    rowEnabled ? palette.text : palette.mutedText,
+                                    currentRowBackground);
 
                 RECT metadataRect = row.rowRect;
                 metadataRect.left += 10;
                 metadataRect.top += metrics.metadataTopInset;
                 metadataRect.right = row.copyRect.left - 10;
                 metadataRect.bottom -= metrics.metadataBottomInset;
-                SetTextColor(hdc, palette.mutedText);
-                SelectObject(hdc, detailsPanelBodyFont_ ? detailsPanelBodyFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-                DrawTextW(hdc, row.metadataLabel.c_str(), -1, &metadataRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                render::DrawGdiText(hdc,
+                                    detailsPanelBodyFont_ ? detailsPanelBodyFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                    row.metadataLabel.c_str(),
+                                    -1,
+                                    metadataRect,
+                                    DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                                    palette.mutedText,
+                                    currentRowBackground);
 
                 drawActionButton(row.copyRect,
                                  L"Copy",
@@ -12563,16 +12619,15 @@ namespace hyperbrowse::ui
         else if (activeRightPaneTab_ == RightPaneTab::QuickSend && !IsRectEmpty(&detailsPanelContentRect_))
         {
             RECT emptyStateRect = detailsPanelContentRect_;
-            SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-            SetTextColor(hdc, palette.mutedText);
-            DrawTextW(hdc,
-                      L"Favorite destinations will appear here.",
-                      -1,
-                      &emptyStateRect,
-                      DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+            render::DrawGdiText(hdc,
+                                detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                L"Favorite destinations will appear here.",
+                                -1,
+                                emptyStateRect,
+                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
+                                palette.mutedText,
+                                palette.paneBackground);
         }
-
-        SelectObject(hdc, oldFont);
     }
 
     void MainWindow::RefreshBrowserPane()
@@ -20751,8 +20806,6 @@ namespace hyperbrowse::ui
         SelectObject(hdc, oldPen);
         DeleteObject(borderPen);
 
-        SetBkMode(hdc, TRANSPARENT);
-
         for (int index = 0; index < static_cast<int>(commandBarMenuButtons_.size()); ++index)
         {
             const CommandBarMenuButton& button = commandBarMenuButtons_[static_cast<std::size_t>(index)];
@@ -20788,14 +20841,14 @@ namespace hyperbrowse::ui
             RECT textRect = buttonRect;
             textRect.left += kCommandBarMenuButtonPadding;
             textRect.right -= kCommandBarMenuButtonPadding + kCommandBarMenuChevronWidth + 4;
-            const HGDIOBJ oldFont = SelectObject(hdc, detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
-            SetTextColor(hdc, palette.text);
-            DrawTextW(hdc,
-                      button.label.c_str(),
-                      -1,
-                      &textRect,
-                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-            SelectObject(hdc, oldFont);
+            render::DrawGdiText(hdc,
+                                detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
+                                button.label.c_str(),
+                                -1,
+                                textRect,
+                                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                                palette.text,
+                                fillColor);
 
             const int chevronX = buttonRect.right - kCommandBarMenuButtonPadding - kCommandBarMenuChevronWidth;
             const int chevronY = buttonRect.top + ((buttonRect.bottom - buttonRect.top) - kCommandBarMenuChevronWidth) / 2;

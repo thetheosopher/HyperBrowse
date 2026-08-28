@@ -23,6 +23,7 @@
 #include "app/resource.h"
 #include "decode/ImageDecoder.h"
 #include "render/D2DRenderer.h"
+#include "render/GdiText.h"
 #include "services/ImageMetadataService.h"
 #include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
@@ -2975,9 +2976,6 @@ namespace hyperbrowse::viewer
         const int textPadding = scaleMenuDimension(kContextMenuTextPadding);
         const int checkColumnWidth = scaleMenuDimension(kContextMenuCheckColumnWidth);
         const int shortcutGap = scaleMenuDimension(kContextMenuShortcutGap);
-        const HGDIOBJ oldFont = SelectObject(drawItem.hDC, menuFont);
-        SetBkMode(drawItem.hDC, TRANSPARENT);
-
         RECT labelRect{drawItem.rcItem.left + checkColumnWidth + textPadding,
                        drawItem.rcItem.top,
                        drawItem.rcItem.right - textPadding,
@@ -2987,14 +2985,16 @@ namespace hyperbrowse::viewer
             labelRect.right -= MeasureMenuTextWidth(menuFont, shortcut) + shortcutGap;
         }
 
-        SetTextColor(drawItem.hDC, disabled
-            ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
-            : TextColor(darkTheme_));
-        DrawTextW(drawItem.hDC,
-                  label.c_str(),
-                  -1,
-                  &labelRect,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        render::DrawGdiText(drawItem.hDC,
+                            menuFont,
+                            label.c_str(),
+                            -1,
+                            labelRect,
+                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                            disabled
+                                ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
+                                : TextColor(darkTheme_),
+                            backgroundColor);
 
         if (!shortcut.empty())
         {
@@ -3002,17 +3002,17 @@ namespace hyperbrowse::viewer
                               drawItem.rcItem.top,
                               drawItem.rcItem.right - textPadding,
                               drawItem.rcItem.bottom};
-            SetTextColor(drawItem.hDC, disabled
-                ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
-                : MutedTextColor(darkTheme_));
-            DrawTextW(drawItem.hDC,
-                      shortcut.c_str(),
-                      -1,
-                      &shortcutRect,
-                      DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            render::DrawGdiText(drawItem.hDC,
+                                menuFont,
+                                shortcut.c_str(),
+                                -1,
+                                shortcutRect,
+                                DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                                disabled
+                                    ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
+                                    : MutedTextColor(darkTheme_),
+                                backgroundColor);
         }
-
-        SelectObject(drawItem.hDC, oldFont);
     }
 
     void ViewerWindow::PrepareContextMenuForOwnerDraw(
@@ -5871,10 +5871,15 @@ namespace hyperbrowse::viewer
                 DeleteObject(toastPen);
                 DeleteObject(toastBrush);
 
-                SetTextColor(hdc, TextColor(darkTheme_));
                 RECT toastRect{toastLeft + 12, toastTop, toastLeft + toastWidth - 12, toastTop + toastHeight};
-                DrawTextW(hdc, wraparoundMessage_.c_str(), static_cast<int>(wraparoundMessage_.size()), &toastRect,
-                          DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                render::DrawGdiText(hdc,
+                                    nullptr,
+                                    wraparoundMessage_.c_str(),
+                                    static_cast<int>(wraparoundMessage_.size()),
+                                    toastRect,
+                                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                                    TextColor(darkTheme_),
+                                    PanelFillColor(darkTheme_));
             }
 
             EndPaint(hwnd_, &paintStruct);
