@@ -2543,7 +2543,7 @@ namespace
             "Quick Send assigned a shortcut when all alphanumeric keys were already occupied");
     }
 
-    void RunViewerWindowFitModeChecks(hyperbrowse::viewer::ViewerWindow& viewer)
+    void RunViewerWindowFitModeChecks(hyperbrowse::viewer::ViewerWindow& viewer, int currentImageHeight)
     {
         Expect(viewer.CurrentIndex() == 1, "Viewer fit-mode scenario did not start on the middle image");
         while (viewer.RotationQuarterTurns() != 0)
@@ -2565,58 +2565,71 @@ namespace
         Expect(viewerMonitor != nullptr && GetMonitorInfoW(viewerMonitor, &viewerMonitorInfo) != FALSE,
             "Failed to read the viewer monitor work area before testing window fit modes");
 
+        for (int index = 0; index < 5; ++index)
+        {
+            SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
+        }
+        PumpMessagesFor(300);
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(120, 120));
+        SendMessageW(viewer.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(180, 150));
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(180, 150));
+        PumpMessagesFor(100);
+
+        const POINT panBeforeHeightFit = viewer.PanOffset();
+        Expect(panBeforeHeightFit.x != 0 || panBeforeHeightFit.y != 0,
+            "Viewer fit-height test did not establish a non-zero pan offset");
+        RECT heightFitBeforeRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &heightFitBeforeRect) != FALSE,
+            "Failed to read the viewer bounds before windowed FitHeight");
+        const DWORD heightFitBeforeStyle = static_cast<DWORD>(GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE));
+
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'H', 0);
         PumpMessagesFor(100);
-        RECT heightFitRect{};
+        RECT heightFitAfterRect{};
         RECT heightFitClientRect{};
-        Expect(GetWindowRect(viewer.Hwnd(), &heightFitRect) != FALSE
+        Expect(GetWindowRect(viewer.Hwnd(), &heightFitAfterRect) != FALSE
                 && GetClientRect(viewer.Hwnd(), &heightFitClientRect) != FALSE,
-            "Failed to read the viewer bounds after FitHeight");
-        Expect(heightFitRect.top == viewerMonitorInfo.rcWork.top
-                && heightFitRect.bottom == viewerMonitorInfo.rcWork.bottom,
-            "Viewer FitHeight did not span the monitor work-area height");
-        Expect((GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE) & WS_CAPTION) != 0,
-            "Viewer FitHeight removed the normal title bar");
-        const double heightFitAspect = static_cast<double>(heightFitClientRect.right)
-            / std::max<LONG>(1, heightFitClientRect.bottom);
-        Expect(std::abs(heightFitAspect - 2.0) < 0.02,
-            "Viewer FitHeight did not size the window from the image aspect ratio (client="
-                + std::to_string(heightFitClientRect.right)
-                + "x" + std::to_string(heightFitClientRect.bottom)
-                + ", work=" + std::to_string(viewerMonitorInfo.rcWork.right - viewerMonitorInfo.rcWork.left)
-                + "x" + std::to_string(viewerMonitorInfo.rcWork.bottom - viewerMonitorInfo.rcWork.top)
-                + ")");
+            "Failed to read the viewer bounds after windowed FitHeight");
+        Expect(heightFitAfterRect.left == heightFitBeforeRect.left
+                && heightFitAfterRect.top == heightFitBeforeRect.top
+                && heightFitAfterRect.right == heightFitBeforeRect.right
+                && heightFitAfterRect.bottom == heightFitBeforeRect.bottom,
+            "Viewer FitHeight changed the windowed window geometry");
+        Expect(static_cast<DWORD>(GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE)) == heightFitBeforeStyle,
+            "Viewer FitHeight changed the windowed window style");
+        const int expectedHeightFitZoom = std::max(
+            1,
+            static_cast<int>(std::lround(
+                static_cast<double>(heightFitClientRect.bottom) / currentImageHeight * 100.0)));
+        Expect(viewer.CurrentZoomPercent() == expectedHeightFitZoom,
+            "Viewer FitHeight did not fit the image to the existing client height");
+        Expect(viewer.PanOffset().x == 0 && viewer.PanOffset().y == 0,
+            "Viewer FitHeight did not reset the pan offset");
 
-        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_PRIOR, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
             "Viewer previous-image navigation failed while in FitHeight");
+        PumpMessagesFor(100);
         RECT previousHeightFitRect{};
         RECT previousHeightFitClientRect{};
         Expect(GetWindowRect(viewer.Hwnd(), &previousHeightFitRect) != FALSE
                 && GetClientRect(viewer.Hwnd(), &previousHeightFitClientRect) != FALSE,
             "Failed to read the viewer bounds after FitHeight navigation");
-        Expect(previousHeightFitRect.top == viewerMonitorInfo.rcWork.top
-                && previousHeightFitRect.bottom == viewerMonitorInfo.rcWork.bottom,
-            "Viewer FitHeight navigation changed the work-area height bounds");
-        const double previousHeightFitAspect = static_cast<double>(previousHeightFitClientRect.right)
-            / std::max<LONG>(1, previousHeightFitClientRect.bottom);
-        Expect(std::abs(previousHeightFitAspect - 0.5) < 0.02,
-            "Viewer FitHeight navigation did not resize from the previous image aspect ratio");
+        Expect(previousHeightFitRect.left == heightFitBeforeRect.left
+                && previousHeightFitRect.top == heightFitBeforeRect.top
+                && previousHeightFitRect.right == heightFitBeforeRect.right
+                && previousHeightFitRect.bottom == heightFitBeforeRect.bottom,
+            "Viewer FitHeight navigation changed the window geometry");
+        const int expectedPreviousHeightFitZoom = std::max(
+            1,
+            static_cast<int>(std::lround(
+                static_cast<double>(previousHeightFitClientRect.bottom) / 48.0 * 100.0)));
+        Expect(viewer.CurrentZoomPercent() == expectedPreviousHeightFitZoom,
+            "Viewer FitHeight navigation did not recompute the image height scale");
 
-        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_NEXT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
             "Viewer next-image navigation failed while returning from FitHeight");
-
-        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'H', 0);
-        PumpMessagesFor(100);
-        RECT restoredAfterHeightFitRect{};
-        Expect(GetWindowRect(viewer.Hwnd(), &restoredAfterHeightFitRect) != FALSE,
-            "Failed to read the viewer bounds after leaving FitHeight");
-        Expect(restoredAfterHeightFitRect.right - restoredAfterHeightFitRect.left
-                    == regularViewerRect.right - regularViewerRect.left
-                && restoredAfterHeightFitRect.bottom - restoredAfterHeightFitRect.top
-                    == regularViewerRect.bottom - regularViewerRect.top,
-            "Viewer did not restore the regular window size after leaving FitHeight");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'W', 0);
         PumpMessagesFor(100);
@@ -2683,20 +2696,46 @@ namespace
         SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
         PumpMessagesFor(100);
         Expect(viewer.IsFullScreen(), "Viewer double-click did not re-enter full screen");
+        RECT fullScreenHeightFitBeforeRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &fullScreenHeightFitBeforeRect) != FALSE,
+            "Failed to read the fullscreen bounds before FitHeight");
+        const DWORD fullScreenHeightFitBeforeStyle = static_cast<DWORD>(GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE));
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'H', 0);
         PumpMessagesFor(100);
-        Expect(!viewer.IsFullScreen(), "Viewer FitHeight shortcut did not leave F11 fullscreen");
-        RECT fullScreenHeightFitRect{};
-        Expect(GetWindowRect(viewer.Hwnd(), &fullScreenHeightFitRect) != FALSE,
-            "Failed to read the viewer bounds after the fullscreen FitHeight transition");
-        Expect(fullScreenHeightFitRect.top == viewerMonitorInfo.rcWork.top
-                && fullScreenHeightFitRect.bottom == viewerMonitorInfo.rcWork.bottom
-                && (GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE) & WS_CAPTION) != 0,
-            "Viewer FitHeight shortcut did not enter normal titled FitHeight mode from F11 fullscreen");
+        RECT fullScreenHeightFitAfterRect{};
+        RECT fullScreenHeightFitClientRect{};
+        Expect(viewer.IsFullScreen()
+                && GetWindowRect(viewer.Hwnd(), &fullScreenHeightFitAfterRect) != FALSE
+                && GetClientRect(viewer.Hwnd(), &fullScreenHeightFitClientRect) != FALSE,
+            "Viewer FitHeight shortcut did not preserve F11 fullscreen");
+        Expect(fullScreenHeightFitAfterRect.left == fullScreenHeightFitBeforeRect.left
+                && fullScreenHeightFitAfterRect.top == fullScreenHeightFitBeforeRect.top
+                && fullScreenHeightFitAfterRect.right == fullScreenHeightFitBeforeRect.right
+                && fullScreenHeightFitAfterRect.bottom == fullScreenHeightFitBeforeRect.bottom,
+            "Viewer FitHeight changed fullscreen window geometry");
+        Expect(static_cast<DWORD>(GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE)) == fullScreenHeightFitBeforeStyle,
+            "Viewer FitHeight changed fullscreen window style");
+        const int expectedFullScreenHeightFitZoom = std::max(
+            1,
+            static_cast<int>(std::lround(
+                static_cast<double>(fullScreenHeightFitClientRect.bottom) / currentImageHeight * 100.0)));
+        Expect(viewer.CurrentZoomPercent() == expectedFullScreenHeightFitZoom,
+            "Viewer fullscreen FitHeight did not fit the image to the client height");
 
-        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
+        PumpMessagesFor(300);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'H', 0);
         PumpMessagesFor(100);
-        Expect(viewer.IsFullScreen(), "Viewer did not re-enter F11 fullscreen before testing FitWidth");
+        Expect(viewer.IsFullScreen(), "Viewer FitHeight shortcut exited fullscreen after a custom zoom");
+        RECT fullScreenCustomHeightFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &fullScreenCustomHeightFitRect) != FALSE
+                && fullScreenCustomHeightFitRect.left == fullScreenHeightFitBeforeRect.left
+                && fullScreenCustomHeightFitRect.top == fullScreenHeightFitBeforeRect.top
+                && fullScreenCustomHeightFitRect.right == fullScreenHeightFitBeforeRect.right
+                && fullScreenCustomHeightFitRect.bottom == fullScreenHeightFitBeforeRect.bottom,
+            "Viewer custom-zoom FitHeight changed fullscreen window geometry");
+
+        Expect(viewer.IsFullScreen(), "Viewer fit-height fullscreen state was not preserved before testing FitWidth");
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'W', 0);
         PumpMessagesFor(100);
         Expect(!viewer.IsFullScreen(), "Viewer FitWidth shortcut did not leave F11 fullscreen");
@@ -2732,7 +2771,7 @@ namespace
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
             "Viewer fit-mode window did not finish the initial image decode");
         Expect(viewer.IsFullScreen(), "Viewer fit-mode window should open in full screen by default");
-        RunViewerWindowFitModeChecks(viewer);
+        RunViewerWindowFitModeChecks(viewer, 32);
 
         Expect(viewer.CurrentIndex() == 1, "Viewer wraparound scenario did not start from the middle image");
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
@@ -3086,7 +3125,7 @@ namespace
          Expect(fitPan.x == 0 && fitPan.y == 0 && viewer.PanOffset().x == 0 && viewer.PanOffset().y == 0,
              "Viewer arrows panned an image while it was fit to the window");
 
-        RunViewerWindowFitModeChecks(viewer);
+        RunViewerWindowFitModeChecks(viewer, 320);
 
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);

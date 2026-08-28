@@ -1712,7 +1712,7 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        ResetViewState();
+        ResetViewState(zoomMode_ == ZoomMode::FitHeight);
         UpdateWindowTitle();
         NotifyZoomChanged(0);
         if (hwnd_)
@@ -2418,29 +2418,41 @@ namespace hyperbrowse::viewer
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
         const double fitScale = FitScaleForClient(clientRect);
+        const double minimumScale = zoomMode_ == ZoomMode::FitHeight
+            ? FitHeightScaleForClient(clientRect)
+            : fitScale;
         const bool smoothZoomActive = smoothZoomTimerId_ != 0;
         const double baseScale = smoothZoomActive
             ? smoothZoomTarget_
-            : (zoomMode_ == ZoomMode::Fit ? fitScale : customZoomScale_);
+            : (zoomMode_ == ZoomMode::Fit ? fitScale
+                : (zoomMode_ == ZoomMode::FitHeight ? minimumScale : customZoomScale_));
         double targetPanX = panOffsetX_;
         double targetPanY = panOffsetY_;
 
-        double targetScale = std::clamp(baseScale * factor, std::min(baseScale, fitScale), kMaximumZoomScale);
+        double targetScale = std::clamp(baseScale * factor, std::min(baseScale, minimumScale), kMaximumZoomScale);
 
-        if (factor < 1.0 && std::abs(targetScale - fitScale) < 0.0001)
+        if (factor < 1.0 && std::abs(targetScale - minimumScale) < 0.0001)
         {
             if (smoothZoomTimerId_)
             {
                 KillTimer(hwnd_, kSmoothZoomTimerId);
                 smoothZoomTimerId_ = 0;
             }
-            FitToWindow();
+            if (zoomMode_ == ZoomMode::FitHeight)
+            {
+                FitToHeight();
+            }
+            else
+            {
+                FitToWindow();
+            }
             return;
         }
 
         const double currentScale = smoothZoomActive
             ? smoothZoomCurrent_
-            : (zoomMode_ == ZoomMode::Fit ? fitScale : customZoomScale_);
+            : (zoomMode_ == ZoomMode::Fit ? fitScale
+                : (zoomMode_ == ZoomMode::FitHeight ? minimumScale : customZoomScale_));
 
         if (anchorPoint)
         {
@@ -2469,6 +2481,22 @@ namespace hyperbrowse::viewer
     void ViewerWindow::FitToWindow()
     {
         zoomMode_ = ZoomMode::Fit;
+        panOffsetX_ = 0.0;
+        panOffsetY_ = 0.0;
+        if (smoothZoomTimerId_)
+        {
+            KillTimer(hwnd_, kSmoothZoomTimerId);
+            smoothZoomTimerId_ = 0;
+        }
+        if (hwnd_)
+        {
+            RequestRepaint();
+        }
+    }
+
+    void ViewerWindow::FitToHeight()
+    {
+        zoomMode_ = ZoomMode::FitHeight;
         panOffsetX_ = 0.0;
         panOffsetY_ = 0.0;
         if (smoothZoomTimerId_)
@@ -3236,9 +3264,10 @@ namespace hyperbrowse::viewer
         wraparoundMessage_.clear();
     }
 
-    void ViewerWindow::ResetViewState()
+    void ViewerWindow::ResetViewState(bool preserveFitHeight)
     {
-        zoomMode_ = ZoomMode::Fit;
+        const bool keepFitHeight = preserveFitHeight && zoomMode_ == ZoomMode::FitHeight;
+        zoomMode_ = keepFitHeight ? ZoomMode::FitHeight : ZoomMode::Fit;
         customZoomScale_ = 1.0;
         currentZoomPercent_ = 0;
         rotationQuarterTurns_ = 0;
@@ -3449,6 +3478,14 @@ namespace hyperbrowse::viewer
         return std::min(widthRatio, heightRatio);
     }
 
+    double ViewerWindow::FitHeightScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const
+    {
+        const int clientHeight = std::max(1, static_cast<int>(clientRect.bottom - clientRect.top));
+        const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+        const double imageHeight = static_cast<double>(swapDimensions ? image.SourceWidth() : image.SourceHeight());
+        return static_cast<double>(clientHeight) / std::max(1.0, imageHeight);
+    }
+
     double ViewerWindow::FitScaleForClient(const RECT& clientRect) const
     {
         if (!currentImage_)
@@ -3459,9 +3496,27 @@ namespace hyperbrowse::viewer
         return FitScaleForImage(*currentImage_, clientRect);
     }
 
+    double ViewerWindow::FitHeightScaleForClient(const RECT& clientRect) const
+    {
+        if (!currentImage_)
+        {
+            return 1.0;
+        }
+
+        return FitHeightScaleForImage(*currentImage_, clientRect);
+    }
+
     double ViewerWindow::EffectiveScaleForClient(const RECT& clientRect) const
     {
-        return zoomMode_ == ZoomMode::Fit ? FitScaleForClient(clientRect) : customZoomScale_;
+        if (zoomMode_ == ZoomMode::Fit)
+        {
+            return FitScaleForClient(clientRect);
+        }
+        if (zoomMode_ == ZoomMode::FitHeight)
+        {
+            return FitHeightScaleForClient(clientRect);
+        }
+        return customZoomScale_;
     }
 
     void ViewerWindow::DrawImageBitmap(ID2D1RenderTarget* renderTarget,
@@ -3711,7 +3766,7 @@ namespace hyperbrowse::viewer
         preserveDisplayedImageWhileLoading_ = false;
         if (deferredSwap)
         {
-            ResetViewState();
+            ResetViewState(zoomMode_ == ZoomMode::FitHeight);
             UpdateWindowTitle();
             NotifyZoomChanged(0);
         }
@@ -4068,7 +4123,7 @@ namespace hyperbrowse::viewer
                 ZoomBy(0.8);
                 return 0;
             case VK_RETURN:
-                if (zoomMode_ == ZoomMode::Fit)
+                if (zoomMode_ == ZoomMode::Fit || zoomMode_ == ZoomMode::FitHeight)
                 {
                     SetActualSize();
                 }
@@ -4084,7 +4139,7 @@ namespace hyperbrowse::viewer
                 SetActualSize();
                 return 0;
             case 'H':
-                SetWindowFitMode(WindowFitMode::Height);
+                FitToHeight();
                 return 0;
             case 'W':
                 SetWindowFitMode(WindowFitMode::Width);
@@ -5576,7 +5631,9 @@ namespace hyperbrowse::viewer
                         bottomLine.append(std::to_wstring(zoomPercent));
                         bottomLine.append(L"%");
                         bottomLine.append(L"  |  ");
-                        bottomLine.append(zoomMode_ == ZoomMode::Fit ? L"Fit" : L"Custom");
+                        bottomLine.append(zoomMode_ == ZoomMode::Fit
+                            ? L"Fit"
+                            : (zoomMode_ == ZoomMode::FitHeight ? L"Fit Height" : L"Custom"));
                         if (compareLayout)
                         {
                             bottomLine.append(compareImage

@@ -153,6 +153,7 @@ namespace hyperbrowse::viewer
         enum class ZoomMode
         {
             Fit,
+            FitHeight,
             Custom,
         };
 
@@ -214,6 +215,7 @@ namespace hyperbrowse::viewer
         void LogPrefetchStats() const;
         void ZoomBy(double factor, const POINT* anchorPoint = nullptr);
         void FitToWindow();
+        void FitToHeight();
         void SetActualSize();
         void RotateLeft();
         void RotateRight();
@@ -244,7 +246,7 @@ namespace hyperbrowse::viewer
         void BeginTransitionFromPending();
         void StopTransition(bool clearPending = true);
         TransitionStyle ResolveActiveTransitionStyle() noexcept;
-        void ResetViewState();
+        void ResetViewState(bool preserveFitHeight = false);
         void CalculatePanLimits(double& maxPanX, double& maxPanY) const;
         void ClampPanOffsets();
         bool CanPanHorizontally() const;
@@ -253,7 +255,9 @@ namespace hyperbrowse::viewer
         int CompareIndexForDirection(CompareDirection direction) const noexcept;
         int ActiveCompareIndex() const noexcept;
         double FitScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const;
+        double FitHeightScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const;
         double FitScaleForClient(const RECT& clientRect) const;
+        double FitHeightScaleForClient(const RECT& clientRect) const;
         double EffectiveScaleForClient(const RECT& clientRect) const;
         void DrawImageBitmap(ID2D1RenderTarget* renderTarget,
                              ID2D1Bitmap* bitmap,
