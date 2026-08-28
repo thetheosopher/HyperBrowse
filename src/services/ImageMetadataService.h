@@ -83,6 +83,9 @@ namespace hyperbrowse::services
                                       MetadataExtractor extractor = ExtractImageMetadata);
         ~ImageMetadataService();
 
+        static std::size_t ResolveCacheCapacityEntries(std::size_t requestedCapacityEntries,
+                                util::ResourceProfile resourceProfile);
+
         void BindTargetWindow(HWND targetWindow);
         void Schedule(std::uint64_t sessionId, MetadataWorkItem workItem);
         void Schedule(std::uint64_t sessionId, std::vector<MetadataWorkItem> workItems);

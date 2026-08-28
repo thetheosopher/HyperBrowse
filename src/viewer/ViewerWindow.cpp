@@ -806,6 +806,36 @@ namespace
 
 namespace hyperbrowse::viewer
 {
+    bool ViewerWindow::DefaultInfoOverlaysVisible()
+    {
+        return LoadViewerInfoOverlaysVisibleSetting();
+    }
+
+    InfoOverlayTextSize ViewerWindow::DefaultOverlayTextSize()
+    {
+        return LoadViewerInfoOverlayTextSizeSetting();
+    }
+
+    bool ViewerWindow::DefaultFullMetadataVisible()
+    {
+        return LoadViewerFullMetadataVisibleSetting();
+    }
+
+    void ViewerWindow::SetDefaultInfoOverlaysVisible(bool visible)
+    {
+        SaveViewerInfoOverlaysVisibleSetting(visible);
+    }
+
+    void ViewerWindow::SetDefaultOverlayTextSize(InfoOverlayTextSize size)
+    {
+        SaveViewerInfoOverlayTextSizeSetting(size);
+    }
+
+    void ViewerWindow::SetDefaultFullMetadataVisible(bool visible)
+    {
+        SaveViewerFullMetadataVisibleSetting(visible);
+    }
+
     ViewerWindow::ViewerWindow(HINSTANCE instance)
         : instance_(instance)
         , asyncState_(std::make_shared<AsyncState>())
@@ -1094,6 +1124,16 @@ namespace hyperbrowse::viewer
     void ViewerWindow::SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept
     {
         mouseWheelBehavior_ = behavior;
+    }
+
+    void ViewerWindow::SetKeyboardPanningInverted(bool inverted) noexcept
+    {
+        keyboardPanningInverted_ = inverted;
+    }
+
+    bool ViewerWindow::IsKeyboardPanningInverted() const noexcept
+    {
+        return keyboardPanningInverted_;
     }
 
     void ViewerWindow::SetTransitionSettings(TransitionStyle style, UINT durationMs)
@@ -3951,7 +3991,8 @@ namespace hyperbrowse::viewer
                     double maxPanX = 0.0;
                     double maxPanY = 0.0;
                     CalculatePanLimits(maxPanX, maxPanY);
-                    panOffsetX_ += std::min(kKeyboardPanStep, maxPanX);
+                    const double panStep = std::min(kKeyboardPanStep, maxPanX);
+                    panOffsetX_ += keyboardPanningInverted_ ? panStep : -panStep;
                     ClampPanOffsets();
                     RequestRepaint();
                 }
@@ -3970,7 +4011,8 @@ namespace hyperbrowse::viewer
                     double maxPanX = 0.0;
                     double maxPanY = 0.0;
                     CalculatePanLimits(maxPanX, maxPanY);
-                    panOffsetX_ -= std::min(kKeyboardPanStep, maxPanX);
+                    const double panStep = std::min(kKeyboardPanStep, maxPanX);
+                    panOffsetX_ -= keyboardPanningInverted_ ? panStep : -panStep;
                     ClampPanOffsets();
                     RequestRepaint();
                 }
@@ -3987,7 +4029,8 @@ namespace hyperbrowse::viewer
                     double maxPanY = 0.0;
                     CalculatePanLimits(maxPanX, maxPanY);
                     const double panStep = std::min(kKeyboardPanStep, maxPanY);
-                    panOffsetY_ += wParam == VK_UP ? -panStep : panStep;
+                    const double direction = wParam == VK_UP ? 1.0 : -1.0;
+                    panOffsetY_ += (keyboardPanningInverted_ ? -direction : direction) * panStep;
                     ClampPanOffsets();
                     RequestRepaint();
                 }
@@ -5601,7 +5644,7 @@ namespace hyperbrowse::viewer
                         }
                     }
 
-                    if (infoOverlaysVisible_ && fullMetadataVisible_)
+                    if (fullMetadataVisible_)
                     {
                         const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
                         const float metadataLeft = std::max(16.0f, (clientWidth * (2.0f / 3.0f)) + 8.0f);

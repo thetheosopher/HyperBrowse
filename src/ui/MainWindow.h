@@ -307,6 +307,7 @@ namespace hyperbrowse::ui
         void ShowAboutDialog() const;
         void ShowFileAssociationsDialog();
         void ShowSlideshowSettingsDialog();
+        void ShowConsolidatedSettingsDialog();
         void ShowPerformanceSettingsDialog();
         void ShowPersistentThumbnailCacheDialog();
         void ShowPersistentThumbnailCacheDialogContents(std::wstring content, std::wstring expandedInformation);
@@ -425,6 +426,7 @@ namespace hyperbrowse::ui
         LRESULT OnPersistentThumbnailCacheMaintenanceMessage(WPARAM wParam);
         void TryOpenPendingStartupViewerPath(bool clearIfNotFound);
         void TryRestorePendingStartupSelectionPath(bool clearIfNotFound);
+        void TryRestorePendingFolderReloadSelection(bool clearIfNotFound);
 
         void SetBrowserMode(BrowserMode mode);
         void StepThumbnailSize(int direction);
@@ -548,7 +550,7 @@ namespace hyperbrowse::ui
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
         int detailsPanelWidth_{340};
-        std::array<CommandBarMenuButton, 5> commandBarMenuButtons_{};
+        std::array<CommandBarMenuButton, 4> commandBarMenuButtons_{};
         int commandBarHotIndex_{-1};
         int commandBarPressedIndex_{-1};
         HWND commandBarPreviousFocus_{};
@@ -590,6 +592,8 @@ namespace hyperbrowse::ui
         std::wstring startupSelectedImagePath_;
         std::wstring pendingStartupSelectionPath_;
         std::wstring pendingStartupViewerPath_;
+        std::vector<std::wstring> pendingFolderReloadSelectionPaths_;
+        std::wstring pendingFolderReloadFocusedPath_;
         std::vector<std::wstring> openedFolderHistory_;
         std::size_t openedFolderHistoryIndex_{static_cast<std::size_t>(-1)};
         FolderHistoryNavigationDirection pendingFolderHistoryNavigation_{FolderHistoryNavigationDirection::None};
@@ -671,6 +675,7 @@ namespace hyperbrowse::ui
         std::uint64_t activeBatchConvertRequestId_{};
         std::uint64_t activeFileOperationRequestId_{};
         HWND foregroundWindowAtFileOperationStart_{};
+        HWND focusWindowAtFileOperationStart_{};
         bool batchConvertActive_{};
         bool fileOperationActive_{};
         bool cacheMaintenanceActive_{};
@@ -736,6 +741,7 @@ namespace hyperbrowse::ui
         bool useSlideshowTransition_{};
         bool detailsStripVisible_{true};
         viewer::MouseWheelBehavior viewerMouseWheelBehavior_{};
+        bool invertKeyboardPanning_{};
         UINT_PTR memoryPressureTimerId_{};
         UINT_PTR displaySurfaceRecoveryTimerId_{};
         int displaySurfaceRecoveryAttempt_{};

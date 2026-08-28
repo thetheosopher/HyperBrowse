@@ -89,6 +89,7 @@ namespace
     constexpr wchar_t kRegistryValueDetailsStripVisible[] = L"DetailsStripVisible";
     constexpr wchar_t kRegistryValueDetailsPanelWidth[] = L"DetailsPanelWidth";
     constexpr wchar_t kRegistryValueViewerMouseWheelBehavior[] = L"ViewerMouseWheelBehavior";
+        constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
     constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
@@ -340,6 +341,72 @@ namespace
     constexpr UINT kSlideshowMaximumDurationMs = 60000U;
     constexpr UINT kSlideshowMinimumTransitionDurationMs = 100U;
     constexpr UINT kSlideshowMaximumTransitionDurationMs = 5000U;
+    constexpr wchar_t kConsolidatedSettingsDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
+    constexpr int kConsolidatedSettingsDialogWidth = 900;
+    constexpr int kConsolidatedSettingsDialogHeight = 600;
+    constexpr int kConsolidatedSettingsTabControlId = 360;
+    constexpr int kConsolidatedSettingsFirstControlId = 5000;
+    constexpr int kConsolidatedSettingsMargin = 18;
+    constexpr int kConsolidatedSettingsButtonWidth = 84;
+    constexpr int kConsolidatedSettingsButtonHeight = 30;
+    constexpr int kConsolidatedSettingsButtonGap = 10;
+
+    enum class ConsolidatedSettingsPage : std::size_t
+    {
+        Slideshow = 0,
+        Viewer,
+        Appearance,
+        Performance,
+        Behavior,
+        Count,
+    };
+
+    enum class ConsolidatedSettingsControl : std::size_t
+    {
+        TransitionEnabled,
+        TransitionStyle,
+        SlideshowDuration,
+        SlideshowDurationSpin,
+        TransitionDuration,
+        TransitionDurationSpin,
+        ViewerWheelZoom,
+        ViewerWheelNavigate,
+        InvertKeyboardPanning,
+        RawPairingEnabled,
+        RawPreferJpeg,
+        RawPreferRaw,
+        SecondaryMonitor,
+        InfoOverlays,
+        FullMetadata,
+        OverlayTextSize,
+        ThemeLight,
+        ThemeDark,
+        AppTextSize,
+        ThumbnailSize,
+        ThumbnailDetails,
+        CompactLayout,
+        DetailsPanel,
+        ResourceProfile,
+        PersistentCache,
+        ThumbnailCache,
+        ThumbnailCacheAutomatic,
+        MetadataCache,
+        MetadataCacheAutomatic,
+        PressureStatus,
+        NvJpeg,
+        LibRawOutOfProcess,
+        RecursiveBrowsing,
+        ShowSubfolders,
+        CloseOnEscape,
+        SingleInstance,
+        Count,
+    };
+
+    constexpr int ConsolidatedSettingsControlId(ConsolidatedSettingsControl control)
+    {
+        return kConsolidatedSettingsFirstControlId + static_cast<int>(control);
+    }
+
     constexpr wchar_t kFileAssociationsDialogClassName[] = L"HyperBrowseFileAssociationsDialog";
     constexpr int kFileAssociationsDialogWidth = 760;
     constexpr int kFileAssociationsDialogHeight = 500;
@@ -741,6 +808,53 @@ namespace
         bool done{};
     };
 
+    struct ConsolidatedSettingsDialogState
+    {
+        HWND ownerWindow{};
+        HINSTANCE instance{};
+        HWND dialogWindow{};
+        HWND tabWindow{};
+        HFONT bodyFont{};
+        std::wstring title;
+        std::array<std::vector<HWND>, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> pageControls;
+        std::array<HWND, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controls{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
+        bool darkTheme{};
+        hyperbrowse::util::ResourceProfile resourceProfile{hyperbrowse::util::ResourceProfile::Balanced};
+        hyperbrowse::browser::ThumbnailSizePreset thumbnailSizePreset{static_cast<hyperbrowse::browser::ThumbnailSizePreset>(192)};
+        hyperbrowse::viewer::MouseWheelBehavior viewerMouseWheelBehavior{hyperbrowse::viewer::MouseWheelBehavior::Zoom};
+            bool invertKeyboardPanning{};
+        hyperbrowse::viewer::TransitionStyle slideshowTransitionStyle{hyperbrowse::viewer::TransitionStyle::Crossfade};
+        hyperbrowse::viewer::InfoOverlayTextSize overlayTextSize{hyperbrowse::viewer::InfoOverlayTextSize::Small};
+        hyperbrowse::browser::RawJpegDisplayPreference pairedRawJpegViewerPreference{hyperbrowse::browser::RawJpegDisplayPreference::Raw};
+        UINT slideshowIntervalMs{3000};
+        UINT slideshowTransitionDurationMs{350};
+        std::size_t thumbnailCacheCapacityOverrideBytes{};
+        std::size_t metadataCacheCapacityOverrideEntries{};
+        bool useSlideshowTransition{};
+        bool infoOverlaysVisible{};
+        bool fullMetadataVisible{};
+        bool compactThumbnailLayout{true};
+        bool thumbnailDetailsVisible{true};
+        bool detailsStripVisible{true};
+        bool recursiveBrowsingEnabled{};
+        bool showSubfoldersInBrowser{};
+        bool rawJpegPairedOperationsEnabled{};
+        bool defaultViewerToSecondaryMonitor{};
+        bool persistentThumbnailCacheEnabled{true};
+        bool showPressureStateInStatusBar{};
+        bool nvJpegEnabled{};
+        bool libRawOutOfProcessEnabled{true};
+        bool closeMainWindowOnEscape{};
+        bool singleInstanceEnabled{};
+        bool secondaryMonitorAvailable{true};
+        bool nvJpegAvailable{};
+        bool libRawAvailable{};
+        std::function<void(const ConsolidatedSettingsDialogState&)> apply;
+        bool accepted{};
+        bool done{};
+    };
+
     struct SlideshowSettingsDialogLayoutMetrics
     {
         int margin{};
@@ -769,6 +883,46 @@ namespace
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
     bool IsWindows11OrGreater();
     bool LaunchDefaultAppsSettings(HWND ownerWindow);
+
+    HWND CreateConsolidatedSettingsControl(ConsolidatedSettingsDialogState& state,
+                                           ConsolidatedSettingsPage page,
+                                           const wchar_t* className,
+                                           const wchar_t* text,
+                                           DWORD style,
+                                           int x,
+                                           int y,
+                                           int width,
+                                           int height,
+                                           int controlId = 0,
+                                           ConsolidatedSettingsControl control = ConsolidatedSettingsControl::Count)
+    {
+        HWND window = CreateWindowExW(
+            0,
+            className,
+            text,
+            style | WS_CHILD | WS_VISIBLE,
+            x,
+            y,
+            width,
+            height,
+            state.dialogWindow,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
+            state.instance,
+            nullptr);
+        if (window)
+        {
+            const std::size_t pageIndex = static_cast<std::size_t>(page);
+            if (pageIndex < state.pageControls.size())
+            {
+                state.pageControls[pageIndex].push_back(window);
+            }
+            if (control != ConsolidatedSettingsControl::Count)
+            {
+                state.controls[static_cast<std::size_t>(control)] = window;
+            }
+        }
+        return window;
+    }
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
     {
@@ -4162,6 +4316,810 @@ namespace
         }
 
         return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    HWND ConsolidatedSettingsControlHandle(const ConsolidatedSettingsDialogState& state,
+                                            ConsolidatedSettingsControl control)
+    {
+        return state.controls[static_cast<std::size_t>(control)];
+    }
+
+    void SetConsolidatedSettingsCheck(const ConsolidatedSettingsDialogState& state,
+                                      ConsolidatedSettingsControl control,
+                                      bool checked)
+    {
+        if (const HWND window = ConsolidatedSettingsControlHandle(state, control))
+        {
+            SendMessageW(window, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+        }
+    }
+
+    void UpdateConsolidatedSettingsDependencies(const ConsolidatedSettingsDialogState& state)
+    {
+        const bool rawPairingEnabled = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPairingEnabled)
+            && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPairingEnabled), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        const bool thumbnailAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
+            && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        const bool metadataAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic)
+            && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPreferJpeg), rawPairingEnabled);
+        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPreferRaw), rawPairingEnabled);
+        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCache), !thumbnailAutomatic);
+        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCache), !metadataAutomatic);
+    }
+
+    void UpdateConsolidatedSettingsCacheValues(
+        const ConsolidatedSettingsDialogState& state,
+        ConsolidatedSettingsControl changedAutomaticControl = ConsolidatedSettingsControl::Count)
+    {
+        const HWND profileCombo = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ResourceProfile);
+        const HWND thumbnailAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic);
+        const HWND metadataAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic);
+        if (!profileCombo || !thumbnailAutomatic || !metadataAutomatic)
+        {
+            return;
+        }
+
+        const int profileIndex = static_cast<int>(SendMessageW(profileCombo, CB_GETCURSEL, 0, 0));
+        if (profileIndex < 0 || profileIndex > 3)
+        {
+            return;
+        }
+
+        const auto profile = static_cast<hyperbrowse::util::ResourceProfile>(profileIndex);
+        const auto updateCacheValue = [&](ConsolidatedSettingsControl automaticControl,
+                                          ConsolidatedSettingsControl cacheControl,
+                                          std::size_t capacity)
+        {
+            const HWND automatic = ConsolidatedSettingsControlHandle(state, automaticControl);
+            if (SendMessageW(automatic, BM_GETCHECK, 0, 0) == BST_CHECKED
+                || changedAutomaticControl == automaticControl)
+            {
+                SetWindowTextW(ConsolidatedSettingsControlHandle(state, cacheControl), std::to_wstring(capacity).c_str());
+            }
+        };
+
+        updateCacheValue(
+            ConsolidatedSettingsControl::ThumbnailCacheAutomatic,
+            ConsolidatedSettingsControl::ThumbnailCache,
+            hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, profile) / (1024ULL * 1024ULL));
+        updateCacheValue(
+            ConsolidatedSettingsControl::MetadataCacheAutomatic,
+            ConsolidatedSettingsControl::MetadataCache,
+            hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, profile));
+    }
+
+    void ShowConsolidatedSettingsPage(ConsolidatedSettingsDialogState& state, ConsolidatedSettingsPage page)
+    {
+        for (std::size_t index = 0; index < state.pageControls.size(); ++index)
+        {
+            const int command = index == static_cast<std::size_t>(page) ? SW_SHOW : SW_HIDE;
+            for (HWND control : state.pageControls[index])
+            {
+                ShowWindow(control, command);
+            }
+        }
+    }
+
+    bool CollectConsolidatedSettings(HWND hwnd, ConsolidatedSettingsDialogState* state)
+    {
+        if (!hwnd || !state)
+        {
+            return false;
+        }
+
+        const auto comboIndex = [&](ConsolidatedSettingsControl control) -> int
+        {
+            const HWND combo = ConsolidatedSettingsControlHandle(*state, control);
+            return combo ? static_cast<int>(SendMessageW(combo, CB_GETCURSEL, 0, 0)) : -1;
+        };
+        const auto isChecked = [&](ConsolidatedSettingsControl control) -> bool
+        {
+            const HWND button = ConsolidatedSettingsControlHandle(*state, control);
+            return button && SendMessageW(button, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        };
+
+        const int transitionIndex = comboIndex(ConsolidatedSettingsControl::TransitionStyle);
+        if (transitionIndex < 0 || transitionIndex >= static_cast<int>(kSlideshowTransitionOptions.size()))
+        {
+            MessageBoxW(hwnd, L"Select a transition type.", state->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionStyle));
+            return false;
+        }
+
+        UINT slideshowDurationMs = 0;
+        if (!TryReadDialogUInt(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration),
+                               kSlideshowMinimumDurationMs,
+                               kSlideshowMaximumDurationMs,
+                               &slideshowDurationMs))
+        {
+            MessageBoxW(hwnd, L"Slide duration must be between 250 and 60000 milliseconds.", state->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration));
+            return false;
+        }
+
+        UINT transitionDurationMs = 0;
+        if (!TryReadDialogUInt(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration),
+                               kSlideshowMinimumTransitionDurationMs,
+                               kSlideshowMaximumTransitionDurationMs,
+                               &transitionDurationMs))
+        {
+            MessageBoxW(hwnd, L"Transition duration must be between 100 and 5000 milliseconds.", state->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration));
+            return false;
+        }
+
+        const bool thumbnailAutomatic = isChecked(ConsolidatedSettingsControl::ThumbnailCacheAutomatic);
+        const bool metadataAutomatic = isChecked(ConsolidatedSettingsControl::MetadataCacheAutomatic);
+        std::size_t thumbnailMegabytes = 0;
+        if (!thumbnailAutomatic
+            && (!TryParsePositiveSizeValue(ReadWindowText(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ThumbnailCache)), &thumbnailMegabytes)
+                || thumbnailMegabytes > std::numeric_limits<std::uint64_t>::max() / (1024ULL * 1024ULL)))
+        {
+            MessageBoxW(hwnd, L"Enter a positive thumbnail cache size in megabytes, or keep Follow profile enabled.", state->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ThumbnailCache));
+            return false;
+        }
+
+        std::size_t metadataEntries = 0;
+        if (!metadataAutomatic
+            && !TryParsePositiveSizeValue(ReadWindowText(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::MetadataCache)), &metadataEntries))
+        {
+            MessageBoxW(hwnd, L"Enter a positive metadata cache capacity in entries, or keep Follow profile enabled.", state->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::MetadataCache));
+            return false;
+        }
+
+        const int wheelIndex = isChecked(ConsolidatedSettingsControl::ViewerWheelNavigate) ? 1 : 0;
+        const int overlaySizeIndex = comboIndex(ConsolidatedSettingsControl::OverlayTextSize);
+        const int appTextSizeIndex = comboIndex(ConsolidatedSettingsControl::AppTextSize);
+        const int thumbnailSizeIndex = comboIndex(ConsolidatedSettingsControl::ThumbnailSize);
+        const int resourceProfileIndex = comboIndex(ConsolidatedSettingsControl::ResourceProfile);
+        if (overlaySizeIndex < 0 || overlaySizeIndex > 2 || appTextSizeIndex < 0 || appTextSizeIndex > 2
+            || thumbnailSizeIndex < 0 || thumbnailSizeIndex >= static_cast<int>(kThumbnailSizePresets.size())
+            || resourceProfileIndex < 0 || resourceProfileIndex > 3)
+        {
+            MessageBoxW(hwnd, L"Select a value for every settings list.", state->title.c_str(), MB_OK | MB_ICONWARNING);
+            return false;
+        }
+
+        state->slideshowIntervalMs = slideshowDurationMs;
+        state->slideshowTransitionDurationMs = transitionDurationMs;
+        state->slideshowTransitionStyle = kSlideshowTransitionOptions[static_cast<std::size_t>(transitionIndex)].style;
+        state->useSlideshowTransition = isChecked(ConsolidatedSettingsControl::TransitionEnabled);
+        state->viewerMouseWheelBehavior = static_cast<hyperbrowse::viewer::MouseWheelBehavior>(wheelIndex);
+            state->invertKeyboardPanning = isChecked(ConsolidatedSettingsControl::InvertKeyboardPanning);
+        state->rawJpegPairedOperationsEnabled = isChecked(ConsolidatedSettingsControl::RawPairingEnabled);
+        state->pairedRawJpegViewerPreference = isChecked(ConsolidatedSettingsControl::RawPreferJpeg)
+            ? hyperbrowse::browser::RawJpegDisplayPreference::Jpeg
+            : hyperbrowse::browser::RawJpegDisplayPreference::Raw;
+        state->defaultViewerToSecondaryMonitor = isChecked(ConsolidatedSettingsControl::SecondaryMonitor);
+        state->infoOverlaysVisible = isChecked(ConsolidatedSettingsControl::InfoOverlays);
+        state->fullMetadataVisible = isChecked(ConsolidatedSettingsControl::FullMetadata);
+        state->overlayTextSize = static_cast<hyperbrowse::viewer::InfoOverlayTextSize>(overlaySizeIndex);
+        state->darkTheme = isChecked(ConsolidatedSettingsControl::ThemeDark);
+        state->appTextSize = static_cast<hyperbrowse::util::AppTextSize>(appTextSizeIndex);
+        state->thumbnailSizePreset = kThumbnailSizePresets[static_cast<std::size_t>(thumbnailSizeIndex)];
+        state->thumbnailDetailsVisible = isChecked(ConsolidatedSettingsControl::ThumbnailDetails);
+        state->compactThumbnailLayout = isChecked(ConsolidatedSettingsControl::CompactLayout);
+        state->detailsStripVisible = isChecked(ConsolidatedSettingsControl::DetailsPanel);
+        state->resourceProfile = static_cast<hyperbrowse::util::ResourceProfile>(resourceProfileIndex);
+        state->persistentThumbnailCacheEnabled = isChecked(ConsolidatedSettingsControl::PersistentCache);
+        state->thumbnailCacheCapacityOverrideBytes = thumbnailAutomatic
+            ? 0
+            : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(thumbnailMegabytes) * 1024ULL * 1024ULL);
+        state->metadataCacheCapacityOverrideEntries = metadataAutomatic ? 0 : metadataEntries;
+        state->showPressureStateInStatusBar = isChecked(ConsolidatedSettingsControl::PressureStatus);
+        state->nvJpegEnabled = isChecked(ConsolidatedSettingsControl::NvJpeg);
+        state->libRawOutOfProcessEnabled = isChecked(ConsolidatedSettingsControl::LibRawOutOfProcess);
+        state->recursiveBrowsingEnabled = isChecked(ConsolidatedSettingsControl::RecursiveBrowsing);
+        state->showSubfoldersInBrowser = isChecked(ConsolidatedSettingsControl::ShowSubfolders);
+        state->closeMainWindowOnEscape = isChecked(ConsolidatedSettingsControl::CloseOnEscape);
+        state->singleInstanceEnabled = isChecked(ConsolidatedSettingsControl::SingleInstance);
+        return true;
+    }
+
+    LRESULT CALLBACK ConsolidatedSettingsDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<ConsolidatedSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<ConsolidatedSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+            state->dialogWindow = hwnd;
+            const HFONT font = state->bodyFont ? state->bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const int tabLeft = kConsolidatedSettingsMargin;
+            const int tabTop = kConsolidatedSettingsMargin;
+            const int tabWidth = kConsolidatedSettingsDialogWidth - (kConsolidatedSettingsMargin * 2);
+            const int buttonTop = kConsolidatedSettingsDialogHeight
+                - kConsolidatedSettingsMargin
+                - kConsolidatedSettingsButtonHeight;
+            const int tabHeight = buttonTop - kConsolidatedSettingsMargin - tabTop;
+            state->tabWindow = CreateWindowExW(
+                0, WC_TABCONTROLW, nullptr,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_FOCUSNEVER,
+                tabLeft, tabTop, tabWidth, tabHeight, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kConsolidatedSettingsTabControlId)),
+                state->instance, nullptr);
+            const wchar_t* tabNames[] = {L"Slideshow", L"Viewer", L"Appearance", L"Performance", L"Behavior"};
+            for (std::size_t tabIndex = 0; tabIndex < std::size(tabNames); ++tabIndex)
+            {
+                TCITEMW item{};
+                item.mask = TCIF_TEXT;
+                item.pszText = const_cast<wchar_t*>(tabNames[tabIndex]);
+                TabCtrl_InsertItem(state->tabWindow, static_cast<int>(tabIndex), &item);
+            }
+
+            RECT displayRect{};
+            GetClientRect(state->tabWindow, &displayRect);
+            TabCtrl_AdjustRect(state->tabWindow, FALSE, &displayRect);
+            const int pageLeft = tabLeft + displayRect.left;
+            const int pageTop = tabTop + displayRect.top;
+            const int pageRight = tabLeft + displayRect.right;
+            HDC measureDc = GetDC(hwnd);
+            HFONT oldMeasureFont = nullptr;
+            if (measureDc)
+            {
+                oldMeasureFont = static_cast<HFONT>(SelectObject(measureDc, font));
+            }
+            TEXTMETRICW textMetrics{};
+            if (measureDc)
+            {
+                GetTextMetricsW(measureDc, &textMetrics);
+            }
+            const auto measureTextWidth = [&](const wchar_t* text)
+            {
+                if (!measureDc || !text)
+                {
+                    return 0;
+                }
+                SIZE size{};
+                GetTextExtentPoint32W(measureDc, text, static_cast<int>(wcslen(text)), &size);
+                return static_cast<int>(size.cx);
+            };
+            const std::array labelTexts{
+                L"Transition style",
+                L"Slide duration (milliseconds)",
+                L"Transition duration (milliseconds)",
+                L"Timing bounds",
+                L"Mouse wheel",
+                L"Paired viewer preference",
+                L"Overlay text size",
+                L"Application text size",
+                L"Thumbnail size",
+                L"Theme",
+                L"Resource profile",
+                L"Thumbnail cache cap (MB)",
+                L"Metadata cache cap (entries)"};
+            const std::array checkboxTexts{
+                L"Use slideshow transitions",
+                L"Treat paired RAW+JPEG files as one operation",
+                L"Open viewers on a secondary monitor when available",
+                L"Show viewer detail overlays",
+                L"Show full metadata",
+                L"Show thumbnail details",
+                L"Use compact thumbnail layout",
+                L"Show the details panel",
+                L"Keep the persistent thumbnail cache enabled",
+                L"Follow profile",
+                L"Show memory pressure state in the status bar",
+                L"Use NVIDIA JPEG acceleration when available",
+                L"Use out-of-process LibRaw fallback",
+                L"Browse folders recursively",
+                L"Show subfolders in the browser",
+                L"Close the main window when Esc is pressed",
+                L"Use a single application instance"};
+            const std::array comboTexts{
+                L"Crossfade",
+                L"Horizontal Blinds",
+                L"Venetian Blinds",
+                L"Monochrome Reveal",
+                L"250-60000 ms slides; 100-5000 ms transitions",
+                L"Small",
+                L"Medium",
+                L"Large",
+                L"640 px",
+                L"Conservative",
+                L"Balanced",
+                L"Performance",
+                L"Aggressive"};
+            int measuredLabelWidth = 0;
+            for (const wchar_t* text : labelTexts)
+            {
+                measuredLabelWidth = std::max(measuredLabelWidth, measureTextWidth(text));
+            }
+            int measuredValueWidth = 0;
+            for (const wchar_t* text : comboTexts)
+            {
+                measuredValueWidth = std::max(measuredValueWidth, measureTextWidth(text));
+            }
+            int measuredCheckboxWidth = 0;
+            for (const wchar_t* text : checkboxTexts)
+            {
+                measuredCheckboxWidth = std::max(measuredCheckboxWidth, measureTextWidth(text));
+            }
+            if (measureDc)
+            {
+                SelectObject(measureDc, oldMeasureFont);
+                ReleaseDC(hwnd, measureDc);
+            }
+            const int labelWidth = std::max(300, measuredLabelWidth + 18);
+            const int valueLeft = pageLeft + labelWidth;
+            const int valueWidth = std::max(360, measuredValueWidth + 48);
+            const int rowHeight = std::max(32, static_cast<int>(textMetrics.tmHeight) + 12);
+            const int rowGap = std::max(10, rowHeight / 3);
+            const int checkboxWidth = std::max(measuredCheckboxWidth + 38, pageRight - pageLeft);
+            const int labelTopInset = std::max(2, (rowHeight - static_cast<int>(textMetrics.tmHeight)) / 2);
+            auto label = [&](ConsolidatedSettingsPage page, const wchar_t* text, int y)
+            {
+                return CreateConsolidatedSettingsControl(*state, page, L"STATIC", text, SS_LEFT | SS_NOPREFIX,
+                                                          pageLeft, y + labelTopInset, labelWidth - 12, rowHeight - labelTopInset, 0);
+            };
+            auto check = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int y, DWORD extraStyle = 0)
+            {
+                return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", text, BS_AUTOCHECKBOX | WS_TABSTOP | extraStyle,
+                                                          pageLeft, y, checkboxWidth, rowHeight, ConsolidatedSettingsControlId(control), control);
+            };
+            auto combo = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, int y)
+            {
+                return CreateConsolidatedSettingsControl(*state, page, L"COMBOBOX", nullptr, CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL,
+                                                          valueLeft, y, valueWidth, 180, ConsolidatedSettingsControlId(control), control);
+            };
+            auto edit = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, int y)
+            {
+                return CreateConsolidatedSettingsControl(*state, page, L"EDIT", nullptr, WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
+                                                          valueLeft, y, 140, rowHeight, ConsolidatedSettingsControlId(control), control);
+            };
+            auto spin = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, int y)
+            {
+                return CreateConsolidatedSettingsControl(*state, page, UPDOWN_CLASSW, nullptr, UDS_ALIGNRIGHT | UDS_ARROWKEYS,
+                                                          valueLeft + 140, y, 22, rowHeight, ConsolidatedSettingsControlId(control), control);
+            };
+            auto radio = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int x, int y, DWORD extraStyle = 0)
+            {
+                return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", text, BS_AUTORADIOBUTTON | WS_TABSTOP | extraStyle,
+                                                          x, y, valueWidth / 2, rowHeight, ConsolidatedSettingsControlId(control), control);
+            };
+
+            int y = pageTop + 16;
+            label(ConsolidatedSettingsPage::Slideshow, L"Transition style", y);
+            combo(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionStyle, y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Slideshow, L"Slide duration (milliseconds)", y);
+            edit(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::SlideshowDuration, y);
+            spin(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::SlideshowDurationSpin, y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Slideshow, L"Transition duration (milliseconds)", y);
+            edit(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionDuration, y);
+            spin(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionDurationSpin, y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Slideshow, L"Timing bounds", y);
+            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Slideshow, L"STATIC", L"250-60000 ms slides; 100-5000 ms transitions",
+                                              SS_LEFT | SS_NOPREFIX, valueLeft, y + 4, valueWidth, rowHeight, 0);
+
+            y = pageTop + 16;
+            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::TransitionEnabled, L"Use slideshow transitions", y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Viewer, L"Mouse wheel", y);
+            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelZoom, L"Zoom", valueLeft, y, WS_GROUP);
+            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelNavigate, L"Navigate", valueLeft + 145, y);
+            y += rowHeight + rowGap;
+                check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::InvertKeyboardPanning, L"Invert Keyboard Panning", y);
+                y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPairingEnabled, L"Treat paired RAW+JPEG files as one operation", y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Viewer, L"Paired viewer preference", y);
+            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferRaw, L"Prefer RAW", valueLeft, y, WS_GROUP);
+            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferJpeg, L"Prefer JPEG", valueLeft + 145, y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::SecondaryMonitor, L"Open viewers on a secondary monitor when available", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::InfoOverlays, L"Show viewer detail overlays", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::FullMetadata, L"Show full metadata", y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Viewer, L"Overlay text size", y);
+            combo(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::OverlayTextSize, y);
+
+            y = pageTop + 16;
+            label(ConsolidatedSettingsPage::Appearance, L"Theme", y);
+            radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeLight, L"Light", valueLeft, y, WS_GROUP);
+            radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeDark, L"Dark", valueLeft + 145, y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Appearance, L"Application text size", y);
+            combo(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::AppTextSize, y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Appearance, L"Thumbnail size", y);
+            combo(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThumbnailSize, y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThumbnailDetails, L"Show thumbnail details", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::CompactLayout, L"Use compact thumbnail layout", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::DetailsPanel, L"Show the details panel", y);
+
+            y = pageTop + 16;
+            label(ConsolidatedSettingsPage::Performance, L"Resource profile", y);
+            combo(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ResourceProfile, y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PersistentCache, L"Keep the persistent thumbnail cache enabled", y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Performance, L"Thumbnail cache cap (MB)", y);
+            edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ThumbnailCache, y);
+            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ThumbnailCacheAutomatic, L"Follow profile", y + 30);
+            y += rowHeight + rowGap + 34;
+            label(ConsolidatedSettingsPage::Performance, L"Metadata cache cap (entries)", y);
+            edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCache, y);
+            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y + 30);
+            y += rowHeight + rowGap + 34;
+            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PressureStatus, L"Show memory pressure state in the status bar", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::NvJpeg, L"Use NVIDIA JPEG acceleration when available", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::LibRawOutOfProcess, L"Use out-of-process LibRaw fallback", y);
+
+            y = pageTop + 16;
+            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::RecursiveBrowsing, L"Browse folders recursively", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::ShowSubfolders, L"Show subfolders in the browser", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when Esc is pressed", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
+
+            for (HWND control : state->controls)
+            {
+                if (control)
+                {
+                    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                }
+            }
+
+            const auto addComboText = [&](ConsolidatedSettingsControl control, const wchar_t* text)
+            {
+                SendMessageW(ConsolidatedSettingsControlHandle(*state, control), CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+            };
+            for (const SlideshowTransitionOption& option : kSlideshowTransitionOptions)
+            {
+                addComboText(ConsolidatedSettingsControl::TransitionStyle, option.label);
+            }
+            addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Small");
+            addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Medium");
+            addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Large");
+            addComboText(ConsolidatedSettingsControl::AppTextSize, L"Small");
+            addComboText(ConsolidatedSettingsControl::AppTextSize, L"Medium");
+            addComboText(ConsolidatedSettingsControl::AppTextSize, L"Large");
+            for (const auto preset : kThumbnailSizePresets)
+            {
+                const std::wstring text = std::to_wstring(static_cast<int>(preset)) + L" px";
+                addComboText(ConsolidatedSettingsControl::ThumbnailSize, text.c_str());
+            }
+            addComboText(ConsolidatedSettingsControl::ResourceProfile, L"Conservative");
+            addComboText(ConsolidatedSettingsControl::ResourceProfile, L"Balanced");
+            addComboText(ConsolidatedSettingsControl::ResourceProfile, L"Performance");
+            addComboText(ConsolidatedSettingsControl::ResourceProfile, L"Aggressive");
+
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionStyle), CB_SETCURSEL,
+                         SlideshowTransitionComboIndex(state->slideshowTransitionStyle), 0);
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::OverlayTextSize), CB_SETCURSEL,
+                         static_cast<int>(state->overlayTextSize), 0);
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::AppTextSize), CB_SETCURSEL,
+                         static_cast<int>(state->appTextSize), 0);
+            const auto thumbnailIterator = std::find(kThumbnailSizePresets.begin(), kThumbnailSizePresets.end(), state->thumbnailSizePreset);
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ThumbnailSize), CB_SETCURSEL,
+                         thumbnailIterator == kThumbnailSizePresets.end() ? 0 : static_cast<int>(thumbnailIterator - kThumbnailSizePresets.begin()), 0);
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ResourceProfile), CB_SETCURSEL,
+                         static_cast<int>(state->resourceProfile), 0);
+            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration), std::to_wstring(state->slideshowIntervalMs).c_str());
+            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration), std::to_wstring(state->slideshowTransitionDurationMs).c_str());
+            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ThumbnailCache),
+                           std::to_wstring(state->thumbnailCacheCapacityOverrideBytes / (1024ULL * 1024ULL)).c_str());
+            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::MetadataCache),
+                           std::to_wstring(state->metadataCacheCapacityOverrideEntries).c_str());
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin), UDM_SETBUDDY,
+                         reinterpret_cast<WPARAM>(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration)), 0);
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin), UDM_SETRANGE32,
+                         kSlideshowMinimumDurationMs, kSlideshowMaximumDurationMs);
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDurationSpin), UDM_SETBUDDY,
+                         reinterpret_cast<WPARAM>(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration)), 0);
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDurationSpin), UDM_SETRANGE32,
+                         kSlideshowMinimumTransitionDurationMs, kSlideshowMaximumTransitionDurationMs);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::TransitionEnabled, state->useSlideshowTransition);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ViewerWheelZoom, state->viewerMouseWheelBehavior == hyperbrowse::viewer::MouseWheelBehavior::Zoom);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ViewerWheelNavigate, state->viewerMouseWheelBehavior == hyperbrowse::viewer::MouseWheelBehavior::Navigate);
+                SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::InvertKeyboardPanning, state->invertKeyboardPanning);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RawPairingEnabled, state->rawJpegPairedOperationsEnabled);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RawPreferJpeg, state->pairedRawJpegViewerPreference == hyperbrowse::browser::RawJpegDisplayPreference::Jpeg);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RawPreferRaw, state->pairedRawJpegViewerPreference == hyperbrowse::browser::RawJpegDisplayPreference::Raw);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::SecondaryMonitor, state->defaultViewerToSecondaryMonitor);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::InfoOverlays, state->infoOverlaysVisible);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::FullMetadata, state->fullMetadataVisible);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThemeDark, state->darkTheme);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThemeLight, !state->darkTheme);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThumbnailDetails, state->thumbnailDetailsVisible);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::CompactLayout, state->compactThumbnailLayout);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::DetailsPanel, state->detailsStripVisible);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::PersistentCache, state->persistentThumbnailCacheEnabled);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic, state->thumbnailCacheCapacityOverrideBytes == 0);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::MetadataCacheAutomatic, state->metadataCacheCapacityOverrideEntries == 0);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::PressureStatus, state->showPressureStateInStatusBar);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::NvJpeg, state->nvJpegEnabled);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::LibRawOutOfProcess, state->libRawOutOfProcessEnabled);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RecursiveBrowsing, state->recursiveBrowsingEnabled);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ShowSubfolders, state->showSubfoldersInBrowser);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::CloseOnEscape, state->closeMainWindowOnEscape);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::SingleInstance, state->singleInstanceEnabled);
+            UpdateConsolidatedSettingsDependencies(*state);
+            UpdateConsolidatedSettingsCacheValues(*state);
+            EnableWindow(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SecondaryMonitor), state->secondaryMonitorAvailable);
+            EnableWindow(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::NvJpeg), state->nvJpegAvailable);
+            EnableWindow(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::LibRawOutOfProcess), state->libRawAvailable);
+            ShowConsolidatedSettingsPage(*state, ConsolidatedSettingsPage::Slideshow);
+
+            const int cancelButtonLeft = kConsolidatedSettingsDialogWidth
+                - kConsolidatedSettingsMargin
+                - kConsolidatedSettingsButtonWidth;
+            const int okButtonLeft = cancelButtonLeft
+                - kConsolidatedSettingsButtonGap
+                - kConsolidatedSettingsButtonWidth;
+            const int applyButtonLeft = okButtonLeft
+                - kConsolidatedSettingsButtonGap
+                - kConsolidatedSettingsButtonWidth;
+            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"Apply",
+                                              BS_DEFPUSHBUTTON | WS_TABSTOP, applyButtonLeft, buttonTop,
+                                              kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, 5500);
+            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"OK",
+                                              BS_DEFPUSHBUTTON | WS_TABSTOP, okButtonLeft, buttonTop,
+                                              kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, IDOK);
+            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"Cancel",
+                                              WS_TABSTOP, cancelButtonLeft, buttonTop,
+                                              kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, IDCANCEL);
+            const HWND applyButton = GetDlgItem(hwnd, 5500);
+            const HWND okButton = GetDlgItem(hwnd, IDOK);
+            const HWND cancelButton = GetDlgItem(hwnd, IDCANCEL);
+            for (HWND button : {applyButton, okButton, cancelButton})
+            {
+                if (button)
+                {
+                    SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                }
+            }
+            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            return 0;
+        }
+        case WM_CTLCOLORDLG:
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORBTN:
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORLISTBOX:
+        {
+            const HDC dc = reinterpret_cast<HDC>(wParam);
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        }
+        case WM_ERASEBKGND:
+        {
+            RECT client{};
+            GetClientRect(hwnd, &client);
+            FillRect(reinterpret_cast<HDC>(wParam), &client, GetSysColorBrush(COLOR_WINDOW));
+            return 1;
+        }
+        case WM_NOTIFY:
+            if (state)
+            {
+                const auto* notify = reinterpret_cast<const NMHDR*>(lParam);
+                if (notify && notify->hwndFrom == state->tabWindow && notify->code == NM_CUSTOMDRAW)
+                {
+                    auto* customDraw = reinterpret_cast<NMCUSTOMDRAW*>(lParam);
+                    if (customDraw->dwDrawStage == CDDS_PREPAINT)
+                    {
+                        return CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT;
+                    }
+                    if (customDraw->dwDrawStage == CDDS_ITEMPREPAINT)
+                    {
+                        return CDRF_NEWFONT;
+                    }
+                    if (customDraw->dwDrawStage == CDDS_POSTPAINT)
+                    {
+                        RECT pageRect{};
+                        GetClientRect(state->tabWindow, &pageRect);
+                        TabCtrl_AdjustRect(state->tabWindow, FALSE, &pageRect);
+                        FillRect(customDraw->hdc, &pageRect, GetSysColorBrush(COLOR_WINDOW));
+                    }
+                    return CDRF_DODEFAULT;
+                }
+                if (notify && notify->code == UDN_DELTAPOS)
+                {
+                    const auto* upDown = reinterpret_cast<const NMUPDOWN*>(lParam);
+                    if (notify->idFrom == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::SlideshowDurationSpin))
+                    {
+                        const UINT nextValue = ComputeNextSpinValue(
+                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration),
+                            upDown->iPos,
+                            upDown->iDelta,
+                            kSlideshowMinimumDurationMs,
+                            kSlideshowMaximumDurationMs);
+                        SetDialogUIntEditAndSpin(
+                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration),
+                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin),
+                            nextValue);
+                        return TRUE;
+                    }
+                    if (notify->idFrom == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::TransitionDurationSpin))
+                    {
+                        const UINT nextValue = ComputeNextSpinValue(
+                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration),
+                            upDown->iPos,
+                            upDown->iDelta,
+                            kSlideshowMinimumTransitionDurationMs,
+                            kSlideshowMaximumTransitionDurationMs);
+                        SetDialogUIntEditAndSpin(
+                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration),
+                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDurationSpin),
+                            nextValue);
+                        return TRUE;
+                    }
+                }
+                if (notify && notify->idFrom == kConsolidatedSettingsTabControlId && notify->code == TCN_SELCHANGE)
+                {
+                    const int selectedIndex = TabCtrl_GetCurSel(state->tabWindow);
+                    if (selectedIndex >= 0 && selectedIndex < static_cast<int>(ConsolidatedSettingsPage::Count))
+                    {
+                        ShowConsolidatedSettingsPage(*state, static_cast<ConsolidatedSettingsPage>(selectedIndex));
+                    }
+                    return 0;
+                }
+            }
+            break;
+        case WM_COMMAND:
+            if (!state)
+            {
+                break;
+            }
+            if (LOWORD(wParam) == 5500 || LOWORD(wParam) == IDOK)
+            {
+                if (CollectConsolidatedSettings(hwnd, state))
+                {
+                    if (state->apply)
+                    {
+                        state->apply(*state);
+                    }
+                    if (LOWORD(wParam) == IDOK)
+                    {
+                        state->accepted = true;
+                        DestroyWindow(hwnd);
+                    }
+                }
+                return 0;
+            }
+            if (LOWORD(wParam) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            if (HIWORD(wParam) == BN_CLICKED
+                && (LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::RawPairingEnabled)
+                    || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
+                    || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::MetadataCacheAutomatic)))
+            {
+                UpdateConsolidatedSettingsDependencies(*state);
+                const auto changedControl = LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
+                    ? ConsolidatedSettingsControl::ThumbnailCacheAutomatic
+                    : LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::MetadataCacheAutomatic)
+                        ? ConsolidatedSettingsControl::MetadataCacheAutomatic
+                        : ConsolidatedSettingsControl::Count;
+                UpdateConsolidatedSettingsCacheValues(*state, changedControl);
+            }
+            if (HIWORD(wParam) == CBN_SELCHANGE
+                && LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::ResourceProfile))
+            {
+                UpdateConsolidatedSettingsCacheValues(*state);
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    bool PromptForConsolidatedSettings(HWND ownerWindow,
+                                       HINSTANCE instance,
+                                       ConsolidatedSettingsDialogState* state)
+    {
+        if (!state)
+        {
+            return false;
+        }
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance, kConsolidatedSettingsDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &ConsolidatedSettingsDialogProc;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = kConsolidatedSettingsDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return false;
+            }
+        }
+
+        RECT windowRect{0, 0, kConsolidatedSettingsDialogWidth, kConsolidatedSettingsDialogHeight};
+        AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, FALSE);
+        }
+        HWND dialogWindow = CreateWindowExW(
+            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+            kConsolidatedSettingsDialogClassName,
+            state->title.c_str(),
+            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            ownerWindow,
+            nullptr,
+            instance,
+            state);
+        if (!dialogWindow)
+        {
+            if (ownerWindow)
+            {
+                EnableWindow(ownerWindow, TRUE);
+            }
+            DeleteFontIfOwned(state->bodyFont);
+            state->bodyFont = nullptr;
+            return false;
+        }
+
+        SetWindowTextW(dialogWindow, state->title.c_str());
+
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+        MSG message{};
+        while (!state->done && GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            if (!IsDialogMessageW(dialogWindow, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, TRUE);
+            SetForegroundWindow(ownerWindow);
+            SetActiveWindow(ownerWindow);
+        }
+        DeleteFontIfOwned(state->bodyFont);
+        state->bodyFont = nullptr;
+        return state->accepted;
     }
 
     bool PromptForPerformanceSettings(HWND ownerWindow,
@@ -7970,7 +8928,6 @@ namespace hyperbrowse::ui
         HMENU ratingMenu = CreatePopupMenu();
         HMENU viewMenu = viewMenu_;
         HMENU editMenu = editMenu_;
-        HMENU settingsMenu = CreatePopupMenu();
         HMENU behaviorSettingsMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
@@ -7987,7 +8944,7 @@ namespace hyperbrowse::ui
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !settingsMenu || !behaviorSettingsMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !appTextSizeMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !behaviorSettingsMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !appTextSizeMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -8062,7 +9019,6 @@ namespace hyperbrowse::ui
 
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode\tCtrl+1");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS, L"&Details Mode\tCtrl+2");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_RECURSIVE, L"&Recursive Browsing\tCtrl+R");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_BACK_FOLDER, L"Navigate &Back\tBackspace / Alt+Left");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_FORWARD_FOLDER, L"Navigate &Forward\tAlt+Right");
@@ -8093,74 +9049,29 @@ namespace hyperbrowse::ui
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_480, L"4&80 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_560, L"5&60 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"6&40 px");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"Compact Thumbnail &Layout");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel\tCtrl+3");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"From &Selection\tCtrl+Shift+S");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"From &Folder\tCtrl+Shift+F");
         AppendMenuW(slideshowMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowMenu), L"S&lideshow");
 
-        AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_SMALL, L"&Small");
-        AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_MEDIUM, L"&Medium");
-        AppendMenuW(appTextSizeMenu, MF_STRING, ID_VIEW_APP_TEXT_SIZE_LARGE, L"&Large");
-        AppendMenuW(themeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(appTextSizeMenu), L"App Text Si&ze");
-
-        AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM, L"&Zoom");
-        AppendMenuW(viewerMouseWheelMenu, MF_STRING, ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE, L"&Next/Previous Image");
-        AppendMenuW(viewerOverlayTextSizeMenu, MF_STRING, ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL, L"&Small");
-        AppendMenuW(viewerOverlayTextSizeMenu, MF_STRING, ID_VIEW_VIEWER_OVERLAY_TEXT_MEDIUM, L"&Medium");
-        AppendMenuW(viewerOverlayTextSizeMenu, MF_STRING, ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE, L"&Large");
-        AppendMenuW(pairedRawJpegViewerMenu, MF_STRING, ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG, L"Prefer &JPEG");
-        AppendMenuW(pairedRawJpegViewerMenu, MF_STRING, ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW, L"Prefer &RAW");
-        AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMouseWheelMenu), L"Mouse &Wheel");
-        AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(pairedRawJpegViewerMenu), L"Paired RAW+JPEG &Viewer");
-        AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR, L"Open on Secondary &Monitor by Default");
-        AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_USE_SLIDESHOW_TRANSITION, L"Use Slideshow &Transition");
-        AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_DETAIL_OVERLAYS, L"Show Detail &Overlays");
-        AppendMenuW(viewerMenu, MF_STRING, ID_VIEW_VIEWER_FULL_METADATA, L"Show Full &Metadata");
-        AppendMenuW(viewerMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerOverlayTextSizeMenu), L"Overlay Text Si&ze");
-        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewerMenu), L"&Viewer");
-
-        AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_LIGHT, L"&Light");
-        AppendMenuW(themeMenu, MF_STRING, ID_VIEW_THEME_DARK, L"&Dark");
-        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(themeMenu), L"&Appearance");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SHOW_SUBFOLDERS, L"Show &Subfolders in Browser");
-
-        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE, L"Persistent Thumbnail &Cache");
         AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
-        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_PRESSURE_STATE_STATUS, L"Show Memory Pressure &Status");
-        AppendMenuW(performanceMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_NVJPEG_ACCELERATION, L"Enable &NVIDIA JPEG Acceleration");
-        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_LIBRAW_OUT_OF_PROCESS, L"Use Out-of-Process &LibRaw Fallback");
 
         AppendMenuW(advancedViewMenu, MF_STRING, ID_FILE_ASSOCIATIONS, L"File &Associations...");
-        AppendMenuW(advancedViewMenu, MF_STRING, ID_VIEW_SINGLE_INSTANCE, L"Use &Single Instance");
-        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Integration");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Integration");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_USER_GUIDE, L"&User Guide\tF1");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_KEYBOARD_SHORTCUTS, L"&Keyboard Shortcuts...");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
-        AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE, L"&Conservative");
-        AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_BALANCED, L"&Balanced");
-        AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE, L"&Performance");
-        AppendMenuW(performanceProfileMenu, MF_STRING, ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE, L"&Aggressive");
-        AppendMenuW(performanceMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceProfileMenu), L"Performance &Profile");
-        AppendMenuW(performanceMenu, MF_STRING, ID_HELP_PERFORMANCE_SETTINGS, L"Performance &Settings...");
-        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"&Snapshot\tCtrl+Shift+D");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"&Reset\tCtrl+Shift+X");
-        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
-        AppendMenuW(settingsMenu, MF_STRING, ID_VIEW_SLIDESHOW_SETTINGS, L"&Slideshow Settings...\tCtrl+Shift+T");
-        AppendMenuW(behaviorSettingsMenu, MF_STRING, ID_EDIT_CLOSE_MAIN_WINDOW_ON_ESCAPE, L"Close Main Window on Esc");
-        AppendMenuW(settingsMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(behaviorSettingsMenu), L"&Behavior");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SETTINGS, L"&Settings...\tCtrl+Shift+T");
 
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu_), L"&File");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(editMenu), L"&Edit");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(viewMenu), L"&View");
-        AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(settingsMenu), L"Se&ttings");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"&Help");
 
         RefreshPersistentMenuOwnerDraw();
@@ -8170,10 +9081,8 @@ namespace hyperbrowse::ui
         commandBarMenuButtons_[1].menu = editMenu_;
         commandBarMenuButtons_[2].label = L"View";
         commandBarMenuButtons_[2].menu = viewMenu_;
-        commandBarMenuButtons_[3].label = L"Settings";
-        commandBarMenuButtons_[3].menu = settingsMenu;
-        commandBarMenuButtons_[4].label = L"Help";
-        commandBarMenuButtons_[4].menu = helpMenu_;
+        commandBarMenuButtons_[3].label = L"Help";
+        commandBarMenuButtons_[3].menu = helpMenu_;
 
         SetMenu(hwnd_, nullptr);
         DrawMenuBar(hwnd_);
@@ -14346,6 +15255,35 @@ namespace hyperbrowse::ui
         // Remember who was active first, so shell-operation completion can hand
         // activation back when the operation was initiated from the viewer.
         foregroundWindowAtFileOperationStart_ = GetForegroundWindow();
+        const HWND currentFocusWindow = GetFocus();
+        const bool viewerOperationOrigin = viewerWindow_
+            && viewerWindow_->IsOpen()
+            && ((currentFocusWindow
+                 && (currentFocusWindow == viewerWindow_->Hwnd()
+                     || IsChild(viewerWindow_->Hwnd(), currentFocusWindow)))
+                || !pendingViewerDeleteSourcePath_.empty()
+                || pendingViewerQuickSend_.active);
+        if (viewerOperationOrigin)
+        {
+            focusWindowAtFileOperationStart_ = currentFocusWindow
+                && (currentFocusWindow == viewerWindow_->Hwnd()
+                    || IsChild(viewerWindow_->Hwnd(), currentFocusWindow))
+                ? currentFocusWindow
+                : viewerWindow_->Hwnd();
+        }
+        else if (!activeTreeFolderOperationPath_.empty() && treePane_)
+        {
+            focusWindowAtFileOperationStart_ = treePane_;
+        }
+        else if (browserPaneController_)
+        {
+            focusWindowAtFileOperationStart_ = browserPaneController_->Hwnd();
+        }
+        else if (currentFocusWindow
+            && (currentFocusWindow == hwnd_ || IsChild(hwnd_, currentFocusWindow)))
+        {
+            focusWindowAtFileOperationStart_ = currentFocusWindow;
+        }
         const HWND operationOwnerWindow = ownerWindow && IsWindow(ownerWindow)
             ? ownerWindow
             : hwnd_;
@@ -15444,6 +16382,8 @@ namespace hyperbrowse::ui
 
         const HWND activationRestoreWindow = foregroundWindowAtFileOperationStart_;
         foregroundWindowAtFileOperationStart_ = nullptr;
+        const HWND focusRestoreWindow = focusWindowAtFileOperationStart_;
+        focusWindowAtFileOperationStart_ = nullptr;
         bool viewerCloseRequested = false;
 
         const std::wstring viewerDeleteSourcePath = pendingViewerDeleteSourcePath_;
@@ -16051,6 +16991,17 @@ namespace hyperbrowse::ui
             SetFocus(activationRestoreWindow);
         }
 
+        if (!viewerCloseRequested
+            && focusRestoreWindow
+            && focusRestoreWindow != activationRestoreWindow
+            && IsWindow(focusRestoreWindow) != FALSE
+            && IsWindowVisible(focusRestoreWindow) != FALSE
+            && GetForegroundWindow() == hwnd_
+            && (GetFocus() == hwnd_ || !GetFocus()))
+        {
+            SetFocus(focusRestoreWindow);
+        }
+
         // Dispatch the next queued viewer delete, if any, now that the file
         // operation slot is free.  Use the viewer's current path as the sync
         // target so we never navigate the viewer back to an image it has already
@@ -16100,6 +17051,15 @@ namespace hyperbrowse::ui
         {
             return;
         }
+
+        const auto reloadFolderPreservingSelection = [&](std::wstring folderPath)
+        {
+            const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+            const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
+            LoadFolderAsync(std::move(folderPath));
+            pendingFolderReloadSelectionPaths_ = selectedPaths;
+            pendingFolderReloadFocusedPath_ = focusedPath;
+        };
 
         if (fileOperationActive_)
         {
@@ -16153,7 +17113,7 @@ namespace hyperbrowse::ui
         if (update.requiresFullReload)
         {
             RefreshFolderTree();
-            LoadFolderAsync(update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath);
+            reloadFolderPreservingSelection(update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath);
             return;
         }
 
@@ -16285,7 +17245,7 @@ namespace hyperbrowse::ui
                 }
             }
 
-            LoadFolderAsync(browserModel_->FolderPath());
+            reloadFolderPreservingSelection(browserModel_->FolderPath());
             return;
         }
 
@@ -16424,7 +17384,7 @@ namespace hyperbrowse::ui
                        MF_BYCOMMAND | (hasFolder && !batchConvertActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_FOLDER, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(menu_, ID_VIEW_SLIDESHOW_SETTINGS, MF_BYCOMMAND | MF_ENABLED);
+        EnableMenuItem(menu_, ID_VIEW_SETTINGS, MF_BYCOMMAND | MF_ENABLED);
         EnableMenuItem(menu_, ID_VIEW_NAVIGATE_BACK_FOLDER, MF_BYCOMMAND | (canNavigateBack ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_NAVIGATE_FORWARD_FOLDER, MF_BYCOMMAND | (canNavigateForward ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_THUMBNAIL_SIZE_INCREASE, MF_BYCOMMAND | (thumbnailSteppingEnabled ? MF_ENABLED : MF_GRAYED));
@@ -16928,6 +17888,7 @@ namespace hyperbrowse::ui
         if (viewerWindow_)
         {
             viewerWindow_->SetMouseWheelBehavior(viewerMouseWheelBehavior_);
+                viewerWindow_->SetKeyboardPanningInverted(invertKeyboardPanning_);
         }
     }
 
@@ -17306,7 +18267,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        browserPaneController_->SetRawJpegDisplayPreference(browser::RawJpegDisplayPreference::Jpeg);
+        browserPaneController_->SetRawJpegDisplayPreference(pairedRawJpegViewerPreference_);
         browserPaneController_->SetRawJpegStackingEnabled(rawJpegPairedOperationsEnabled_);
     }
 
@@ -17325,6 +18286,165 @@ namespace hyperbrowse::ui
 
         std::vector<bool> selectedDefaults;
         PromptForFileAssociations(hwnd_, instance_, appTextSize_, defaults, &selectedDefaults);
+    }
+
+    void MainWindow::ShowConsolidatedSettingsDialog()
+    {
+        ConsolidatedSettingsDialogState state;
+        state.ownerWindow = hwnd_;
+        state.instance = instance_;
+        state.title = L"Settings";
+        state.appTextSize = appTextSize_;
+        state.darkTheme = themeMode_ == ThemeMode::Dark;
+        state.resourceProfile = resourceProfile_;
+        state.thumbnailSizePreset = thumbnailSizePreset_;
+        state.viewerMouseWheelBehavior = viewerMouseWheelBehavior_;
+        state.invertKeyboardPanning = invertKeyboardPanning_;
+        state.slideshowTransitionStyle = slideshowTransitionStyle_;
+        state.slideshowIntervalMs = slideshowIntervalMs_;
+        state.slideshowTransitionDurationMs = slideshowTransitionDurationMs_;
+        state.useSlideshowTransition = useSlideshowTransition_;
+        state.compactThumbnailLayout = compactThumbnailLayout_;
+        state.thumbnailDetailsVisible = thumbnailDetailsVisible_;
+        state.detailsStripVisible = detailsStripVisible_;
+        state.recursiveBrowsingEnabled = recursiveBrowsingEnabled_;
+        state.showSubfoldersInBrowser = showSubfoldersInBrowser_;
+        state.rawJpegPairedOperationsEnabled = rawJpegPairedOperationsEnabled_;
+        state.pairedRawJpegViewerPreference = pairedRawJpegViewerPreference_;
+        state.defaultViewerToSecondaryMonitor = defaultViewerToSecondaryMonitor_;
+        state.persistentThumbnailCacheEnabled = persistentThumbnailCacheEnabled_;
+        state.thumbnailCacheCapacityOverrideBytes = thumbnailCacheCapacityOverrideBytes_;
+        state.metadataCacheCapacityOverrideEntries = metadataCacheCapacityOverrideEntries_;
+        state.showPressureStateInStatusBar = showPressureStateInStatusBar_;
+        state.nvJpegEnabled = nvJpegEnabled_;
+        state.libRawOutOfProcessEnabled = libRawOutOfProcessEnabled_;
+        state.closeMainWindowOnEscape = closeMainWindowOnEscape_;
+        state.singleInstanceEnabled = app::Application::IsSingleInstanceEnabled();
+        state.secondaryMonitorAvailable = FindAlternateMonitorForWindow(hwnd_) != nullptr;
+        state.nvJpegAvailable = HasNvJpegCapability();
+        state.libRawAvailable = decode::IsLibRawBuildEnabled();
+        state.infoOverlaysVisible = viewerWindow_ && viewerWindow_->IsOpen()
+            ? viewerWindow_->AreInfoOverlaysVisible()
+            : viewer::ViewerWindow::DefaultInfoOverlaysVisible();
+        state.overlayTextSize = viewerWindow_ && viewerWindow_->IsOpen()
+            ? viewerWindow_->OverlayTextSize()
+            : viewer::ViewerWindow::DefaultOverlayTextSize();
+        state.fullMetadataVisible = viewerWindow_ && viewerWindow_->IsOpen()
+            ? viewerWindow_->IsFullMetadataVisible()
+            : viewer::ViewerWindow::DefaultFullMetadataVisible();
+
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        if (!state.bodyFont)
+        {
+            state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
+
+        state.apply = [this](const ConsolidatedSettingsDialogState& draft)
+        {
+            const bool slideshowDurationChanged = slideshowIntervalMs_ != draft.slideshowIntervalMs;
+            const bool slideshowTransitionChanged = slideshowTransitionStyle_ != draft.slideshowTransitionStyle
+                || slideshowTransitionDurationMs_ != draft.slideshowTransitionDurationMs
+                || useSlideshowTransition_ != draft.useSlideshowTransition;
+            const bool thumbnailDisplayChanged = thumbnailSizePreset_ != draft.thumbnailSizePreset
+                || compactThumbnailLayout_ != draft.compactThumbnailLayout
+                || thumbnailDetailsVisible_ != draft.thumbnailDetailsVisible
+                || appTextSize_ != draft.appTextSize;
+            const bool folderScopeChanged = recursiveBrowsingEnabled_ != draft.recursiveBrowsingEnabled
+                || showSubfoldersInBrowser_ != draft.showSubfoldersInBrowser;
+            const bool viewerOverlayChanged = !viewerWindow_ || !viewerWindow_->IsOpen()
+                || viewerWindow_->AreInfoOverlaysVisible() != draft.infoOverlaysVisible
+                || viewerWindow_->OverlayTextSize() != draft.overlayTextSize
+                || viewerWindow_->IsFullMetadataVisible() != draft.fullMetadataVisible;
+
+            slideshowIntervalMs_ = draft.slideshowIntervalMs;
+            slideshowTransitionStyle_ = draft.slideshowTransitionStyle;
+            slideshowTransitionDurationMs_ = draft.slideshowTransitionDurationMs;
+            useSlideshowTransition_ = draft.useSlideshowTransition;
+            viewerMouseWheelBehavior_ = draft.viewerMouseWheelBehavior;
+            invertKeyboardPanning_ = draft.invertKeyboardPanning;
+            rawJpegPairedOperationsEnabled_ = draft.rawJpegPairedOperationsEnabled;
+            pairedRawJpegViewerPreference_ = draft.pairedRawJpegViewerPreference;
+            defaultViewerToSecondaryMonitor_ = draft.defaultViewerToSecondaryMonitor;
+            themeMode_ = draft.darkTheme ? ThemeMode::Dark : ThemeMode::Light;
+            appTextSize_ = draft.appTextSize;
+            thumbnailSizePreset_ = draft.thumbnailSizePreset;
+            thumbnailDetailsVisible_ = draft.thumbnailDetailsVisible;
+            compactThumbnailLayout_ = draft.compactThumbnailLayout;
+            detailsStripVisible_ = draft.detailsStripVisible;
+            resourceProfile_ = draft.resourceProfile;
+            persistentThumbnailCacheEnabled_ = draft.persistentThumbnailCacheEnabled;
+            thumbnailCacheCapacityOverrideBytes_ = draft.thumbnailCacheCapacityOverrideBytes;
+            metadataCacheCapacityOverrideEntries_ = draft.metadataCacheCapacityOverrideEntries;
+            showPressureStateInStatusBar_ = draft.showPressureStateInStatusBar;
+            nvJpegEnabled_ = draft.nvJpegEnabled;
+            libRawOutOfProcessEnabled_ = draft.libRawOutOfProcessEnabled;
+            recursiveBrowsingEnabled_ = draft.recursiveBrowsingEnabled;
+            showSubfoldersInBrowser_ = draft.showSubfoldersInBrowser;
+            closeMainWindowOnEscape_ = draft.closeMainWindowOnEscape;
+
+            app::Application::SetSingleInstanceEnabled(draft.singleInstanceEnabled);
+            decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_ && HasNvJpegCapability());
+            ApplyTheme();
+            if (thumbnailDisplayChanged)
+            {
+                ApplyAppTextSize();
+                ApplyThumbnailDisplaySettings();
+            }
+            if (viewerOverlayChanged)
+            {
+                if (viewerWindow_ && viewerWindow_->IsOpen())
+                {
+                    viewerWindow_->SetInfoOverlaysVisible(draft.infoOverlaysVisible);
+                    viewerWindow_->SetOverlayTextSize(draft.overlayTextSize);
+                    viewerWindow_->SetFullMetadataVisible(draft.fullMetadataVisible);
+                }
+                else
+                {
+                    viewer::ViewerWindow::SetDefaultInfoOverlaysVisible(draft.infoOverlaysVisible);
+                    viewer::ViewerWindow::SetDefaultOverlayTextSize(draft.overlayTextSize);
+                    viewer::ViewerWindow::SetDefaultFullMetadataVisible(draft.fullMetadataVisible);
+                }
+            }
+            ApplyViewerMouseWheelSetting();
+            if (slideshowTransitionChanged)
+            {
+                ApplyViewerTransitionSettings();
+            }
+            ApplyRawJpegPairingSettings();
+            ApplyResourceProfileSetting();
+            ApplyCacheCapacityOverrideSettings();
+            ApplyPersistentThumbnailCacheSetting();
+
+            if (detailsStripVisible_)
+            {
+                UpdateDetailsPanel();
+            }
+            else if (detailsPanelText_)
+            {
+                ShowWindow(detailsPanelText_, SW_HIDE);
+            }
+            LayoutChildren();
+
+            if (folderScopeChanged && browserModel_ && !browserModel_->FolderPath().empty())
+            {
+                LoadFolderAsync(browserModel_->FolderPath());
+            }
+            else if (folderScopeChanged)
+            {
+                RefreshBrowserPane();
+            }
+
+            if (slideshowDurationChanged && viewerWindow_ && viewerWindow_->IsSlideshowActive())
+            {
+                viewerWindow_->StartSlideshow(slideshowIntervalMs_);
+            }
+            UpdateStatusText();
+            UpdateMenuState();
+            UpdateWindowTitle();
+            SaveWindowState();
+        };
+
+        PromptForConsolidatedSettings(hwnd_, instance_, &state);
     }
 
     void MainWindow::ShowSlideshowSettingsDialog()
@@ -17558,6 +18678,11 @@ namespace hyperbrowse::ui
                 viewerMouseWheelBehavior_ = static_cast<viewer::MouseWheelBehavior>(value);
             }
 
+            if (TryReadDwordValue(key, kRegistryValueInvertKeyboardPanning, &value))
+            {
+                invertKeyboardPanning_ = value != 0;
+            }
+
             if (TryReadDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, &value))
             {
                 rawJpegPairedOperationsEnabled_ = value != 0;
@@ -17739,6 +18864,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueDetailsPanelWidth, static_cast<DWORD>(std::max(detailsPanelWidth_, kDetailsPanelMinWidth)));
             WriteDwordValue(key, kRegistryValueViewerMouseWheelBehavior, static_cast<DWORD>(viewerMouseWheelBehavior_));
+            WriteDwordValue(key, kRegistryValueInvertKeyboardPanning, invertKeyboardPanning_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValuePairedRawJpegViewerPreference, static_cast<DWORD>(pairedRawJpegViewerPreference_));
             WriteDwordValue(key, kRegistryValueDefaultViewerToSecondaryMonitor, defaultViewerToSecondaryMonitor_ ? 1UL : 0UL);
@@ -17758,6 +18884,9 @@ namespace hyperbrowse::ui
         {
             return;
         }
+
+        pendingFolderReloadSelectionPaths_.clear();
+        pendingFolderReloadFocusedPath_.clear();
 
         if (!historyNavigation)
         {
@@ -17835,6 +18964,7 @@ namespace hyperbrowse::ui
         util::ScopedTimer timer(L"MainWindow::FlushFolderEnumerationPresentation");
         RefreshBrowserPane();
         TryRestorePendingStartupSelectionPath(clearStartupPathsIfNotFound);
+        TryRestorePendingFolderReloadSelection(clearStartupPathsIfNotFound);
         TryOpenPendingStartupViewerPath(clearStartupPathsIfNotFound);
         UpdateStatusText();
         UpdateWindowTitle();
@@ -17912,6 +19042,41 @@ namespace hyperbrowse::ui
         const std::wstring startupSelectionPath = pendingStartupSelectionPath_;
         pendingStartupSelectionPath_.clear();
         browserPaneController_->RestoreSelectionByFilePaths({startupSelectionPath}, startupSelectionPath);
+        browserPaneController_->EnsureFocusedItemVisible();
+    }
+
+    void MainWindow::TryRestorePendingFolderReloadSelection(bool clearIfNotFound)
+    {
+        if (pendingFolderReloadSelectionPaths_.empty()
+            || !browserModel_
+            || !browserPaneController_
+            || !pendingStartupViewerPath_.empty())
+        {
+            return;
+        }
+
+        const bool anyPathFound = std::any_of(
+            pendingFolderReloadSelectionPaths_.begin(),
+            pendingFolderReloadSelectionPaths_.end(),
+            [&](const std::wstring& path)
+            {
+                return browserModel_->FindItemIndexByPath(path) >= 0;
+            });
+        if (!anyPathFound)
+        {
+            if (clearIfNotFound)
+            {
+                pendingFolderReloadSelectionPaths_.clear();
+                pendingFolderReloadFocusedPath_.clear();
+            }
+            return;
+        }
+
+        std::vector<std::wstring> selectionPaths = std::move(pendingFolderReloadSelectionPaths_);
+        const std::wstring focusedPath = std::move(pendingFolderReloadFocusedPath_);
+        pendingFolderReloadSelectionPaths_.clear();
+        pendingFolderReloadFocusedPath_.clear();
+        browserPaneController_->RestoreSelectionByFilePaths(selectionPaths, focusedPath);
         browserPaneController_->EnsureFocusedItemVisible();
     }
 
@@ -19047,8 +20212,8 @@ namespace hyperbrowse::ui
         case ID_VIEW_SHOW_SUBFOLDERS:
             ToggleShowSubfoldersInBrowser();
             return true;
-        case ID_VIEW_SLIDESHOW_SETTINGS:
-            ShowSlideshowSettingsDialog();
+        case ID_VIEW_SETTINGS:
+            ShowConsolidatedSettingsDialog();
             return true;
         case ID_FILE_ASSOCIATIONS:
             ShowFileAssociationsDialog();

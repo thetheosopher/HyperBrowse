@@ -278,7 +278,7 @@
 
         <section id="slideshow">
             <h2>Run a slideshow</h2>
-            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>Settings &gt; Slideshow Settings</strong>.</p>
+            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>Settings &gt; Settings</strong>, or press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd>.</p>
             <p>Slideshow transitions include cut, crossfade, slide, and Ken Burns styles. Slideshow scope follows the current recursive-browsing setting. The viewer can open on a secondary monitor when that preference is enabled.</p>
         </section>
 
@@ -329,15 +329,16 @@
 
         <section id="settings">
             <h2>Settings and performance</h2>
-            <p>Preferences are grouped under the top-level <strong>Settings</strong> menu and are remembered per user. Appearance, app text size, thumbnail size, viewer behavior, slideshow settings, performance, diagnostics, integration, and RAW/JPEG preferences can be changed without restarting.</p>
+            <p>Preferences are grouped in the consolidated <strong>Settings &gt; Settings</strong> dialog and are remembered per user. Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> to open it. The dialog stages edits until you choose <strong>Apply</strong> or <strong>OK</strong>; <strong>Cancel</strong> or closing the dialog discards uncommitted edits.</p>
             <ul>
-                <li><strong>Settings &gt; Appearance</strong> contains the light/dark theme and app text size. Choose Small, Medium, or Large; Medium preserves the default size.</li>
-                <li><strong>Settings &gt; Viewer</strong> contains mouse-wheel behavior, overlay text size, detail overlays, full metadata, secondary-monitor defaults, slideshow transition, and RAW/JPEG display preferences.</li>
-                <li><strong>Settings &gt; Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
+                <li><strong>Slideshow</strong> contains transition style and timing for slideshow playback.</li>
+                <li><strong>Viewer</strong> contains manual-navigation transitions, mouse-wheel behavior, overlay text size, detail overlays, full metadata, secondary-monitor defaults, and RAW/JPEG display preferences.</li>
+                <li><strong>Appearance</strong> contains the light/dark theme, app text size, thumbnail size, thumbnail details, compact layout, and details panel.</li>
+                <li><strong>Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
                 <li><strong>Settings &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
-                <li><strong>Settings &gt; Integration</strong> contains file associations and single-instance behavior.</li>
-                <li><strong>Settings &gt; Behavior</strong> can make Esc close the main window instead of minimizing it. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> continues to minimize.</li>
-                <li><strong>View &gt; Thumbnail Size</strong> provides fixed presets and keyboard stepping. <strong>Settings &gt; Slideshow Settings</strong> controls slideshow timing and transitions.</li>
+                <li><strong>Settings &gt; Integration</strong> contains file associations. Single-instance behavior is on the Behavior tab.</li>
+                <li><strong>Behavior</strong> can enable recursive browsing, show subfolders, make Esc close the main window instead of minimizing it, and enable single-instance behavior. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> continues to minimize.</li>
+                <li><strong>View &gt; Thumbnail Size</strong> still provides fixed presets and keyboard stepping.</li>
             </ul>
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
         </section>
@@ -375,7 +376,7 @@
                     <tr><td>View</td><td><kbd>+</kbd> / <kbd>=</kbd> / Numpad <kbd>+</kbd></td><td>Increase thumbnail size</td></tr>
                     <tr><td>View</td><td><kbd>-</kbd> / <kbd>_</kbd> / Numpad <kbd>-</kbd></td><td>Decrease thumbnail size</td></tr>
                     <tr><td>Slideshow</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> / <kbd>F</kbd></td><td>Start from selection / folder</td></tr>
-                    <tr><td>Slideshow</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd></td><td>Open slideshow settings</td></tr>
+                    <tr><td>Settings</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd></td><td>Open consolidated Settings</td></tr>
                     <tr><td>Diagnostics</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd> / <kbd>X</kbd></td><td>Snapshot / reset diagnostics</td></tr>
                     <tr><th colspan="3">Viewer</th></tr>
                     <tr><td>Viewer</td><td><kbd>Esc</kbd> / <kbd>Ctrl</kbd> + <kbd>W</kbd></td><td>Close the viewer</td></tr>

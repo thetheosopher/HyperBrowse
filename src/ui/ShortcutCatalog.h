@@ -64,7 +64,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_THUMBNAIL_SIZE_DECREASE, VK_SUBTRACT, 0, L"Numpad -", L"Decrease thumbnail size", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_SLIDESHOW_SELECTION, static_cast<WORD>('S'), FCONTROL | FSHIFT, L"Ctrl+Shift+S", L"Start a slideshow from the selection", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_SLIDESHOW_FOLDER, static_cast<WORD>('F'), FCONTROL | FSHIFT, L"Ctrl+Shift+F", L"Start a slideshow from the folder", L"View and navigation"},
-        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_SLIDESHOW_SETTINGS, static_cast<WORD>('T'), FCONTROL | FSHIFT, L"Ctrl+Shift+T", L"Open slideshow settings", L"View and navigation"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_SETTINGS, static_cast<WORD>('T'), FCONTROL | FSHIFT, L"Ctrl+Shift+T", L"Open Settings", L"Settings"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_HELP_DIAGNOSTICS_SNAPSHOT, static_cast<WORD>('D'), FCONTROL | FSHIFT, L"Ctrl+Shift+D", L"Capture a diagnostics snapshot", L"Help"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_HELP_DIAGNOSTICS_RESET, static_cast<WORD>('X'), FCONTROL | FSHIFT, L"Ctrl+Shift+X", L"Reset diagnostics state", L"Help"},
     };

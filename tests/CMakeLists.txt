@@ -39,3 +39,4 @@ add_custom_command(TARGET HyperBrowseTests POST_BUILD
 add_test(NAME HyperBrowseSmoke COMMAND HyperBrowseTests)
 add_test(NAME HyperBrowseViewerFitSmoke COMMAND HyperBrowseTests --viewer-fit)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)
+add_test(NAME HyperBrowseConsolidatedSettingsSmoke COMMAND HyperBrowseTests --settings)

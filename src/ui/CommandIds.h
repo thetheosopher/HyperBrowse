@@ -131,6 +131,7 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     inline constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     inline constexpr UINT ID_VIEW_SLIDESHOW_SETTINGS = 2307;
+    inline constexpr UINT ID_VIEW_SETTINGS = 2308;
     inline constexpr UINT ID_ACTION_SORT_MENU = 2401;
     inline constexpr UINT ID_ACTION_THUMBNAIL_SIZE_MENU = 2402;
     inline constexpr UINT ID_ACTION_THEME_MENU = 2403;

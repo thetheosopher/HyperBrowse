@@ -121,7 +121,15 @@ namespace hyperbrowse::viewer
         bool IsSlideshowActive() const noexcept;
         void SetCompareMode(bool enabled, CompareDirection direction = CompareDirection::Next);
         bool IsCompareModeEnabled() const noexcept;
+        static bool DefaultInfoOverlaysVisible();
+        static InfoOverlayTextSize DefaultOverlayTextSize();
+        static bool DefaultFullMetadataVisible();
+        static void SetDefaultInfoOverlaysVisible(bool visible);
+        static void SetDefaultOverlayTextSize(InfoOverlayTextSize size);
+        static void SetDefaultFullMetadataVisible(bool visible);
         void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
+        void SetKeyboardPanningInverted(bool inverted) noexcept;
+        bool IsKeyboardPanningInverted() const noexcept;
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
         void SetManualTransitionEnabled(bool enabled);
         void SetInfoOverlaysVisible(bool visible);
@@ -319,6 +327,7 @@ namespace hyperbrowse::viewer
         std::shared_ptr<const services::ImageMetadata> currentMetadata_;
         std::wstring currentMetadataText_;
         MouseWheelBehavior mouseWheelBehavior_{MouseWheelBehavior::Zoom};
+        bool keyboardPanningInverted_{};
         bool panning_{};
         POINT lastPanPoint_{};
         bool fullScreen_{};

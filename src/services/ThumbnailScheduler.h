@@ -54,6 +54,9 @@ namespace hyperbrowse::services
                                     util::ResourceProfile resourceProfile = util::ResourceProfile::Balanced);
         ~ThumbnailScheduler();
 
+        static std::size_t ResolveCacheCapacityBytes(std::size_t requestedCapacityBytes,
+                                  util::ResourceProfile resourceProfile);
+
         void BindTargetWindow(HWND targetWindow);
         void Schedule(std::uint64_t sessionId, std::uint64_t requestEpoch, std::vector<ThumbnailWorkItem> workItems);
         void CancelOutstanding();

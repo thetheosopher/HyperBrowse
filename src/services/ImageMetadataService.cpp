@@ -1212,6 +1212,12 @@ SwarmValueDone:
 
 namespace hyperbrowse::services
 {
+    std::size_t ImageMetadataService::ResolveCacheCapacityEntries(std::size_t requestedCapacityEntries,
+                                                                    util::ResourceProfile resourceProfile)
+    {
+        return ResolveMetadataCacheCapacityEntries(requestedCapacityEntries, resourceProfile);
+    }
+
     std::shared_ptr<const ImageMetadata> ExtractImageMetadata(const browser::BrowserItem& item,
                                                               std::wstring* errorMessage)
     {

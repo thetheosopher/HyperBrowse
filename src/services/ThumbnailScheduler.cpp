@@ -192,6 +192,12 @@ namespace
 
 namespace hyperbrowse::services
 {
+    std::size_t ThumbnailScheduler::ResolveCacheCapacityBytes(std::size_t requestedCapacityBytes,
+                                                               util::ResourceProfile resourceProfile)
+    {
+        return ResolveThumbnailCacheCapacityBytes(requestedCapacityBytes, resourceProfile);
+    }
+
     ThumbnailScheduler::ThumbnailScheduler(std::size_t cacheCapacityBytes,
                                            std::size_t workerCount,
                                            util::ResourceProfile resourceProfile)

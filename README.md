@@ -26,6 +26,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Quick Send with favorite-only destinations, persistent key assignments, F7 move, and F8 copy for the currently displayed image or selected browser files.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
+- Consolidated tabbed Settings dialog covering slideshow, viewer, appearance, performance, and behavior preferences with Apply, OK, and Cancel workflow; open it with Ctrl+Shift+T.
 - Folder tree workflow upgrades with validated folder moves, inline folder creation, favorite destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
 - Selected thumbnails and details rows can be dragged to File Explorer, mail clients, and other shell-aware applications using native Windows file-drop data.
 - Keyboard navigation now covers browser and viewer workflows with consistent focus, selection, and folder-history behavior.
@@ -132,6 +133,8 @@ ctest --preset release-tests
 ```
 
 The smoke coverage includes folder enumeration, folder tree enumeration, thumbnail scheduling and caching, WIC decode behavior, LibRaw decode behavior, metadata caching, file operations, batch convert cancellation, browser selection behavior, viewer interaction, and persisted UI state.
+
+The consolidated Settings dialog is available from View > Settings or with Ctrl+Shift+T. Its Slideshow, Viewer, Appearance, Performance, and Behavior tabs stage changes until Apply or OK; Cancel and closing the dialog discard uncommitted changes.
 
 The release packaging path builds the release binaries, runs the smoke executable, stages both portable and installer layouts, and then emits the zipped portable package plus the Inno Setup installer.
 
@@ -284,7 +287,7 @@ Release **2.0.0** expands HyperBrowse from a fast image browser into a more comp
 ### 1.2.0.0
 
 - Fixed slideshow settings numeric entry behavior so spinner controls and manual values remain parse-safe, while introducing clearer lower bounds of 250 ms for slide duration and 100 ms for transition duration.
-- Added a dedicated slideshow settings shortcut (`Ctrl+Shift+T`) and updated related dialog copy to reflect the expanded transition catalog.
+- Added the consolidated Settings dialog and moved the `Ctrl+Shift+T` shortcut to its five-tab configuration surface, while preserving the expanded slideshow transition catalog.
 - Expanded classic transition options with new directional and wipe-based styles, including Fade to Black, Diagonal Slide, Push, Center Wipe, Venetian Blinds, Split Wipe, Horizontal Blinds, Checkerboard Wipe, and Zoom Fade.
 - Added Direct2D effect-backed transition styles: Blur Crossfade, Motion Blur, Color Wash, Sepia Drift, Flashbulb, Prism, and Monochrome Reveal.
 

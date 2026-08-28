@@ -2344,6 +2344,10 @@ namespace hyperbrowse::browser
     {
         switch (keyCode)
         {
+        case VK_LEFT:
+        case VK_RIGHT:
+        case VK_UP:
+        case VK_DOWN:
         case VK_PRIOR:
         case VK_NEXT:
         case VK_HOME:
@@ -2356,11 +2360,19 @@ namespace hyperbrowse::browser
         if (viewMode_ == BrowserViewMode::Thumbnails)
         {
             HandleThumbnailNavigationKey(keyCode, GetKeyState(VK_SHIFT) < 0);
+            if (hwnd_ && GetFocus() != hwnd_)
+            {
+                SetFocus(hwnd_);
+            }
             return true;
         }
 
         if (viewMode_ == BrowserViewMode::Details && detailsList_)
         {
+            if (GetFocus() != detailsList_)
+            {
+                SetFocus(detailsList_);
+            }
             SendMessageW(detailsList_, message, keyCode, keyData);
             return true;
         }

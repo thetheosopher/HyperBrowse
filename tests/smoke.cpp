@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "browser/BrowserModel.h"
@@ -60,6 +61,7 @@ namespace
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
     constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
+    constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
     constexpr wchar_t kRegistryValueAppTextSize[] = L"AppTextSize";
 
     struct EnumerationResult
@@ -626,6 +628,30 @@ namespace
 
             MsgWaitForMultipleObjectsEx(0, nullptr, 25, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         }
+    }
+
+    bool ReadClientPixel(HWND window, POINT point, COLORREF* color)
+    {
+        if (!window || !color)
+        {
+            return false;
+        }
+
+        HDC dc = GetDC(window);
+        if (!dc)
+        {
+            return false;
+        }
+
+        const COLORREF sampledColor = GetPixel(dc, point.x, point.y);
+        ReleaseDC(window, dc);
+        if (sampledColor == CLR_INVALID)
+        {
+            return false;
+        }
+
+        *color = sampledColor;
+        return true;
     }
 
     std::wstring ReadTreeItemText(HWND treeView, HTREEITEM item)
@@ -2240,6 +2266,16 @@ namespace
         SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(50, 50));
         Expect(browserPane.SelectedCount() == 1, "Single-click selection in thumbnail mode failed");
 
+        SetFocus(hostWindow);
+        Expect(browserPane.HandleNavigationKey(WM_KEYDOWN, VK_RIGHT, 0),
+               "Thumbnail navigation did not handle an arrow key from the main window focus path");
+        Expect(GetFocus() == browserPane.Hwnd(),
+               "Thumbnail navigation did not return keyboard focus to the browser pane");
+        Expect(browserPane.FocusedFilePathSnapshot() == L"C:\\Alpha\\delta.nef",
+               "Arrow navigation from main window focus did not advance the focused thumbnail");
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(50, 50));
+        SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(50, 50));
+
         SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, MAKELPARAM(500, 50));
         SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(500, 50));
         Expect(browserPane.SelectedCount() == 3, "Shift-range selection in thumbnail mode failed");
@@ -2809,11 +2845,19 @@ namespace
         const LONG initialHorizontalPan = viewer.PanOffset().x;
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
         const POINT pannedRight = viewer.PanOffset();
-        Expect(viewer.CurrentIndex() == 0 && pannedRight.x > initialHorizontalPan,
-            "Viewer right arrow did not pan the horizontally zoomed image");
+        Expect(viewer.CurrentIndex() == 0 && pannedRight.x < initialHorizontalPan,
+            "Viewer right arrow did not pan the viewport to the right by default");
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
         Expect(viewer.CurrentIndex() == 0 && viewer.PanOffset().x == initialHorizontalPan,
             "Viewer left arrow did not pan the horizontally zoomed image back");
+        viewer.SetKeyboardPanningInverted(true);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+        Expect(viewer.IsKeyboardPanningInverted() && viewer.PanOffset().x > initialHorizontalPan,
+            "Viewer inverted keyboard panning option did not restore the legacy right-arrow direction");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
+        Expect(viewer.PanOffset().x == initialHorizontalPan,
+            "Viewer inverted keyboard panning option did not restore the legacy left-arrow direction");
+        viewer.SetKeyboardPanningInverted(false);
         SetWindowPos(viewer.Hwnd(), nullptr,
                      originalViewerRect.left,
                      originalViewerRect.top,
@@ -2844,6 +2888,16 @@ namespace
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_NEXT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
             "Viewer Page Down did not navigate to the next image");
+        PumpMessagesFor(100);
+        RECT metadataClientRect{};
+        Expect(GetClientRect(viewer.Hwnd(), &metadataClientRect) != FALSE,
+            "Failed to read the viewer client area for the metadata pane test");
+        const POINT metadataSamplePoint{
+            metadataClientRect.left + ((metadataClientRect.right - metadataClientRect.left) * 5 / 6),
+            metadataClientRect.top + 24};
+        COLORREF metadataPixelWithOverlays{};
+        Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithOverlays),
+            "Failed to sample the visible metadata pane");
 
         state->viewerStartFolderSlideshowRequests = 0;
         state->lastViewerStartFolderSlideshowSource = nullptr;
@@ -2919,6 +2973,11 @@ namespace
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
         PumpMessagesFor(100);
         Expect(!viewer.AreInfoOverlaysVisible(), "Viewer Tab key did not hide the info overlays");
+        COLORREF metadataPixelWithoutOverlays{};
+        Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithoutOverlays),
+            "Failed to sample the metadata pane with info overlays hidden");
+        Expect(metadataPixelWithoutOverlays == metadataPixelWithOverlays,
+            "Viewer full metadata pane disappeared when info overlays were hidden");
 
         RECT secondImageClientRect{};
         Expect(GetClientRect(viewer.Hwnd(), &secondImageClientRect) != FALSE,
@@ -2974,9 +3033,17 @@ namespace
         const LONG panBeforeArrow = viewer.PanOffset().y;
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
         const LONG panAfterUp = viewer.PanOffset().y;
-        Expect(panAfterUp < panBeforeArrow, "Viewer up arrow did not pan the zoomed image upward");
+        Expect(panAfterUp > panBeforeArrow, "Viewer up arrow did not pan the viewport upward");
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
         Expect(viewer.PanOffset().y == panBeforeArrow, "Viewer down arrow did not pan the zoomed image downward");
+        viewer.SetKeyboardPanningInverted(true);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
+        Expect(viewer.PanOffset().y < panBeforeArrow,
+            "Viewer inverted keyboard panning option did not restore the legacy up-arrow direction");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
+        Expect(viewer.PanOffset().y == panBeforeArrow,
+            "Viewer inverted keyboard panning option did not restore the legacy down-arrow direction");
+        viewer.SetKeyboardPanningInverted(false);
 
         for (int index = 0; index < 128; ++index)
         {
@@ -2993,7 +3060,7 @@ namespace
         const LONG bottomPan = viewer.PanOffset().y;
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
         Expect(viewer.PanOffset().y == bottomPan, "Viewer down arrow exceeded the bottom image pan limit");
-        Expect(topPan < bottomPan, "Viewer vertical pan limits did not reflect image overflow");
+        Expect(topPan > bottomPan, "Viewer vertical pan limits did not reflect image overflow");
 
          SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RETURN, 0);
          PumpMessagesFor(100);
@@ -3121,6 +3188,274 @@ namespace
         }
     }
 
+    void RunConsolidatedSettingsScenario(HINSTANCE instance)
+    {
+        using hyperbrowse::ui::command_ids::ID_VIEW_SETTINGS;
+
+        constexpr wchar_t kDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
+        constexpr int kTabControlId = 360;
+        constexpr int kFirstControlId = 5000;
+        constexpr int kTransitionEnabledControlId = kFirstControlId;
+        constexpr int kInvertKeyboardPanningControlId = kFirstControlId + 8;
+        constexpr int kAppTextSizeControlId = kFirstControlId + 18;
+        constexpr int kResourceProfileControlId = kFirstControlId + 23;
+        constexpr int kThumbnailCacheControlId = kFirstControlId + 25;
+        constexpr int kThumbnailCacheAutomaticControlId = kFirstControlId + 26;
+        constexpr int kMetadataCacheControlId = kFirstControlId + 27;
+        constexpr int kMetadataCacheAutomaticControlId = kFirstControlId + 28;
+        constexpr int kSlideshowDurationControlId = kFirstControlId + 2;
+        constexpr int kApplyButtonId = 5500;
+        const std::array<std::wstring_view, 5> expectedTabs{
+            L"Slideshow", L"Viewer", L"Appearance", L"Performance", L"Behavior"};
+
+        ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
+        ScopedRegistryDwordBackup invertKeyboardPanningBackup(kRegistryPath, kRegistryValueInvertKeyboardPanning);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueAppTextSize);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueInvertKeyboardPanning);
+        hyperbrowse::ui::MainWindow mainWindow(instance);
+        Expect(mainWindow.Create(), "Failed to create MainWindow for consolidated-settings smoke coverage");
+        Expect(mainWindow.AppTextSize() == hyperbrowse::util::AppTextSize::Medium,
+               "Consolidated-settings smoke coverage did not start from the default app text size");
+
+        const auto runDialog = [&](const std::function<void(HWND, std::string*)>& controller)
+        {
+            std::atomic_bool done{false};
+            std::string failure;
+            std::thread worker([&]()
+            {
+                if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
+                {
+                    failure = "Failed to post the consolidated Settings command";
+                    done.store(true, std::memory_order_release);
+                    return;
+                }
+
+                HWND dialog = nullptr;
+                const ULONGLONG deadline = GetTickCount64() + 10000;
+                while (GetTickCount64() < deadline && !(dialog = FindWindowW(kDialogClassName, nullptr)))
+                {
+                    Sleep(10);
+                }
+                if (!dialog)
+                {
+                    failure = "Consolidated Settings dialog did not open";
+                    done.store(true, std::memory_order_release);
+                    return;
+                }
+                controller(dialog, &failure);
+                const ULONGLONG closeDeadline = GetTickCount64() + 10000;
+                while (GetTickCount64() < closeDeadline && FindWindowW(kDialogClassName, nullptr))
+                {
+                    Sleep(10);
+                }
+                if (FindWindowW(kDialogClassName, nullptr))
+                {
+                    if (failure.empty())
+                    {
+                        failure = "Consolidated Settings dialog did not close";
+                    }
+                }
+                done.store(true, std::memory_order_release);
+            });
+
+            Expect(PumpMessagesUntil([&]() { return done.load(std::memory_order_acquire); }, 15000),
+                   "Consolidated Settings dialog interaction timed out");
+            worker.join();
+            Expect(failure.empty(), failure.empty() ? "Consolidated Settings interaction failed" : failure.c_str());
+        };
+
+        runDialog([&](HWND dialog, std::string* failure)
+        {
+            HWND tabs = GetDlgItem(dialog, kTabControlId);
+            if (!tabs || TabCtrl_GetItemCount(tabs) != static_cast<int>(expectedTabs.size()))
+            {
+                *failure = "Consolidated Settings did not create all five tabs";
+                return;
+            }
+            HWND transitionEnabled = GetDlgItem(dialog, kTransitionEnabledControlId);
+            HWND invertKeyboardPanning = GetDlgItem(dialog, kInvertKeyboardPanningControlId);
+            if (!transitionEnabled || IsWindowVisible(transitionEnabled))
+            {
+                *failure = "Manual viewer transitions appeared on the Slideshow tab";
+                return;
+            }
+            TabCtrl_SetCurSel(tabs, 1);
+            NMHDR tabChanged{};
+            tabChanged.hwndFrom = tabs;
+            tabChanged.idFrom = kTabControlId;
+            tabChanged.code = TCN_SELCHANGE;
+            SendMessageW(dialog, WM_NOTIFY, kTabControlId, reinterpret_cast<LPARAM>(&tabChanged));
+            if (!IsWindowVisible(transitionEnabled))
+            {
+                *failure = "Manual viewer transitions did not appear first on the Viewer tab";
+                return;
+            }
+            if (!invertKeyboardPanning || SendMessageW(invertKeyboardPanning, BM_GETCHECK, 0, 0) != BST_UNCHECKED)
+            {
+                *failure = "Invert Keyboard Panning did not default to unchecked";
+                return;
+            }
+            const auto readControlText = [](HWND control)
+            {
+                wchar_t buffer[64]{};
+                GetWindowTextW(control, buffer, static_cast<int>(std::size(buffer)));
+                return std::wstring(buffer);
+            };
+            HWND profile = GetDlgItem(dialog, kResourceProfileControlId);
+            HWND thumbnailCache = GetDlgItem(dialog, kThumbnailCacheControlId);
+            HWND metadataCache = GetDlgItem(dialog, kMetadataCacheControlId);
+            HWND thumbnailAutomatic = GetDlgItem(dialog, kThumbnailCacheAutomaticControlId);
+            HWND metadataAutomatic = GetDlgItem(dialog, kMetadataCacheAutomaticControlId);
+            if (!profile || !thumbnailCache || !metadataCache
+                || !thumbnailAutomatic || !metadataAutomatic
+                || SendMessageW(thumbnailAutomatic, BM_GETCHECK, 0, 0) != BST_CHECKED
+                || SendMessageW(metadataAutomatic, BM_GETCHECK, 0, 0) != BST_CHECKED)
+            {
+                *failure = "Consolidated Settings did not initialize automatic cache capacity controls";
+                return;
+            }
+            SendMessageW(profile, CB_SETCURSEL, static_cast<WPARAM>(hyperbrowse::util::ResourceProfile::Aggressive), 0);
+            SendMessageW(dialog,
+                         WM_COMMAND,
+                         MAKEWPARAM(kResourceProfileControlId, CBN_SELCHANGE),
+                         reinterpret_cast<LPARAM>(profile));
+            const std::wstring expectedThumbnailCache = std::to_wstring(
+                hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(
+                    0,
+                    hyperbrowse::util::ResourceProfile::Aggressive)
+                / (1024ULL * 1024ULL));
+            const std::wstring expectedMetadataCache = std::to_wstring(
+                hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(
+                    0,
+                    hyperbrowse::util::ResourceProfile::Aggressive));
+            if (readControlText(thumbnailCache) != expectedThumbnailCache
+                || readControlText(metadataCache) != expectedMetadataCache)
+            {
+                *failure = "Follow profile did not display the selected profile cache capacities";
+                return;
+            }
+            SendMessageW(thumbnailAutomatic, BM_SETCHECK, BST_UNCHECKED, 0);
+            SendMessageW(dialog,
+                         WM_COMMAND,
+                         MAKEWPARAM(kThumbnailCacheAutomaticControlId, BN_CLICKED),
+                         reinterpret_cast<LPARAM>(thumbnailAutomatic));
+            if (readControlText(thumbnailCache) != expectedThumbnailCache || !IsWindowEnabled(thumbnailCache))
+            {
+                *failure = "Disabling Follow profile did not preserve the effective thumbnail cache capacity";
+                return;
+            }
+            SendMessageW(thumbnailAutomatic, BM_SETCHECK, BST_CHECKED, 0);
+            SendMessageW(dialog,
+                         WM_COMMAND,
+                         MAKEWPARAM(kThumbnailCacheAutomaticControlId, BN_CLICKED),
+                         reinterpret_cast<LPARAM>(thumbnailAutomatic));
+            if (readControlText(thumbnailCache) != expectedThumbnailCache || IsWindowEnabled(thumbnailCache))
+            {
+                *failure = "Re-enabling Follow profile did not restore automatic thumbnail cache behavior";
+                return;
+            }
+            for (int index = 0; index < static_cast<int>(expectedTabs.size()); ++index)
+            {
+                wchar_t tabText[64]{};
+                TCITEMW item{};
+                item.mask = TCIF_TEXT;
+                item.pszText = tabText;
+                item.cchTextMax = static_cast<int>(std::size(tabText));
+                if (!TabCtrl_GetItem(tabs, index, &item) || std::wstring_view(tabText) != expectedTabs[static_cast<std::size_t>(index)])
+                {
+                    *failure = "Consolidated Settings tab labels are incorrect";
+                    return;
+                }
+                TabCtrl_SetCurSel(tabs, index);
+                if (TabCtrl_GetCurSel(tabs) != index)
+                {
+                    *failure = "Consolidated Settings tab switching failed";
+                    return;
+                }
+            }
+            HWND appTextSize = GetDlgItem(dialog, kAppTextSizeControlId);
+            SendMessageW(appTextSize, CB_SETCURSEL, 2, 0);
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+        });
+        Expect(mainWindow.AppTextSize() == hyperbrowse::util::AppTextSize::Medium,
+               "Cancel committed staged consolidated-settings changes");
+
+        runDialog([&](HWND dialog, std::string* failure)
+        {
+            HWND appTextSize = GetDlgItem(dialog, kAppTextSizeControlId);
+            HWND invertKeyboardPanning = GetDlgItem(dialog, kInvertKeyboardPanningControlId);
+            SendMessageW(appTextSize, CB_SETCURSEL, 2, 0);
+            SendMessageW(invertKeyboardPanning, BM_SETCHECK, BST_CHECKED, 0);
+            PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(kApplyButtonId, BN_CLICKED), 0);
+            const ULONGLONG deadline = GetTickCount64() + 10000;
+            DWORD persistedValue = 0;
+            DWORD persistedInvertKeyboardPanning = 0;
+            while (GetTickCount64() < deadline)
+            {
+                if (TryReadRegistryDwordValue(kRegistryPath, kRegistryValueAppTextSize, &persistedValue)
+                    && persistedValue == static_cast<DWORD>(hyperbrowse::util::AppTextSize::Large)
+                    && TryReadRegistryDwordValue(kRegistryPath, kRegistryValueInvertKeyboardPanning, &persistedInvertKeyboardPanning)
+                    && persistedInvertKeyboardPanning == 1)
+                {
+                    break;
+                }
+                Sleep(10);
+            }
+            if (persistedValue != static_cast<DWORD>(hyperbrowse::util::AppTextSize::Large)
+                || persistedInvertKeyboardPanning != 1
+                || !FindWindowW(kDialogClassName, nullptr))
+            {
+                *failure = "Apply did not commit the staged setting while keeping the dialog open";
+                return;
+            }
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+        });
+        Expect(mainWindow.AppTextSize() == hyperbrowse::util::AppTextSize::Large,
+               "Apply did not update the live application setting");
+
+        runDialog([&](HWND dialog, std::string* failure)
+        {
+            SetWindowTextW(GetDlgItem(dialog, kSlideshowDurationControlId), L"1");
+            PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(kApplyButtonId, BN_CLICKED), 0);
+            HWND validationMessage = nullptr;
+            const ULONGLONG deadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < deadline && !(validationMessage = FindWindowW(L"#32770", L"Settings")))
+            {
+                Sleep(10);
+            }
+            if (!validationMessage)
+            {
+                *failure = "Invalid slideshow duration did not trigger Settings validation";
+                return;
+            }
+            SendMessageW(validationMessage, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+            while (GetTickCount64() < deadline && FindWindowW(L"#32770", L"Settings"))
+            {
+                Sleep(10);
+            }
+            if (FindWindowW(kDialogClassName, nullptr) != dialog)
+            {
+                *failure = "Invalid slideshow duration closed the Settings dialog";
+                return;
+            }
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+        });
+
+        runDialog([&](HWND dialog, std::string* failure)
+        {
+            if (SendMessageW(GetDlgItem(dialog, kInvertKeyboardPanningControlId), BM_GETCHECK, 0, 0) != BST_CHECKED)
+            {
+                *failure = "Applied Invert Keyboard Panning value was not restored";
+                return;
+            }
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+        });
+        Expect(mainWindow.AppTextSize() == hyperbrowse::util::AppTextSize::Large,
+               "OK did not preserve the applied consolidated-settings value");
+        DestroyWindow(mainWindow.Hwnd());
+        PumpMessagesFor(100);
+    }
+
     void RunMainWindowFolderTreeScenario(HINSTANCE instance)
     {
          const std::vector<std::wstring> expectedSpecialRoots = ExpectedSpecialFolderRootTexts();
@@ -3210,6 +3545,7 @@ int main(int argc, char* argv[])
 
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
+        const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
         if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
@@ -3217,6 +3553,10 @@ int main(int argc, char* argv[])
         else if (appTextSizeOnly)
         {
             RunAppTextSizeScenario(instance);
+        }
+        else if (settingsOnly)
+        {
+            RunConsolidatedSettingsScenario(instance);
         }
         else
         {
