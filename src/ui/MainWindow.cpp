@@ -7228,6 +7228,18 @@ namespace
         return result == IDOK;
     }
 
+    bool ConfirmFavoriteDestinationClear(HWND ownerWindow, std::size_t favoriteCount)
+    {
+        const std::wstring prompt = favoriteCount == 1
+            ? L"Remove the only favorite destination?"
+            : L"Remove all " + std::to_wstring(favoriteCount) + L" favorite destinations?";
+        const int result = MessageBoxW(ownerWindow,
+                                       prompt.c_str(),
+                                       L"Clear Favorite Destinations",
+                                       MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+        return result == IDYES;
+    }
+
     bool ShouldConfirmDeletion(bool permanent)
     {
         return permanent && (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0;
@@ -20060,7 +20072,10 @@ namespace hyperbrowse::ui
             ToggleCurrentFolderFavoriteDestination();
             return true;
         case ID_FILE_CLEAR_FAVORITE_DESTINATIONS:
-            ClearFavoriteDestinations();
+            if (ConfirmFavoriteDestinationClear(hwnd_, favoriteDestinationFolders_.size()))
+            {
+                ClearFavoriteDestinations();
+            }
             return true;
         case ID_FILE_CLEAR_RECENT_FOLDERS:
             ClearRecentFolders();
