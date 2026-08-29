@@ -23,11 +23,11 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - WIC baseline decode path, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
-- Quick Send with favorite-only destinations, persistent key assignments, F7 move, and F8 copy for the currently displayed image or selected browser files.
+- Quick Actions with saved destinations, persistent key assignments, F7 move, and F8 copy for the currently displayed image or selected browser files.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
 - Consolidated tabbed Settings dialog covering slideshow, viewer, appearance, performance, and behavior preferences with Apply, OK, and Cancel workflow; open it with Ctrl+Shift+T.
-- Folder tree workflow upgrades with validated folder moves, inline folder creation, favorite destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
+- Folder tree workflow upgrades with validated folder moves, inline folder creation, Quick Actions destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
 - Selected thumbnails and details rows can be dragged to File Explorer, mail clients, and other shell-aware applications using native Windows file-drop data.
 - Keyboard navigation now covers browser and viewer workflows with consistent focus, selection, and folder-history behavior.
 - Display changes and graphics-surface loss trigger redraw and resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
@@ -47,9 +47,9 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 | Performance pipeline | Prioritized thumbnail scheduling, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, viewer prefetch, folder watch refresh, and optional GPU-assisted JPEG decode |
 | Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
 
-### Viewer Quick Send
+### Viewer Quick Actions
 
-Quick Send supports up to 36 favorite destinations. Each newly added favorite is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`; its key field accepts one digit or letter and can be edited later. Assignments persist by folder path and remain associated with the same folder when favorites are reordered. Recent folders are not included.
+Quick Actions supports up to 36 saved destinations. Each newly added destination is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`; its key field accepts one digit or letter and can be edited later. Assignments persist by folder path and remain associated with the same destination when the list is reordered. Recent folders are not included.
 
 In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed.
 
@@ -224,7 +224,7 @@ Release **2.0.0** expands HyperBrowse from a fast image browser into a more comp
 - Added a redesigned command bar and reorganized menus with clearer browser, viewer, slideshow, metadata, organize, convert, and advanced workflows.
 - Added native Windows drag-and-drop in both directions: drag selected images to folders, File Explorer, mail clients, or other shell-aware applications, and drop files onto HyperBrowse to open them in the viewer or copy them into the current folder.
 - Added clipboard copy and paste for files, image-pixel copying, duplicate-to-same-folder, shell context menus, multi-file Properties, and taskbar progress for long-running file operations.
-- Added favorite destinations, recent-folder integration, Quick Send move/copy shortcuts, folder-history navigation, inline folder rename and creation, guarded folder moves, and improved folder-tree feedback.
+- Added Quick Actions destinations, recent-folder integration, Quick Actions move/copy shortcuts, folder-history navigation, inline folder rename and creation, guarded folder moves, and improved folder-tree feedback.
 - Added bounded undo and redo for copy, move, and rename workflows, with completion-aware history updates that never journal incomplete operations.
 - Added viewer context actions, scalable overlay text, full metadata presentation, multi-monitor opening, improved keyboard and focus behavior, persistent slideshow settings, and richer transition controls.
 - Added opt-in single-instance launch forwarding through a current-user named pipe, with overlapped shutdown-safe IPC, remote-client rejection, and current-user ACL enforcement.
@@ -249,7 +249,7 @@ Release **2.0.0** expands HyperBrowse from a fast image browser into a more comp
 ### 1.2.6
 
 - Added native drag-out for selected thumbnails and details rows to File Explorer, mail clients, and other shell-aware applications.
-- Preserved existing in-app browser-to-tree and Quick Send drag workflows while starting external shell drags when the pointer leaves HyperBrowse.
+- Preserved existing in-app browser-to-tree and Quick Actions drag workflows while starting external shell drags when the pointer leaves HyperBrowse.
 - Initialized OLE on the application thread so Windows `DoDragDrop` provides normal drag feedback and drop effects.
 
 ### 1.2.5
@@ -274,7 +274,7 @@ Release **2.0.0** expands HyperBrowse from a fast image browser into a more comp
 
 - Added browser-to-tree image drag-and-drop so selected thumbnails or image rows can be dropped onto folder-tree destinations.
 - Added cross-drive drop prompting for those image drags so the app asks whether to copy or move when the destination lives on a different drive.
-- Added favorite destination toggling, move-to-new-child-folder workflows, and back-folder navigation history to speed up repeat organization tasks.
+- Added Quick Actions destination toggling, move-to-new-child-folder workflows, and back-folder navigation history to speed up repeat organization tasks.
 - Refreshed the slideshow settings transition list so Random stays pinned at the top while the remaining transition options are easier to scan alphabetically.
 
 ### 1.2.1

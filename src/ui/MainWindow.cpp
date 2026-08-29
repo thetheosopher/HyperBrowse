@@ -516,7 +516,7 @@ namespace
 
     std::wstring BuildQuickAccessDestinationMetadata(std::wstring_view folderPath, bool favorite, bool currentFolder)
     {
-        std::wstring metadata = favorite ? L"Favorite destination" : L"Recent destination";
+        std::wstring metadata = favorite ? L"Quick action destination" : L"Recent destination";
 
         std::uintmax_t imageCount = 0;
         metadata.append(L" | ");
@@ -7261,11 +7261,11 @@ namespace
     bool ConfirmFavoriteDestinationClear(HWND ownerWindow, std::size_t favoriteCount)
     {
         const std::wstring prompt = favoriteCount == 1
-            ? L"Remove the only favorite destination?"
-            : L"Remove all " + std::to_wstring(favoriteCount) + L" favorite destinations?";
+            ? L"Remove the only quick action destination?"
+            : L"Remove all " + std::to_wstring(favoriteCount) + L" quick action destinations?";
         const int result = MessageBoxW(ownerWindow,
                                        prompt.c_str(),
-                                       L"Clear Favorite Destinations",
+                                       L"Clear Quick Actions",
                                        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
         return result == IDYES;
     }
@@ -9010,8 +9010,8 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(openRecentFolderMenu_), L"Open &Recent Folder");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, L"Add Current Folder to Favorite &Destinations");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_CLEAR_FAVORITE_DESTINATIONS, L"Clear All Favorite &Destinations");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, L"Add Current Folder to Quick &Actions");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_CLEAR_FAVORITE_DESTINATIONS, L"Clear All Quick &Actions");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
@@ -9030,8 +9030,8 @@ namespace hyperbrowse::ui
         AppendMenuW(editMenu, MF_STRING, ID_FILE_PASTE_FILES, L"&Paste\tCtrl+V");
         AppendMenuW(editMenu, MF_STRING, ID_FILE_COPY_PATH, L"Copy Pat&h\tCtrl+Shift+C");
         AppendMenuW(editMenu, MF_STRING, ID_FILE_SELECT_ALL, L"Select &All\tCtrl+A");
-        AppendMenuW(editMenu, MF_STRING, ID_FILE_QUICK_SEND_MOVE, L"Quick Send &Move\tF7");
-        AppendMenuW(editMenu, MF_STRING, ID_FILE_QUICK_SEND_COPY, L"Quick Send &Copy\tF8");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_QUICK_SEND_MOVE, L"Quick Actions &Move\tF7");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_QUICK_SEND_COPY, L"Quick Actions &Copy\tF8");
         AppendMenuW(editMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
@@ -10659,7 +10659,7 @@ namespace hyperbrowse::ui
                 {
                     const HFONT tabFont = detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
                     const int maxLabelWidth = std::max(MeasureTextWidth(tabFont, L"File Details"),
-                                                       MeasureTextWidth(tabFont, L"Quick Send"));
+                                                       MeasureTextWidth(tabFont, L"Quick Actions"));
                     const int desiredButtonWidth = std::max(kDetailsPanelTabMinButtonWidth,
                                                             maxLabelWidth + (kDetailsPanelTabButtonHorizontalPadding * 2));
                     const int maxButtonWidth = std::max(1, (std::max(0, innerWidth - kDetailsPanelTabButtonGap) / 2));
@@ -11563,7 +11563,7 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             if (favoriteCount > 0)
             {
-                AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"Favorite Destinations");
+                AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"Quick Actions");
                 for (std::size_t index = 0; index < favoriteCount; ++index)
                 {
                     const std::wstring label = FormatFolderShortcutMenuLabel(favoriteDestinationFolders_[index]);
@@ -12262,7 +12262,7 @@ namespace hyperbrowse::ui
             const COLORREF activePressedFill = BlendColor(palette.accentFill,
                                                           palette.accent,
                                                           themeMode_ == ThemeMode::Dark ? 22 : 12);
-            const wchar_t* labels[] = {L"File Details", L"Quick Send"};
+            const wchar_t* labels[] = {L"File Details", L"Quick Actions"};
 
             for (std::size_t index = 0; index < detailsPanelTabRects_.size(); ++index)
             {
@@ -12489,7 +12489,7 @@ namespace hyperbrowse::ui
             }
             render::DrawGdiText(hdc,
                                 detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                L"Quick Send",
+                                L"Quick Actions",
                                 -1,
                                 headerRect,
                                 DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE,
@@ -12663,7 +12663,7 @@ namespace hyperbrowse::ui
             RECT emptyStateRect = detailsPanelContentRect_;
             render::DrawGdiText(hdc,
                                 detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                L"Favorite destinations will appear here.",
+                                L"Quick action destinations will appear here.",
                                 -1,
                                 emptyStateRect,
                                 DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
@@ -13088,7 +13088,7 @@ namespace hyperbrowse::ui
             : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         const int sortButtonSize = std::min(kQuickAccessPanelSortButtonSize, metrics.headerHeight);
         const int sortButtonLeft = innerLeft
-            + MeasureTextWidth(headerFont, L"Quick Send")
+            + MeasureTextWidth(headerFont, L"Quick Actions")
             + kQuickAccessPanelSortButtonGap;
         const int sortButtonTop = top + std::max(0, (metrics.headerHeight - sortButtonSize) / 2);
         if (sortButtonSize > 0 && sortButtonLeft + sortButtonSize <= innerRight)
@@ -13214,7 +13214,7 @@ namespace hyperbrowse::ui
                 toolInfo.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
                 toolInfo.hwnd = hwnd_;
                 toolInfo.uId = reinterpret_cast<UINT_PTR>(edit);
-                toolInfo.lpszText = const_cast<LPWSTR>(L"Quick Send hotkey: enter one digit or letter from 0 through 9 or A through Z.");
+                toolInfo.lpszText = const_cast<LPWSTR>(L"Quick Actions hotkey: enter one digit or letter from 0 through 9 or A through Z.");
                 SendMessageW(tooltipControl_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
             }
         }
@@ -14405,7 +14405,7 @@ namespace hyperbrowse::ui
         }
 
         const bool isFavoriteDestination = IsFavoriteDestination(folderPath);
-        const wchar_t* toggleFavoriteLabel = isFavoriteDestination ? L"Remove from &Favorites" : L"&Add to Favorites";
+        const wchar_t* toggleFavoriteLabel = isFavoriteDestination ? L"Remove from &Quick Actions" : L"&Add to Quick Actions";
 
         AppendMenuW(menu, MF_STRING, kNewFolderCommandId, L"&New Folder...");
         AppendMenuW(menu, MF_STRING, kRenameFolderCommandId, L"Re&name Folder...");
@@ -19763,7 +19763,7 @@ namespace hyperbrowse::ui
         {
             MessageBoxW(viewerHwnd,
                         L"The selected destination folder is no longer available.",
-                        L"Quick Send",
+                        L"Quick Actions",
                         MB_OK | MB_ICONINFORMATION);
             return false;
         }
@@ -19773,7 +19773,7 @@ namespace hyperbrowse::ui
         {
             MessageBoxW(viewerHwnd,
                         L"The selected destination is already the current folder.",
-                        L"Quick Send",
+                        L"Quick Actions",
                         MB_OK | MB_ICONINFORMATION);
             return false;
         }
@@ -21348,7 +21348,7 @@ namespace hyperbrowse::ui
         if (IsOverDetailsPanelSplitter(x, y))
         {
             detailsPanelWidth_ = kDetailsPanelPreferredWidth;
-            util::LogInfo(L"Reset details and Quick Send panel to default width");
+            util::LogInfo(L"Reset details and Quick Actions panel to default width");
             LayoutChildren();
             return;
         }
@@ -21877,7 +21877,7 @@ namespace hyperbrowse::ui
         {
             MessageBoxW(hwnd_,
                         L"The selected destination folder is no longer available.",
-                        L"Quick Send",
+                        L"Quick Actions",
                         MB_OK | MB_ICONINFORMATION);
             return 0;
         }
@@ -22512,7 +22512,7 @@ namespace hyperbrowse::ui
 
                 if (di->hdr.idFrom == kQuickAccessSortTooltipId)
                 {
-                    di->lpszText = const_cast<LPWSTR>(L"Sort Quick Send destinations by hotkey");
+                    di->lpszText = const_cast<LPWSTR>(L"Sort Quick Actions destinations by hotkey");
                     return 0;
                 }
 
