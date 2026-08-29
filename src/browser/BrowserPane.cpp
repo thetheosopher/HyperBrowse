@@ -54,10 +54,10 @@ namespace
     constexpr int kMinimumDetailsMetadataLookAheadItems = 12;
     constexpr int kMaximumDetailsMetadataLookAheadItems = 96;
     constexpr int kPlaceholderBrandArtSize = 256;
-    constexpr int kPlaceholderIconDisplaySize = 128;
+    constexpr int kPlaceholderIconDisplaySize = 72;
     constexpr int kUnavailableThumbnailIconSize = 48;
-    constexpr int kPlaceholderTitlePointSize = 18;
-    constexpr int kPlaceholderBodyPointSize = 13;
+    constexpr int kPlaceholderTitlePointSize = 11;
+    constexpr int kPlaceholderBodyPointSize = 8;
     constexpr std::wstring_view kThumbnailRatingStars = L"\x2605\x2605\x2605\x2605\x2605";
     constexpr COLORREF kThumbnailRatingGold = RGB(214, 172, 46);
 
@@ -3560,31 +3560,31 @@ namespace hyperbrowse::browser
 
         const float clientWidth = size.width;
         const float clientHeight = size.height;
-        constexpr float kPanelPaddingLeft = 24.0f;
-        constexpr float kPanelPaddingRight = 28.0f;
-        constexpr float kPanelPaddingVertical = 16.0f;
-        constexpr float kIconTextGap = 28.0f;
-        constexpr float kDesiredTextBlockWidth = 300.0f;
-        constexpr float kMinimumTextBlockWidth = 220.0f;
-        constexpr float kTitleHeight = 42.0f;
-        constexpr float kBodyHeight = 52.0f;
-        constexpr float kTitleBodyGap = 10.0f;
+        const float kPanelPaddingLeft = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(12, appTextSize_));
+        const float kPanelPaddingRight = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(14, appTextSize_));
+        const float kPanelPaddingVertical = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(9, appTextSize_));
+        const float kIconTextGap = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(15, appTextSize_));
+        const float kDesiredTextBlockWidth = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(180, appTextSize_));
+        const float kMinimumTextBlockWidth = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(135, appTextSize_));
+        const float kTitleHeight = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(26, appTextSize_));
+        const float kBodyHeight = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(32, appTextSize_));
+        const float kTitleBodyGap = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(5, appTextSize_));
 
-        const float maxPanelWidth = std::max(280.0f, clientWidth - 40.0f);
-        const float maxPanelHeight = std::max(120.0f, clientHeight - 32.0f);
+        const float maxPanelWidth = std::max(180.0f, clientWidth - 40.0f);
+        const float maxPanelHeight = std::max(72.0f, clientHeight - 32.0f);
 
         float renderedIconSize = 0.0f;
-        float panelWidth = std::max(280.0f, std::min(520.0f, clientWidth - 56.0f));
+        float panelWidth = std::max(180.0f, std::min(330.0f, clientWidth - 48.0f));
         float panelHeight = showIcon
-            ? std::min(196.0f, std::max(152.0f, clientHeight - 56.0f))
-            : std::min(160.0f, std::max(120.0f, clientHeight - 56.0f));
+            ? std::min(114.0f, std::max(90.0f, clientHeight - 48.0f))
+            : std::min(96.0f, std::max(72.0f, clientHeight - 48.0f));
 
         if (showIcon && d2dPlaceholderArtBitmap_)
         {
             const float artWidth = static_cast<float>(d2dPlaceholderArtBitmap_->GetSize().width);
-            const float maxIconWidth = std::max(96.0f, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
-            const float maxIconHeight = std::max(96.0f, maxPanelHeight - (kPanelPaddingVertical * 2.0f));
-            renderedIconSize = std::min({static_cast<float>(kPlaceholderIconDisplaySize), artWidth, maxIconWidth, maxIconHeight});
+            const float maxIconWidth = std::max(54.0f, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
+            const float maxIconHeight = std::max(54.0f, maxPanelHeight - (kPanelPaddingVertical * 2.0f));
+            renderedIconSize = std::min({static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(kPlaceholderIconDisplaySize, appTextSize_)), artWidth, maxIconWidth, maxIconHeight});
 
             const float textBlockWidth = std::max(kMinimumTextBlockWidth,
                 std::min(kDesiredTextBlockWidth,
@@ -3597,7 +3597,8 @@ namespace hyperbrowse::browser
         const float panelLeft = (clientWidth - panelWidth) / 2.0f;
         const float panelTop = (clientHeight - panelHeight) / 2.0f;
         const D2D1_RECT_F panelRect = D2D1::RectF(panelLeft, panelTop, panelLeft + panelWidth, panelTop + panelHeight);
-        const D2D1_ROUNDED_RECT roundedPanel = D2D1::RoundedRect(panelRect, 11.0f, 11.0f);
+        const float panelCornerRadius = static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(7, appTextSize_));
+        const D2D1_ROUNDED_RECT roundedPanel = D2D1::RoundedRect(panelRect, panelCornerRadius, panelCornerRadius);
 
         if (d2dPlaceholderBrush_) rt->FillRoundedRectangle(roundedPanel, d2dPlaceholderBrush_.Get());
         if (d2dBorderBrush_) rt->DrawRoundedRectangle(roundedPanel, d2dBorderBrush_.Get(), 1.0f);
@@ -4050,29 +4051,29 @@ namespace hyperbrowse::browser
         const int clientHeight = clientRect.bottom - clientRect.top;
         constexpr int kPanelMarginX = 20;
         constexpr int kPanelMarginY = 16;
-        constexpr int kPanelPaddingLeft = 24;
-        constexpr int kPanelPaddingRight = 28;
-        constexpr int kPanelPaddingVertical = 16;
-        constexpr int kIconTextGap = 28;
-        constexpr int kDesiredTextBlockWidth = 300;
-        constexpr int kMinimumTextBlockWidth = 220;
-        constexpr int kTitleHeight = 42;
-        constexpr int kBodyHeight = 52;
-        constexpr int kTitleBodyGap = 10;
+        const int kPanelPaddingLeft = hyperbrowse::util::ScaleAppTextDimension(12, appTextSize_);
+        const int kPanelPaddingRight = hyperbrowse::util::ScaleAppTextDimension(14, appTextSize_);
+        const int kPanelPaddingVertical = hyperbrowse::util::ScaleAppTextDimension(9, appTextSize_);
+        const int kIconTextGap = hyperbrowse::util::ScaleAppTextDimension(15, appTextSize_);
+        const int kDesiredTextBlockWidth = hyperbrowse::util::ScaleAppTextDimension(180, appTextSize_);
+        const int kMinimumTextBlockWidth = hyperbrowse::util::ScaleAppTextDimension(135, appTextSize_);
+        const int kTitleHeight = hyperbrowse::util::ScaleAppTextDimension(26, appTextSize_);
+        const int kBodyHeight = hyperbrowse::util::ScaleAppTextDimension(32, appTextSize_);
+        const int kTitleBodyGap = hyperbrowse::util::ScaleAppTextDimension(5, appTextSize_);
 
-        const int maxPanelWidth = std::max(280, clientWidth - (kPanelMarginX * 2));
-        const int maxPanelHeight = std::max(120, clientHeight - (kPanelMarginY * 2));
+        const int maxPanelWidth = std::max(180, clientWidth - (kPanelMarginX * 2));
+        const int maxPanelHeight = std::max(72, clientHeight - (kPanelMarginY * 2));
 
         int renderedIconSize = 0;
-        int panelWidth = std::max(280, std::min(520, clientWidth - 56));
+        int panelWidth = std::max(180, std::min(330, clientWidth - 48));
         int panelHeight = showIcon
-            ? std::min(196, std::max(152, clientHeight - 56))
-            : std::min(160, std::max(120, clientHeight - 56));
+            ? std::min(114, std::max(90, clientHeight - 48))
+            : std::min(96, std::max(72, clientHeight - 48));
         if (showIcon && placeholderArt_)
         {
-            const int maxIconWidth = std::max(96, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
-            const int maxIconHeight = std::max(96, maxPanelHeight - (kPanelPaddingVertical * 2));
-            renderedIconSize = std::min({kPlaceholderIconDisplaySize, placeholderArt_->Width(), maxIconWidth, maxIconHeight});
+            const int maxIconWidth = std::max(54, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
+            const int maxIconHeight = std::max(54, maxPanelHeight - (kPanelPaddingVertical * 2));
+            renderedIconSize = std::min({hyperbrowse::util::ScaleAppTextDimension(kPlaceholderIconDisplaySize, appTextSize_), placeholderArt_->Width(), maxIconWidth, maxIconHeight});
 
             const int textBlockWidth = std::max(kMinimumTextBlockWidth,
                                                 std::min(kDesiredTextBlockWidth,
@@ -4088,7 +4089,8 @@ namespace hyperbrowse::browser
 
         HGDIOBJ oldBrush = SelectObject(hdc, placeholderBrush_ ? placeholderBrush_ : surfaceBrush_);
         HGDIOBJ oldPen = SelectObject(hdc, borderPen_ ? borderPen_ : GetStockObject(BLACK_PEN));
-        RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, 22, 22);
+        const int panelCornerRadius = hyperbrowse::util::ScaleAppTextDimension(12, appTextSize_);
+        RoundRect(hdc, panelRect.left, panelRect.top, panelRect.right, panelRect.bottom, panelCornerRadius, panelCornerRadius);
         SelectObject(hdc, oldPen);
         SelectObject(hdc, oldBrush);
 

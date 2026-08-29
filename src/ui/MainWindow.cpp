@@ -375,7 +375,10 @@ namespace
     constexpr UINT kSlideshowMaximumDurationMs = 60000U;
     constexpr UINT kSlideshowMinimumTransitionDurationMs = 100U;
     constexpr UINT kSlideshowMaximumTransitionDurationMs = 5000U;
+    constexpr UINT kDefaultSlideshowDurationMs = 3000U;
+    constexpr UINT kDefaultSlideshowTransitionDurationMs = 350U;
     constexpr wchar_t kConsolidatedSettingsDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
+    constexpr wchar_t kExperimentalSettingsDialogClassName[] = L"HyperBrowseExperimentalSettingsDialog";
     constexpr int kConsolidatedSettingsDialogWidth = 900;
     constexpr int kConsolidatedSettingsDialogHeight = 600;
     constexpr int kConsolidatedSettingsTabControlId = 360;
@@ -894,6 +897,57 @@ namespace
         std::function<void(const ConsolidatedSettingsDialogState&)> apply;
         bool accepted{};
         bool done{};
+    };
+
+    enum class ExperimentalSettingsDialogResult
+    {
+        Unavailable,
+        Cancelled,
+        Accepted,
+    };
+
+    struct ExperimentalSettingsLabel
+    {
+        RECT bounds{};
+        std::wstring text;
+        bool muted{};
+    };
+
+    struct ExperimentalSettingsDialogState
+    {
+        HWND ownerWindow{};
+        HINSTANCE instance{};
+        HWND dialogWindow{};
+        ConsolidatedSettingsDialogState* settings{};
+        Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> renderTarget;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> bodyFormat;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> smallFormat;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> buttonFormat;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> panelBrush;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> fieldBrush;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> borderBrush;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> textBrush;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> mutedTextBrush;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> accentBrush;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> accentFillBrush;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> buttonTextBrush;
+        HBRUSH editBackgroundBrush{};
+        HFONT controlFont{};
+        std::array<HWND, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> nativeControls{};
+        std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> tabRects{};
+        std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controlRects{};
+        std::array<HWND, 4> numericEdits{};
+        std::array<HWND, 4> numericSpins{};
+        std::vector<ExperimentalSettingsLabel> labels;
+        RECT applyButtonRect{};
+        RECT okButtonRect{};
+        RECT cancelButtonRect{};
+        ConsolidatedSettingsPage page{ConsolidatedSettingsPage::Slideshow};
+        int hoveredControl{-1};
+        int hoveredTab{-1};
+        int pressedControl{-1};
+        bool done{};
+        bool accepted{};
     };
 
     struct SlideshowSettingsDialogLayoutMetrics
@@ -2320,6 +2374,20 @@ namespace
 
         *value = static_cast<UINT>(parsedValue);
         return true;
+    }
+
+    UINT NormalizeSlideshowDuration(UINT value)
+    {
+        return value >= kSlideshowMinimumDurationMs && value <= kSlideshowMaximumDurationMs
+            ? value
+            : kDefaultSlideshowDurationMs;
+    }
+
+    UINT NormalizeSlideshowTransitionDuration(UINT value)
+    {
+        return value >= kSlideshowMinimumTransitionDurationMs && value <= kSlideshowMaximumTransitionDurationMs
+            ? value
+            : kDefaultSlideshowTransitionDurationMs;
     }
 
     void SetDialogUIntEditAndSpin(HWND editWindow, HWND spinWindow, UINT value)
@@ -5517,6 +5585,1247 @@ namespace
         return state->accepted;
     }
 
+    constexpr int kExperimentalSettingsDialogWidth = 980;
+    constexpr int kExperimentalSettingsDialogHeight = 680;
+    constexpr int kExperimentalSettingsApplyId = 5600;
+    constexpr int kExperimentalSettingsOkId = 5601;
+    constexpr int kExperimentalSettingsCancelId = 5602;
+
+    const wchar_t* ExperimentalSettingsPageTitle(ConsolidatedSettingsPage page)
+    {
+        constexpr const wchar_t* titles[] = {L"Slideshow", L"Viewer", L"Appearance", L"Performance", L"Behavior"};
+        const std::size_t index = static_cast<std::size_t>(page);
+        return index < std::size(titles) ? titles[index] : L"Settings";
+    }
+
+    bool ExperimentalSettingsControlIsChoice(ConsolidatedSettingsControl control)
+    {
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::TransitionStyle:
+        case ConsolidatedSettingsControl::OverlayTextSize:
+        case ConsolidatedSettingsControl::AppTextSize:
+        case ConsolidatedSettingsControl::ThumbnailSize:
+        case ConsolidatedSettingsControl::ResourceProfile:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    std::wstring ExperimentalSettingsChoiceValue(const ConsolidatedSettingsDialogState& settings,
+                                                 ConsolidatedSettingsControl control)
+    {
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::TransitionStyle:
+        {
+            const int index = SlideshowTransitionComboIndex(settings.slideshowTransitionStyle);
+            return index >= 0 && index < static_cast<int>(kSlideshowTransitionOptions.size())
+                ? std::wstring(kSlideshowTransitionOptions[static_cast<std::size_t>(index)].label)
+                : std::wstring(L"Crossfade");
+        }
+        case ConsolidatedSettingsControl::OverlayTextSize:
+            return settings.overlayTextSize == hyperbrowse::viewer::InfoOverlayTextSize::Large
+                ? std::wstring(L"Large")
+                : settings.overlayTextSize == hyperbrowse::viewer::InfoOverlayTextSize::Medium ? std::wstring(L"Medium") : std::wstring(L"Small");
+        case ConsolidatedSettingsControl::AppTextSize:
+            return settings.appTextSize == hyperbrowse::util::AppTextSize::Large
+                ? std::wstring(L"Large")
+                : settings.appTextSize == hyperbrowse::util::AppTextSize::Small ? std::wstring(L"Small") : std::wstring(L"Medium");
+        case ConsolidatedSettingsControl::ThumbnailSize:
+            return std::to_wstring(static_cast<int>(settings.thumbnailSizePreset)).append(L" px");
+        case ConsolidatedSettingsControl::ResourceProfile:
+        {
+            constexpr const wchar_t* profiles[] = {L"Conservative", L"Balanced", L"Performance", L"Aggressive"};
+            const int index = static_cast<int>(settings.resourceProfile);
+            return index >= 0 && index < static_cast<int>(std::size(profiles)) ? std::wstring(profiles[index]) : std::wstring(L"Balanced");
+        }
+        default:
+            return {};
+        }
+    }
+
+    void ExperimentalSettingsAddLabel(ExperimentalSettingsDialogState& state,
+                                      int left,
+                                      int top,
+                                      int right,
+                                      int bottom,
+                                      const wchar_t* text,
+                                      bool muted = false)
+    {
+        state.labels.push_back(ExperimentalSettingsLabel{{left, top, right, bottom}, text ? text : L"", muted});
+    }
+
+    void ExperimentalSettingsSetControlRect(ExperimentalSettingsDialogState& state,
+                                            ConsolidatedSettingsControl control,
+                                            int left,
+                                            int top,
+                                            int right,
+                                            int bottom)
+    {
+        state.controlRects[static_cast<std::size_t>(control)] = {left, top, right, bottom};
+    }
+
+    void LayoutExperimentalSettings(ExperimentalSettingsDialogState& state)
+    {
+        RECT client{};
+        GetClientRect(state.dialogWindow, &client);
+        const int width = client.right;
+        const int height = client.bottom;
+        const int margin = 28;
+        const int tabTop = 14;
+        const int tabHeight = 46;
+        const int contentTop = tabTop + tabHeight + 18;
+        const int footerBottom = height - 20;
+        const int left = margin;
+        const int right = width - margin;
+        const int valueLeft = std::max(left + 310, width / 2);
+        const int valueRight = right - 18;
+        const int rowHeight = 38;
+        const int rowGap = 12;
+
+        state.labels.clear();
+        state.tabRects = {};
+        state.controlRects = {};
+        const int buttonWidth = 104;
+        const int buttonHeight = 38;
+        const int buttonGap = 12;
+        const int buttonTop = footerBottom - buttonHeight;
+        state.cancelButtonRect = {right - buttonWidth, buttonTop, right, buttonTop + buttonHeight};
+        state.okButtonRect = {state.cancelButtonRect.left - buttonGap - buttonWidth, buttonTop,
+                      state.cancelButtonRect.left - buttonGap, buttonTop + buttonHeight};
+        state.applyButtonRect = {state.okButtonRect.left - buttonGap - buttonWidth, buttonTop,
+                     state.okButtonRect.left - buttonGap, buttonTop + buttonHeight};
+        for (std::size_t index = 0; index < state.tabRects.size(); ++index)
+        {
+            const int tabLeft = margin + static_cast<int>(index) * ((width - (margin * 2)) / static_cast<int>(state.tabRects.size()));
+            const int tabRight = margin + static_cast<int>(index + 1) * ((width - (margin * 2)) / static_cast<int>(state.tabRects.size()));
+            state.tabRects[index] = {tabLeft, tabTop, tabRight, tabTop + tabHeight};
+        }
+
+        auto labelValue = [&](const wchar_t* labelText, ConsolidatedSettingsControl control, int y)
+        {
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, labelText);
+            ExperimentalSettingsSetControlRect(state, control, valueLeft, y, valueRight, y + rowHeight);
+        };
+        auto check = [&](ConsolidatedSettingsControl control, const wchar_t* text, int y)
+        {
+            ExperimentalSettingsSetControlRect(state, control, left, y, right, y + rowHeight);
+            ExperimentalSettingsAddLabel(state, left + 34, y, right, y + rowHeight, text);
+        };
+        auto radio = [&](ConsolidatedSettingsControl control, const wchar_t* text, int x, int y)
+        {
+            ExperimentalSettingsSetControlRect(state, control, x, y, x + 190, y + rowHeight);
+            ExperimentalSettingsAddLabel(state, x + 34, y, x + 190, y + rowHeight, text);
+        };
+
+        int y = contentTop;
+        switch (state.page)
+        {
+        case ConsolidatedSettingsPage::Slideshow:
+            labelValue(L"Transition style", ConsolidatedSettingsControl::TransitionStyle, y);
+            y += rowHeight + rowGap;
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Slide duration (milliseconds)");
+            y += rowHeight + rowGap;
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Transition duration (milliseconds)");
+            y += rowHeight + rowGap;
+            ExperimentalSettingsAddLabel(state, left, y, right, y + rowHeight, L"Slides: 250-60000 ms   |   Transitions: 100-5000 ms");
+            break;
+        case ConsolidatedSettingsPage::Viewer:
+            check(ConsolidatedSettingsControl::TransitionEnabled, L"Use slideshow transitions", y);
+            y += rowHeight + rowGap;
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Mouse wheel");
+            radio(ConsolidatedSettingsControl::ViewerWheelZoom, L"Zoom", valueLeft, y);
+            radio(ConsolidatedSettingsControl::ViewerWheelNavigate, L"Navigate", valueLeft + 205, y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::InvertKeyboardPanning, L"Invert keyboard panning", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::RawPairingEnabled, L"Treat paired RAW+JPEG files as one operation", y);
+            y += rowHeight + rowGap;
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Paired viewer preference");
+            radio(ConsolidatedSettingsControl::RawPreferRaw, L"Prefer RAW", valueLeft, y);
+            radio(ConsolidatedSettingsControl::RawPreferJpeg, L"Prefer JPEG", valueLeft + 205, y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::SecondaryMonitor, L"Open viewers on a secondary monitor when available", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::InfoOverlays, L"Show viewer detail overlays", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::FullMetadata, L"Show full metadata", y);
+            y += rowHeight + rowGap;
+            labelValue(L"Overlay text size", ConsolidatedSettingsControl::OverlayTextSize, y);
+            break;
+        case ConsolidatedSettingsPage::Appearance:
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Theme");
+            radio(ConsolidatedSettingsControl::ThemeLight, L"Light", valueLeft, y);
+            radio(ConsolidatedSettingsControl::ThemeDark, L"Dark", valueLeft + 205, y);
+            y += rowHeight + rowGap;
+            labelValue(L"Application text size", ConsolidatedSettingsControl::AppTextSize, y);
+            y += rowHeight + rowGap;
+            labelValue(L"Thumbnail size", ConsolidatedSettingsControl::ThumbnailSize, y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::ThumbnailDetails, L"Show thumbnail details", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::CompactLayout, L"Use compact thumbnail layout", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::DetailsPanel, L"Show the details panel", y);
+            break;
+        case ConsolidatedSettingsPage::Performance:
+            labelValue(L"Resource profile", ConsolidatedSettingsControl::ResourceProfile, y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::PersistentCache, L"Keep the persistent thumbnail cache enabled", y);
+            y += rowHeight + rowGap;
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Thumbnail cache cap (MB)");
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::ThumbnailCacheAutomatic, L"Follow profile", y);
+            y += rowHeight + rowGap;
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Metadata cache cap (entries)");
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::PressureStatus, L"Show memory pressure state in the status bar", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::NvJpeg, L"Use NVIDIA JPEG acceleration when available", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::LibRawOutOfProcess, L"Use out-of-process LibRaw fallback", y);
+            break;
+        case ConsolidatedSettingsPage::Behavior:
+            check(ConsolidatedSettingsControl::RecursiveBrowsing, L"Browse folders recursively", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::ShowSubfolders, L"Show subfolders in the browser", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when Esc is pressed", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
+            break;
+        default:
+            break;
+        }
+
+        const int editWidth = 170;
+        const int editHeight = 34;
+        const int spinWidth = 28;
+        const int slideshowDurationY = contentTop + rowHeight + rowGap;
+        const int transitionDurationY = slideshowDurationY + rowHeight + rowGap;
+        const int thumbnailCacheY = contentTop + (rowHeight + rowGap) * 2;
+        const int metadataCacheY = thumbnailCacheY + (rowHeight + rowGap) * 2;
+        const std::array<std::pair<HWND, RECT>, 4> edits{
+            std::pair{state.numericEdits[0], RECT{valueLeft, slideshowDurationY, valueLeft + editWidth, slideshowDurationY + editHeight}},
+            std::pair{state.numericEdits[1], RECT{valueLeft, transitionDurationY, valueLeft + editWidth, transitionDurationY + editHeight}},
+            std::pair{state.numericEdits[2], RECT{valueLeft, thumbnailCacheY, valueLeft + editWidth, thumbnailCacheY + editHeight}},
+            std::pair{state.numericEdits[3], RECT{valueLeft, metadataCacheY, valueLeft + editWidth, metadataCacheY + editHeight}}};
+        for (const auto& [edit, bounds] : edits)
+        {
+            if (edit)
+            {
+                const int adjustedRight = bounds.right - spinWidth;
+                SetWindowPos(edit, nullptr, bounds.left, bounds.top, adjustedRight - bounds.left, bounds.bottom - bounds.top,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+                const bool visible = (state.page == ConsolidatedSettingsPage::Slideshow && (edit == state.numericEdits[0] || edit == state.numericEdits[1]))
+                    || (state.page == ConsolidatedSettingsPage::Performance && (edit == state.numericEdits[2] || edit == state.numericEdits[3]));
+                ShowWindow(edit, visible ? SW_SHOW : SW_HIDE);
+            }
+        }
+        for (std::size_t index = 0; index < state.numericSpins.size(); ++index)
+        {
+            if (!state.numericSpins[index])
+            {
+                continue;
+            }
+            const RECT& editBounds = index == 0 ? edits[0].second : edits[1].second;
+            const int spinTop = editBounds.top;
+            SetWindowPos(state.numericSpins[index], nullptr, editBounds.right - spinWidth, spinTop,
+                         spinWidth, editBounds.bottom - spinTop, SWP_NOZORDER | SWP_NOACTIVATE);
+            const bool visible = (state.page == ConsolidatedSettingsPage::Slideshow && index < 2)
+                || (state.page == ConsolidatedSettingsPage::Performance && index >= 2);
+            ShowWindow(state.numericSpins[index], visible ? SW_SHOW : SW_HIDE);
+        }
+        const auto setChoiceVisibility = [&](ConsolidatedSettingsControl control, ConsolidatedSettingsPage page)
+        {
+            if (const HWND choice = state.nativeControls[static_cast<std::size_t>(control)])
+            {
+                ShowWindow(choice, state.page == page ? SW_SHOW : SW_HIDE);
+            }
+        };
+        setChoiceVisibility(ConsolidatedSettingsControl::TransitionStyle, ConsolidatedSettingsPage::Slideshow);
+        setChoiceVisibility(ConsolidatedSettingsControl::OverlayTextSize, ConsolidatedSettingsPage::Viewer);
+        setChoiceVisibility(ConsolidatedSettingsControl::AppTextSize, ConsolidatedSettingsPage::Appearance);
+        setChoiceVisibility(ConsolidatedSettingsControl::ThumbnailSize, ConsolidatedSettingsPage::Appearance);
+        setChoiceVisibility(ConsolidatedSettingsControl::ResourceProfile, ConsolidatedSettingsPage::Performance);
+        const auto positionChoice = [&](ConsolidatedSettingsControl control)
+        {
+            if (const HWND choice = state.nativeControls[static_cast<std::size_t>(control)])
+            {
+                const RECT& bounds = state.controlRects[static_cast<std::size_t>(control)];
+                SetWindowPos(choice, nullptr, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        };
+        positionChoice(ConsolidatedSettingsControl::TransitionStyle);
+        positionChoice(ConsolidatedSettingsControl::OverlayTextSize);
+        positionChoice(ConsolidatedSettingsControl::AppTextSize);
+        positionChoice(ConsolidatedSettingsControl::ThumbnailSize);
+        positionChoice(ConsolidatedSettingsControl::ResourceProfile);
+        InvalidateRect(state.dialogWindow, nullptr, FALSE);
+    }
+
+    bool ExperimentalSettingsChecked(const ConsolidatedSettingsDialogState& settings, ConsolidatedSettingsControl control)
+    {
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::TransitionEnabled: return settings.useSlideshowTransition;
+        case ConsolidatedSettingsControl::ViewerWheelZoom: return settings.viewerMouseWheelBehavior == hyperbrowse::viewer::MouseWheelBehavior::Zoom;
+        case ConsolidatedSettingsControl::ViewerWheelNavigate: return settings.viewerMouseWheelBehavior == hyperbrowse::viewer::MouseWheelBehavior::Navigate;
+        case ConsolidatedSettingsControl::InvertKeyboardPanning: return settings.invertKeyboardPanning;
+        case ConsolidatedSettingsControl::RawPairingEnabled: return settings.rawJpegPairedOperationsEnabled;
+        case ConsolidatedSettingsControl::RawPreferRaw: return settings.pairedRawJpegViewerPreference == hyperbrowse::browser::RawJpegDisplayPreference::Raw;
+        case ConsolidatedSettingsControl::RawPreferJpeg: return settings.pairedRawJpegViewerPreference == hyperbrowse::browser::RawJpegDisplayPreference::Jpeg;
+        case ConsolidatedSettingsControl::SecondaryMonitor: return settings.defaultViewerToSecondaryMonitor;
+        case ConsolidatedSettingsControl::InfoOverlays: return settings.infoOverlaysVisible;
+        case ConsolidatedSettingsControl::FullMetadata: return settings.fullMetadataVisible;
+        case ConsolidatedSettingsControl::ThemeLight: return !settings.darkTheme;
+        case ConsolidatedSettingsControl::ThemeDark: return settings.darkTheme;
+        case ConsolidatedSettingsControl::ThumbnailDetails: return settings.thumbnailDetailsVisible;
+        case ConsolidatedSettingsControl::CompactLayout: return settings.compactThumbnailLayout;
+        case ConsolidatedSettingsControl::DetailsPanel: return settings.detailsStripVisible;
+        case ConsolidatedSettingsControl::PersistentCache: return settings.persistentThumbnailCacheEnabled;
+        case ConsolidatedSettingsControl::ThumbnailCacheAutomatic: return settings.thumbnailCacheCapacityOverrideBytes == 0;
+        case ConsolidatedSettingsControl::MetadataCacheAutomatic: return settings.metadataCacheCapacityOverrideEntries == 0;
+        case ConsolidatedSettingsControl::PressureStatus: return settings.showPressureStateInStatusBar;
+        case ConsolidatedSettingsControl::NvJpeg: return settings.nvJpegEnabled;
+        case ConsolidatedSettingsControl::LibRawOutOfProcess: return settings.libRawOutOfProcessEnabled;
+        case ConsolidatedSettingsControl::RecursiveBrowsing: return settings.recursiveBrowsingEnabled;
+        case ConsolidatedSettingsControl::ShowSubfolders: return settings.showSubfoldersInBrowser;
+        case ConsolidatedSettingsControl::CloseOnEscape: return settings.closeMainWindowOnEscape;
+        case ConsolidatedSettingsControl::SingleInstance: return settings.singleInstanceEnabled;
+        default: return false;
+        }
+    }
+
+    void ExperimentalSettingsToggle(ExperimentalSettingsDialogState& state, ConsolidatedSettingsControl control)
+    {
+        auto& settings = *state.settings;
+        if (ExperimentalSettingsControlIsChoice(control))
+        {
+            if (control == ConsolidatedSettingsControl::TransitionStyle)
+            {
+                const int current = SlideshowTransitionComboIndex(settings.slideshowTransitionStyle);
+                settings.slideshowTransitionStyle = kSlideshowTransitionOptions[static_cast<std::size_t>((current + 1) % kSlideshowTransitionOptions.size())].style;
+            }
+            else if (control == ConsolidatedSettingsControl::OverlayTextSize)
+            {
+                settings.overlayTextSize = static_cast<hyperbrowse::viewer::InfoOverlayTextSize>((static_cast<int>(settings.overlayTextSize) + 1) % 3);
+            }
+            else if (control == ConsolidatedSettingsControl::AppTextSize)
+            {
+                settings.appTextSize = static_cast<hyperbrowse::util::AppTextSize>((static_cast<int>(settings.appTextSize) + 1) % 3);
+            }
+            else if (control == ConsolidatedSettingsControl::ThumbnailSize)
+            {
+                const auto iterator = std::find(kThumbnailSizePresets.begin(), kThumbnailSizePresets.end(), settings.thumbnailSizePreset);
+                const std::size_t next = iterator == kThumbnailSizePresets.end() ? 0 : static_cast<std::size_t>(iterator - kThumbnailSizePresets.begin() + 1) % kThumbnailSizePresets.size();
+                settings.thumbnailSizePreset = kThumbnailSizePresets[next];
+            }
+            else
+            {
+                settings.resourceProfile = static_cast<hyperbrowse::util::ResourceProfile>((static_cast<int>(settings.resourceProfile) + 1) % 4);
+            }
+            return;
+        }
+
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::ViewerWheelZoom:
+            settings.viewerMouseWheelBehavior = hyperbrowse::viewer::MouseWheelBehavior::Zoom;
+            break;
+        case ConsolidatedSettingsControl::ViewerWheelNavigate:
+            settings.viewerMouseWheelBehavior = hyperbrowse::viewer::MouseWheelBehavior::Navigate;
+            break;
+        case ConsolidatedSettingsControl::RawPreferRaw:
+            settings.pairedRawJpegViewerPreference = hyperbrowse::browser::RawJpegDisplayPreference::Raw;
+            break;
+        case ConsolidatedSettingsControl::RawPreferJpeg:
+            settings.pairedRawJpegViewerPreference = hyperbrowse::browser::RawJpegDisplayPreference::Jpeg;
+            break;
+        case ConsolidatedSettingsControl::ThemeLight:
+            settings.darkTheme = false;
+            break;
+        case ConsolidatedSettingsControl::ThemeDark:
+            settings.darkTheme = true;
+            break;
+        default:
+        {
+            bool* value = nullptr;
+            switch (control)
+            {
+            case ConsolidatedSettingsControl::TransitionEnabled: value = &settings.useSlideshowTransition; break;
+            case ConsolidatedSettingsControl::InvertKeyboardPanning: value = &settings.invertKeyboardPanning; break;
+            case ConsolidatedSettingsControl::RawPairingEnabled: value = &settings.rawJpegPairedOperationsEnabled; break;
+            case ConsolidatedSettingsControl::SecondaryMonitor: value = &settings.defaultViewerToSecondaryMonitor; break;
+            case ConsolidatedSettingsControl::InfoOverlays: value = &settings.infoOverlaysVisible; break;
+            case ConsolidatedSettingsControl::FullMetadata: value = &settings.fullMetadataVisible; break;
+            case ConsolidatedSettingsControl::ThumbnailDetails: value = &settings.thumbnailDetailsVisible; break;
+            case ConsolidatedSettingsControl::CompactLayout: value = &settings.compactThumbnailLayout; break;
+            case ConsolidatedSettingsControl::DetailsPanel: value = &settings.detailsStripVisible; break;
+            case ConsolidatedSettingsControl::PersistentCache: value = &settings.persistentThumbnailCacheEnabled; break;
+            case ConsolidatedSettingsControl::PressureStatus: value = &settings.showPressureStateInStatusBar; break;
+            case ConsolidatedSettingsControl::NvJpeg: value = &settings.nvJpegEnabled; break;
+            case ConsolidatedSettingsControl::LibRawOutOfProcess: value = &settings.libRawOutOfProcessEnabled; break;
+            case ConsolidatedSettingsControl::RecursiveBrowsing: value = &settings.recursiveBrowsingEnabled; break;
+            case ConsolidatedSettingsControl::ShowSubfolders: value = &settings.showSubfoldersInBrowser; break;
+            case ConsolidatedSettingsControl::CloseOnEscape: value = &settings.closeMainWindowOnEscape; break;
+            case ConsolidatedSettingsControl::SingleInstance: value = &settings.singleInstanceEnabled; break;
+            case ConsolidatedSettingsControl::ThumbnailCacheAutomatic:
+                settings.thumbnailCacheCapacityOverrideBytes = settings.thumbnailCacheCapacityOverrideBytes == 0
+                    ? hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, settings.resourceProfile)
+                    : 0;
+                return;
+            case ConsolidatedSettingsControl::MetadataCacheAutomatic:
+                settings.metadataCacheCapacityOverrideEntries = settings.metadataCacheCapacityOverrideEntries == 0
+                    ? hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, settings.resourceProfile)
+                    : 0;
+                return;
+            default: break;
+            }
+            if (value)
+            {
+                *value = !*value;
+            }
+            break;
+        }
+        }
+    }
+
+    void DrawExperimentalSettingsText(ID2D1RenderTarget* target,
+                                      IDWriteTextFormat* format,
+                                      const std::wstring& text,
+                                      const RECT& bounds,
+                                      ID2D1Brush* brush)
+    {
+        if (target && format && brush && !text.empty())
+        {
+            target->DrawText(text.c_str(), static_cast<UINT32>(text.size()), format,
+                             hyperbrowse::render::ToD2DRect(bounds), brush);
+        }
+    }
+
+    void UpdateExperimentalSettingsCacheValues(ExperimentalSettingsDialogState& state)
+    {
+        if (!state.settings)
+        {
+            return;
+        }
+
+        const HWND profileCombo = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::ResourceProfile)];
+        const int profileIndex = profileCombo
+            ? static_cast<int>(SendMessageW(profileCombo, CB_GETCURSEL, 0, 0))
+            : static_cast<int>(state.settings->resourceProfile);
+        if (profileIndex < 0 || profileIndex > 3)
+        {
+            return;
+        }
+
+        const auto profile = static_cast<hyperbrowse::util::ResourceProfile>(profileIndex);
+        const bool thumbnailAutomatic = state.settings->thumbnailCacheCapacityOverrideBytes == 0;
+        const bool metadataAutomatic = state.settings->metadataCacheCapacityOverrideEntries == 0;
+        if (thumbnailAutomatic && state.numericEdits[2])
+        {
+            const auto capacityMegabytes = hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, profile)
+                / (1024ULL * 1024ULL);
+            SetWindowTextW(state.numericEdits[2], std::to_wstring(capacityMegabytes).c_str());
+            if (state.numericSpins[2])
+            {
+                SendMessageW(state.numericSpins[2], UDM_SETPOS32, 0, static_cast<LPARAM>(capacityMegabytes));
+            }
+        }
+        if (metadataAutomatic && state.numericEdits[3])
+        {
+            const auto capacityEntries = hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, profile);
+            SetWindowTextW(state.numericEdits[3], std::to_wstring(capacityEntries).c_str());
+            if (state.numericSpins[3])
+            {
+                SendMessageW(state.numericSpins[3], UDM_SETPOS32, 0, static_cast<LPARAM>(capacityEntries));
+            }
+        }
+    }
+
+    void PaintExperimentalSettings(ExperimentalSettingsDialogState& state)
+    {
+        if (!state.renderTarget || !state.settings)
+        {
+            return;
+        }
+        RECT client{};
+        GetClientRect(state.dialogWindow, &client);
+        const bool dark = state.settings->darkTheme;
+        const COLORREF windowColor = dark ? RGB(24, 28, 32) : RGB(244, 246, 249);
+        state.renderTarget->BeginDraw();
+        state.renderTarget->Clear(hyperbrowse::render::ToD2DColor(windowColor));
+        state.renderTarget->FillRectangle(D2D1::RectF(20.0f, 14.0f, static_cast<float>(client.right - 20), 60.0f), state.panelBrush.Get());
+
+        for (std::size_t index = 0; index < state.tabRects.size(); ++index)
+        {
+            const RECT& tab = state.tabRects[index];
+            const bool selected = index == static_cast<std::size_t>(state.page);
+            const bool hovered = state.hoveredTab == static_cast<int>(index);
+            if (selected)
+            {
+                const float underlineTop = static_cast<float>(tab.bottom - 3);
+                state.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(static_cast<float>(tab.left + 18), underlineTop,
+                                                   static_cast<float>(tab.right - 18), static_cast<float>(tab.bottom)), 1.5f, 1.5f),
+                    state.accentBrush.Get());
+            }
+            else if (hovered)
+            {
+                state.renderTarget->FillRoundedRectangle(
+                    hyperbrowse::render::ToD2DRoundedRect(tab, 6.0f, 6.0f), state.accentFillBrush.Get());
+            }
+            RECT textBounds = tab;
+            textBounds.left += 12;
+            textBounds.right -= 10;
+            DrawExperimentalSettingsText(state.renderTarget.Get(), state.bodyFormat.Get(),
+                                         ExperimentalSettingsPageTitle(static_cast<ConsolidatedSettingsPage>(index)), textBounds,
+                                         selected ? state.accentBrush.Get() : state.mutedTextBrush.Get());
+        }
+
+        for (std::size_t index = 0; index < state.labels.size(); ++index)
+        {
+            const ExperimentalSettingsLabel& label = state.labels[index];
+            DrawExperimentalSettingsText(state.renderTarget.Get(), label.muted ? state.smallFormat.Get() : state.bodyFormat.Get(), label.text, label.bounds,
+                                         label.muted ? state.mutedTextBrush.Get() : state.textBrush.Get());
+        }
+
+        for (std::size_t index = 0; index < state.controlRects.size(); ++index)
+        {
+            const auto control = static_cast<ConsolidatedSettingsControl>(index);
+            const RECT& bounds = state.controlRects[index];
+            if (bounds.right <= bounds.left || bounds.bottom <= bounds.top || state.nativeControls[index])
+            {
+                continue;
+            }
+            const bool checked = ExperimentalSettingsChecked(*state.settings, control);
+            const bool hovered = state.hoveredControl == static_cast<int>(index);
+            if (ExperimentalSettingsControlIsChoice(control))
+            {
+                state.renderTarget->FillRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f), hovered ? state.accentFillBrush.Get() : state.fieldBrush.Get());
+                state.renderTarget->DrawRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f), state.borderBrush.Get(), 1.0f);
+                RECT valueBounds = bounds;
+                valueBounds.left += 14;
+                DrawExperimentalSettingsText(state.renderTarget.Get(), state.bodyFormat.Get(), ExperimentalSettingsChoiceValue(*state.settings, control), valueBounds, state.textBrush.Get());
+            }
+            else
+            {
+                const RECT indicator{bounds.left + 3, bounds.top + 7, bounds.left + 22, bounds.top + 26};
+                if (control == ConsolidatedSettingsControl::ViewerWheelZoom || control == ConsolidatedSettingsControl::ViewerWheelNavigate
+                    || control == ConsolidatedSettingsControl::RawPreferRaw || control == ConsolidatedSettingsControl::RawPreferJpeg
+                    || control == ConsolidatedSettingsControl::ThemeLight || control == ConsolidatedSettingsControl::ThemeDark)
+                {
+                    state.renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F((indicator.left + indicator.right) / 2.0f, (indicator.top + indicator.bottom) / 2.0f), 8.0f, 8.0f), state.borderBrush.Get(), 1.5f);
+                    if (checked)
+                    {
+                        state.renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F((indicator.left + indicator.right) / 2.0f, (indicator.top + indicator.bottom) / 2.0f), 4.5f, 4.5f), state.accentBrush.Get());
+                    }
+                }
+                else
+                {
+                    state.renderTarget->DrawRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(indicator, 3.0f, 3.0f), state.borderBrush.Get(), 1.5f);
+                    if (checked)
+                    {
+                        state.renderTarget->FillRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(indicator, 3.0f, 3.0f), state.accentBrush.Get());
+                        state.renderTarget->DrawLine(D2D1::Point2F(static_cast<float>(indicator.left + 5), static_cast<float>(indicator.top + 10)),
+                                                     D2D1::Point2F(static_cast<float>(indicator.left + 9), static_cast<float>(indicator.top + 14)), state.panelBrush.Get(), 2.0f);
+                        state.renderTarget->DrawLine(D2D1::Point2F(static_cast<float>(indicator.left + 9), static_cast<float>(indicator.top + 14)),
+                                                     D2D1::Point2F(static_cast<float>(indicator.left + 16), static_cast<float>(indicator.top + 5)), state.panelBrush.Get(), 2.0f);
+                    }
+                }
+            }
+        }
+        const auto drawButton = [&](const RECT& bounds, const wchar_t* text, bool primary, int hoverId)
+        {
+            const bool hovered = state.hoveredControl == hoverId;
+            state.renderTarget->FillRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f),
+                                                     primary ? state.accentBrush.Get() : hovered ? state.accentFillBrush.Get() : state.fieldBrush.Get());
+            if (!primary)
+            {
+                state.renderTarget->DrawRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f),
+                                                         hovered ? state.accentBrush.Get() : state.borderBrush.Get(), 1.0f);
+            }
+            RECT textBounds = bounds;
+            textBounds.left += 12;
+            textBounds.right -= 10;
+            DrawExperimentalSettingsText(state.renderTarget.Get(), state.buttonFormat.Get(), text, textBounds,
+                                         primary ? state.buttonTextBrush.Get() : state.textBrush.Get());
+        };
+        drawButton(state.applyButtonRect, L"Apply", false, -10);
+        drawButton(state.okButtonRect, L"OK", true, -11);
+        drawButton(state.cancelButtonRect, L"Cancel", false, -12);
+        state.renderTarget->EndDraw();
+    }
+
+    bool CollectExperimentalSettings(HWND hwnd, ExperimentalSettingsDialogState& state)
+    {
+        UINT slideshowDuration = 0;
+        if (!TryReadDialogUInt(state.numericEdits[0], kSlideshowMinimumDurationMs, kSlideshowMaximumDurationMs, &slideshowDuration))
+        {
+            MessageBoxW(hwnd, L"Slide duration must be between 250 and 60000 milliseconds.", state.settings->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(state.numericEdits[0]);
+            return false;
+        }
+        UINT transitionDuration = 0;
+        if (!TryReadDialogUInt(state.numericEdits[1], kSlideshowMinimumTransitionDurationMs, kSlideshowMaximumTransitionDurationMs, &transitionDuration))
+        {
+            MessageBoxW(hwnd, L"Transition duration must be between 100 and 5000 milliseconds.", state.settings->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(state.numericEdits[1]);
+            return false;
+        }
+        const bool thumbnailAutomatic = state.settings->thumbnailCacheCapacityOverrideBytes == 0;
+        const bool metadataAutomatic = state.settings->metadataCacheCapacityOverrideEntries == 0;
+        std::size_t thumbnailMegabytes = 0;
+        if (!thumbnailAutomatic && (!TryParsePositiveSizeValue(ReadWindowText(state.numericEdits[2]), &thumbnailMegabytes)
+                                     || thumbnailMegabytes > std::numeric_limits<std::uint64_t>::max() / (1024ULL * 1024ULL)))
+        {
+            MessageBoxW(hwnd, L"Enter a positive thumbnail cache size in megabytes, or keep Follow profile enabled.", state.settings->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(state.numericEdits[2]);
+            return false;
+        }
+        std::size_t metadataEntries = 0;
+        if (!metadataAutomatic && !TryParsePositiveSizeValue(ReadWindowText(state.numericEdits[3]), &metadataEntries))
+        {
+            MessageBoxW(hwnd, L"Enter a positive metadata cache capacity in entries, or keep Follow profile enabled.", state.settings->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(state.numericEdits[3]);
+            return false;
+        }
+        state.settings->slideshowIntervalMs = slideshowDuration;
+        state.settings->slideshowTransitionDurationMs = transitionDuration;
+        state.settings->thumbnailCacheCapacityOverrideBytes = thumbnailAutomatic ? 0 : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(thumbnailMegabytes) * 1024ULL * 1024ULL);
+        state.settings->metadataCacheCapacityOverrideEntries = metadataAutomatic ? 0 : metadataEntries;
+        return true;
+    }
+
+    void ApplyExperimentalSettingsTheme(ExperimentalSettingsDialogState& state)
+    {
+        const bool dark = state.settings && state.settings->darkTheme;
+        const COLORREF panelColor = dark ? RGB(34, 39, 45) : RGB(255, 255, 255);
+        const COLORREF fieldColor = dark ? RGB(45, 51, 59) : RGB(247, 249, 252);
+        const COLORREF borderColor = dark ? RGB(78, 87, 98) : RGB(215, 221, 229);
+        const COLORREF textColor = dark ? RGB(235, 239, 244) : RGB(30, 36, 44);
+        const COLORREF mutedColor = dark ? RGB(157, 167, 179) : RGB(105, 116, 131);
+        const COLORREF accentColor = dark ? RGB(112, 169, 227) : RGB(54, 114, 186);
+        const COLORREF accentFill = dark ? RGB(47, 68, 92) : RGB(220, 233, 247);
+        auto createBrush = [&](Microsoft::WRL::ComPtr<ID2D1SolidColorBrush>& brush, COLORREF color)
+        {
+            if (state.renderTarget)
+            {
+                state.renderTarget->CreateSolidColorBrush(hyperbrowse::render::ToD2DColor(color), brush.ReleaseAndGetAddressOf());
+            }
+        };
+        createBrush(state.panelBrush, panelColor);
+        createBrush(state.fieldBrush, fieldColor);
+        createBrush(state.borderBrush, borderColor);
+        createBrush(state.textBrush, textColor);
+        createBrush(state.mutedTextBrush, mutedColor);
+        createBrush(state.accentBrush, accentColor);
+        createBrush(state.accentFillBrush, accentFill);
+        createBrush(state.buttonTextBrush, RGB(255, 255, 255));
+        InvalidateRect(state.dialogWindow, nullptr, FALSE);
+    }
+
+    LRESULT CALLBACK ExperimentalSettingsDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<ExperimentalSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<ExperimentalSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state || !state->settings)
+            {
+                return -1;
+            }
+            state->dialogWindow = hwnd;
+            auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+            state->renderTarget = renderer.CreateHwndRenderTarget(hwnd);
+            if (!state->renderTarget)
+            {
+                return -1;
+            }
+            const auto size = state->settings->appTextSize;
+            state->bodyFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(16.0f, size));
+            state->smallFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(13.0f, size));
+            state->buttonFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(15.0f, size), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            state->controlFont = CreateDialogUiFont(9, FW_NORMAL, size);
+            if (!state->controlFont)
+            {
+                state->controlFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            }
+            for (IDWriteTextFormat* format : {state->bodyFormat.Get(), state->smallFormat.Get(), state->buttonFormat.Get()})
+            {
+                if (format)
+                {
+                    format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                }
+            }
+            state->editBackgroundBrush = CreateSolidBrush(state->settings->darkTheme ? RGB(45, 51, 59) : RGB(247, 249, 252));
+            const auto profile = state->settings->resourceProfile;
+            const auto thumbnailCacheMegabytes = state->settings->thumbnailCacheCapacityOverrideBytes == 0
+                ? hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, profile) / (1024ULL * 1024ULL)
+                : state->settings->thumbnailCacheCapacityOverrideBytes / (1024ULL * 1024ULL);
+            const auto metadataCacheEntries = state->settings->metadataCacheCapacityOverrideEntries == 0
+                ? hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, profile)
+                : state->settings->metadataCacheCapacityOverrideEntries;
+            const std::array<std::pair<int, std::wstring>, 4> editValues{
+                std::pair{ES_NUMBER, std::to_wstring(state->settings->slideshowIntervalMs)},
+                std::pair{ES_NUMBER, std::to_wstring(state->settings->slideshowTransitionDurationMs)},
+                std::pair{ES_NUMBER, std::to_wstring(thumbnailCacheMegabytes)},
+                std::pair{ES_NUMBER, std::to_wstring(metadataCacheEntries)}};
+            for (std::size_t index = 0; index < state->numericEdits.size(); ++index)
+            {
+                state->numericEdits[index] = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", editValues[index].second.c_str(),
+                    WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL | editValues[index].first, 0, 0, 0, 0, hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(5700 + index)), state->instance, nullptr);
+                if (state->numericEdits[index])
+                {
+                    SendMessageW(state->numericEdits[index], WM_SETFONT, reinterpret_cast<WPARAM>(state->controlFont), TRUE);
+                }
+            }
+            const auto createChoice = [&](ConsolidatedSettingsControl control,
+                                          const std::vector<std::wstring>& values,
+                                          int selectedIndex)
+            {
+                const int controlIndex = static_cast<int>(control);
+                HWND choice = CreateWindowExW(
+                    0,
+                    WC_COMBOBOXW,
+                    nullptr,
+                    WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+                    0,
+                    0,
+                    0,
+                    0,
+                    hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(5800 + controlIndex)),
+                    state->instance,
+                    nullptr);
+                if (!choice)
+                {
+                    return;
+                }
+                state->nativeControls[static_cast<std::size_t>(control)] = choice;
+                SendMessageW(choice, WM_SETFONT, reinterpret_cast<WPARAM>(state->controlFont), TRUE);
+                for (const std::wstring& value : values)
+                {
+                    SendMessageW(choice, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
+                }
+                SendMessageW(choice, CB_SETMINVISIBLE, static_cast<WPARAM>(std::min<std::size_t>(values.size(), 8)), 0);
+                SendMessageW(choice, CB_SETCURSEL, selectedIndex, 0);
+            };
+            std::vector<std::wstring> transitionValues;
+            transitionValues.reserve(kSlideshowTransitionOptions.size());
+            for (const SlideshowTransitionOption& option : kSlideshowTransitionOptions)
+            {
+                transitionValues.emplace_back(option.label);
+            }
+            createChoice(ConsolidatedSettingsControl::TransitionStyle,
+                         transitionValues,
+                         SlideshowTransitionComboIndex(state->settings->slideshowTransitionStyle));
+            createChoice(ConsolidatedSettingsControl::OverlayTextSize,
+                         {L"Small", L"Medium", L"Large"},
+                         static_cast<int>(state->settings->overlayTextSize));
+            createChoice(ConsolidatedSettingsControl::AppTextSize,
+                         {L"Small", L"Medium", L"Large"},
+                         static_cast<int>(state->settings->appTextSize));
+            int thumbnailIndex = 0;
+            const auto thumbnailIterator = std::find(kThumbnailSizePresets.begin(), kThumbnailSizePresets.end(), state->settings->thumbnailSizePreset);
+            if (thumbnailIterator != kThumbnailSizePresets.end())
+            {
+                thumbnailIndex = static_cast<int>(thumbnailIterator - kThumbnailSizePresets.begin());
+            }
+            std::vector<std::wstring> thumbnailValues;
+            for (const auto preset : kThumbnailSizePresets)
+            {
+                thumbnailValues.push_back(std::to_wstring(static_cast<int>(preset)) + L" px");
+            }
+            createChoice(ConsolidatedSettingsControl::ThumbnailSize, thumbnailValues, thumbnailIndex);
+            createChoice(ConsolidatedSettingsControl::ResourceProfile,
+                         {L"Conservative", L"Balanced", L"Performance", L"Aggressive"},
+                         static_cast<int>(state->settings->resourceProfile));
+            for (std::size_t index = 0; index < state->numericSpins.size(); ++index)
+            {
+                state->numericSpins[index] = CreateWindowExW(
+                    0,
+                    UPDOWN_CLASSW,
+                    nullptr,
+                    WS_CHILD | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT | UDS_NOTHOUSANDS,
+                    0,
+                    0,
+                    0,
+                    0,
+                    hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(5850 + index)),
+                    state->instance,
+                    nullptr);
+                if (state->numericSpins[index])
+                {
+                    SendMessageW(state->numericSpins[index], UDM_SETBUDDY,
+                                 reinterpret_cast<WPARAM>(state->numericEdits[index]), 0);
+                    const UINT minimum = index == 0 ? kSlideshowMinimumDurationMs : index == 1 ? kSlideshowMinimumTransitionDurationMs : 1;
+                    const UINT maximum = index == 0 ? kSlideshowMaximumDurationMs : index == 1 ? kSlideshowMaximumTransitionDurationMs : 2147483647U;
+                    SendMessageW(state->numericSpins[index], UDM_SETRANGE32,
+                                 minimum, maximum);
+                    SendMessageW(state->numericSpins[index], UDM_SETPOS32, 0,
+                                 index == 0 ? state->settings->slideshowIntervalMs
+                                     : index == 1 ? state->settings->slideshowTransitionDurationMs
+                                     : index == 2 ? static_cast<int>(thumbnailCacheMegabytes)
+                                     : static_cast<int>(metadataCacheEntries));
+                }
+            }
+            const bool thumbnailCacheAutomatic = state->settings->thumbnailCacheCapacityOverrideBytes == 0;
+            const bool metadataCacheAutomatic = state->settings->metadataCacheCapacityOverrideEntries == 0;
+            EnableWindow(state->numericEdits[2], thumbnailCacheAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericSpins[2], thumbnailCacheAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericEdits[3], metadataCacheAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericSpins[3], metadataCacheAutomatic ? FALSE : TRUE);
+            ApplyExperimentalSettingsTheme(*state);
+            LayoutExperimentalSettings(*state);
+            return 0;
+        }
+        case WM_SIZE:
+            if (state)
+            {
+                hyperbrowse::render::D2DRenderer::Instance().ResizeRenderTarget(state->renderTarget.Get(), hwnd);
+                LayoutExperimentalSettings(*state);
+            }
+            return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+            if (state)
+            {
+                PAINTSTRUCT paint{};
+                BeginPaint(hwnd, &paint);
+                PaintExperimentalSettings(*state);
+                EndPaint(hwnd, &paint);
+                return 0;
+            }
+            break;
+        case WM_MOUSEMOVE:
+            if (state)
+            {
+                const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                int hovered = -1;
+                if (PtInRect(&state->applyButtonRect, point))
+                {
+                    hovered = -10;
+                }
+                else if (PtInRect(&state->okButtonRect, point))
+                {
+                    hovered = -11;
+                }
+                else if (PtInRect(&state->cancelButtonRect, point))
+                {
+                    hovered = -12;
+                }
+                int hoveredTab = -1;
+                for (std::size_t index = 0; index < state->tabRects.size(); ++index)
+                {
+                    if (PtInRect(&state->tabRects[index], point))
+                    {
+                        hoveredTab = static_cast<int>(index);
+                        break;
+                    }
+                }
+                for (std::size_t index = 0; index < state->controlRects.size(); ++index)
+                {
+                    if (hovered == -1 && PtInRect(&state->controlRects[index], point))
+                    {
+                        hovered = static_cast<int>(index);
+                        break;
+                    }
+                }
+                if (hovered != state->hoveredControl || hoveredTab != state->hoveredTab)
+                {
+                    state->hoveredControl = hovered;
+                    state->hoveredTab = hoveredTab;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd, 0};
+                TrackMouseEvent(&tracking);
+            }
+            return 0;
+        case WM_MOUSELEAVE:
+            if (state)
+            {
+                state->hoveredControl = -1;
+                state->hoveredTab = -1;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+        case WM_LBUTTONDOWN:
+            if (state)
+            {
+                const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                SetFocus(hwnd);
+                if (PtInRect(&state->applyButtonRect, point))
+                {
+                    state->pressedControl = -10;
+                    SetCapture(hwnd);
+                    return 0;
+                }
+                if (PtInRect(&state->okButtonRect, point))
+                {
+                    state->pressedControl = -11;
+                    SetCapture(hwnd);
+                    return 0;
+                }
+                if (PtInRect(&state->cancelButtonRect, point))
+                {
+                    state->pressedControl = -12;
+                    SetCapture(hwnd);
+                    return 0;
+                }
+                for (std::size_t index = 0; index < state->tabRects.size(); ++index)
+                {
+                    if (PtInRect(&state->tabRects[index], point))
+                    {
+                        state->page = static_cast<ConsolidatedSettingsPage>(index);
+                        LayoutExperimentalSettings(*state);
+                        return 0;
+                    }
+                }
+                for (std::size_t index = 0; index < state->controlRects.size(); ++index)
+                {
+                    if (PtInRect(&state->controlRects[index], point))
+                    {
+                        state->pressedControl = static_cast<int>(index);
+                        SetCapture(hwnd);
+                        return 0;
+                    }
+                }
+            }
+            return 0;
+        case WM_LBUTTONUP:
+            if (state && state->pressedControl >= 0)
+            {
+                const int pressed = state->pressedControl;
+                state->pressedControl = -1;
+                ReleaseCapture();
+                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                const auto& bounds = state->controlRects[static_cast<std::size_t>(pressed)];
+                if (PtInRect(&bounds, point))
+                {
+                    const auto control = static_cast<ConsolidatedSettingsControl>(pressed);
+                    ExperimentalSettingsToggle(*state, control);
+                    if (control == ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
+                    {
+                        const bool enabled = !ExperimentalSettingsChecked(*state->settings, control);
+                        EnableWindow(state->numericEdits[2], enabled ? TRUE : FALSE);
+                        EnableWindow(state->numericSpins[2], enabled ? TRUE : FALSE);
+                    }
+                    else if (control == ConsolidatedSettingsControl::MetadataCacheAutomatic)
+                    {
+                        const bool enabled = !ExperimentalSettingsChecked(*state->settings, control);
+                        EnableWindow(state->numericEdits[3], enabled ? TRUE : FALSE);
+                        EnableWindow(state->numericSpins[3], enabled ? TRUE : FALSE);
+                    }
+                    if (control == ConsolidatedSettingsControl::ThemeLight
+                        || control == ConsolidatedSettingsControl::ThemeDark)
+                    {
+                        ApplyExperimentalSettingsTheme(*state);
+                    }
+                    if (control == ConsolidatedSettingsControl::ThumbnailCacheAutomatic
+                        || control == ConsolidatedSettingsControl::MetadataCacheAutomatic)
+                    {
+                        UpdateExperimentalSettingsCacheValues(*state);
+                    }
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+            }
+            else if (state && state->pressedControl <= -10)
+            {
+                const int pressed = state->pressedControl;
+                state->pressedControl = -1;
+                ReleaseCapture();
+                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                const RECT& bounds = pressed == -10 ? state->applyButtonRect : pressed == -11 ? state->okButtonRect : state->cancelButtonRect;
+                if (PtInRect(&bounds, point))
+                {
+                    if (pressed == -12)
+                    {
+                        DestroyWindow(hwnd);
+                    }
+                    else if (CollectExperimentalSettings(hwnd, *state))
+                    {
+                        if (state->settings->apply)
+                        {
+                            state->settings->apply(*state->settings);
+                        }
+                        if (pressed == -11)
+                        {
+                            state->accepted = true;
+                            DestroyWindow(hwnd);
+                        }
+                    }
+                }
+            }
+            return 0;
+        case WM_KEYDOWN:
+            if (state && wParam == VK_ESCAPE)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            if (state && wParam == VK_RETURN && GetFocus() == hwnd)
+            {
+                if (CollectExperimentalSettings(hwnd, *state))
+                {
+                    if (state->settings->apply)
+                    {
+                        state->settings->apply(*state->settings);
+                    }
+                    state->accepted = true;
+                    DestroyWindow(hwnd);
+                }
+                return 0;
+            }
+            break;
+        case WM_COMMAND:
+            if (!state)
+            {
+                break;
+            }
+            if (LOWORD(wParam) == kExperimentalSettingsApplyId || LOWORD(wParam) == kExperimentalSettingsOkId)
+            {
+                if (CollectExperimentalSettings(hwnd, *state))
+                {
+                    if (state->settings->apply)
+                    {
+                        state->settings->apply(*state->settings);
+                    }
+                    if (LOWORD(wParam) == kExperimentalSettingsOkId)
+                    {
+                        state->accepted = true;
+                        DestroyWindow(hwnd);
+                    }
+                }
+                return 0;
+            }
+            if (LOWORD(wParam) == kExperimentalSettingsCancelId)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            if (HIWORD(wParam) == CBN_SELCHANGE)
+            {
+                const HWND source = reinterpret_cast<HWND>(lParam);
+                const int selected = static_cast<int>(SendMessageW(source, CB_GETCURSEL, 0, 0));
+                if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::TransitionStyle)]
+                    && selected < static_cast<int>(kSlideshowTransitionOptions.size()))
+                {
+                    state->settings->slideshowTransitionStyle = kSlideshowTransitionOptions[static_cast<std::size_t>(selected)].style;
+                }
+                else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::OverlayTextSize)] && selected < 3)
+                {
+                    state->settings->overlayTextSize = static_cast<hyperbrowse::viewer::InfoOverlayTextSize>(selected);
+                }
+                else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::AppTextSize)] && selected < 3)
+                {
+                    state->settings->appTextSize = static_cast<hyperbrowse::util::AppTextSize>(selected);
+                }
+                else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::ThumbnailSize)]
+                         && selected < static_cast<int>(kThumbnailSizePresets.size()))
+                {
+                    state->settings->thumbnailSizePreset = kThumbnailSizePresets[static_cast<std::size_t>(selected)];
+                }
+                else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::ResourceProfile)] && selected < 4)
+                {
+                    state->settings->resourceProfile = static_cast<hyperbrowse::util::ResourceProfile>(selected);
+                    UpdateExperimentalSettingsCacheValues(*state);
+                }
+                return 0;
+            }
+            break;
+        case WM_CTLCOLORLISTBOX:
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLOREDIT:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetTextColor(dc, state->settings->darkTheme ? RGB(235, 239, 244) : RGB(30, 36, 44));
+                SetBkColor(dc, state->settings->darkTheme ? RGB(45, 51, 59) : RGB(247, 249, 252));
+                return reinterpret_cast<LRESULT>(state->editBackgroundBrush);
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                for (HWND edit : state->numericEdits)
+                {
+                    if (edit)
+                    {
+                        DestroyWindow(edit);
+                    }
+                }
+                if (state->editBackgroundBrush)
+                {
+                    DeleteObject(state->editBackgroundBrush);
+                    state->editBackgroundBrush = nullptr;
+                }
+                DeleteFontIfOwned(state->controlFont);
+                state->controlFont = nullptr;
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    ExperimentalSettingsDialogResult PromptForExperimentalSettings(HWND ownerWindow,
+                                                                    HINSTANCE instance,
+                                                                    ConsolidatedSettingsDialogState* settings)
+    {
+        if (!settings || !hyperbrowse::render::D2DRenderer::Instance().IsAvailable())
+        {
+            return ExperimentalSettingsDialogResult::Unavailable;
+        }
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance, kExperimentalSettingsDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &ExperimentalSettingsDialogProc;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = kExperimentalSettingsDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hbrBackground = nullptr;
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return ExperimentalSettingsDialogResult::Unavailable;
+            }
+        }
+        ExperimentalSettingsDialogState state;
+        state.ownerWindow = ownerWindow;
+        state.instance = instance;
+        state.settings = settings;
+        RECT windowRect{0, 0, kExperimentalSettingsDialogWidth, kExperimentalSettingsDialogHeight};
+        AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, FALSE);
+        }
+        HWND dialogWindow = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                                            kExperimentalSettingsDialogClassName,
+                                            settings->title.c_str(),
+                                            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+                                            CW_USEDEFAULT, CW_USEDEFAULT,
+                                            windowRect.right - windowRect.left,
+                                            windowRect.bottom - windowRect.top,
+                                            ownerWindow, nullptr, instance, &state);
+        if (!dialogWindow)
+        {
+            if (ownerWindow)
+            {
+                EnableWindow(ownerWindow, TRUE);
+            }
+            return ExperimentalSettingsDialogResult::Unavailable;
+        }
+        SetWindowTextW(dialogWindow, settings->title.c_str());
+        ApplyWindowFrameTheme(dialogWindow, settings->darkTheme,
+                              settings->darkTheme ? RGB(24, 28, 32) : RGB(244, 246, 249),
+                              settings->darkTheme ? RGB(235, 239, 244) : RGB(30, 36, 44),
+                              settings->darkTheme ? RGB(78, 87, 98) : RGB(215, 221, 229));
+        RefreshWindowNonClientArea(dialogWindow);
+        CenterWindowOnOwner(dialogWindow, ownerWindow);
+        ShowWindow(dialogWindow, SW_SHOWNORMAL);
+        UpdateWindow(dialogWindow);
+        const HWND initialFocus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::TransitionStyle)];
+        SetFocus(initialFocus ? initialFocus : dialogWindow);
+        const auto isChoiceDropped = [&state]()
+        {
+            const HWND focus = GetFocus();
+            for (const HWND choice : state.nativeControls)
+            {
+                if (choice == focus && SendMessageW(choice, CB_GETDROPPEDSTATE, 0, 0) != FALSE)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        const auto focusFirstControlOnPage = [&state, dialogWindow]()
+        {
+            HWND focus = nullptr;
+            switch (state.page)
+            {
+            case ConsolidatedSettingsPage::Slideshow:
+                focus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::TransitionStyle)];
+                break;
+            case ConsolidatedSettingsPage::Viewer:
+                focus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::OverlayTextSize)];
+                break;
+            case ConsolidatedSettingsPage::Appearance:
+                focus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::AppTextSize)];
+                break;
+            case ConsolidatedSettingsPage::Performance:
+                focus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::ResourceProfile)];
+                break;
+            case ConsolidatedSettingsPage::Behavior:
+            default:
+                break;
+            }
+            SetFocus(focus ? focus : dialogWindow);
+        };
+        MSG message{};
+        while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
+        {
+            const bool keyMessage = message.message == WM_KEYDOWN || message.message == WM_SYSKEYDOWN;
+            if (keyMessage && message.wParam == VK_TAB && (GetKeyState(VK_CONTROL) & 0x8000) != 0)
+            {
+                const int pageCount = static_cast<int>(ConsolidatedSettingsPage::Count);
+                int pageIndex = static_cast<int>(state.page);
+                const int direction = (GetKeyState(VK_SHIFT) & 0x8000) != 0 ? -1 : 1;
+                pageIndex = (pageIndex + direction + pageCount) % pageCount;
+                state.page = static_cast<ConsolidatedSettingsPage>(pageIndex);
+                LayoutExperimentalSettings(state);
+                focusFirstControlOnPage();
+                continue;
+            }
+            if (keyMessage && message.wParam == VK_ESCAPE && !isChoiceDropped())
+            {
+                SendMessageW(dialogWindow, WM_CLOSE, 0, 0);
+                continue;
+            }
+            if (keyMessage && message.wParam == VK_RETURN && !isChoiceDropped())
+            {
+                SendMessageW(dialogWindow, WM_COMMAND, MAKEWPARAM(kExperimentalSettingsOkId, BN_CLICKED), 0);
+                continue;
+            }
+            if (!IsDialogMessageW(dialogWindow, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, TRUE);
+            SetForegroundWindow(ownerWindow);
+            SetActiveWindow(ownerWindow);
+        }
+        return state.accepted ? ExperimentalSettingsDialogResult::Accepted : ExperimentalSettingsDialogResult::Cancelled;
+    }
+
     bool PromptForPerformanceSettings(HWND ownerWindow,
                                       HINSTANCE instance,
                                       hyperbrowse::util::AppTextSize appTextSize,
@@ -6938,12 +8247,8 @@ namespace
         state.title = L"Slideshow Settings";
         state.instruction = L"Choose transition style and precise slideshow timing.";
         state.footnote = L"Random selects from the animated transition styles for each transition. None uses hard cuts.";
-        state.slideshowDurationMs = std::clamp<UINT>(initialSlideshowDurationMs,
-                                 kSlideshowMinimumDurationMs,
-                                 kSlideshowMaximumDurationMs);
-        state.transitionDurationMs = std::clamp<UINT>(initialTransitionDurationMs,
-                                  kSlideshowMinimumTransitionDurationMs,
-                                  kSlideshowMaximumTransitionDurationMs);
+        state.slideshowDurationMs = NormalizeSlideshowDuration(initialSlideshowDurationMs);
+        state.transitionDurationMs = NormalizeSlideshowTransitionDuration(initialTransitionDurationMs);
         state.transitionStyle = initialTransitionStyle;
 
         const SlideshowSettingsDialogLayoutMetrics layoutMetrics = BuildSlideshowSettingsDialogLayoutMetrics(state);
@@ -9458,7 +10763,6 @@ namespace hyperbrowse::ui
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"6&40 px");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"From &Selection\tCtrl+Shift+S");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"From &Folder\tCtrl+Shift+F");
-        AppendMenuW(slideshowMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowMenu), L"S&lideshow");
 
@@ -19463,8 +20767,8 @@ namespace hyperbrowse::ui
         state.viewerMouseWheelBehavior = viewerMouseWheelBehavior_;
         state.invertKeyboardPanning = invertKeyboardPanning_;
         state.slideshowTransitionStyle = slideshowTransitionStyle_;
-        state.slideshowIntervalMs = slideshowIntervalMs_;
-        state.slideshowTransitionDurationMs = slideshowTransitionDurationMs_;
+        state.slideshowIntervalMs = NormalizeSlideshowDuration(slideshowIntervalMs_);
+        state.slideshowTransitionDurationMs = NormalizeSlideshowTransitionDuration(slideshowTransitionDurationMs_);
         state.useSlideshowTransition = useSlideshowTransition_;
         state.compactThumbnailLayout = compactThumbnailLayout_;
         state.thumbnailDetailsVisible = thumbnailDetailsVisible_;
@@ -19518,9 +20822,9 @@ namespace hyperbrowse::ui
                 || viewerWindow_->OverlayTextSize() != draft.overlayTextSize
                 || viewerWindow_->IsFullMetadataVisible() != draft.fullMetadataVisible;
 
-            slideshowIntervalMs_ = draft.slideshowIntervalMs;
+            slideshowIntervalMs_ = NormalizeSlideshowDuration(draft.slideshowIntervalMs);
             slideshowTransitionStyle_ = draft.slideshowTransitionStyle;
-            slideshowTransitionDurationMs_ = draft.slideshowTransitionDurationMs;
+            slideshowTransitionDurationMs_ = NormalizeSlideshowTransitionDuration(draft.slideshowTransitionDurationMs);
             useSlideshowTransition_ = draft.useSlideshowTransition;
             viewerMouseWheelBehavior_ = draft.viewerMouseWheelBehavior;
             invertKeyboardPanning_ = draft.invertKeyboardPanning;
@@ -19606,14 +20910,31 @@ namespace hyperbrowse::ui
             SaveWindowState();
         };
 
+        wchar_t settingsUiOverride[32]{};
+        const DWORD settingsUiOverrideLength = GetEnvironmentVariableW(
+            L"HYPERBROWSE_SETTINGS_UI",
+            settingsUiOverride,
+            static_cast<DWORD>(std::size(settingsUiOverride)));
+        const bool useLegacySettings = settingsUiOverrideLength > 0
+            && _wcsicmp(settingsUiOverride, L"legacy") == 0;
+        if (!useLegacySettings)
+        {
+            const ExperimentalSettingsDialogResult result = PromptForExperimentalSettings(hwnd_, instance_, &state);
+            if (result != ExperimentalSettingsDialogResult::Unavailable)
+            {
+                DeleteFontIfOwned(state.bodyFont);
+                state.bodyFont = nullptr;
+                return;
+            }
+        }
         PromptForConsolidatedSettings(hwnd_, instance_, &state);
     }
 
     void MainWindow::ShowSlideshowSettingsDialog()
     {
-        UINT slideshowDurationMs = slideshowIntervalMs_;
+        UINT slideshowDurationMs = NormalizeSlideshowDuration(slideshowIntervalMs_);
         viewer::TransitionStyle transitionStyle = slideshowTransitionStyle_;
-        UINT transitionDurationMs = slideshowTransitionDurationMs_;
+        UINT transitionDurationMs = NormalizeSlideshowTransitionDuration(slideshowTransitionDurationMs_);
         if (!PromptForSlideshowSettings(hwnd_,
                                         instance_,
                                         appTextSize_,
@@ -19635,9 +20956,9 @@ namespace hyperbrowse::ui
             return;
         }
 
-        slideshowIntervalMs_ = slideshowDurationMs;
+        slideshowIntervalMs_ = NormalizeSlideshowDuration(slideshowDurationMs);
         slideshowTransitionStyle_ = transitionStyle;
-        slideshowTransitionDurationMs_ = transitionDurationMs;
+        slideshowTransitionDurationMs_ = NormalizeSlideshowTransitionDuration(transitionDurationMs);
         ApplyViewerTransitionSettings();
         if (slideshowDurationChanged && viewerWindow_ && viewerWindow_->IsSlideshowActive())
         {
@@ -19801,11 +21122,9 @@ namespace hyperbrowse::ui
                 sortAscending_ = value != 0;
             }
 
-            if (TryReadDwordValue(key, kRegistryValueSlideshowInterval, &value)
-                && value >= kSlideshowMinimumDurationMs
-                && value <= kSlideshowMaximumDurationMs)
+            if (TryReadDwordValue(key, kRegistryValueSlideshowInterval, &value))
             {
-                slideshowIntervalMs_ = static_cast<UINT>(value);
+                slideshowIntervalMs_ = NormalizeSlideshowDuration(static_cast<UINT>(value));
             }
 
             if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionStyle, &value)
@@ -19814,11 +21133,9 @@ namespace hyperbrowse::ui
                 slideshowTransitionStyle_ = static_cast<viewer::TransitionStyle>(value);
             }
 
-            if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionDuration, &value)
-                && value >= kSlideshowMinimumTransitionDurationMs
-                && value <= kSlideshowMaximumTransitionDurationMs)
+            if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionDuration, &value))
             {
-                slideshowTransitionDurationMs_ = static_cast<UINT>(value);
+                slideshowTransitionDurationMs_ = NormalizeSlideshowTransitionDuration(static_cast<UINT>(value));
             }
 
             if (TryReadDwordValue(key, kRegistryValueUseSlideshowTransition, &value))

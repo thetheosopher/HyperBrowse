@@ -63,6 +63,9 @@ namespace
     constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
     constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
     constexpr wchar_t kRegistryValueAppTextSize[] = L"AppTextSize";
+    constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
+    constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
+    constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
 
     struct EnumerationResult
     {
@@ -3243,111 +3246,132 @@ namespace
         }
     }
 
-    void RunConsolidatedSettingsScenario(HINSTANCE instance)
+    void RunDefaultSettingsScenario(HINSTANCE instance)
     {
         using hyperbrowse::ui::command_ids::ID_VIEW_SETTINGS;
 
-        constexpr wchar_t kDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
-        constexpr int kTabControlId = 360;
-        constexpr int kFirstControlId = 5000;
-        constexpr int kTransitionEnabledControlId = kFirstControlId;
-        constexpr int kInvertKeyboardPanningControlId = kFirstControlId + 8;
-        constexpr int kAppTextSizeControlId = kFirstControlId + 18;
-        constexpr int kResourceProfileControlId = kFirstControlId + 23;
-        constexpr int kThumbnailCacheControlId = kFirstControlId + 25;
-        constexpr int kThumbnailCacheAutomaticControlId = kFirstControlId + 26;
-        constexpr int kMetadataCacheControlId = kFirstControlId + 27;
-        constexpr int kMetadataCacheAutomaticControlId = kFirstControlId + 28;
-        constexpr int kSlideshowDurationControlId = kFirstControlId + 2;
-        constexpr int kApplyButtonId = 5500;
-        const std::array<std::wstring_view, 5> expectedTabs{
-            L"Slideshow", L"Viewer", L"Appearance", L"Performance", L"Behavior"};
-
+        constexpr wchar_t kDialogClassName[] = L"HyperBrowseExperimentalSettingsDialog";
+        constexpr wchar_t kSettingsUiEnvironment[] = L"HYPERBROWSE_SETTINGS_UI";
         ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
-        ScopedRegistryDwordBackup invertKeyboardPanningBackup(kRegistryPath, kRegistryValueInvertKeyboardPanning);
+        ScopedRegistryDwordBackup thumbnailCacheBackup(kRegistryPath, kRegistryValueThumbnailCacheCapacityOverrideBytes);
+        ScopedRegistryDwordBackup metadataCacheBackup(kRegistryPath, kRegistryValueMetadataCacheCapacityOverrideEntries);
         DeleteRegistryValue(kRegistryPath, kRegistryValueAppTextSize);
-        DeleteRegistryValue(kRegistryPath, kRegistryValueInvertKeyboardPanning);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueThumbnailCacheCapacityOverrideBytes);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueMetadataCacheCapacityOverrideEntries);
+        wchar_t previousValue[64]{};
+        const DWORD previousLength = GetEnvironmentVariableW(
+            kSettingsUiEnvironment,
+            previousValue,
+            static_cast<DWORD>(std::size(previousValue)));
+        SetEnvironmentVariableW(kSettingsUiEnvironment, nullptr);
+
         hyperbrowse::ui::MainWindow mainWindow(instance);
-        Expect(mainWindow.Create(), "Failed to create MainWindow for consolidated-settings smoke coverage");
-        Expect(mainWindow.AppTextSize() == hyperbrowse::util::AppTextSize::Medium,
-               "Consolidated-settings smoke coverage did not start from the default app text size");
-
-        const auto runDialog = [&](const std::function<void(HWND, std::string*)>& controller)
+        Expect(mainWindow.Create(), "Failed to create MainWindow for experimental-settings smoke coverage");
+        std::atomic_bool done{false};
+        std::string failure;
+        std::thread worker([&]()
         {
-            std::atomic_bool done{false};
-            std::string failure;
-            std::thread worker([&]()
+            if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
             {
-                if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
-                {
-                    failure = "Failed to post the consolidated Settings command";
-                    done.store(true, std::memory_order_release);
-                    return;
-                }
-
-                HWND dialog = nullptr;
-                const ULONGLONG deadline = GetTickCount64() + 10000;
-                while (GetTickCount64() < deadline && !(dialog = FindWindowW(kDialogClassName, nullptr)))
-                {
-                    Sleep(10);
-                }
-                if (!dialog)
-                {
-                    failure = "Consolidated Settings dialog did not open";
-                    done.store(true, std::memory_order_release);
-                    return;
-                }
-                controller(dialog, &failure);
-                const ULONGLONG closeDeadline = GetTickCount64() + 10000;
-                while (GetTickCount64() < closeDeadline && FindWindowW(kDialogClassName, nullptr))
-                {
-                    Sleep(10);
-                }
-                if (FindWindowW(kDialogClassName, nullptr))
-                {
-                    if (failure.empty())
-                    {
-                        failure = "Consolidated Settings dialog did not close";
-                    }
-                }
+                failure = "Failed to post the experimental Settings command";
                 done.store(true, std::memory_order_release);
-            });
+                return;
+            }
 
-            Expect(PumpMessagesUntil([&]() { return done.load(std::memory_order_acquire); }, 15000),
-                   "Consolidated Settings dialog interaction timed out");
-            worker.join();
-            Expect(failure.empty(), failure.empty() ? "Consolidated Settings interaction failed" : failure.c_str());
-        };
+            HWND dialog = nullptr;
+            const ULONGLONG deadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < deadline && !(dialog = FindWindowW(kDialogClassName, nullptr)))
+            {
+                Sleep(10);
+            }
+            if (!dialog)
+            {
+                failure = "Experimental Settings dialog did not open";
+                done.store(true, std::memory_order_release);
+                return;
+            }
+            const auto failAndClose = [&](std::string message)
+            {
+                failure = std::move(message);
+                SendMessageW(dialog, WM_CLOSE, 0, 0);
+                done.store(true, std::memory_order_release);
+            };
+            if (GetDlgItem(dialog, 5601) != nullptr)
+            {
+                failAndClose("Experimental Settings unexpectedly created a native OK button");
+                return;
+            }
+            HWND transitionCombo = nullptr;
+            HWND overlayTextCombo = nullptr;
+            HWND appTextCombo = nullptr;
+            HWND thumbnailCombo = nullptr;
+            HWND resourceCombo = nullptr;
+            const ULONGLONG controlsDeadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < controlsDeadline)
+            {
+                transitionCombo = GetDlgItem(dialog, 5801);
+                overlayTextCombo = GetDlgItem(dialog, 5815);
+                appTextCombo = GetDlgItem(dialog, 5818);
+                thumbnailCombo = GetDlgItem(dialog, 5819);
+                resourceCombo = GetDlgItem(dialog, 5823);
+                if (transitionCombo && overlayTextCombo && appTextCombo && thumbnailCombo && resourceCombo
+                    && SendMessageW(transitionCombo, CB_GETCOUNT, 0, 0) >= 2
+                    && SendMessageW(overlayTextCombo, CB_GETCOUNT, 0, 0) == 3
+                    && SendMessageW(appTextCombo, CB_GETCOUNT, 0, 0) == 3
+                    && SendMessageW(thumbnailCombo, CB_GETCOUNT, 0, 0) >= 2
+                    && SendMessageW(resourceCombo, CB_GETCOUNT, 0, 0) == 4)
+                {
+                    break;
+                }
+                Sleep(10);
+            }
+            if (!transitionCombo || !overlayTextCombo || !appTextCombo || !thumbnailCombo || !resourceCombo
+                || SendMessageW(transitionCombo, CB_GETCOUNT, 0, 0) < 2
+                || SendMessageW(overlayTextCombo, CB_GETCOUNT, 0, 0) != 3
+                || SendMessageW(appTextCombo, CB_GETCOUNT, 0, 0) != 3
+                || SendMessageW(thumbnailCombo, CB_GETCOUNT, 0, 0) < 2
+                || SendMessageW(resourceCombo, CB_GETCOUNT, 0, 0) != 4)
+            {
+                failAndClose("Experimental Settings did not create/populate all native combo boxes (transition="
+                    + std::to_string(transitionCombo != nullptr) + ", overlay="
+                    + std::to_string(overlayTextCombo != nullptr) + ", app="
+                    + std::to_string(appTextCombo != nullptr) + ", thumbnail="
+                    + std::to_string(thumbnailCombo != nullptr) + ", resource="
+                    + std::to_string(resourceCombo != nullptr) + ")");
+                return;
+            }
+            SendMessageW(transitionCombo, CB_SHOWDROPDOWN, TRUE, 0);
+            if (SendMessageW(transitionCombo, CB_GETDROPPEDSTATE, 0, 0) == FALSE)
+            {
+                failAndClose("Experimental Settings transition combo did not open a dropdown list");
+                return;
+            }
+            SendMessageW(transitionCombo, CB_SHOWDROPDOWN, FALSE, 0);
 
-        runDialog([&](HWND dialog, std::string* failure)
-        {
-            HWND tabs = GetDlgItem(dialog, kTabControlId);
-            if (!tabs || TabCtrl_GetItemCount(tabs) != static_cast<int>(expectedTabs.size()))
+            const HWND slideDurationEdit = GetDlgItem(dialog, 5700);
+            const HWND transitionDurationEdit = GetDlgItem(dialog, 5701);
+            const HWND thumbnailCacheEdit = GetDlgItem(dialog, 5702);
+            const HWND metadataCacheEdit = GetDlgItem(dialog, 5703);
+            const HWND slideDurationSpin = GetDlgItem(dialog, 5850);
+            const HWND transitionDurationSpin = GetDlgItem(dialog, 5851);
+            const HWND thumbnailCacheSpin = GetDlgItem(dialog, 5852);
+            const HWND metadataCacheSpin = GetDlgItem(dialog, 5853);
+            if (!slideDurationEdit || !transitionDurationEdit || !thumbnailCacheEdit || !metadataCacheEdit
+                || !slideDurationSpin || !transitionDurationSpin || !thumbnailCacheSpin || !metadataCacheSpin
+                || reinterpret_cast<HWND>(SendMessageW(slideDurationSpin, UDM_GETBUDDY, 0, 0)) != slideDurationEdit
+                || reinterpret_cast<HWND>(SendMessageW(transitionDurationSpin, UDM_GETBUDDY, 0, 0)) != transitionDurationEdit
+                || reinterpret_cast<HWND>(SendMessageW(thumbnailCacheSpin, UDM_GETBUDDY, 0, 0)) != thumbnailCacheEdit
+                || reinterpret_cast<HWND>(SendMessageW(metadataCacheSpin, UDM_GETBUDDY, 0, 0)) != metadataCacheEdit)
             {
-                *failure = "Consolidated Settings did not create all five tabs";
+                failAndClose("Experimental Settings numeric fields did not create native spin buddies");
                 return;
             }
-            HWND transitionEnabled = GetDlgItem(dialog, kTransitionEnabledControlId);
-            HWND invertKeyboardPanning = GetDlgItem(dialog, kInvertKeyboardPanningControlId);
-            if (!transitionEnabled || IsWindowVisible(transitionEnabled))
+            int slideMinimum = 0;
+            int slideMaximum = 0;
+            SendMessageW(slideDurationSpin, UDM_GETRANGE32, reinterpret_cast<WPARAM>(&slideMinimum), reinterpret_cast<LPARAM>(&slideMaximum));
+            if (slideMinimum != 250 || slideMaximum != 60000)
             {
-                *failure = "Manual viewer transitions appeared on the Slideshow tab";
-                return;
-            }
-            TabCtrl_SetCurSel(tabs, 1);
-            NMHDR tabChanged{};
-            tabChanged.hwndFrom = tabs;
-            tabChanged.idFrom = kTabControlId;
-            tabChanged.code = TCN_SELCHANGE;
-            SendMessageW(dialog, WM_NOTIFY, kTabControlId, reinterpret_cast<LPARAM>(&tabChanged));
-            if (!IsWindowVisible(transitionEnabled))
-            {
-                *failure = "Manual viewer transitions did not appear first on the Viewer tab";
-                return;
-            }
-            if (!invertKeyboardPanning || SendMessageW(invertKeyboardPanning, BM_GETCHECK, 0, 0) != BST_UNCHECKED)
-            {
-                *failure = "Invert Keyboard Panning did not default to unchecked";
+                failAndClose("Experimental Settings duration spin range was not configured");
                 return;
             }
             const auto readControlText = [](HWND control)
@@ -3356,159 +3380,138 @@ namespace
                 GetWindowTextW(control, buffer, static_cast<int>(std::size(buffer)));
                 return std::wstring(buffer);
             };
-            HWND profile = GetDlgItem(dialog, kResourceProfileControlId);
-            HWND thumbnailCache = GetDlgItem(dialog, kThumbnailCacheControlId);
-            HWND metadataCache = GetDlgItem(dialog, kMetadataCacheControlId);
-            HWND thumbnailAutomatic = GetDlgItem(dialog, kThumbnailCacheAutomaticControlId);
-            HWND metadataAutomatic = GetDlgItem(dialog, kMetadataCacheAutomaticControlId);
-            if (!profile || !thumbnailCache || !metadataCache
-                || !thumbnailAutomatic || !metadataAutomatic
-                || SendMessageW(thumbnailAutomatic, BM_GETCHECK, 0, 0) != BST_CHECKED
-                || SendMessageW(metadataAutomatic, BM_GETCHECK, 0, 0) != BST_CHECKED)
-            {
-                *failure = "Consolidated Settings did not initialize automatic cache capacity controls";
-                return;
-            }
-            SendMessageW(profile, CB_SETCURSEL, static_cast<WPARAM>(hyperbrowse::util::ResourceProfile::Aggressive), 0);
-            SendMessageW(dialog,
-                         WM_COMMAND,
-                         MAKEWPARAM(kResourceProfileControlId, CBN_SELCHANGE),
-                         reinterpret_cast<LPARAM>(profile));
+            const auto selectedProfile = static_cast<hyperbrowse::util::ResourceProfile>(
+                SendMessageW(resourceCombo, CB_GETCURSEL, 0, 0));
             const std::wstring expectedThumbnailCache = std::to_wstring(
-                hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(
-                    0,
-                    hyperbrowse::util::ResourceProfile::Aggressive)
+                hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, selectedProfile)
                 / (1024ULL * 1024ULL));
             const std::wstring expectedMetadataCache = std::to_wstring(
+                hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, selectedProfile));
+            if (readControlText(thumbnailCacheEdit) != expectedThumbnailCache
+                || readControlText(metadataCacheEdit) != expectedMetadataCache)
+            {
+                failAndClose("Experimental Settings did not populate automatic cache values from the selected profile");
+                return;
+            }
+            SendMessageW(resourceCombo, CB_SETCURSEL, 0, 0);
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(5823, CBN_SELCHANGE), reinterpret_cast<LPARAM>(resourceCombo));
+            const std::wstring expectedConservativeThumbnailCache = std::to_wstring(
+                hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(
+                    0,
+                    hyperbrowse::util::ResourceProfile::Conservative)
+                / (1024ULL * 1024ULL));
+            const std::wstring expectedConservativeMetadataCache = std::to_wstring(
                 hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(
                     0,
-                    hyperbrowse::util::ResourceProfile::Aggressive));
-            if (readControlText(thumbnailCache) != expectedThumbnailCache
-                || readControlText(metadataCache) != expectedMetadataCache)
+                    hyperbrowse::util::ResourceProfile::Conservative));
+            if (readControlText(thumbnailCacheEdit) != expectedConservativeThumbnailCache
+                || readControlText(metadataCacheEdit) != expectedConservativeMetadataCache)
             {
-                *failure = "Follow profile did not display the selected profile cache capacities";
+                failAndClose("Experimental Settings did not refresh automatic cache values after changing profile");
                 return;
             }
-            SendMessageW(thumbnailAutomatic, BM_SETCHECK, BST_UNCHECKED, 0);
-            SendMessageW(dialog,
-                         WM_COMMAND,
-                         MAKEWPARAM(kThumbnailCacheAutomaticControlId, BN_CLICKED),
-                         reinterpret_cast<LPARAM>(thumbnailAutomatic));
-            if (readControlText(thumbnailCache) != expectedThumbnailCache || !IsWindowEnabled(thumbnailCache))
+
+            RECT client{};
+            GetClientRect(dialog, &client);
+            const int tabWidth = (client.right - 56) / 5;
+            for (int index = 0; index < 5; ++index)
             {
-                *failure = "Disabling Follow profile did not preserve the effective thumbnail cache capacity";
-                return;
-            }
-            SendMessageW(thumbnailAutomatic, BM_SETCHECK, BST_CHECKED, 0);
-            SendMessageW(dialog,
-                         WM_COMMAND,
-                         MAKEWPARAM(kThumbnailCacheAutomaticControlId, BN_CLICKED),
-                         reinterpret_cast<LPARAM>(thumbnailAutomatic));
-            if (readControlText(thumbnailCache) != expectedThumbnailCache || IsWindowEnabled(thumbnailCache))
-            {
-                *failure = "Re-enabling Follow profile did not restore automatic thumbnail cache behavior";
-                return;
-            }
-            for (int index = 0; index < static_cast<int>(expectedTabs.size()); ++index)
-            {
-                wchar_t tabText[64]{};
-                TCITEMW item{};
-                item.mask = TCIF_TEXT;
-                item.pszText = tabText;
-                item.cchTextMax = static_cast<int>(std::size(tabText));
-                if (!TabCtrl_GetItem(tabs, index, &item) || std::wstring_view(tabText) != expectedTabs[static_cast<std::size_t>(index)])
+                const int x = 28 + (index * tabWidth) + (tabWidth / 2);
+                SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(x, 36));
+                SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(x, 36));
+                PumpMessagesFor(20);
+                if (!FindWindowW(kDialogClassName, nullptr))
                 {
-                    *failure = "Consolidated Settings tab labels are incorrect";
-                    return;
-                }
-                TabCtrl_SetCurSel(tabs, index);
-                if (TabCtrl_GetCurSel(tabs) != index)
-                {
-                    *failure = "Consolidated Settings tab switching failed";
+                    failAndClose("Experimental Settings closed while switching pages");
                     return;
                 }
             }
-            HWND appTextSize = GetDlgItem(dialog, kAppTextSizeControlId);
-            SendMessageW(appTextSize, CB_SETCURSEL, 2, 0);
-            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
-        });
-        Expect(mainWindow.AppTextSize() == hyperbrowse::util::AppTextSize::Medium,
-               "Cancel committed staged consolidated-settings changes");
 
-        runDialog([&](HWND dialog, std::string* failure)
-        {
-            HWND appTextSize = GetDlgItem(dialog, kAppTextSizeControlId);
-            HWND invertKeyboardPanning = GetDlgItem(dialog, kInvertKeyboardPanningControlId);
-            SendMessageW(appTextSize, CB_SETCURSEL, 2, 0);
-            SendMessageW(invertKeyboardPanning, BM_SETCHECK, BST_CHECKED, 0);
-            PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(kApplyButtonId, BN_CLICKED), 0);
-            const ULONGLONG deadline = GetTickCount64() + 10000;
-            DWORD persistedValue = 0;
-            DWORD persistedInvertKeyboardPanning = 0;
-            while (GetTickCount64() < deadline)
+            const int appearanceTabX = 28 + (2 * tabWidth) + (tabWidth / 2);
+            SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(appearanceTabX, 36));
+            SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(appearanceTabX, 36));
+            SendMessageW(appTextCombo, CB_SETCURSEL, 2, 0);
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(5818, CBN_SELCHANGE), reinterpret_cast<LPARAM>(appTextCombo));
+            SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(client.right - 300, client.bottom - 46));
+            SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(client.right - 300, client.bottom - 46));
+            PumpMessagesFor(100);
+            if (mainWindow.AppTextSize() != hyperbrowse::util::AppTextSize::Large || !FindWindowW(kDialogClassName, nullptr))
             {
-                if (TryReadRegistryDwordValue(kRegistryPath, kRegistryValueAppTextSize, &persistedValue)
-                    && persistedValue == static_cast<DWORD>(hyperbrowse::util::AppTextSize::Large)
-                    && TryReadRegistryDwordValue(kRegistryPath, kRegistryValueInvertKeyboardPanning, &persistedInvertKeyboardPanning)
-                    && persistedInvertKeyboardPanning == 1)
-                {
-                    break;
-                }
-                Sleep(10);
-            }
-            if (persistedValue != static_cast<DWORD>(hyperbrowse::util::AppTextSize::Large)
-                || persistedInvertKeyboardPanning != 1
-                || !FindWindowW(kDialogClassName, nullptr))
-            {
-                *failure = "Apply did not commit the staged setting while keeping the dialog open";
+                failAndClose("Experimental Settings Apply did not update the live setting while keeping the dialog open");
                 return;
             }
-            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
-        });
-        Expect(mainWindow.AppTextSize() == hyperbrowse::util::AppTextSize::Large,
-               "Apply did not update the live application setting");
-
-        runDialog([&](HWND dialog, std::string* failure)
-        {
-            SetWindowTextW(GetDlgItem(dialog, kSlideshowDurationControlId), L"1");
-            PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(kApplyButtonId, BN_CLICKED), 0);
-            HWND validationMessage = nullptr;
-            const ULONGLONG deadline = GetTickCount64() + 10000;
-            while (GetTickCount64() < deadline && !(validationMessage = FindWindowW(L"#32770", L"Settings")))
+            SendMessageW(appTextCombo, CB_SETCURSEL, 1, 0);
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(5818, CBN_SELCHANGE), reinterpret_cast<LPARAM>(appTextCombo));
+            if (!PostMessageW(dialog, WM_KEYDOWN, VK_RETURN, 0))
+            {
+                failAndClose("Failed to post Enter to Experimental Settings");
+                return;
+            }
+            const ULONGLONG enterDeadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < enterDeadline && FindWindowW(kDialogClassName, nullptr))
             {
                 Sleep(10);
             }
-            if (!validationMessage)
+            if (FindWindowW(kDialogClassName, nullptr)
+                || mainWindow.AppTextSize() != hyperbrowse::util::AppTextSize::Medium)
             {
-                *failure = "Invalid slideshow duration did not trigger Settings validation";
+                failure = "Experimental Settings Enter did not apply and close the dialog";
+                done.store(true, std::memory_order_release);
                 return;
             }
-            SendMessageW(validationMessage, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
-            while (GetTickCount64() < deadline && FindWindowW(L"#32770", L"Settings"))
+
+            if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
+            {
+                failure = "Failed to reopen Experimental Settings for Escape coverage";
+                done.store(true, std::memory_order_release);
+                return;
+            }
+            dialog = nullptr;
+            const ULONGLONG reopenDeadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < reopenDeadline && !(dialog = FindWindowW(kDialogClassName, nullptr)))
             {
                 Sleep(10);
             }
-            if (FindWindowW(kDialogClassName, nullptr) != dialog)
+            if (!dialog)
             {
-                *failure = "Invalid slideshow duration closed the Settings dialog";
+                failure = "Experimental Settings did not reopen for Escape coverage";
+                done.store(true, std::memory_order_release);
                 return;
             }
-            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+            if (!PostMessageW(dialog, WM_KEYDOWN, VK_ESCAPE, 0))
+            {
+                failure = "Failed to post Escape to Experimental Settings";
+                SendMessageW(dialog, WM_CLOSE, 0, 0);
+                done.store(true, std::memory_order_release);
+                return;
+            }
+            const ULONGLONG escapeDeadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < escapeDeadline && FindWindowW(kDialogClassName, nullptr))
+            {
+                Sleep(10);
+            }
+            if (FindWindowW(kDialogClassName, nullptr))
+            {
+                failure = "Experimental Settings Escape did not close the dialog";
+            }
+            done.store(true, std::memory_order_release);
         });
 
-        runDialog([&](HWND dialog, std::string* failure)
-        {
-            if (SendMessageW(GetDlgItem(dialog, kInvertKeyboardPanningControlId), BM_GETCHECK, 0, 0) != BST_CHECKED)
-            {
-                *failure = "Applied Invert Keyboard Panning value was not restored";
-                return;
-            }
-            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
-        });
-        Expect(mainWindow.AppTextSize() == hyperbrowse::util::AppTextSize::Large,
-               "OK did not preserve the applied consolidated-settings value");
+        Expect(PumpMessagesUntil([&]() { return done.load(std::memory_order_acquire); }, 15000),
+               "Experimental Settings interaction timed out");
+        worker.join();
+        Expect(failure.empty(), failure.empty() ? "Experimental Settings interaction failed" : failure.c_str());
         DestroyWindow(mainWindow.Hwnd());
         PumpMessagesFor(100);
+
+        if (previousLength > 0)
+        {
+            SetEnvironmentVariableW(kSettingsUiEnvironment, previousValue);
+        }
+        else
+        {
+            SetEnvironmentVariableW(kSettingsUiEnvironment, nullptr);
+        }
     }
 
     void RunMainWindowFolderTreeScenario(HINSTANCE instance)
@@ -3611,7 +3614,7 @@ int main(int argc, char* argv[])
         }
         else if (settingsOnly)
         {
-            RunConsolidatedSettingsScenario(instance);
+            RunDefaultSettingsScenario(instance);
         }
         else
         {
