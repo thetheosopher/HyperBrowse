@@ -601,6 +601,7 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> recentFolders_;
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
+        std::wstring lastQuickSendDestination_;
         QuickSendModel quickSendModel_;
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems_;
         std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
@@ -714,6 +715,7 @@ namespace hyperbrowse::ui
         std::deque<PendingViewerDelete> pendingViewerDeletes_;
         PendingViewerQuickSend pendingViewerQuickSend_;
         bool quickSendPopupActive_{};
+        std::size_t quickSendPopupInitialDownCount_{};
         std::wstring pendingFolderWatchReloadPath_;
         bool pendingFolderWatchTreeRefresh_{};
         std::wstring activeFileOperationLabel_;

@@ -94,6 +94,7 @@ namespace
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
     constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
+    constexpr wchar_t kRegistryValueLastQuickSendDestination[] = L"LastQuickSendDestination";
     constexpr wchar_t kRegistryValueQuickSendShortcutPrefix[] = L"QuickSendShortcut";
     constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
     constexpr wchar_t kRegistryValuePairedRawJpegViewerPreference[] = L"PairedRawJpegViewerPreference";
@@ -228,6 +229,35 @@ namespace
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
     constexpr UINT_PTR kFolderEnumerationPresentationTimerId = 9102;
     constexpr UINT kFolderEnumerationPresentationIntervalMs = 50;
+    HWND FindPopupMenuWindow(HMENU menu)
+    {
+        struct SearchContext
+        {
+            HMENU menu{};
+            HWND window{};
+        } context{menu};
+
+        EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM lParam)
+        {
+            auto* context = reinterpret_cast<SearchContext*>(lParam);
+            if (!context || GetMenu(window) != context->menu)
+            {
+                return TRUE;
+            }
+
+            wchar_t className[32]{};
+            if (GetClassNameW(window, className, static_cast<int>(std::size(className))) > 0
+                && _wcsicmp(className, L"#32768") == 0)
+            {
+                context->window = window;
+                return FALSE;
+            }
+
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&context));
+        return context.window;
+    }
+
     constexpr wchar_t kTextInputDialogClassName[] = L"HyperBrowseTextInputDialog";
     constexpr std::array kThumbnailSizePresets{
         hyperbrowse::browser::ThumbnailSizePreset::Pixels96,
@@ -13864,11 +13894,15 @@ namespace hyperbrowse::ui
                 conflictPolicy).targetLeafNames;
         }
 
-        StartFileOperation(type,
-                           std::vector<std::wstring>(sourcePaths),
-                           std::move(destinationFolder),
-                           conflictPolicy,
-                           std::move(targetLeafNames));
+        const std::wstring quickSendDestination = destinationFolder;
+        if (StartFileOperation(type,
+                               std::vector<std::wstring>(sourcePaths),
+                               std::move(destinationFolder),
+                               conflictPolicy,
+                               std::move(targetLeafNames)))
+        {
+            lastQuickSendDestination_ = quickSendDestination;
+        }
     }
 
     bool MainWindow::ShowShellContextMenuForSelection(POINT screenPoint)
@@ -18683,6 +18717,8 @@ namespace hyperbrowse::ui
                 favoriteDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kFavoriteDestinationLimit);
             }
 
+            TryReadStringValue(key, kRegistryValueLastQuickSendDestination, &lastQuickSendDestination_);
+
             SyncQuickSendModel();
             QuickSendModel::ShortcutAssignments shortcutAssignments{};
             for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
@@ -18804,6 +18840,7 @@ namespace hyperbrowse::ui
         detailsPanelWidth_ = std::max(detailsPanelWidth_, kDetailsPanelMinWidth);
         startupFolderPath_ = NormalizeFolderPath(std::move(startupFolderPath_));
         startupSelectedImagePath_ = NormalizeFolderPath(std::move(startupSelectedImagePath_));
+        lastQuickSendDestination_ = NormalizeFolderPath(std::move(lastQuickSendDestination_));
     }
 
     void MainWindow::ApplyStartupLaunchPathOverride()
@@ -18912,6 +18949,14 @@ namespace hyperbrowse::ui
             WriteStringValue(key, kRegistryValueRecentFolders, SerializeFolderPathList(recentFolders_));
             WriteStringValue(key, kRegistryValueRecentDestinationFolders, SerializeFolderPathList(recentDestinationFolders_));
             WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, SerializeFolderPathList(favoriteDestinationFolders_));
+            if (!lastQuickSendDestination_.empty())
+            {
+                WriteStringValue(key, kRegistryValueLastQuickSendDestination, lastQuickSendDestination_);
+            }
+            else
+            {
+                RegDeleteValueW(key, kRegistryValueLastQuickSendDestination);
+            }
             const QuickSendModel::ShortcutAssignments& shortcutAssignments = quickSendModel_.ShortcutAssignmentsByKey();
             for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
             {
@@ -19534,6 +19579,20 @@ namespace hyperbrowse::ui
             return false;
         }
 
+        quickSendPopupInitialDownCount_ = destinations.empty() ? 0 : 1;
+        if (!lastQuickSendDestination_.empty())
+        {
+            for (std::size_t index = 0; index < destinations.size(); ++index)
+            {
+                if (FolderPathsEqual(destinations[index], lastQuickSendDestination_)
+                    && IsExistingDirectory(destinations[index]))
+                {
+                    quickSendPopupInitialDownCount_ = index + 2;
+                    break;
+                }
+            }
+        }
+
         AppendMenuW(popupMenu,
                     MF_STRING,
                     kQuickSendPopupBrowseCommand,
@@ -19580,6 +19639,7 @@ namespace hyperbrowse::ui
             hwnd_,
             nullptr);
         quickSendPopupActive_ = false;
+        quickSendPopupInitialDownCount_ = 0;
         DestroyMenu(popupMenu);
         SetForegroundWindow(browseOwner);
 
@@ -19745,6 +19805,7 @@ namespace hyperbrowse::ui
         pending.active = true;
         pendingViewerQuickSend_ = std::move(pending);
 
+        const std::wstring quickSendDestination = destinationFolder;
         if (!StartFileOperation(type,
                                 sourcePaths,
                                 destinationFolder,
@@ -19755,6 +19816,7 @@ namespace hyperbrowse::ui
             pendingViewerQuickSend_ = {};
             return false;
         }
+        lastQuickSendDestination_ = quickSendDestination;
 
         if (type == services::FileOperationType::Move)
         {
@@ -22078,8 +22140,12 @@ namespace hyperbrowse::ui
         case WM_INITMENUPOPUP:
             if (quickSendPopupActive_ && HIWORD(lParam) == FALSE)
             {
-                PostMessageW(hwnd_, WM_KEYDOWN, VK_DOWN, 0);
-                PostMessageW(hwnd_, WM_KEYUP, VK_DOWN, 0);
+                const HWND popupWindow = FindPopupMenuWindow(reinterpret_cast<HMENU>(lParam));
+                for (std::size_t index = 0; popupWindow && index < quickSendPopupInitialDownCount_; ++index)
+                {
+                    PostMessageW(popupWindow, WM_KEYDOWN, VK_DOWN, 0);
+                    PostMessageW(popupWindow, WM_KEYUP, VK_DOWN, 0);
+                }
             }
             break;
         case WM_KEYDOWN:
