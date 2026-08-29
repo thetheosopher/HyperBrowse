@@ -4597,6 +4597,11 @@ namespace
                 tabLeft, tabTop, tabWidth, tabHeight, hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kConsolidatedSettingsTabControlId)),
                 state->instance, nullptr);
+            constexpr UINT kTabControlSetBackgroundColorMessage = TCM_FIRST + 1;
+            SendMessageW(state->tabWindow,
+                         kTabControlSetBackgroundColorMessage,
+                         0,
+                         static_cast<LPARAM>(GetSysColor(COLOR_WINDOW)));
             const wchar_t* tabNames[] = {L"Slideshow", L"Viewer", L"Appearance", L"Performance", L"Behavior"};
             for (std::size_t tabIndex = 0; tabIndex < std::size(tabNames); ++tabIndex)
             {
@@ -4702,14 +4707,14 @@ namespace
             const int labelWidth = std::max(300, measuredLabelWidth + 18);
             const int valueLeft = pageLeft + labelWidth;
             const int valueWidth = std::max(360, measuredValueWidth + 48);
+            const int radioColumnWidth = valueWidth / 2;
             const int rowHeight = std::max(32, static_cast<int>(textMetrics.tmHeight) + 12);
             const int rowGap = std::max(10, rowHeight / 3);
             const int checkboxWidth = std::max(measuredCheckboxWidth + 38, pageRight - pageLeft);
-            const int labelTopInset = std::max(2, (rowHeight - static_cast<int>(textMetrics.tmHeight)) / 2);
             auto label = [&](ConsolidatedSettingsPage page, const wchar_t* text, int y)
             {
-                return CreateConsolidatedSettingsControl(*state, page, L"STATIC", text, SS_LEFT | SS_NOPREFIX,
-                                                          pageLeft, y + labelTopInset, labelWidth - 12, rowHeight - labelTopInset, 0);
+                return CreateConsolidatedSettingsControl(*state, page, L"STATIC", text, SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX,
+                                                          pageLeft, y, labelWidth - 12, rowHeight, 0);
             };
             auto check = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int y, DWORD extraStyle = 0)
             {
@@ -4734,7 +4739,7 @@ namespace
             auto radio = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int x, int y, DWORD extraStyle = 0)
             {
                 return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", text, BS_AUTORADIOBUTTON | WS_TABSTOP | extraStyle,
-                                                          x, y, valueWidth / 2, rowHeight, ConsolidatedSettingsControlId(control), control);
+                                                          x, y, radioColumnWidth, rowHeight, ConsolidatedSettingsControlId(control), control);
             };
 
             int y = pageTop + 16;
@@ -4758,7 +4763,7 @@ namespace
             y += rowHeight + rowGap;
             label(ConsolidatedSettingsPage::Viewer, L"Mouse wheel", y);
             radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelZoom, L"Zoom", valueLeft, y, WS_GROUP);
-            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelNavigate, L"Navigate", valueLeft + 145, y);
+            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelNavigate, L"Navigate", valueLeft + radioColumnWidth, y);
             y += rowHeight + rowGap;
                 check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::InvertKeyboardPanning, L"Invert Keyboard Panning", y);
                 y += rowHeight + rowGap;
@@ -4766,7 +4771,7 @@ namespace
             y += rowHeight + rowGap;
             label(ConsolidatedSettingsPage::Viewer, L"Paired viewer preference", y);
             radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferRaw, L"Prefer RAW", valueLeft, y, WS_GROUP);
-            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferJpeg, L"Prefer JPEG", valueLeft + 145, y);
+            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferJpeg, L"Prefer JPEG", valueLeft + radioColumnWidth, y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::SecondaryMonitor, L"Open viewers on a secondary monitor when available", y);
             y += rowHeight + rowGap;
@@ -4780,7 +4785,7 @@ namespace
             y = pageTop + 16;
             label(ConsolidatedSettingsPage::Appearance, L"Theme", y);
             radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeLight, L"Light", valueLeft, y, WS_GROUP);
-            radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeDark, L"Dark", valueLeft + 145, y);
+            radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeDark, L"Dark", valueLeft + radioColumnWidth, y);
             y += rowHeight + rowGap;
             label(ConsolidatedSettingsPage::Appearance, L"Application text size", y);
             combo(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::AppTextSize, y);
@@ -4946,6 +4951,13 @@ namespace
         case WM_CTLCOLORDLG:
             return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
         case WM_CTLCOLORSTATIC:
+        {
+            const HDC dc = reinterpret_cast<HDC>(wParam);
+            SetBkMode(dc, OPAQUE);
+            SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+            SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+        }
         case WM_CTLCOLORBTN:
         case WM_CTLCOLOREDIT:
         case WM_CTLCOLORLISTBOX:
