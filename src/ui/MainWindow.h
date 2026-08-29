@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "browser/BrowserModel.h"
+#include "render/D2DRenderer.h"
 #include "util/ResourceSizing.h"
 #include "util/UiTextSize.h"
 #include "ui/QuickSend.h"
@@ -463,10 +464,13 @@ namespace hyperbrowse::ui
         void ResetDetailsPanelHistogram();
         void RequestDetailsPanelHistogram(const browser::BrowserItem& item, int modelIndex);
         void ApplyDetailsPanelHistogram(const cache::CachedThumbnail& thumbnail);
+        bool PaintDetailsPanelD2D(HDC hdc, const RECT& clientRect) const;
         void PaintDetailsPanel(HDC hdc, const RECT& clientRect) const;
         void DrawStatusStrip(const DRAWITEMSTRUCT& drawItem) const;
+        bool DrawStatusStripD2D(const DRAWITEMSTRUCT& drawItem) const;
         void MeasureOwnerDrawMenuItem(MEASUREITEMSTRUCT* measureItem) const;
         void DrawOwnerDrawMenuItem(const DRAWITEMSTRUCT& drawItem) const;
+        bool DrawOwnerDrawMenuItemD2D(const DRAWITEMSTRUCT& drawItem) const;
         int CommandBarMenuHitTest(int x, int y) const;
         void ActivateCommandBarKeyboardMode(int index);
         void DeactivateCommandBarKeyboardMode(bool restoreFocus);
@@ -476,6 +480,10 @@ namespace hyperbrowse::ui
         void InitToolbarItems();
         void LayoutToolbar();
         void PaintToolbar(HDC hdc, const RECT& stripRect);
+        bool EnsureD2DResources();
+        void ResetD2DResources();
+        void PaintMainShellD2D(ID2D1RenderTarget* renderTarget, const RECT& clientRect);
+        void PaintToolbarD2D(ID2D1RenderTarget* renderTarget, const RECT& stripRect);
         int ToolbarHitTest(int x, int y) const;
         void ToolbarHandleClick(int itemIndex);
         void ShowDropdownForItem(int itemIndex);
@@ -587,6 +595,8 @@ namespace hyperbrowse::ui
         HFONT detailsPanelTitleFont_{};
         HFONT detailsPanelSummaryFont_{};
         HFONT detailsPanelBodyFont_{};
+        hyperbrowse::render::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget_;
+        hyperbrowse::render::ComPtr<IDWriteTextFormat> d2dToolbarTextFormat_;
         std::wstring startupLaunchPathOverride_;
         std::wstring startupFolderPath_;
         std::wstring startupSelectedImagePath_;

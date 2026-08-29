@@ -625,40 +625,6 @@ namespace
                           static_cast<int>(kThumbnailRatingStars.size()));
     }
 
-    float MeasureDWriteTextWidth(IDWriteTextFormat* format, std::wstring_view text)
-    {
-        if (!format || text.empty())
-        {
-            return 0.0f;
-        }
-
-        IDWriteFactory* dwriteFactory = hyperbrowse::render::D2DRenderer::Instance().DWriteFactory();
-        if (!dwriteFactory)
-        {
-            return 0.0f;
-        }
-
-        Microsoft::WRL::ComPtr<IDWriteTextLayout> textLayout;
-        const HRESULT result = dwriteFactory->CreateTextLayout(text.data(),
-                                                               static_cast<UINT32>(text.size()),
-                                                               format,
-                                                               512.0f,
-                                                               128.0f,
-                                                               textLayout.GetAddressOf());
-        if (FAILED(result) || !textLayout)
-        {
-            return 0.0f;
-        }
-
-        DWRITE_TEXT_METRICS textMetrics{};
-        if (FAILED(textLayout->GetMetrics(&textMetrics)))
-        {
-            return 0.0f;
-        }
-
-        return textMetrics.widthIncludingTrailingWhitespace;
-    }
-
     D2D1_RECT_F InsetD2DRect(const D2D1_RECT_F& rect, float insetX, float insetY)
     {
         return D2D1::RectF(rect.left + insetX,
@@ -1709,13 +1675,13 @@ namespace hyperbrowse::browser
         layout.previewCornerRadius = compact ? 10 : 12;
         layout.loadingIconSize = std::clamp(previewWidth / 5, 18, 40);
         layout.titlePointSize = hyperbrowse::util::ScaleAppTextDimension(
-            std::clamp(previewWidth / (compact ? 15 : 14), compact ? 12 : 13, compact ? 14 : 15),
+            std::clamp(previewWidth / 20, 9, 10),
             appTextSize_);
         layout.metaPointSize = hyperbrowse::util::ScaleAppTextDimension(
-            std::clamp(previewWidth / (compact ? 18 : 17), compact ? 11 : 12, compact ? 12 : 13),
+            std::clamp(previewWidth / 24, 8, 9),
             appTextSize_);
         layout.statusPointSize = hyperbrowse::util::ScaleAppTextDimension(
-            std::clamp(previewWidth / (compact ? 18 : 17), compact ? 11 : 12, compact ? 12 : 13),
+            std::clamp(previewWidth / 24, 8, 9),
             appTextSize_);
         const int horizontalInset = std::max(layout.previewInset, layout.textInset);
         layout.itemWidth = layout.previewWidth + (horizontalInset * 2);
@@ -3503,23 +3469,12 @@ namespace hyperbrowse::browser
         }
 
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
-        d2dTitleFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.titlePointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        d2dFolderTitleFormat_ = renderer.CreateTextFormat(
-            L"Segoe UI",
-            static_cast<float>(std::clamp(layout.titlePointSize + hyperbrowse::util::ScaleAppTextDimension(3, appTextSize_),
-                                          hyperbrowse::util::ScaleAppTextDimension(14, appTextSize_),
-                                          hyperbrowse::util::ScaleAppTextDimension(20, appTextSize_))),
-            DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        d2dMetaFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.metaPointSize), DWRITE_FONT_WEIGHT_NORMAL);
-        d2dStatusFormat_ = renderer.CreateTextFormat(L"Segoe UI", static_cast<float>(layout.statusPointSize), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        d2dPlaceholderTitleFormat_ = renderer.CreateTextFormat(
-            L"Segoe UI",
-            static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(kPlaceholderTitlePointSize, appTextSize_)),
-            DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        d2dPlaceholderBodyFormat_ = renderer.CreateTextFormat(
-            L"Segoe UI",
-            static_cast<float>(hyperbrowse::util::ScaleAppTextDimension(kPlaceholderBodyPointSize, appTextSize_)),
-            DWRITE_FONT_WEIGHT_NORMAL);
+        d2dTitleFormat_ = renderer.CreateTextFormatFromFont(thumbnailTitleFont_);
+        d2dFolderTitleFormat_ = renderer.CreateTextFormatFromFont(folderTitleFont_);
+        d2dMetaFormat_ = renderer.CreateTextFormatFromFont(thumbnailMetaFont_);
+        d2dStatusFormat_ = renderer.CreateTextFormatFromFont(thumbnailStatusFont_);
+        d2dPlaceholderTitleFormat_ = renderer.CreateTextFormatFromFont(placeholderTitleFont_);
+        d2dPlaceholderBodyFormat_ = renderer.CreateTextFormatFromFont(placeholderBodyFont_);
 
         const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
 
@@ -3717,7 +3672,11 @@ namespace hyperbrowse::browser
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dRatingBrush;
         if (thumbnailDetailsVisible_)
         {
-            ratingStripWidth = MeasureDWriteTextWidth(d2dMetaFormat_.Get(), kThumbnailRatingStars);
+            ratingStripWidth = render::D2DRenderer::Instance().MeasureTextWidth(
+                kThumbnailRatingStars,
+                d2dMetaFormat_.Get(),
+                512.0f,
+                128.0f);
             if (ratingStripWidth <= 0.0f)
             {
                 ratingStripWidth = static_cast<float>(layout.infoHeight * 3);

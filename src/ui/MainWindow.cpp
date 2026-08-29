@@ -1,7 +1,9 @@
 #include "ui/MainWindow.h"
 
 #include <commctrl.h>
+#include <d2d1.h>
 #include <dwmapi.h>
+#include <dwrite.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shellapi.h>
@@ -44,6 +46,7 @@
 #include "ui/CommandIds.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ToolbarIconLibrary.h"
+#include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
@@ -378,6 +381,7 @@ namespace
     constexpr int kConsolidatedSettingsTabControlId = 360;
     constexpr int kConsolidatedSettingsFirstControlId = 5000;
     constexpr int kConsolidatedSettingsMargin = 18;
+    constexpr int kConsolidatedSettingsPagePadding = 8;
     constexpr int kConsolidatedSettingsButtonWidth = 84;
     constexpr int kConsolidatedSettingsButtonHeight = 30;
     constexpr int kConsolidatedSettingsButtonGap = 10;
@@ -678,6 +682,12 @@ namespace
         std::wstring bodyContent;
         std::wstring footer;
         std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> brandArt;
+        Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dBrandArtBitmap;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dTitleFormat;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dSubtitleFormat;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dBodyFormat;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dFooterFormat;
     };
 
     struct ShortcutReferenceState
@@ -3927,6 +3937,216 @@ namespace
                     state.footerBackground);
     }
 
+    bool EnsureAboutDialogD2DResources(HWND hwnd, AboutDialogState& state)
+    {
+        if (state.d2dRenderTarget)
+        {
+            return true;
+        }
+
+        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+        if (!renderer.IsAvailable())
+        {
+            return false;
+        }
+
+        state.d2dRenderTarget = renderer.CreateHwndRenderTarget(hwnd);
+        if (!state.d2dRenderTarget)
+        {
+            return false;
+        }
+
+        state.d2dTitleFormat = renderer.CreateTextFormatFromFont(state.titleFont);
+        state.d2dSubtitleFormat = renderer.CreateTextFormatFromFont(state.subtitleFont);
+        state.d2dBodyFormat = renderer.CreateTextFormatFromFont(state.bodyFont);
+        state.d2dFooterFormat = renderer.CreateTextFormatFromFont(state.footerFont);
+
+        if (!state.d2dTitleFormat
+            || !state.d2dSubtitleFormat
+            || !state.d2dBodyFormat
+            || !state.d2dFooterFormat)
+        {
+            state.d2dRenderTarget.Reset();
+            state.d2dBrandArtBitmap.Reset();
+            state.d2dTitleFormat.Reset();
+            state.d2dSubtitleFormat.Reset();
+            state.d2dBodyFormat.Reset();
+            state.d2dFooterFormat.Reset();
+            return false;
+        }
+
+        state.d2dTitleFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        state.d2dSubtitleFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        state.d2dBodyFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+        state.d2dFooterFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+
+        if (state.brandArt)
+        {
+            state.d2dBrandArtBitmap = renderer.CreateBitmapFromCachedThumbnail(
+                state.d2dRenderTarget.Get(),
+                *state.brandArt);
+        }
+
+        return true;
+    }
+
+    void PaintAboutDialogD2D(ID2D1RenderTarget* renderTarget,
+                            const D2D1_SIZE_F& size,
+                            const AboutDialogState& state)
+    {
+        if (!renderTarget)
+        {
+            return;
+        }
+
+        const int clientWidth = static_cast<int>(size.width);
+        const int clientHeight = static_cast<int>(size.height);
+        const int contentRight = clientWidth - kAboutDialogMargin;
+        const int artLeft = contentRight - kAboutDialogBrandArtSize;
+        const int artTop = kAboutDialogMargin - 4;
+        const int iconLeft = kAboutDialogMargin;
+        const int iconTop = kAboutDialogMargin + 2;
+        const int iconSize = 48;
+        const int textLeft = iconLeft + iconSize + 20;
+        const int textRight = artLeft - 28;
+        const int textWidth = std::max(320, textRight - textLeft);
+
+        const int titleTop = kAboutDialogMargin - 2;
+        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 44);
+        const int subtitleTop = titleTop + titleHeight + 10;
+        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int introTop = subtitleTop + subtitleHeight + 10;
+        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 40);
+        const int artFrameBottom = artTop + kAboutDialogBrandArtSize + 10;
+        const int headerHeight = std::max(kAboutDialogHeaderHeight,
+                                          std::max(artFrameBottom + kAboutDialogMargin - 8,
+                                                   introTop + introHeight + kAboutDialogMargin - 8));
+
+        const int bodyWidth = clientWidth - (kAboutDialogMargin * 2);
+        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int footerTextWidth = MeasureAboutDialogFooterTextWidth(state, clientWidth);
+        const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
+        const int footerHeight = std::max(kAboutDialogFooterHeight, std::max(footerTextHeight + 34, kAboutDialogButtonHeight + 36));
+
+        const D2D1_RECT_F headerRect = D2D1::RectF(0.0f, 0.0f, static_cast<float>(clientWidth), static_cast<float>(headerHeight));
+        const D2D1_RECT_F footerRect = D2D1::RectF(0.0f, static_cast<float>(clientHeight - footerHeight), static_cast<float>(clientWidth), static_cast<float>(clientHeight));
+        const D2D1_RECT_F bodyRect = D2D1::RectF(0.0f, static_cast<float>(headerHeight), static_cast<float>(clientWidth), static_cast<float>(clientHeight - footerHeight));
+
+        auto createBrush = [renderTarget](COLORREF color)
+        {
+            Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
+            renderTarget->CreateSolidColorBrush(
+                hyperbrowse::render::ToD2DColor(color),
+                brush.GetAddressOf());
+            return brush;
+        };
+
+        const auto backgroundBrush = createBrush(state.background);
+        const auto headerBrush = createBrush(state.headerBackground);
+        const auto footerBrush = createBrush(state.footerBackground);
+        const auto panelBrush = createBrush(state.panelBackground);
+        const auto borderBrush = createBrush(state.border);
+        const auto textBrush = createBrush(state.text);
+        const auto mutedTextBrush = createBrush(state.mutedText);
+        const auto accentBrush = createBrush(state.accent);
+
+        renderTarget->Clear(hyperbrowse::render::ToD2DColor(state.background));
+        if (headerBrush)
+        {
+            renderTarget->FillRectangle(&headerRect, headerBrush.Get());
+        }
+        if (footerBrush)
+        {
+            renderTarget->FillRectangle(&footerRect, footerBrush.Get());
+        }
+        if (panelBrush)
+        {
+            renderTarget->FillRectangle(&bodyRect, panelBrush.Get());
+        }
+        if (borderBrush)
+        {
+            renderTarget->DrawLine(
+                D2D1::Point2F(0.0f, static_cast<float>(headerHeight - 1)),
+                D2D1::Point2F(static_cast<float>(clientWidth), static_cast<float>(headerHeight - 1)),
+                borderBrush.Get());
+            renderTarget->DrawLine(
+                D2D1::Point2F(0.0f, static_cast<float>(clientHeight - footerHeight)),
+                D2D1::Point2F(static_cast<float>(clientWidth), static_cast<float>(clientHeight - footerHeight)),
+                borderBrush.Get());
+        }
+
+        if (state.d2dBrandArtBitmap)
+        {
+            const D2D1_RECT_F artFrame = D2D1::RectF(
+                static_cast<float>(artLeft - 10),
+                static_cast<float>(artTop - 10),
+                static_cast<float>(artLeft + kAboutDialogBrandArtSize + 10),
+                static_cast<float>(artTop + kAboutDialogBrandArtSize + 10));
+            if (panelBrush)
+            {
+                renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(artFrame, 9.0f, 9.0f),
+                    panelBrush.Get());
+            }
+            if (borderBrush)
+            {
+                renderTarget->DrawRoundedRectangle(
+                    D2D1::RoundedRect(artFrame, 9.0f, 9.0f),
+                    borderBrush.Get(),
+                    1.0f);
+            }
+            renderTarget->DrawBitmap(
+                state.d2dBrandArtBitmap.Get(),
+                D2D1::RectF(static_cast<float>(artLeft),
+                            static_cast<float>(artTop),
+                            static_cast<float>(artLeft + kAboutDialogBrandArtSize),
+                            static_cast<float>(artTop + kAboutDialogBrandArtSize)),
+                1.0f,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        }
+
+        const auto drawText = [renderTarget](std::wstring_view text,
+                                             IDWriteTextFormat* format,
+                                             const RECT& rect,
+                                             ID2D1Brush* brush)
+        {
+            if (text.empty() || !format || !brush)
+            {
+                return;
+            }
+
+            renderTarget->DrawText(
+                text.data(),
+                static_cast<UINT32>(text.size()),
+                format,
+                hyperbrowse::render::ToD2DRect(rect),
+                brush);
+        };
+
+        const RECT titleRect{textLeft, titleTop, textRight, titleTop + titleHeight};
+        const RECT subtitleRect{textLeft, subtitleTop, textRight, subtitleTop + subtitleHeight};
+        const RECT introRect{textLeft, introTop, textRight, introTop + introHeight};
+        drawText(state.title, state.d2dTitleFormat.Get(), titleRect, textBrush.Get());
+        drawText(state.subtitle, state.d2dSubtitleFormat.Get(), subtitleRect, accentBrush.Get());
+        drawText(state.intro, state.d2dBodyFormat.Get(), introRect, mutedTextBrush.Get());
+
+        const RECT headingRect{kAboutDialogMargin, headerHeight + 24, clientWidth - kAboutDialogMargin, headerHeight + 24 + headingHeight};
+        const RECT bodyTextRect{kAboutDialogMargin, headingRect.bottom + 12, clientWidth - kAboutDialogMargin, clientHeight - footerHeight - 18};
+        drawText(state.bodyHeading, state.d2dSubtitleFormat.Get(), headingRect, accentBrush.Get());
+        drawText(state.bodyContent, state.d2dBodyFormat.Get(), bodyTextRect, textBrush.Get());
+
+        const RECT footerTextRect{kAboutDialogMargin,
+                                  clientHeight - footerHeight + 18,
+                                  std::max(kAboutDialogMargin + 200, AboutDialogFooterButtonsLeft(RECT{0, 0, clientWidth, clientHeight}, state) - 20),
+                                  clientHeight - 16};
+        drawText(state.footer, state.d2dFooterFormat.Get(), footerTextRect, mutedTextBrush.Get());
+
+        (void)backgroundBrush;
+        (void)iconLeft;
+        (void)iconTop;
+        (void)iconSize;
+    }
+
     LRESULT CALLBACK AboutDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         auto* state = reinterpret_cast<AboutDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -4025,6 +4245,29 @@ namespace
                 LayoutAboutDialogControls(hwnd, *state);
             }
             return 0;
+        case WM_DPICHANGED:
+            if (state)
+            {
+                const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+                if (suggested)
+                {
+                    SetWindowPos(hwnd,
+                                 nullptr,
+                                 suggested->left,
+                                 suggested->top,
+                                 suggested->right - suggested->left,
+                                 suggested->bottom - suggested->top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                state->d2dRenderTarget.Reset();
+                state->d2dBrandArtBitmap.Reset();
+                state->d2dTitleFormat.Reset();
+                state->d2dSubtitleFormat.Reset();
+                state->d2dBodyFormat.Reset();
+                state->d2dFooterFormat.Reset();
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
         case WM_SHOWWINDOW:
             if (wParam != FALSE && state && state->okButton)
             {
@@ -4045,7 +4288,47 @@ namespace
             HDC hdc = BeginPaint(hwnd, &ps);
             RECT clientRect{};
             GetClientRect(hwnd, &clientRect);
-            PaintAboutDialog(hdc, clientRect, *state);
+
+            bool paintedWithD2D = false;
+            if (EnsureAboutDialogD2DResources(hwnd, *state))
+            {
+                hyperbrowse::render::D2DRenderer::Instance().ResizeRenderTarget(
+                    state->d2dRenderTarget.Get(),
+                    hwnd);
+                state->d2dRenderTarget->BeginDraw();
+                PaintAboutDialogD2D(
+                    state->d2dRenderTarget.Get(),
+                    state->d2dRenderTarget->GetSize(),
+                    *state);
+                const HRESULT drawResult = state->d2dRenderTarget->EndDraw();
+                paintedWithD2D = SUCCEEDED(drawResult);
+                if (drawResult == D2DERR_RECREATE_TARGET)
+                {
+                    state->d2dRenderTarget.Reset();
+                    state->d2dBrandArtBitmap.Reset();
+                    state->d2dTitleFormat.Reset();
+                    state->d2dSubtitleFormat.Reset();
+                    state->d2dBodyFormat.Reset();
+                    state->d2dFooterFormat.Reset();
+                }
+            }
+
+            if (!paintedWithD2D)
+            {
+                PaintAboutDialog(hdc, clientRect, *state);
+            }
+            if (paintedWithD2D && state->heroIcon)
+            {
+                DrawIconEx(hdc,
+                           kAboutDialogMargin,
+                           kAboutDialogMargin + 2,
+                           state->heroIcon,
+                           48,
+                           48,
+                           0,
+                           nullptr,
+                           DI_NORMAL);
+            }
             EndPaint(hwnd, &ps);
             return 0;
         }
@@ -4593,7 +4876,7 @@ namespace
             const int tabHeight = buttonTop - kConsolidatedSettingsMargin - tabTop;
             state->tabWindow = CreateWindowExW(
                 0, WC_TABCONTROLW, nullptr,
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_FOCUSNEVER,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_FOCUSNEVER | TCS_OWNERDRAWFIXED,
                 tabLeft, tabTop, tabWidth, tabHeight, hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kConsolidatedSettingsTabControlId)),
                 state->instance, nullptr);
@@ -4617,6 +4900,8 @@ namespace
             const int pageLeft = tabLeft + displayRect.left;
             const int pageTop = tabTop + displayRect.top;
             const int pageRight = tabLeft + displayRect.right;
+            const int pageContentLeft = pageLeft + kConsolidatedSettingsPagePadding;
+            const int pageContentRight = pageRight - kConsolidatedSettingsPagePadding;
             HDC measureDc = GetDC(hwnd);
             HFONT oldMeasureFont = nullptr;
             if (measureDc)
@@ -4705,21 +4990,21 @@ namespace
                 ReleaseDC(hwnd, measureDc);
             }
             const int labelWidth = std::max(300, measuredLabelWidth + 18);
-            const int valueLeft = pageLeft + labelWidth;
+            const int valueLeft = pageContentLeft + labelWidth;
             const int valueWidth = std::max(360, measuredValueWidth + 48);
             const int radioColumnWidth = valueWidth / 2;
             const int rowHeight = std::max(32, static_cast<int>(textMetrics.tmHeight) + 12);
             const int rowGap = std::max(10, rowHeight / 3);
-            const int checkboxWidth = std::max(measuredCheckboxWidth + 38, pageRight - pageLeft);
+            const int checkboxWidth = std::max(measuredCheckboxWidth + 38, pageContentRight - pageContentLeft);
             auto label = [&](ConsolidatedSettingsPage page, const wchar_t* text, int y)
             {
                 return CreateConsolidatedSettingsControl(*state, page, L"STATIC", text, SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX,
-                                                          pageLeft, y, labelWidth - 12, rowHeight, 0);
+                                                          pageContentLeft, y, labelWidth - 12, rowHeight, 0);
             };
             auto check = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int y, DWORD extraStyle = 0)
             {
                 return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", text, BS_AUTOCHECKBOX | WS_TABSTOP | extraStyle,
-                                                          pageLeft, y, checkboxWidth, rowHeight, ConsolidatedSettingsControlId(control), control);
+                                                          pageContentLeft, y, checkboxWidth, rowHeight, ConsolidatedSettingsControlId(control), control);
             };
             auto combo = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, int y)
             {
@@ -4975,30 +5260,84 @@ namespace
             FillRect(reinterpret_cast<HDC>(wParam), &client, GetSysColorBrush(COLOR_WINDOW));
             return 1;
         }
+        case WM_DRAWITEM:
+            if (state && wParam == static_cast<WPARAM>(kConsolidatedSettingsTabControlId))
+            {
+                const auto* drawItem = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+                if (!drawItem || drawItem->CtlType != ODT_TAB || !drawItem->hDC)
+                {
+                    return FALSE;
+                }
+
+                RECT itemRect = drawItem->rcItem;
+                const int width = itemRect.right - itemRect.left;
+                const int height = itemRect.bottom - itemRect.top;
+                if (width <= 0 || height <= 0)
+                {
+                    return TRUE;
+                }
+
+                wchar_t tabText[64]{};
+                TCITEMW item{};
+                item.mask = TCIF_TEXT;
+                item.pszText = tabText;
+                item.cchTextMax = static_cast<int>(std::size(tabText));
+                TabCtrl_GetItem(state->tabWindow, static_cast<int>(drawItem->itemID), &item);
+
+                auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+                const auto renderTarget = renderer.CreateDCRenderTarget();
+                const auto textFormat = renderer.CreateTextFormatFromFont(state->bodyFont);
+                if (renderTarget && textFormat && SUCCEEDED(renderTarget->BindDC(drawItem->hDC, &itemRect)))
+                {
+                    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> backgroundBrush;
+                    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> textBrush;
+                    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> accentBrush;
+                    renderTarget->CreateSolidColorBrush(
+                        hyperbrowse::render::ToD2DColor(GetSysColor(COLOR_WINDOW)),
+                        backgroundBrush.GetAddressOf());
+                    renderTarget->CreateSolidColorBrush(
+                        hyperbrowse::render::ToD2DColor(GetSysColor(COLOR_WINDOWTEXT)),
+                        textBrush.GetAddressOf());
+                    renderTarget->CreateSolidColorBrush(
+                        hyperbrowse::render::ToD2DColor(GetSysColor(COLOR_HIGHLIGHT)),
+                        accentBrush.GetAddressOf());
+                    if (backgroundBrush && textBrush && accentBrush)
+                    {
+                        renderTarget->BeginDraw();
+                        renderTarget->Clear(hyperbrowse::render::ToD2DColor(GetSysColor(COLOR_WINDOW)));
+                        renderTarget->FillRectangle(
+                            D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
+                            backgroundBrush.Get());
+                        renderTarget->DrawText(
+                            tabText,
+                            static_cast<UINT32>(wcslen(tabText)),
+                            textFormat.Get(),
+                            D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
+                            textBrush.Get());
+                        if ((drawItem->itemState & ODS_SELECTED) != 0)
+                        {
+                            renderTarget->FillRectangle(
+                                D2D1::RectF(0.0f, static_cast<float>(std::max(0, height - 2)),
+                                             static_cast<float>(width), static_cast<float>(height)),
+                                accentBrush.Get());
+                        }
+                        renderTarget->EndDraw();
+                    }
+                }
+                else
+                {
+                    FillRect(drawItem->hDC, &itemRect, GetSysColorBrush(COLOR_WINDOW));
+                    SetBkMode(drawItem->hDC, TRANSPARENT);
+                    SetTextColor(drawItem->hDC, GetSysColor(COLOR_WINDOWTEXT));
+                    DrawTextW(drawItem->hDC, tabText, -1, &itemRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                }
+                return TRUE;
+            }
+            break;
         case WM_NOTIFY:
             if (state)
             {
                 const auto* notify = reinterpret_cast<const NMHDR*>(lParam);
-                if (notify && notify->hwndFrom == state->tabWindow && notify->code == NM_CUSTOMDRAW)
-                {
-                    auto* customDraw = reinterpret_cast<NMCUSTOMDRAW*>(lParam);
-                    if (customDraw->dwDrawStage == CDDS_PREPAINT)
-                    {
-                        return CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT;
-                    }
-                    if (customDraw->dwDrawStage == CDDS_ITEMPREPAINT)
-                    {
-                        return CDRF_NEWFONT;
-                    }
-                    if (customDraw->dwDrawStage == CDDS_POSTPAINT)
-                    {
-                        RECT pageRect{};
-                        GetClientRect(state->tabWindow, &pageRect);
-                        TabCtrl_AdjustRect(state->tabWindow, FALSE, &pageRect);
-                        FillRect(customDraw->hdc, &pageRect, GetSysColorBrush(COLOR_WINDOW));
-                    }
-                    return CDRF_DODEFAULT;
-                }
                 if (notify && notify->code == UDN_DELTAPOS)
                 {
                     const auto* upDown = reinterpret_cast<const NMUPDOWN*>(lParam);
@@ -5124,7 +5463,6 @@ namespace
                 return false;
             }
         }
-
         RECT windowRect{0, 0, kConsolidatedSettingsDialogWidth, kConsolidatedSettingsDialogHeight};
         AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
         if (ownerWindow)
@@ -9278,7 +9616,7 @@ namespace hyperbrowse::ui
         const DWORD detailsPanelTextStyle = WS_CHILD | (detailsStripVisible_ ? WS_VISIBLE : 0) | WS_VSCROLL
             | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_NOHIDESEL;
         detailsPanelText_ = CreateWindowExW(
-            WS_EX_CLIENTEDGE,
+            0,
             detailsPanelRichEditModule_ ? MSFTEDIT_CLASS : L"EDIT",
             L"",
             detailsPanelTextStyle,
@@ -9293,7 +9631,7 @@ namespace hyperbrowse::ui
             FreeLibrary(detailsPanelRichEditModule_);
             detailsPanelRichEditModule_ = nullptr;
             detailsPanelText_ = CreateWindowExW(
-                WS_EX_CLIENTEDGE,
+                0,
                 L"EDIT",
                 L"",
                 detailsPanelTextStyle,
@@ -10906,8 +11244,98 @@ namespace hyperbrowse::ui
         InvalidateRect(statusBar_, nullptr, TRUE);
     }
 
+    bool MainWindow::DrawStatusStripD2D(const DRAWITEMSTRUCT& drawItem) const
+    {
+        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+        if (!renderer.IsAvailable() || !drawItem.hDC)
+        {
+            return false;
+        }
+
+        const RECT& itemRect = drawItem.rcItem;
+        const int width = itemRect.right - itemRect.left;
+        const int height = itemRect.bottom - itemRect.top;
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        const auto renderTarget = renderer.CreateDCRenderTarget();
+        if (!renderTarget || FAILED(renderTarget->BindDC(drawItem.hDC, &itemRect)))
+        {
+            return false;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        const int firstPartWidth = width > 0 ? width / 2 : 420;
+        const COLORREF backgroundColor = BlendColor(palette.paneBackground,
+                                                    palette.windowBackground,
+                                                    themeMode_ == ThemeMode::Dark ? 34 : 18);
+        const auto createBrush = [renderTarget](COLORREF color)
+        {
+            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> brush;
+            renderTarget->CreateSolidColorBrush(
+                hyperbrowse::render::ToD2DColor(color),
+                brush.GetAddressOf());
+            return brush;
+        };
+
+        const auto backgroundBrush = createBrush(backgroundColor);
+        const auto borderBrush = createBrush(palette.actionStripBorder);
+        const auto textBrush = createBrush(palette.text);
+        const auto mutedTextBrush = createBrush(palette.mutedText);
+        const auto statusTextFormat = renderer.CreateTextFormatFromFont(detailsPanelSummaryFont_);
+        if (!backgroundBrush || !borderBrush || !textBrush || !mutedTextBrush || !statusTextFormat)
+        {
+            return false;
+        }
+
+        renderTarget->BeginDraw();
+        renderTarget->Clear(hyperbrowse::render::ToD2DColor(backgroundColor));
+        renderTarget->FillRectangle(
+            D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
+            backgroundBrush.Get());
+        renderTarget->DrawLine(
+            hyperbrowse::render::ToD2DPoint(0.0f, 0.5f),
+            hyperbrowse::render::ToD2DPoint(static_cast<float>(width), 0.5f),
+            borderBrush.Get());
+        renderTarget->DrawLine(
+            hyperbrowse::render::ToD2DPoint(static_cast<float>(firstPartWidth), 5.0f),
+            hyperbrowse::render::ToD2DPoint(static_cast<float>(firstPartWidth), static_cast<float>(std::max(5, height - 5))),
+            borderBrush.Get());
+
+        RECT primaryRect{kStatusStripHorizontalPadding,
+                         0,
+                         std::max(kStatusStripHorizontalPadding, firstPartWidth - kStatusStripHorizontalPadding),
+                         height};
+        RECT secondaryRect{firstPartWidth + kStatusStripHorizontalPadding,
+                           0,
+                           std::max(firstPartWidth + kStatusStripHorizontalPadding, width - kStatusStripHorizontalPadding),
+                           height};
+        renderTarget->DrawText(
+            statusPrimaryText_.c_str(),
+            static_cast<UINT32>(statusPrimaryText_.size()),
+            statusTextFormat.Get(),
+            hyperbrowse::render::ToD2DRect(primaryRect),
+            textBrush.Get());
+        renderTarget->DrawText(
+            statusSecondaryText_.c_str(),
+            static_cast<UINT32>(statusSecondaryText_.size()),
+            statusTextFormat.Get(),
+            hyperbrowse::render::ToD2DRect(secondaryRect),
+            mutedTextBrush.Get());
+
+        const HRESULT drawResult = renderTarget->EndDraw();
+        return SUCCEEDED(drawResult);
+    }
+
     void MainWindow::DrawStatusStrip(const DRAWITEMSTRUCT& drawItem) const
     {
+        if (DrawStatusStripD2D(drawItem))
+        {
+            return;
+        }
+
         const ThemePalette palette = GetThemePalette();
         RECT clientRect = drawItem.rcItem;
         const int width = clientRect.right - clientRect.left;
@@ -10993,8 +11421,15 @@ namespace hyperbrowse::ui
         const int measurementAllowance = scaleMenuDimension(kMenuPopupMeasurementAllowance);
         const int arrowWidth = scaleMenuDimension(kMenuPopupArrowWidth);
         const HFONT menuFont = appTextUiFont_ ? appTextUiFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        const int labelWidth = MeasureTextWidth(menuFont, label);
-        const int shortcutWidth = shortcut.empty() ? 0 : MeasureTextWidth(menuFont, shortcut);
+        const auto d2dMenuFormat = hyperbrowse::render::D2DRenderer::Instance().CreateTextFormatFromFont(menuFont);
+        const int labelWidth = d2dMenuFormat
+            ? static_cast<int>(hyperbrowse::render::D2DRenderer::Instance().MeasureTextWidth(label, d2dMenuFormat.Get()) + 0.5f)
+            : MeasureTextWidth(menuFont, label);
+        const int shortcutWidth = shortcut.empty()
+            ? 0
+            : (d2dMenuFormat
+                ? static_cast<int>(hyperbrowse::render::D2DRenderer::Instance().MeasureTextWidth(shortcut, d2dMenuFormat.Get()) + 0.5f)
+                : MeasureTextWidth(menuFont, shortcut));
         int itemWidth = checkColumnWidth + (textPadding * 2) + labelWidth;
         if (shortcutWidth > 0)
         {
@@ -11013,10 +11448,171 @@ namespace hyperbrowse::ui
                 + measurementAllowance));
     }
 
+    bool MainWindow::DrawOwnerDrawMenuItemD2D(const DRAWITEMSTRUCT& drawItem) const
+    {
+        const auto* drawData = reinterpret_cast<const MenuDrawItemData*>(drawItem.itemData);
+        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+        if (!drawData || !renderer.IsAvailable() || !drawItem.hDC)
+        {
+            return false;
+        }
+
+        const RECT& itemRect = drawItem.rcItem;
+        const int width = itemRect.right - itemRect.left;
+        const int height = itemRect.bottom - itemRect.top;
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        const auto renderTarget = renderer.CreateDCRenderTarget();
+        if (!renderTarget || FAILED(renderTarget->BindDC(drawItem.hDC, &itemRect)))
+        {
+            return false;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        const bool selected = (drawItem.itemState & ODS_SELECTED) != 0;
+        const bool disabled = (drawItem.itemState & ODS_DISABLED) != 0;
+        const bool checked = (drawItem.itemState & ODS_CHECKED) != 0;
+        const COLORREF backgroundColor = selected
+            ? BlendColor(palette.accentFill, palette.actionStripBackground, themeMode_ == ThemeMode::Dark ? 28 : 12)
+            : BlendColor(palette.paneBackground, palette.windowBackground, themeMode_ == ThemeMode::Dark ? 26 : 12);
+        const auto createBrush = [renderTarget](COLORREF color)
+        {
+            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> brush;
+            renderTarget->CreateSolidColorBrush(
+                hyperbrowse::render::ToD2DColor(color),
+                brush.GetAddressOf());
+            return brush;
+        };
+        const auto backgroundBrush = createBrush(backgroundColor);
+        const auto borderBrush = createBrush(palette.actionStripBorder);
+        if (!backgroundBrush || !borderBrush)
+        {
+            return false;
+        }
+
+        renderTarget->BeginDraw();
+        renderTarget->Clear(hyperbrowse::render::ToD2DColor(backgroundColor));
+        renderTarget->FillRectangle(
+            D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
+            backgroundBrush.Get());
+
+        const auto scaleMenuDimension = [this](int dimension)
+        {
+            return hyperbrowse::util::ScaleAppTextDimension(dimension, appTextSize_);
+        };
+        const int checkColumnWidth = scaleMenuDimension(kMenuPopupCheckColumnWidth);
+        const int textPadding = scaleMenuDimension(kMenuPopupTextPadding);
+        const int shortcutGap = scaleMenuDimension(kMenuPopupShortcutGap);
+
+        if (drawData->separator)
+        {
+            renderTarget->DrawLine(
+                hyperbrowse::render::ToD2DPoint(static_cast<float>(checkColumnWidth), static_cast<float>(height / 2)),
+                hyperbrowse::render::ToD2DPoint(static_cast<float>(std::max(checkColumnWidth, width - textPadding)), static_cast<float>(height / 2)),
+                borderBrush.Get());
+            const HRESULT drawResult = renderTarget->EndDraw();
+            return SUCCEEDED(drawResult);
+        }
+
+        std::wstring label;
+        std::wstring shortcut;
+        SplitMenuDisplayText(drawData->text, &label, &shortcut);
+
+        if (checked)
+        {
+            const int checkInset = scaleMenuDimension(4);
+            const RECT checkRect{checkInset,
+                                 checkInset,
+                                 std::max(checkInset, checkColumnWidth - checkInset),
+                                 std::max(checkInset, height - checkInset)};
+            const COLORREF checkFill = selected ? palette.accent : BlendColor(palette.accentFill, backgroundColor, 24);
+            const auto checkBrush = createBrush(checkFill);
+            const auto markBrush = createBrush(palette.accentText);
+            if (checkBrush && markBrush)
+            {
+                const D2D1_ROUNDED_RECT roundedCheck = hyperbrowse::render::ToD2DRoundedRect(
+                    checkRect,
+                    static_cast<float>(scaleMenuDimension(8)),
+                    static_cast<float>(scaleMenuDimension(8)));
+                renderTarget->FillRoundedRectangle(&roundedCheck, checkBrush.Get());
+                const int checkMarkInset = scaleMenuDimension(5);
+                renderTarget->DrawLine(
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.left + checkMarkInset), static_cast<float>(height / 2)),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.left + scaleMenuDimension(9)), static_cast<float>(checkRect.bottom - scaleMenuDimension(6))),
+                    markBrush.Get(),
+                    2.0f);
+                renderTarget->DrawLine(
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.left + scaleMenuDimension(9)), static_cast<float>(checkRect.bottom - scaleMenuDimension(6))),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.right - checkMarkInset), static_cast<float>(checkRect.top + scaleMenuDimension(6))),
+                    markBrush.Get(),
+                    2.0f);
+            }
+        }
+
+        const COLORREF labelColor = disabled
+            ? BlendColor(palette.mutedText, backgroundColor, 128)
+            : palette.text;
+        const COLORREF shortcutColor = disabled
+            ? BlendColor(palette.mutedText, backgroundColor, 128)
+            : palette.mutedText;
+        const auto labelBrush = createBrush(labelColor);
+        const auto shortcutBrush = createBrush(shortcutColor);
+        const HFONT menuFont = appTextUiFont_ ? appTextUiFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        auto menuFormat = renderer.CreateTextFormatFromFont(menuFont);
+        if (!labelBrush || !shortcutBrush || !menuFormat)
+        {
+            renderTarget->EndDraw();
+            return false;
+        }
+        menuFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        menuFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+        RECT labelRect{checkColumnWidth + textPadding,
+                       0,
+                       width - textPadding,
+                       height};
+        if (!shortcut.empty())
+        {
+            labelRect.right -= static_cast<int>(renderer.MeasureTextWidth(shortcut, menuFormat.Get()) + 0.5f) + shortcutGap;
+        }
+        renderTarget->DrawText(
+            label.c_str(),
+            static_cast<UINT32>(label.size()),
+            menuFormat.Get(),
+            hyperbrowse::render::ToD2DRect(labelRect),
+            labelBrush.Get());
+
+        if (!shortcut.empty())
+        {
+            menuFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+            const RECT shortcutRect{labelRect.right + shortcutGap,
+                                    0,
+                                    width - textPadding,
+                                    height};
+            renderTarget->DrawText(
+                shortcut.c_str(),
+                static_cast<UINT32>(shortcut.size()),
+                menuFormat.Get(),
+                hyperbrowse::render::ToD2DRect(shortcutRect),
+                shortcutBrush.Get());
+        }
+
+        const HRESULT drawResult = renderTarget->EndDraw();
+        return SUCCEEDED(drawResult);
+    }
+
     void MainWindow::DrawOwnerDrawMenuItem(const DRAWITEMSTRUCT& drawItem) const
     {
         const auto* drawData = reinterpret_cast<const MenuDrawItemData*>(drawItem.itemData);
         if (!drawData)
+        {
+            return;
+        }
+
+        if (DrawOwnerDrawMenuItemD2D(drawItem))
         {
             return;
         }
@@ -12237,8 +12833,460 @@ namespace hyperbrowse::ui
         LayoutChildren();
     }
 
+    bool MainWindow::PaintDetailsPanelD2D(HDC hdc, const RECT& clientRect) const
+    {
+        if (!hdc || !detailsStripVisible_ || IsRectEmpty(&detailsPanelRect_))
+        {
+            return false;
+        }
+
+        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+        if (!renderer.IsAvailable())
+        {
+            return false;
+        }
+
+        const auto renderTarget = renderer.CreateDCRenderTarget();
+        if (!renderTarget)
+        {
+            return false;
+        }
+
+        const auto titleFormat = renderer.CreateTextFormatFromFont(detailsPanelTitleFont_);
+        const auto summaryFormat = renderer.CreateTextFormatFromFont(detailsPanelSummaryFont_);
+        const auto bodyFormat = renderer.CreateTextFormatFromFont(detailsPanelBodyFont_);
+        const auto tabFormat = renderer.CreateTextFormatFromFont(detailsPanelSummaryFont_, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        if (!titleFormat || !summaryFormat || !bodyFormat || !tabFormat)
+        {
+            return false;
+        }
+
+        titleFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+        summaryFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+        bodyFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        tabFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        tabFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        tabFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+        const ThemePalette palette = GetThemePalette();
+        const auto createBrush = [renderTarget](COLORREF color)
+        {
+            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> brush;
+            renderTarget->CreateSolidColorBrush(
+                hyperbrowse::render::ToD2DColor(color),
+                brush.GetAddressOf());
+            return brush;
+        };
+        const auto panelBrush = createBrush(palette.paneBackground);
+        const auto borderBrush = createBrush(palette.actionStripBorder);
+        const auto mutedBrush = createBrush(palette.mutedText);
+        if (!panelBrush || !borderBrush || !mutedBrush)
+        {
+            return false;
+        }
+
+        const int clientWidth = std::max(1, static_cast<int>(clientRect.right - clientRect.left));
+        const int clientHeight = std::max(1, static_cast<int>(clientRect.bottom - clientRect.top));
+        HDC bufferedDc = CreateCompatibleDC(hdc);
+        HBITMAP bufferedBitmap = bufferedDc
+            ? CreateCompatibleBitmap(hdc, clientWidth, clientHeight)
+            : nullptr;
+        if (!bufferedDc || !bufferedBitmap)
+        {
+            if (bufferedBitmap)
+            {
+                DeleteObject(bufferedBitmap);
+            }
+            if (bufferedDc)
+            {
+                DeleteDC(bufferedDc);
+            }
+            return false;
+        }
+
+        const HGDIOBJ previousBitmap = SelectObject(bufferedDc, bufferedBitmap);
+        if (FAILED(renderTarget->BindDC(bufferedDc, &clientRect)))
+        {
+            SelectObject(bufferedDc, previousBitmap);
+            DeleteObject(bufferedBitmap);
+            DeleteDC(bufferedDc);
+            return false;
+        }
+
+        const auto drawText = [renderTarget](std::wstring_view text,
+                                             IDWriteTextFormat* format,
+                                             const RECT& rect,
+                                             ID2D1Brush* brush)
+        {
+            if (!text.empty() && format && brush && rect.right > rect.left && rect.bottom > rect.top)
+            {
+                renderTarget->DrawText(text.data(),
+                                       static_cast<UINT32>(text.size()),
+                                       format,
+                                       hyperbrowse::render::ToD2DRect(rect),
+                                       brush);
+            }
+        };
+        const auto drawRounded = [renderTarget](const RECT& rect,
+                                                COLORREF fillColor,
+                                                COLORREF borderColor,
+                                                float radius)
+        {
+            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> fillBrush;
+            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> outlineBrush;
+            renderTarget->CreateSolidColorBrush(hyperbrowse::render::ToD2DColor(fillColor), fillBrush.GetAddressOf());
+            renderTarget->CreateSolidColorBrush(hyperbrowse::render::ToD2DColor(borderColor), outlineBrush.GetAddressOf());
+            RECT insetRect = rect;
+            InflateRect(&insetRect, -1, -1);
+            const auto roundedRect = hyperbrowse::render::ToD2DRoundedRect(insetRect, radius, radius);
+            if (fillBrush)
+            {
+                renderTarget->FillRoundedRectangle(&roundedRect, fillBrush.Get());
+            }
+            if (outlineBrush)
+            {
+                renderTarget->DrawRoundedRectangle(&roundedRect, outlineBrush.Get(), 1.0f);
+            }
+        };
+
+        renderTarget->BeginDraw();
+        renderTarget->FillRectangle(hyperbrowse::render::ToD2DRect(detailsPanelRect_), panelBrush.Get());
+        renderTarget->DrawLine(
+            hyperbrowse::render::ToD2DPoint(static_cast<float>(detailsPanelRect_.left) + 0.5f, static_cast<float>(detailsPanelRect_.top)),
+            hyperbrowse::render::ToD2DPoint(static_cast<float>(detailsPanelRect_.left) + 0.5f, static_cast<float>(detailsPanelRect_.bottom)),
+            borderBrush.Get());
+
+        if (!IsRectEmpty(&detailsPanelTabStripRect_))
+        {
+            const COLORREF inactiveFill = BlendColor(palette.actionFieldBackground,
+                                                      palette.paneBackground,
+                                                      themeMode_ == ThemeMode::Dark ? 24 : 12);
+            const COLORREF inactiveBorder = BlendColor(palette.actionStripBorder,
+                                                       palette.paneBackground,
+                                                       themeMode_ == ThemeMode::Dark ? 32 : 16);
+            const COLORREF hoverFill = BlendColor(inactiveFill,
+                                                  palette.accentFill,
+                                                  themeMode_ == ThemeMode::Dark ? 24 : 14);
+            const COLORREF pressedFill = BlendColor(inactiveFill,
+                                                    palette.accent,
+                                                    themeMode_ == ThemeMode::Dark ? 40 : 18);
+            const COLORREF activePressedFill = BlendColor(palette.accentFill,
+                                                          palette.accent,
+                                                          themeMode_ == ThemeMode::Dark ? 22 : 12);
+            const wchar_t* labels[] = {L"File Details", L"Quick Actions"};
+
+            for (std::size_t index = 0; index < detailsPanelTabRects_.size(); ++index)
+            {
+                const RECT& tabRect = detailsPanelTabRects_[index];
+                if (IsRectEmpty(&tabRect))
+                {
+                    continue;
+                }
+
+                const bool active = static_cast<int>(index) == static_cast<int>(activeRightPaneTab_);
+                const bool hot = static_cast<int>(index) == detailsPanelHotTabIndex_;
+                const bool pressed = static_cast<int>(index) == detailsPanelPressedTabIndex_;
+                const COLORREF fillColor = active
+                    ? (pressed ? activePressedFill : palette.accentFill)
+                    : (pressed ? pressedFill : (hot ? hoverFill : inactiveFill));
+                const COLORREF borderColor = active
+                    ? palette.accent
+                    : ((hot || pressed)
+                        ? BlendColor(inactiveBorder, palette.accent, themeMode_ == ThemeMode::Dark ? 44 : 24)
+                        : inactiveBorder);
+                const COLORREF textColor = active
+                    ? palette.accentText
+                    : ((hot || pressed) ? palette.text : palette.mutedText);
+                drawRounded(tabRect, fillColor, borderColor, 7.0f);
+                const auto tabBrush = createBrush(textColor);
+                if (tabBrush)
+                {
+                    drawText(labels[index], tabFormat.Get(), tabRect, tabBrush.Get());
+                }
+            }
+        }
+
+        if (!IsRectEmpty(&detailsPanelCloseButtonRect_))
+        {
+            const bool hot = detailsPanelCloseButtonHot_;
+            const bool pressed = detailsPanelCloseButtonPressed_;
+            const COLORREF fillColor = pressed
+                ? BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 24 : 16)
+                : (hot
+                    ? BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 14 : 10)
+                    : palette.actionFieldBackground);
+            const COLORREF closeColor = hot || pressed ? palette.accentText : palette.mutedText;
+            drawRounded(detailsPanelCloseButtonRect_, fillColor, hot || pressed ? palette.accent : palette.actionStripBorder, 4.0f);
+            const auto closeBrush = createBrush(closeColor);
+            if (closeBrush)
+            {
+                const RECT& closeRect = detailsPanelCloseButtonRect_;
+                renderTarget->DrawLine(
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(closeRect.left + 5), static_cast<float>(closeRect.top + 5)),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(closeRect.right - 5), static_cast<float>(closeRect.bottom - 5)),
+                    closeBrush.Get(),
+                    1.5f);
+                renderTarget->DrawLine(
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(closeRect.left + 5), static_cast<float>(closeRect.bottom - 5)),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(closeRect.right - 5), static_cast<float>(closeRect.top + 5)),
+                    closeBrush.Get(),
+                    1.5f);
+            }
+        }
+
+        if (activeRightPaneTab_ == RightPaneTab::FileDetails && !IsRectEmpty(&detailsPanelContentRect_))
+        {
+            const int innerWidth = std::max(0, static_cast<int>(detailsPanelContentRect_.right - detailsPanelContentRect_.left));
+            const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
+            const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
+                                                           title,
+                                                           innerWidth,
+                                                           DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                           22);
+            const auto titleBrush = createBrush(palette.text);
+            drawText(title,
+                     titleFormat.Get(),
+                     RECT{detailsPanelContentRect_.left,
+                          detailsPanelContentRect_.top,
+                          detailsPanelContentRect_.right,
+                          detailsPanelContentRect_.top + titleHeight},
+                     titleBrush.Get());
+
+            const int summaryTop = detailsPanelContentRect_.top + titleHeight + 6;
+            if (!detailsPanelSummaryText_.empty())
+            {
+                const int summaryHeight = MeasureTextBlockHeight(detailsPanelSummaryFont_,
+                                                                 detailsPanelSummaryText_,
+                                                                 innerWidth,
+                                                                 DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                                 18);
+                const auto summaryBrush = createBrush(palette.mutedText);
+                drawText(detailsPanelSummaryText_,
+                         summaryFormat.Get(),
+                         RECT{detailsPanelContentRect_.left,
+                              summaryTop,
+                              detailsPanelContentRect_.right,
+                              summaryTop + summaryHeight},
+                         summaryBrush.Get());
+            }
+
+            if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_)
+                && !IsRectEmpty(&detailsPanelHistogramRect_))
+            {
+                const COLORREF histogramBackground = BlendColor(palette.actionFieldBackground,
+                                                                 palette.paneBackground,
+                                                                 themeMode_ == ThemeMode::Dark ? 24 : 12);
+                const auto histogramBrush = createBrush(histogramBackground);
+                if (histogramBrush)
+                {
+                    renderTarget->FillRectangle(hyperbrowse::render::ToD2DRect(detailsPanelHistogramRect_), histogramBrush.Get());
+                }
+                renderTarget->DrawRectangle(hyperbrowse::render::ToD2DRect(detailsPanelHistogramRect_), borderBrush.Get(), 1.0f);
+
+                RECT histogramTextRect = detailsPanelHistogramRect_;
+                InflateRect(&histogramTextRect, -8, -8);
+                if (detailsPanelHistogramLoading_)
+                {
+                    drawText(L"Loading histogram...", summaryFormat.Get(), histogramTextRect, mutedBrush.Get());
+                }
+                else if (!detailsPanelHistogramVisible_ || detailsPanelHistogramPeak_ == 0)
+                {
+                    drawText(L"Histogram unavailable", summaryFormat.Get(), histogramTextRect, mutedBrush.Get());
+                }
+                else
+                {
+                    const int chartLeft = detailsPanelHistogramRect_.left + 6;
+                    const int chartTop = detailsPanelHistogramRect_.top + 6;
+                    const int chartRight = detailsPanelHistogramRect_.right - 6;
+                    const int chartBottom = detailsPanelHistogramRect_.bottom - 6;
+                    const int chartWidth = std::max(1, chartRight - chartLeft);
+                    const int chartHeight = std::max(1, chartBottom - chartTop);
+                    const auto drawChannel = [&](const std::array<std::uint32_t, 64>& values, COLORREF color)
+                    {
+                        const auto channelBrush = createBrush(color);
+                        if (!channelBrush)
+                        {
+                            return;
+                        }
+                        for (int index = 1; index < kDetailsPanelHistogramBins; ++index)
+                        {
+                            const int previousX = chartLeft + MulDiv(index - 1, chartWidth - 1, kDetailsPanelHistogramBins - 1);
+                            const int currentX = chartLeft + MulDiv(index, chartWidth - 1, kDetailsPanelHistogramBins - 1);
+                            const int previousHeight = detailsPanelHistogramPeak_ > 0
+                                ? MulDiv(static_cast<int>(values[static_cast<std::size_t>(index - 1)]), chartHeight - 1, static_cast<int>(detailsPanelHistogramPeak_))
+                                : 0;
+                            const int currentHeight = detailsPanelHistogramPeak_ > 0
+                                ? MulDiv(static_cast<int>(values[static_cast<std::size_t>(index)]), chartHeight - 1, static_cast<int>(detailsPanelHistogramPeak_))
+                                : 0;
+                            renderTarget->DrawLine(
+                                hyperbrowse::render::ToD2DPoint(static_cast<float>(previousX), static_cast<float>(chartBottom - previousHeight)),
+                                hyperbrowse::render::ToD2DPoint(static_cast<float>(currentX), static_cast<float>(chartBottom - currentHeight)),
+                                channelBrush.Get(),
+                                1.0f);
+                        }
+                    };
+                    drawChannel(detailsPanelHistogramRed_, RGB(224, 98, 92));
+                    drawChannel(detailsPanelHistogramGreen_, RGB(112, 188, 102));
+                    drawChannel(detailsPanelHistogramBlue_, RGB(92, 150, 232));
+                }
+            }
+        }
+
+        if (activeRightPaneTab_ == RightPaneTab::QuickSend && !quickAccessDestinationRows_.empty()
+            && !IsRectEmpty(&quickAccessDestinationPanelRect_))
+        {
+            const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+            RECT headerRect{quickAccessDestinationPanelRect_.left,
+                            quickAccessDestinationPanelRect_.top,
+                            quickAccessDestinationPanelRect_.right,
+                            quickAccessDestinationPanelRect_.top + metrics.headerHeight};
+            if (!IsRectEmpty(&quickAccessSortButtonRect_))
+            {
+                headerRect.right = quickAccessSortButtonRect_.left - kQuickAccessPanelSortButtonGap;
+            }
+            drawText(L"Quick Actions", summaryFormat.Get(), headerRect, mutedBrush.Get());
+
+            if (!IsRectEmpty(&quickAccessSortButtonRect_))
+            {
+                const bool hot = quickAccessSortButtonHot_;
+                const bool pressed = quickAccessSortButtonPressed_;
+                if (hot || pressed)
+                {
+                    drawRounded(quickAccessSortButtonRect_,
+                                pressed
+                                    ? BlendColor(palette.accentFill, palette.accent, themeMode_ == ThemeMode::Dark ? 40 : 18)
+                                    : BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 28 : 16),
+                                palette.accent,
+                                4.0f);
+                }
+                const auto sortBrush = createBrush(hot || pressed ? palette.accentText : palette.mutedText);
+                if (sortBrush)
+                {
+                    const RECT& sortRect = quickAccessSortButtonRect_;
+                    const int centerX = (sortRect.left + sortRect.right) / 2;
+                    renderTarget->DrawLine(hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX - 6), static_cast<float>(sortRect.top + 6)),
+                                           hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX + 6), static_cast<float>(sortRect.top + 6)),
+                                           sortBrush.Get(), 1.5f);
+                    renderTarget->DrawLine(hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX - 4), static_cast<float>(sortRect.top + 10)),
+                                           hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX + 4), static_cast<float>(sortRect.top + 10)),
+                                           sortBrush.Get(), 1.5f);
+                    renderTarget->DrawLine(hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX - 2), static_cast<float>(sortRect.top + 14)),
+                                           hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX + 2), static_cast<float>(sortRect.top + 14)),
+                                           sortBrush.Get(), 1.5f);
+                }
+            }
+
+            const COLORREF rowBackground = BlendColor(palette.actionFieldBackground,
+                                                       palette.paneBackground,
+                                                       themeMode_ == ThemeMode::Dark ? 24 : 12);
+            const COLORREF disabledButtonFill = BlendColor(palette.actionFieldBackground,
+                                                           palette.paneBackground,
+                                                           themeMode_ == ThemeMode::Dark ? 10 : 20);
+            const auto drawActionButton = [&](const RECT& rect,
+                                              const wchar_t* label,
+                                              int buttonIndex,
+                                              bool enabled,
+                                              COLORREF baseFill,
+                                              COLORREF baseText,
+                                              COLORREF enabledBorder)
+            {
+                const bool hot = buttonIndex == quickAccessHotButtonIndex_;
+                const bool pressed = buttonIndex == quickAccessPressedButtonIndex_;
+                const COLORREF fillColor = enabled
+                    ? (pressed ? palette.accent : (hot ? BlendColor(baseFill, palette.accent, 48) : baseFill))
+                    : disabledButtonFill;
+                const COLORREF textColor = enabled ? baseText : palette.mutedText;
+                drawRounded(rect, fillColor, enabled ? enabledBorder : palette.actionStripBorder, 5.0f);
+                const auto buttonBrush = createBrush(textColor);
+                drawText(label, bodyFormat.Get(), rect, buttonBrush.Get());
+            };
+
+            const int savedDC = SaveDC(bufferedDc);
+            IntersectClipRect(bufferedDc,
+                              quickAccessDestinationViewportRect_.left,
+                              quickAccessDestinationViewportRect_.top,
+                              quickAccessDestinationViewportRect_.right,
+                              quickAccessDestinationViewportRect_.bottom);
+            renderTarget->PushAxisAlignedClip(
+                hyperbrowse::render::ToD2DRect(quickAccessDestinationViewportRect_),
+                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
+            {
+                const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
+                const bool rowEnabled = CanNavigateToQuickAccessDestination(row.destinationPath);
+                const bool actionsEnabled = CanUseQuickAccessDestinationActions(row.destinationPath);
+                const bool rowHot = rowEnabled && static_cast<int>(rowIndex) == quickAccessHotRowIndex_;
+                const bool rowPressed = rowEnabled && static_cast<int>(rowIndex) == quickAccessPressedRowIndex_;
+                const COLORREF currentRowBackground = rowPressed
+                    ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 28 : 18)
+                    : (rowHot
+                        ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 20 : 12)
+                        : rowBackground);
+                drawRounded(row.rowRect, currentRowBackground, rowHot ? palette.accent : palette.actionStripBorder, 6.0f);
+
+                RECT labelRect = row.rowRect;
+                labelRect.left += 10;
+                labelRect.top += metrics.labelTopInset;
+                labelRect.right = row.shortcutRect.left - 10;
+                labelRect.bottom = labelRect.top + metrics.labelHeight;
+                const auto rowTextBrush = createBrush(rowEnabled ? palette.text : palette.mutedText);
+                drawText(row.displayLabel, summaryFormat.Get(), labelRect, rowTextBrush.Get());
+
+                RECT metadataRect = row.rowRect;
+                metadataRect.left += 10;
+                metadataRect.top += metrics.metadataTopInset;
+                metadataRect.right = row.copyRect.left - 10;
+                metadataRect.bottom -= metrics.metadataBottomInset;
+                drawText(row.metadataLabel, bodyFormat.Get(), metadataRect, mutedBrush.Get());
+
+                drawActionButton(row.copyRect, L"Copy", static_cast<int>(rowIndex * 3), actionsEnabled,
+                                 palette.accentFill, palette.accentText, palette.accent);
+                drawActionButton(row.moveRect, L"Move", static_cast<int>(rowIndex * 3 + 1), actionsEnabled,
+                                 palette.accentFill, palette.accentText, palette.accent);
+                drawActionButton(row.removeRect, L"x", static_cast<int>(rowIndex * 3 + 2), true,
+                                 BlendColor(rowBackground, palette.actionFieldBackground, themeMode_ == ThemeMode::Dark ? 12 : 20),
+                                 palette.mutedText, palette.actionStripBorder);
+            }
+            renderTarget->PopAxisAlignedClip();
+            RestoreDC(bufferedDc, savedDC);
+        }
+        else if (activeRightPaneTab_ == RightPaneTab::QuickSend && !IsRectEmpty(&detailsPanelContentRect_))
+        {
+            drawText(L"Quick action destinations will appear here.", summaryFormat.Get(), detailsPanelContentRect_, mutedBrush.Get());
+        }
+
+        const HRESULT drawResult = renderTarget->EndDraw();
+        if (SUCCEEDED(drawResult))
+        {
+            const int panelWidth = std::max(0, static_cast<int>(detailsPanelRect_.right - detailsPanelRect_.left));
+            const int panelHeight = std::max(0, static_cast<int>(detailsPanelRect_.bottom - detailsPanelRect_.top));
+            if (panelWidth > 0 && panelHeight > 0)
+            {
+                BitBlt(hdc,
+                       detailsPanelRect_.left,
+                       detailsPanelRect_.top,
+                       panelWidth,
+                       panelHeight,
+                       bufferedDc,
+                       detailsPanelRect_.left,
+                       detailsPanelRect_.top,
+                       SRCCOPY);
+            }
+        }
+
+        SelectObject(bufferedDc, previousBitmap);
+        DeleteObject(bufferedBitmap);
+        DeleteDC(bufferedDc);
+        return SUCCEEDED(drawResult);
+    }
+
     void MainWindow::PaintDetailsPanel(HDC hdc, const RECT& clientRect) const
     {
+        if (PaintDetailsPanelD2D(hdc, clientRect))
+        {
+            return;
+        }
+
         (void)clientRect;
         if (!detailsStripVisible_ || IsRectEmpty(&detailsPanelRect_))
         {
@@ -17877,6 +18925,7 @@ namespace hyperbrowse::ui
     {
         appTextSize_ = util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize_));
         RebuildAppTextFonts();
+        d2dToolbarTextFormat_.Reset();
         if (browserPaneController_)
         {
             browserPaneController_->SetAppTextSize(appTextSize_);
@@ -20877,6 +21926,366 @@ namespace hyperbrowse::ui
         InvalidateRect(hwnd_, &stripRect, FALSE);
     }
 
+    bool MainWindow::EnsureD2DResources()
+    {
+        if (d2dToolbarTextFormat_)
+        {
+            return true;
+        }
+
+        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+        if (!renderer.IsAvailable() || !hwnd_)
+        {
+            return false;
+        }
+
+        d2dToolbarTextFormat_ = renderer.CreateTextFormatFromFont(appTextUiFont_, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        if (!d2dToolbarTextFormat_)
+        {
+            ResetD2DResources();
+            return false;
+        }
+
+        d2dToolbarTextFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        d2dToolbarTextFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        d2dToolbarTextFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        return true;
+    }
+
+    void MainWindow::ResetD2DResources()
+    {
+        d2dToolbarTextFormat_.Reset();
+        d2dRenderTarget_.Reset();
+    }
+
+    void MainWindow::PaintMainShellD2D(ID2D1RenderTarget* renderTarget, const RECT& clientRect)
+    {
+        if (!renderTarget)
+        {
+            return;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        renderTarget->Clear(hyperbrowse::render::ToD2DColor(palette.windowBackground));
+
+        const auto createBrush = [renderTarget](COLORREF color)
+        {
+            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> brush;
+            renderTarget->CreateSolidColorBrush(
+                hyperbrowse::render::ToD2DColor(color),
+                brush.GetAddressOf());
+            return brush;
+        };
+
+        const auto splitterBrush = createBrush(palette.splitter);
+        const auto gripBrush = createBrush(palette.actionStripBorder);
+        const auto paintSplitter = [&](const RECT& splitterRect)
+        {
+            if (splitterBrush)
+            {
+                renderTarget->FillRectangle(
+                    hyperbrowse::render::ToD2DRect(splitterRect),
+                    splitterBrush.Get());
+            }
+            if (gripBrush)
+            {
+                const float gripX = static_cast<float>((splitterRect.left + splitterRect.right) / 2);
+                const float gripTop = static_cast<float>(splitterRect.top + 20);
+                const float gripBottom = static_cast<float>(std::max(
+                    static_cast<int>(splitterRect.top) + 32,
+                    static_cast<int>(splitterRect.bottom) - 20));
+                renderTarget->DrawLine(
+                    hyperbrowse::render::ToD2DPoint(gripX, gripTop),
+                    hyperbrowse::render::ToD2DPoint(gripX, gripBottom),
+                    gripBrush.Get());
+            }
+        };
+
+        const RECT splitterRect{leftPaneWidth_,
+                                kActionStripHeight,
+                                leftPaneWidth_ + kSplitterWidth,
+                                clientRect.bottom};
+        paintSplitter(splitterRect);
+        if (detailsStripVisible_ && !IsRectEmpty(&detailsPanelRect_))
+        {
+            const RECT detailsSplitterRect{detailsPanelRect_.left - kSplitterWidth,
+                                           kActionStripHeight,
+                                           detailsPanelRect_.left,
+                                           clientRect.bottom};
+            paintSplitter(detailsSplitterRect);
+        }
+
+        const RECT stripRect{0, 0, clientRect.right, kActionStripHeight};
+        PaintToolbarD2D(renderTarget, stripRect);
+    }
+
+    void MainWindow::PaintToolbarD2D(ID2D1RenderTarget* renderTarget, const RECT& stripRect)
+    {
+        if (!renderTarget || !d2dToolbarTextFormat_)
+        {
+            return;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        const auto createBrush = [renderTarget](COLORREF color)
+        {
+            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> brush;
+            renderTarget->CreateSolidColorBrush(
+                hyperbrowse::render::ToD2DColor(color),
+                brush.GetAddressOf());
+            return brush;
+        };
+        const auto stripBrush = createBrush(palette.actionStripBackground);
+        const auto borderBrush = createBrush(palette.actionStripBorder);
+
+        if (stripBrush)
+        {
+            renderTarget->FillRectangle(
+                hyperbrowse::render::ToD2DRect(stripRect),
+                stripBrush.Get());
+        }
+        if (borderBrush)
+        {
+            renderTarget->DrawLine(
+                hyperbrowse::render::ToD2DPoint(static_cast<float>(stripRect.left), static_cast<float>(stripRect.bottom - 0.5f)),
+                hyperbrowse::render::ToD2DPoint(static_cast<float>(stripRect.right), static_cast<float>(stripRect.bottom - 0.5f)),
+                borderBrush.Get());
+        }
+
+        const auto drawText = [renderTarget, this](std::wstring_view text,
+                                                   const RECT& rect,
+                                                   COLORREF color)
+        {
+            if (text.empty())
+            {
+                return;
+            }
+
+            const auto brush = [&]()
+            {
+                hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> result;
+                renderTarget->CreateSolidColorBrush(
+                    hyperbrowse::render::ToD2DColor(color),
+                    result.GetAddressOf());
+                return result;
+            }();
+            if (brush)
+            {
+                renderTarget->DrawText(
+                    text.data(),
+                    static_cast<UINT32>(text.size()),
+                    d2dToolbarTextFormat_.Get(),
+                    hyperbrowse::render::ToD2DRect(rect),
+                    brush.Get());
+            }
+        };
+
+        const auto drawRoundedButton = [&](const RECT& sourceRect, COLORREF fillColor, COLORREF borderColor)
+        {
+            RECT buttonRect = sourceRect;
+            InflateRect(&buttonRect, -1, -1);
+            const auto fillBrush = createBrush(fillColor);
+            const auto buttonBorderBrush = createBrush(borderColor);
+            const D2D1_ROUNDED_RECT roundedRect = hyperbrowse::render::ToD2DRoundedRect(buttonRect, 10.0f, 10.0f);
+            if (fillBrush)
+            {
+                renderTarget->FillRoundedRectangle(&roundedRect, fillBrush.Get());
+            }
+            if (buttonBorderBrush)
+            {
+                renderTarget->DrawRoundedRectangle(&roundedRect, buttonBorderBrush.Get(), 1.0f);
+            }
+        };
+
+        for (int index = 0; index < static_cast<int>(commandBarMenuButtons_.size()); ++index)
+        {
+            const CommandBarMenuButton& button = commandBarMenuButtons_[static_cast<std::size_t>(index)];
+            if (IsRectEmpty(&button.rect))
+            {
+                continue;
+            }
+
+            const bool hot = index == commandBarHotIndex_;
+            const bool pressed = index == commandBarPressedIndex_;
+            const COLORREF fillColor = pressed
+                ? BlendColor(palette.actionStripBackground, palette.accent, 48)
+                : (hot
+                    ? BlendColor(palette.actionStripBackground, palette.text, 20)
+                    : palette.actionStripBackground);
+            const COLORREF borderColor = hot || pressed
+                ? BlendColor(palette.actionStripBorder, palette.accent, 28)
+                : fillColor;
+            drawRoundedButton(button.rect, fillColor, borderColor);
+
+            RECT textRect = button.rect;
+            InflateRect(&textRect, -kCommandBarMenuButtonPadding, 0);
+            textRect.right -= kCommandBarMenuChevronWidth + 4;
+            drawText(button.label, textRect, palette.text);
+
+            const int chevronX = button.rect.right - kCommandBarMenuButtonPadding - kCommandBarMenuChevronWidth;
+            const int chevronY = button.rect.top + ((button.rect.bottom - button.rect.top) - kCommandBarMenuChevronWidth) / 2;
+            const auto chevronBrush = createBrush(palette.mutedText);
+            if (chevronBrush)
+            {
+                renderTarget->DrawLine(
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX), static_cast<float>(chevronY + 2)),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + (kCommandBarMenuChevronWidth / 2)), static_cast<float>(chevronY + 6)),
+                    chevronBrush.Get(),
+                    2.0f);
+                renderTarget->DrawLine(
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + (kCommandBarMenuChevronWidth / 2)), static_cast<float>(chevronY + 6)),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + kCommandBarMenuChevronWidth), static_cast<float>(chevronY + 2)),
+                    chevronBrush.Get(),
+                    2.0f);
+            }
+        }
+
+        for (int index = 0; index < static_cast<int>(toolbarItems_.size()); ++index)
+        {
+            const ToolbarItem& item = toolbarItems_[static_cast<std::size_t>(index)];
+            if (item.kind == ToolbarItemKind::Separator)
+            {
+                if (borderBrush)
+                {
+                    renderTarget->DrawLine(
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(item.rect.left), static_cast<float>(item.rect.top + 4)),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(item.rect.left), static_cast<float>(item.rect.bottom - 4)),
+                        borderBrush.Get());
+                }
+                continue;
+            }
+
+            if (item.kind == ToolbarItemKind::FilterEdit)
+            {
+                if (filterEdit_)
+                {
+                    RECT filterRect = item.rect;
+                    InflateRect(&filterRect, 0, -2);
+                    const COLORREF borderColor = GetFocus() == filterEdit_ ? palette.accent : palette.actionStripBorder;
+                    drawRoundedButton(filterRect, palette.actionFieldBackground, borderColor);
+
+                    if (toolbarIconLibrary_)
+                    {
+                        const HBITMAP bitmap = toolbarIconLibrary_->GetBitmap("search", 14, palette.mutedText);
+                        BITMAP bitmapInfo{};
+                        if (bitmap && GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) == sizeof(bitmapInfo))
+                        {
+                            const auto icon = hyperbrowse::render::D2DRenderer::Instance().CreateBitmapFromHBITMAP(
+                                renderTarget,
+                                bitmap,
+                                bitmapInfo.bmWidth,
+                                std::abs(bitmapInfo.bmHeight));
+                            if (icon)
+                            {
+                                const int iconLeft = filterRect.left + 7;
+                                const int iconTop = filterRect.top + 5;
+                                hyperbrowse::render::DrawBitmapHighQuality(
+                                    renderTarget,
+                                    icon.Get(),
+                                    D2D1::RectF(static_cast<float>(iconLeft),
+                                                static_cast<float>(iconTop),
+                                                static_cast<float>(iconLeft + 14),
+                                                static_cast<float>(iconTop + 14)));
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+
+            const bool isHot = index == toolbarHotIndex_;
+            const bool isPressed = index == toolbarPressedIndex_;
+            const bool isChecked = item.checked;
+            const bool isEnabled = item.enabled;
+            COLORREF iconColor = palette.mutedText;
+            if (isChecked)
+            {
+                iconColor = palette.accentText;
+            }
+            else if (!isEnabled)
+            {
+                iconColor = BlendColor(palette.mutedText, palette.actionStripBackground, 140);
+            }
+
+            if (isEnabled && (isHot || isPressed || isChecked))
+            {
+                COLORREF backgroundColor = palette.actionStripBackground;
+                if (isChecked)
+                {
+                    backgroundColor = palette.accentFill;
+                    if (isPressed)
+                    {
+                        backgroundColor = BlendColor(backgroundColor, palette.accent, 48);
+                    }
+                    else if (isHot)
+                    {
+                        backgroundColor = BlendColor(backgroundColor, palette.accent, 24);
+                    }
+                }
+                else if (isPressed)
+                {
+                    backgroundColor = BlendColor(palette.actionStripBackground, palette.accent, 48);
+                }
+                else
+                {
+                    backgroundColor = BlendColor(palette.actionStripBackground, palette.text, 20);
+                }
+                drawRoundedButton(item.rect, backgroundColor, backgroundColor);
+            }
+
+            if (!item.iconName.empty() && toolbarIconLibrary_)
+            {
+                RECT iconRect = item.rect;
+                if (item.kind == ToolbarItemKind::IconDropdown)
+                {
+                    iconRect.right -= kToolbarDropdownChevronSize + 2;
+                }
+                const int iconLeft = iconRect.left + ((iconRect.right - iconRect.left) - kToolbarIconSize) / 2;
+                const int iconTop = iconRect.top + ((iconRect.bottom - iconRect.top) - kToolbarIconSize) / 2;
+                const HBITMAP bitmap = toolbarIconLibrary_->GetBitmap(item.iconName, kToolbarIconSize, iconColor);
+                BITMAP bitmapInfo{};
+                if (bitmap && GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) == sizeof(bitmapInfo))
+                {
+                    const auto icon = hyperbrowse::render::D2DRenderer::Instance().CreateBitmapFromHBITMAP(
+                        renderTarget,
+                        bitmap,
+                        bitmapInfo.bmWidth,
+                        std::abs(bitmapInfo.bmHeight));
+                    if (icon)
+                    {
+                        hyperbrowse::render::DrawBitmapHighQuality(
+                            renderTarget,
+                            icon.Get(),
+                            D2D1::RectF(static_cast<float>(iconLeft),
+                                        static_cast<float>(iconTop),
+                                        static_cast<float>(iconLeft + kToolbarIconSize),
+                                        static_cast<float>(iconTop + kToolbarIconSize)));
+                    }
+                }
+            }
+
+            if (item.kind == ToolbarItemKind::IconDropdown && isEnabled)
+            {
+                const int chevronX = item.rect.right - kToolbarDropdownChevronSize - 6;
+                const int chevronY = item.rect.top + ((item.rect.bottom - item.rect.top) - kToolbarDropdownChevronSize) / 2;
+                const auto chevronBrush = createBrush(palette.mutedText);
+                if (chevronBrush)
+                {
+                    renderTarget->DrawLine(
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX), static_cast<float>(chevronY + 3)),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + 5), static_cast<float>(chevronY + 7)),
+                        chevronBrush.Get(),
+                        1.5f);
+                    renderTarget->DrawLine(
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + 5), static_cast<float>(chevronY + 7)),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + 10), static_cast<float>(chevronY + 3)),
+                        chevronBrush.Get(),
+                        1.5f);
+                }
+            }
+        }
+    }
+
     void MainWindow::PaintToolbar(HDC hdc, const RECT& stripRect)
     {
         const ThemePalette palette = GetThemePalette();
@@ -22077,6 +23486,7 @@ namespace hyperbrowse::ui
                          suggested->right - suggested->left,
                          suggested->bottom - suggested->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+            ResetD2DResources();
             ApplyTheme();
             return 0;
         }
@@ -22675,6 +24085,44 @@ namespace hyperbrowse::ui
             HDC hdc = BeginPaint(hwnd_, &ps);
             RECT client{};
             GetClientRect(hwnd_, &client);
+
+            bool paintedWithD2D = false;
+            if (EnsureD2DResources())
+            {
+                const int clientWidth = std::max(1, static_cast<int>(client.right - client.left));
+                const int clientHeight = std::max(1, static_cast<int>(client.bottom - client.top));
+                HDC memDC = CreateCompatibleDC(hdc);
+                HBITMAP memBmp = memDC ? CreateCompatibleBitmap(hdc, clientWidth, clientHeight) : nullptr;
+                if (memDC && memBmp)
+                {
+                    const HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+                    auto bufferedRenderTarget = hyperbrowse::render::D2DRenderer::Instance().CreateDCRenderTarget();
+                    if (bufferedRenderTarget
+                        && SUCCEEDED(bufferedRenderTarget->BindDC(memDC, &client)))
+                    {
+                        bufferedRenderTarget->BeginDraw();
+                        PaintMainShellD2D(bufferedRenderTarget.Get(), client);
+                        const HRESULT drawResult = bufferedRenderTarget->EndDraw();
+                        paintedWithD2D = SUCCEEDED(drawResult);
+                    }
+
+                    if (paintedWithD2D)
+                    {
+                        PaintDetailsPanel(memDC, client);
+                        BitBlt(hdc, 0, 0, clientWidth, clientHeight, memDC, 0, 0, SRCCOPY);
+                    }
+
+                    SelectObject(memDC, oldBmp);
+                    DeleteObject(memBmp);
+                    DeleteDC(memDC);
+                }
+            }
+
+            if (paintedWithD2D)
+            {
+                EndPaint(hwnd_, &ps);
+                return 0;
+            }
 
             const int clientWidth = std::max(1, static_cast<int>(client.right - client.left));
             const int clientHeight = std::max(1, static_cast<int>(client.bottom - client.top));

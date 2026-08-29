@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 
 namespace hyperbrowse::cache
 {
@@ -29,6 +30,7 @@ namespace hyperbrowse::render
         IDWriteFactory* DWriteFactory() const noexcept;
 
         ComPtr<ID2D1HwndRenderTarget> CreateHwndRenderTarget(HWND hwnd);
+        ComPtr<ID2D1DCRenderTarget> CreateDCRenderTarget();
         void ResizeRenderTarget(ID2D1HwndRenderTarget* renderTarget, HWND hwnd);
 
         ComPtr<ID2D1Bitmap> CreateBitmapFromHBITMAP(
@@ -46,6 +48,23 @@ namespace hyperbrowse::render
             float fontSize,
             DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE style = DWRITE_FONT_STYLE_NORMAL);
+
+        ComPtr<IDWriteTextFormat> CreateTextFormatFromFont(
+            HFONT font,
+            DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE style = DWRITE_FONT_STYLE_NORMAL);
+
+        ComPtr<IDWriteTextLayout> CreateTextLayout(
+            std::wstring_view text,
+            IDWriteTextFormat* format,
+            float maxWidth = 4096.0f,
+            float maxHeight = 4096.0f);
+
+        float MeasureTextWidth(
+            std::wstring_view text,
+            IDWriteTextFormat* format,
+            float maxWidth = 4096.0f,
+            float maxHeight = 4096.0f);
 
     private:
         D2DRenderer();

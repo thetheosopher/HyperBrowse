@@ -116,6 +116,30 @@ namespace hyperbrowse::render
         return renderTarget;
     }
 
+    ComPtr<ID2D1DCRenderTarget> D2DRenderer::CreateDCRenderTarget()
+    {
+        if (!d2dFactory_)
+        {
+            return {};
+        }
+
+        D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties();
+        rtProps.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+        rtProps.usage = D2D1_RENDER_TARGET_USAGE_NONE;
+
+        ComPtr<ID2D1DCRenderTarget> renderTarget;
+        if (FAILED(d2dFactory_->CreateDCRenderTarget(
+                &rtProps,
+                renderTarget.GetAddressOf())))
+        {
+            return {};
+        }
+
+        renderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        renderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+        return renderTarget;
+    }
+
     void D2DRenderer::ResizeRenderTarget(ID2D1HwndRenderTarget* renderTarget, HWND hwnd)
     {
         if (!renderTarget || !hwnd)
@@ -135,6 +159,8 @@ namespace hyperbrowse::render
         {
             renderTarget->Resize(size);
         }
+
+        renderTarget->SetDpi(96.0f, 96.0f);
     }
 
     ComPtr<ID2D1Bitmap> D2DRenderer::CreateBitmapFromHBITMAP(
@@ -254,5 +280,84 @@ namespace hyperbrowse::render
 
         textFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         return textFormat;
+    }
+
+    ComPtr<IDWriteTextFormat> D2DRenderer::CreateTextFormatFromFont(
+        HFONT font,
+        DWRITE_FONT_WEIGHT weight,
+        DWRITE_FONT_STYLE style)
+    {
+        if (!font)
+        {
+            return {};
+        }
+
+        LOGFONTW logFont{};
+        if (GetObjectW(font, sizeof(logFont), &logFont) != sizeof(logFont))
+        {
+            return {};
+        }
+
+        const float fontSize = static_cast<float>(std::abs(logFont.lfHeight));
+        if (fontSize <= 0.0f || logFont.lfFaceName[0] == L'\0')
+        {
+            return {};
+        }
+
+        const DWRITE_FONT_WEIGHT resolvedWeight = weight == DWRITE_FONT_WEIGHT_NORMAL
+            ? (logFont.lfWeight >= FW_BOLD ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL)
+            : weight;
+        const DWRITE_FONT_STYLE resolvedStyle = logFont.lfItalic != FALSE
+            ? DWRITE_FONT_STYLE_ITALIC
+            : style;
+        return CreateTextFormat(logFont.lfFaceName, fontSize, resolvedWeight, resolvedStyle);
+    }
+
+    ComPtr<IDWriteTextLayout> D2DRenderer::CreateTextLayout(
+        std::wstring_view text,
+        IDWriteTextFormat* format,
+        float maxWidth,
+        float maxHeight)
+    {
+        if (!dwriteFactory_ || !format || text.empty() || maxWidth <= 0.0f || maxHeight <= 0.0f)
+        {
+            return {};
+        }
+
+        ComPtr<IDWriteTextLayout> textLayout;
+        const HRESULT hr = dwriteFactory_->CreateTextLayout(
+            text.data(),
+            static_cast<UINT32>(text.size()),
+            format,
+            maxWidth,
+            maxHeight,
+            textLayout.GetAddressOf());
+        if (FAILED(hr))
+        {
+            return {};
+        }
+
+        return textLayout;
+    }
+
+    float D2DRenderer::MeasureTextWidth(
+        std::wstring_view text,
+        IDWriteTextFormat* format,
+        float maxWidth,
+        float maxHeight)
+    {
+        const ComPtr<IDWriteTextLayout> textLayout = CreateTextLayout(text, format, maxWidth, maxHeight);
+        if (!textLayout)
+        {
+            return 0.0f;
+        }
+
+        DWRITE_TEXT_METRICS textMetrics{};
+        if (FAILED(textLayout->GetMetrics(&textMetrics)))
+        {
+            return 0.0f;
+        }
+
+        return textMetrics.widthIncludingTrailingWhitespace;
     }
 }
