@@ -2900,6 +2900,7 @@ namespace hyperbrowse::viewer
         windowFitMode_ = WindowFitMode::Regular;
         hasRegularPlacementBeforeFit_ = false;
         regularPlacementBeforeFit_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
+        FitToWindow();
     }
 
     void ViewerWindow::ToggleFullScreen()

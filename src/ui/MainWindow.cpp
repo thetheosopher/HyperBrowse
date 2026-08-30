@@ -5245,7 +5245,7 @@ namespace
                 L"Use out-of-process LibRaw fallback",
                 L"Browse folders recursively",
                 L"Show subfolders in the browser",
-                L"Close the main window when Esc is pressed",
+                L"Close the main window when ESC is pressed",
                 L"Use a single application instance"};
             const std::array comboTexts{
                 L"Crossfade",
@@ -5405,7 +5405,7 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::ShowSubfolders, L"Show subfolders in the browser", y);
             y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when Esc is pressed", y);
+            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when ESC is pressed", y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
 
@@ -6075,7 +6075,7 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::ShowSubfolders, L"Show subfolders in the browser", y);
             y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when Esc is pressed", y);
+            check(ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when ESC is pressed", y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
             break;

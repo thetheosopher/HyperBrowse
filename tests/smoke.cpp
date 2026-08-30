@@ -2619,9 +2619,24 @@ namespace
             PumpMessagesFor(100);
         }
 
+        for (int index = 0; index < 5; ++index)
+        {
+            SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
+        }
+        PumpMessagesFor(300);
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(120, 120));
+        SendMessageW(viewer.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(180, 150));
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(180, 150));
+        PumpMessagesFor(100);
+        Expect(viewer.PanOffset().x != 0 || viewer.PanOffset().y != 0,
+            "Viewer fullscreen fit test did not establish a non-zero pan offset");
+
         SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
         PumpMessagesFor(100);
-        Expect(!viewer.IsFullScreen(), "Viewer double-click did not exit full screen");
+        Expect(!viewer.IsFullScreen()
+                && viewer.PanOffset().x == 0
+                && viewer.PanOffset().y == 0,
+            "Viewer exiting fullscreen did not fit the image to the resized window");
 
         for (int index = 0; index < 5; ++index)
         {
