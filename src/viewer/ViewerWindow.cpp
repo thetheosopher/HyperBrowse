@@ -1013,7 +1013,16 @@ namespace hyperbrowse::viewer
         {
             hasWindowedStateToRestore_ = false;
         }
-        SetForegroundWindow(hwnd_);
+        if (!SetForegroundWindow(hwnd_))
+        {
+            SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            SetWindowPos(hwnd_, HWND_NOTOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            SetForegroundWindow(hwnd_);
+        }
+        SetActiveWindow(hwnd_);
+        SetFocus(hwnd_);
         NotifyCurrentItemChanged();
         LoadCurrentImageAsync(LoadReason::Open);
         return true;
