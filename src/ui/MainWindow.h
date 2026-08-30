@@ -607,6 +607,7 @@ namespace hyperbrowse::ui
         std::wstring startupSelectedImagePath_;
         std::wstring pendingStartupSelectionPath_;
         std::wstring pendingStartupViewerPath_;
+        bool viewerOpenedBeforeFolderEnumerationCompleted_{};
         std::vector<std::wstring> pendingFolderReloadSelectionPaths_;
         std::wstring pendingFolderReloadFocusedPath_;
         std::vector<std::wstring> openedFolderHistory_;

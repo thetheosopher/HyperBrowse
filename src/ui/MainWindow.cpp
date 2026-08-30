@@ -21483,6 +21483,7 @@ namespace hyperbrowse::ui
 
         pendingFolderReloadSelectionPaths_.clear();
         pendingFolderReloadFocusedPath_.clear();
+        viewerOpenedBeforeFolderEnumerationCompleted_ = false;
 
         if (!historyNavigation)
         {
@@ -21614,6 +21615,15 @@ namespace hyperbrowse::ui
         }
 
         FlushFolderEnumerationPresentation(true);
+        if (update->kind == services::FolderEnumerationUpdateKind::Completed
+            && viewerOpenedBeforeFolderEnumerationCompleted_)
+        {
+            if (viewerWindow_ && viewerWindow_->IsOpen())
+            {
+                SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
+            }
+            viewerOpenedBeforeFolderEnumerationCompleted_ = false;
+        }
         return 0;
     }
 
@@ -21698,6 +21708,9 @@ namespace hyperbrowse::ui
         pendingStartupViewerPath_.clear();
         browserPaneController_->RestoreSelectionByFilePaths({startupViewerPath}, startupViewerPath);
         OpenItemInViewer(modelIndex, ShouldDefaultViewerToSecondaryMonitor());
+        viewerOpenedBeforeFolderEnumerationCompleted_ = viewerWindow_
+            && viewerWindow_->IsOpen()
+            && browser::FilePathsEqual(viewerWindow_->CurrentFilePath(), startupViewerPath);
     }
 
     LRESULT MainWindow::OnFolderTreeEnumerationMessage(LPARAM lParam)

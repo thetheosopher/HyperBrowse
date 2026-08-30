@@ -3584,6 +3584,49 @@ namespace
              PumpMessagesFor(100);
          }
     }
+
+    void RunStartupViewerEnumerationScenario(HINSTANCE instance)
+    {
+        TempFolder root(L"HyperBrowseStartupViewerEnumeration");
+        const fs::path targetPath = root.Root() / L"000-target.jpg";
+        WriteTestImage(targetPath, TestImageFormat::Jpeg, 48, 24, 6);
+        for (int index = 1; index < 40; ++index)
+        {
+            WriteTestImage(root.Root() / (L"image_" + std::to_wstring(index) + L".jpg"),
+                           TestImageFormat::Jpeg,
+                           48,
+                           24,
+                           6);
+        }
+
+        hyperbrowse::ui::MainWindow mainWindow(instance);
+        mainWindow.SetStartupLaunchPath(targetPath.wstring());
+        Expect(mainWindow.Create(), "Failed to create MainWindow for startup viewer enumeration coverage");
+
+        HWND viewerHandle = nullptr;
+        const bool openedWithCompleteFolder = PumpMessagesUntil([&]()
+        {
+            viewerHandle = FindWindowW(L"HyperBrowseViewerWindow", nullptr);
+            if (!viewerHandle)
+            {
+                return false;
+            }
+
+            wchar_t title[512]{};
+            GetWindowTextW(viewerHandle, title, static_cast<int>(std::size(title)));
+            return std::wstring(title).find(L"/40)") != std::wstring::npos;
+        }, 5000);
+        Expect(openedWithCompleteFolder,
+               "Viewer opened from a startup launch path with only the initial enumeration batch");
+
+        if (viewerHandle && IsWindow(viewerHandle) != FALSE)
+        {
+            SendMessageW(viewerHandle, WM_CLOSE, 0, 0);
+            PumpMessagesFor(100);
+        }
+        DestroyWindow(mainWindow.Hwnd());
+        PumpMessagesFor(100);
+    }
 }
 
 int main(int argc, char* argv[])
@@ -3646,6 +3689,7 @@ int main(int argc, char* argv[])
             RunQuickSendModelScenario();
             RunViewerWindowScenario(instance, hwnd);
             RunAppTextSizeScenario(instance);
+            RunStartupViewerEnumerationScenario(instance);
             RunMainWindowFolderTreeScenario(instance);
         }
 
