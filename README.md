@@ -53,6 +53,68 @@ Quick Actions supports up to 36 saved destinations. Each newly added destination
 
 In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed.
 
+## Keyboard shortcuts
+
+The same catalogue is available in the application from Help > Keyboard Shortcuts. Shortcuts are listed by the window that has focus.
+
+### Main window
+
+| Shortcut | Action |
+| --- | --- |
+| `F1` | Open the user guide |
+| `Ctrl+O` | Open a folder |
+| `Backspace` / `Alt+Left` | Navigate to the previous folder |
+| `Alt+Right` | Navigate to the next folder |
+| `Esc` | Minimize the main window, or close it when configured in Settings |
+| `Ctrl+W` | Minimize the main window |
+| `F5` | Refresh the folder tree |
+| `F2` | Rename the selected item |
+| `F7` / `F8` | Move / copy the selection to a Quick Actions destination |
+| `Ctrl+I` | Show image information |
+| `Ctrl+C` / `Ctrl+X` | Copy / cut selected files |
+| `Ctrl+Shift+C` | Copy selected paths |
+| `Ctrl+Shift+I` | Copy displayed image pixels |
+| `Ctrl+V` | Paste files into the current folder |
+| `Ctrl+A` | Select all items |
+| `Ctrl+D` | Duplicate selected files |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo the last supported file operation |
+| `Ctrl+E` | Reveal the selection in Explorer |
+| `Alt+Enter` | Show file properties |
+| `Del` / `Shift+Del` | Move the selection to the Recycle Bin / delete it permanently |
+| `Ctrl+1` / `Ctrl+2` | Use thumbnail / details mode |
+| `Ctrl+3` | Toggle the details panel |
+| `Ctrl+R` | Toggle recursive browsing |
+| `+` / `=` / Numpad `+` | Increase thumbnail size |
+| `-` / `_` / Numpad `-` | Decrease thumbnail size |
+| `Ctrl+Shift+S` / `Ctrl+Shift+F` | Start a slideshow from the selection / current folder |
+| `Ctrl+Shift+T` | Open Settings |
+| `Ctrl+Shift+D` / `Ctrl+Shift+X` | Capture a diagnostics snapshot / reset diagnostics |
+
+### Viewer
+
+| Shortcut | Action |
+| --- | --- |
+| `Esc` / `Ctrl+W` | Close the viewer |
+| Arrow keys | Navigate, or pan when zoomed |
+| `Shift` + Arrow keys | Navigate the comparison pair |
+| `Page Up` / `Page Down` | Navigate to the previous / next image |
+| `Ctrl+Home` / `Ctrl+End` | Go to the first / last image |
+| `Ctrl+Shift+F` | Start a slideshow from the current folder |
+| `F7` / `F8` | Move / copy the displayed image to a Quick Actions destination |
+| `Ctrl+Shift+I` | Copy the displayed image |
+| `Tab` | Toggle image information overlays |
+| `+` / `=` / Numpad `+` | Zoom in |
+| `-` / `_` / Numpad `-` | Zoom out |
+| `Enter` | Toggle between fit and actual-size viewing |
+| `0` / `1` | Fit the image to the window / show it at actual size |
+| `H` / `W` | Fit the image to the window height / width |
+| `L` / `R` | Rotate the image left / right |
+| `C` | Toggle comparison mode |
+| `X` | Activate the compared image |
+| `Space` | Start or stop the slideshow |
+| `F11` | Toggle full-screen mode |
+| `Del` / `Shift+Del` | Move the displayed file to the Recycle Bin / delete it permanently |
+
 ## Architecture Overview
 
 HyperBrowse is organized as a native desktop app with a shared core library and a small helper toolchain around it:

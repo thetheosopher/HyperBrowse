@@ -460,6 +460,52 @@ namespace
                       '1',
                       0),
              "Viewer 1 actual-size shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
+                      ShortcutContext::Viewer,
+                      ID_VIEW_SLIDESHOW_FOLDER,
+                      'F',
+                      FCONTROL | FSHIFT),
+             "Viewer Ctrl+Shift+F slideshow shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
+                      ShortcutContext::Viewer,
+                      ID_FILE_QUICK_SEND_MOVE,
+                      VK_F7,
+                      0),
+             "Viewer F7 Quick Actions shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
+                      ShortcutContext::Viewer,
+                      ID_FILE_QUICK_SEND_COPY,
+                      VK_F8,
+                      0),
+             "Viewer F8 Quick Actions shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'H', 0),
+             "Viewer H fit-height shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'W', 0),
+             "Viewer W fit-width shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'L', 0),
+             "Viewer L rotate-left shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'R', 0),
+             "Viewer R rotate-right shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'C', 0),
+             "Viewer C compare shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'X', 0),
+             "Viewer X compared-image shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_TAB, 0),
+             "Viewer Tab overlay shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_SPACE, 0),
+             "Viewer Space slideshow shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_F11, 0),
+             "Viewer F11 full-screen shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_PRIOR, 0),
+             "Viewer Page Up shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_NEXT, 0),
+             "Viewer Page Down shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_RETURN, 0),
+             "Viewer Enter fit-toggle shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_OEM_PLUS, 0),
+             "Viewer plus zoom shortcut is missing from the shared catalog");
+         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_OEM_MINUS, 0),
+             "Viewer minus zoom shortcut is missing from the shared catalog");
         }
 
     void RunBackgroundExecutorExceptionScenario()
