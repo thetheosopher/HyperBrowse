@@ -445,6 +445,8 @@ namespace
         CloseOnEscape,
         SingleInstance,
         EscapeKeyBehavior,
+        WindowedFullMetadata,
+        FullScreenFullMetadata,
         Count,
     };
 
@@ -912,7 +914,8 @@ namespace
         std::size_t metadataCacheCapacityOverrideEntries{};
         bool useSlideshowTransition{};
         bool infoOverlaysVisible{};
-        bool fullMetadataVisible{};
+        bool windowedFullMetadataVisible{};
+        bool fullScreenFullMetadataVisible{};
         bool compactThumbnailLayout{true};
         bool thumbnailDetailsVisible{true};
         bool detailsStripVisible{true};
@@ -5160,7 +5163,8 @@ namespace
             : hyperbrowse::browser::RawJpegDisplayPreference::Raw;
         state->defaultViewerToSecondaryMonitor = isChecked(ConsolidatedSettingsControl::SecondaryMonitor);
         state->infoOverlaysVisible = isChecked(ConsolidatedSettingsControl::InfoOverlays);
-        state->fullMetadataVisible = isChecked(ConsolidatedSettingsControl::FullMetadata);
+        state->windowedFullMetadataVisible = isChecked(ConsolidatedSettingsControl::WindowedFullMetadata);
+        state->fullScreenFullMetadataVisible = isChecked(ConsolidatedSettingsControl::FullScreenFullMetadata);
         state->overlayTextSize = static_cast<hyperbrowse::viewer::InfoOverlayTextSize>(overlaySizeIndex);
         state->darkTheme = isChecked(ConsolidatedSettingsControl::ThemeDark);
         state->appTextSize = static_cast<hyperbrowse::util::AppTextSize>(appTextSizeIndex);
@@ -5404,7 +5408,9 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::InfoOverlays, L"Show viewer detail overlays", y);
             y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::FullMetadata, L"Show full metadata", y);
+            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::WindowedFullMetadata, L"Show full metadata in windowed mode", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::FullScreenFullMetadata, L"Show full metadata in full-screen mode", y);
             y += rowHeight + rowGap;
             label(ConsolidatedSettingsPage::Viewer, L"Overlay text size", y);
             combo(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::OverlayTextSize, y);
@@ -5530,7 +5536,8 @@ namespace
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RawPreferRaw, state->pairedRawJpegViewerPreference == hyperbrowse::browser::RawJpegDisplayPreference::Raw);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::SecondaryMonitor, state->defaultViewerToSecondaryMonitor);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::InfoOverlays, state->infoOverlaysVisible);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::FullMetadata, state->fullMetadataVisible);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::WindowedFullMetadata, state->windowedFullMetadataVisible);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::FullScreenFullMetadata, state->fullScreenFullMetadataVisible);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThemeDark, state->darkTheme);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThemeLight, !state->darkTheme);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThumbnailDetails, state->thumbnailDetailsVisible);
@@ -6079,7 +6086,9 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::InfoOverlays, L"Show viewer detail overlays", y);
             y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::FullMetadata, L"Show full metadata", y);
+            check(ConsolidatedSettingsControl::WindowedFullMetadata, L"Show full metadata in windowed mode", y);
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::FullScreenFullMetadata, L"Show full metadata in full-screen mode", y);
             y += rowHeight + rowGap;
             labelValue(L"Overlay text size", ConsolidatedSettingsControl::OverlayTextSize, y);
             y += rowHeight + rowGap;
@@ -6214,7 +6223,8 @@ namespace
         case ConsolidatedSettingsControl::RawPreferJpeg: return settings.pairedRawJpegViewerPreference == hyperbrowse::browser::RawJpegDisplayPreference::Jpeg;
         case ConsolidatedSettingsControl::SecondaryMonitor: return settings.defaultViewerToSecondaryMonitor;
         case ConsolidatedSettingsControl::InfoOverlays: return settings.infoOverlaysVisible;
-        case ConsolidatedSettingsControl::FullMetadata: return settings.fullMetadataVisible;
+        case ConsolidatedSettingsControl::WindowedFullMetadata: return settings.windowedFullMetadataVisible;
+        case ConsolidatedSettingsControl::FullScreenFullMetadata: return settings.fullScreenFullMetadataVisible;
         case ConsolidatedSettingsControl::ThemeLight: return !settings.darkTheme;
         case ConsolidatedSettingsControl::ThemeDark: return settings.darkTheme;
         case ConsolidatedSettingsControl::ThumbnailDetails: return settings.thumbnailDetailsVisible;
@@ -6300,7 +6310,8 @@ namespace
             case ConsolidatedSettingsControl::RawPairingEnabled: value = &settings.rawJpegPairedOperationsEnabled; break;
             case ConsolidatedSettingsControl::SecondaryMonitor: value = &settings.defaultViewerToSecondaryMonitor; break;
             case ConsolidatedSettingsControl::InfoOverlays: value = &settings.infoOverlaysVisible; break;
-            case ConsolidatedSettingsControl::FullMetadata: value = &settings.fullMetadataVisible; break;
+            case ConsolidatedSettingsControl::WindowedFullMetadata: value = &settings.windowedFullMetadataVisible; break;
+            case ConsolidatedSettingsControl::FullScreenFullMetadata: value = &settings.fullScreenFullMetadataVisible; break;
             case ConsolidatedSettingsControl::ThumbnailDetails: value = &settings.thumbnailDetailsVisible; break;
             case ConsolidatedSettingsControl::CompactLayout: value = &settings.compactThumbnailLayout; break;
             case ConsolidatedSettingsControl::DetailsPanel: value = &settings.detailsStripVisible; break;
@@ -22079,9 +22090,19 @@ namespace hyperbrowse::ui
         state.overlayTextSize = viewerWindow_ && viewerWindow_->IsOpen()
             ? viewerWindow_->OverlayTextSize()
             : viewer::ViewerWindow::DefaultOverlayTextSize();
-        state.fullMetadataVisible = viewerWindow_ && viewerWindow_->IsOpen()
-            ? viewerWindow_->IsFullMetadataVisible()
-            : viewer::ViewerWindow::DefaultFullMetadataVisible();
+        state.windowedFullMetadataVisible = viewer::ViewerWindow::DefaultWindowedFullMetadataVisible();
+        state.fullScreenFullMetadataVisible = viewer::ViewerWindow::DefaultFullScreenFullMetadataVisible();
+        if (viewerWindow_ && viewerWindow_->IsOpen())
+        {
+            if (viewerWindow_->IsFullScreen())
+            {
+                state.fullScreenFullMetadataVisible = viewerWindow_->IsFullMetadataVisible();
+            }
+            else
+            {
+                state.windowedFullMetadataVisible = viewerWindow_->IsFullMetadataVisible();
+            }
+        }
 
         state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
         if (!state.bodyFont)
@@ -22104,7 +22125,8 @@ namespace hyperbrowse::ui
             const bool viewerOverlayChanged = !viewerWindow_ || !viewerWindow_->IsOpen()
                 || viewerWindow_->AreInfoOverlaysVisible() != draft.infoOverlaysVisible
                 || viewerWindow_->OverlayTextSize() != draft.overlayTextSize
-                || viewerWindow_->IsFullMetadataVisible() != draft.fullMetadataVisible;
+                || viewer::ViewerWindow::DefaultWindowedFullMetadataVisible() != draft.windowedFullMetadataVisible
+                || viewer::ViewerWindow::DefaultFullScreenFullMetadataVisible() != draft.fullScreenFullMetadataVisible;
 
             slideshowIntervalMs_ = NormalizeSlideshowDuration(draft.slideshowIntervalMs);
             slideshowTransitionStyle_ = draft.slideshowTransitionStyle;
@@ -22143,17 +22165,20 @@ namespace hyperbrowse::ui
             }
             if (viewerOverlayChanged)
             {
+                viewer::ViewerWindow::SetDefaultWindowedFullMetadataVisible(draft.windowedFullMetadataVisible);
+                viewer::ViewerWindow::SetDefaultFullScreenFullMetadataVisible(draft.fullScreenFullMetadataVisible);
                 if (viewerWindow_ && viewerWindow_->IsOpen())
                 {
                     viewerWindow_->SetInfoOverlaysVisible(draft.infoOverlaysVisible);
                     viewerWindow_->SetOverlayTextSize(draft.overlayTextSize);
-                    viewerWindow_->SetFullMetadataVisible(draft.fullMetadataVisible);
+                    viewerWindow_->SetFullMetadataVisible(viewerWindow_->IsFullScreen()
+                        ? draft.fullScreenFullMetadataVisible
+                        : draft.windowedFullMetadataVisible);
                 }
                 else
                 {
                     viewer::ViewerWindow::SetDefaultInfoOverlaysVisible(draft.infoOverlaysVisible);
                     viewer::ViewerWindow::SetDefaultOverlayTextSize(draft.overlayTextSize);
-                    viewer::ViewerWindow::SetDefaultFullMetadataVisible(draft.fullMetadataVisible);
                 }
             }
             ApplyViewerMouseWheelSetting();

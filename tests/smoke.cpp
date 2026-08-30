@@ -60,6 +60,8 @@ namespace
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
+    constexpr wchar_t kRegistryValueViewerWindowedFullMetadataVisible[] = L"ViewerWindowedFullMetadataVisible";
+    constexpr wchar_t kRegistryValueViewerFullScreenFullMetadataVisible[] = L"ViewerFullScreenFullMetadataVisible";
     constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
     constexpr wchar_t kRegistryValueViewerEscapeKeyBehavior[] = L"ViewerEscapeKeyBehavior";
     constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
@@ -3023,6 +3025,8 @@ namespace
     {
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
         ScopedRegistryDwordBackup overlayTextSizeBackup(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
+        ScopedRegistryDwordBackup windowedFullMetadataBackup(kRegistryPath, kRegistryValueViewerWindowedFullMetadataVisible);
+        ScopedRegistryDwordBackup fullScreenFullMetadataBackup(kRegistryPath, kRegistryValueViewerFullScreenFullMetadataVisible);
         ScopedRegistryDwordBackup fullMetadataBackup(kRegistryPath, kRegistryValueViewerFullMetadataVisible);
         auto* state = reinterpret_cast<TestWindowState*>(GetWindowLongPtrW(ownerWindow, GWLP_USERDATA));
         Expect(state != nullptr, "Failed to locate the hidden test window state");
@@ -3033,6 +3037,8 @@ namespace
             {
                 RegDeleteValueW(key, kRegistryValueViewerInfoOverlaysVisible);
                 RegDeleteValueW(key, kRegistryValueViewerInfoOverlayTextSize);
+                RegDeleteValueW(key, kRegistryValueViewerWindowedFullMetadataVisible);
+                RegDeleteValueW(key, kRegistryValueViewerFullScreenFullMetadataVisible);
                 RegDeleteValueW(key, kRegistryValueViewerFullMetadataVisible);
                 RegCloseKey(key);
             }
@@ -3118,6 +3124,24 @@ namespace
             "Viewer did not apply the requested overlay text size");
         viewer.SetFullMetadataVisible(true);
         Expect(viewer.IsFullMetadataVisible(), "Viewer did not apply the requested full metadata visibility");
+
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(!viewer.IsFullScreen() && !viewer.IsFullMetadataVisible(),
+            "Viewer did not switch to the independent windowed full metadata preference");
+        viewer.SetFullMetadataVisible(true);
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(viewer.IsFullScreen() && viewer.IsFullMetadataVisible(),
+            "Viewer did not restore the full-screen full metadata preference");
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(!viewer.IsFullScreen() && viewer.IsFullMetadataVisible(),
+            "Viewer did not restore the windowed full metadata preference");
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        Expect(viewer.IsFullScreen() && viewer.IsFullMetadataVisible(),
+            "Viewer did not restore the full-screen metadata state after returning from windowed mode");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),

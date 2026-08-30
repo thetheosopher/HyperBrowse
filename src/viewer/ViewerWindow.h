@@ -134,9 +134,13 @@ namespace hyperbrowse::viewer
         static bool DefaultInfoOverlaysVisible();
         static InfoOverlayTextSize DefaultOverlayTextSize();
         static bool DefaultFullMetadataVisible();
+        static bool DefaultWindowedFullMetadataVisible();
+        static bool DefaultFullScreenFullMetadataVisible();
         static void SetDefaultInfoOverlaysVisible(bool visible);
         static void SetDefaultOverlayTextSize(InfoOverlayTextSize size);
         static void SetDefaultFullMetadataVisible(bool visible);
+        static void SetDefaultWindowedFullMetadataVisible(bool visible);
+        static void SetDefaultFullScreenFullMetadataVisible(bool visible);
         void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
         void SetKeyboardPanningInverted(bool inverted) noexcept;
         bool IsKeyboardPanningInverted() const noexcept;
@@ -243,6 +247,7 @@ namespace hyperbrowse::viewer
         void RestoreRegularWindowPlacement();
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
         void ToggleFullScreen();
+        void ApplyFullMetadataVisible(bool visible);
         void AdvanceSlideshow();
         void ShowNavigationMessage(std::wstring message);
         void ShowWraparoundMessage(bool forward);

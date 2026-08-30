@@ -42,6 +42,8 @@ namespace
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
+    constexpr wchar_t kRegistryValueViewerWindowedFullMetadataVisible[] = L"ViewerWindowedFullMetadataVisible";
+    constexpr wchar_t kRegistryValueViewerFullScreenFullMetadataVisible[] = L"ViewerFullScreenFullMetadataVisible";
     constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
     constexpr int kPlaceholderBrandArtSize = 256;
     constexpr bool kEnableFullImagePrefetch = false;
@@ -403,7 +405,7 @@ namespace
         RegCloseKey(key);
     }
 
-    bool LoadViewerFullMetadataVisibleSetting()
+    bool LoadViewerFullMetadataVisibleSetting(const wchar_t* valueName)
     {
         HKEY key{};
         if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
@@ -412,12 +414,16 @@ namespace
         }
 
         DWORD value = 0;
-        const bool foundValue = TryReadDwordValue(key, kRegistryValueViewerFullMetadataVisible, &value);
+        bool foundValue = TryReadDwordValue(key, valueName, &value);
+        if (!foundValue)
+        {
+            foundValue = TryReadDwordValue(key, kRegistryValueViewerFullMetadataVisible, &value);
+        }
         RegCloseKey(key);
         return foundValue && value != 0;
     }
 
-    void SaveViewerFullMetadataVisibleSetting(bool visible)
+    void SaveViewerFullMetadataVisibleSetting(const wchar_t* valueName, bool visible)
     {
         HKEY key{};
         DWORD disposition = 0;
@@ -434,7 +440,7 @@ namespace
             return;
         }
 
-        WriteDwordValue(key, kRegistryValueViewerFullMetadataVisible, visible ? 1UL : 0UL);
+        WriteDwordValue(key, valueName, visible ? 1UL : 0UL);
         RegCloseKey(key);
     }
 
@@ -846,7 +852,17 @@ namespace hyperbrowse::viewer
 
     bool ViewerWindow::DefaultFullMetadataVisible()
     {
-        return LoadViewerFullMetadataVisibleSetting();
+        return DefaultWindowedFullMetadataVisible();
+    }
+
+    bool ViewerWindow::DefaultWindowedFullMetadataVisible()
+    {
+        return LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible);
+    }
+
+    bool ViewerWindow::DefaultFullScreenFullMetadataVisible()
+    {
+        return LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerFullScreenFullMetadataVisible);
     }
 
     void ViewerWindow::SetDefaultInfoOverlaysVisible(bool visible)
@@ -861,7 +877,18 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::SetDefaultFullMetadataVisible(bool visible)
     {
-        SaveViewerFullMetadataVisibleSetting(visible);
+        SetDefaultWindowedFullMetadataVisible(visible);
+        SetDefaultFullScreenFullMetadataVisible(visible);
+    }
+
+    void ViewerWindow::SetDefaultWindowedFullMetadataVisible(bool visible)
+    {
+        SaveViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible, visible);
+    }
+
+    void ViewerWindow::SetDefaultFullScreenFullMetadataVisible(bool visible)
+    {
+        SaveViewerFullMetadataVisibleSetting(kRegistryValueViewerFullScreenFullMetadataVisible, visible);
     }
 
     ViewerWindow::ViewerWindow(HINSTANCE instance)
@@ -869,7 +896,7 @@ namespace hyperbrowse::viewer
         , asyncState_(std::make_shared<AsyncState>())
         , infoOverlaysVisible_(LoadViewerInfoOverlaysVisibleSetting())
         , infoOverlayTextSize_(LoadViewerInfoOverlayTextSizeSetting())
-        , fullMetadataVisible_(LoadViewerFullMetadataVisibleSetting())
+        , fullMetadataVisible_(LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible))
     {
         menuFont_ = CreateViewerMenuFont(appTextSize_);
         backgroundBrush_ = CreateSolidBrush(BackgroundColor(false));
@@ -968,7 +995,7 @@ namespace hyperbrowse::viewer
         {
             infoOverlaysVisible_ = LoadViewerInfoOverlaysVisibleSetting();
             infoOverlayTextSize_ = LoadViewerInfoOverlayTextSizeSetting();
-            fullMetadataVisible_ = LoadViewerFullMetadataVisibleSetting();
+            fullMetadataVisible_ = LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible);
             if (!RegisterWindowClass())
             {
                 return false;
@@ -1294,9 +1321,17 @@ namespace hyperbrowse::viewer
         if (fullMetadataVisible_ != visible)
         {
             fullMetadataVisible_ = visible;
-            SaveViewerFullMetadataVisibleSetting(fullMetadataVisible_);
+            SaveViewerFullMetadataVisibleSetting(
+                fullScreen_ ? kRegistryValueViewerFullScreenFullMetadataVisible : kRegistryValueViewerWindowedFullMetadataVisible,
+                fullMetadataVisible_);
         }
 
+        ApplyFullMetadataVisible(fullMetadataVisible_);
+    }
+
+    void ViewerWindow::ApplyFullMetadataVisible(bool visible)
+    {
+        fullMetadataVisible_ = visible;
         if (fullMetadataVisible_)
         {
             LoadMetadataAsyncForIndex(currentIndex_);
@@ -2890,6 +2925,7 @@ namespace hyperbrowse::viewer
                          monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top,
                          SWP_FRAMECHANGED | SWP_SHOWWINDOW);
             fullScreen_ = true;
+            ApplyFullMetadataVisible(LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerFullScreenFullMetadataVisible));
             FitToWindow();
             return;
         }
@@ -2905,6 +2941,7 @@ namespace hyperbrowse::viewer
         SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         fullScreen_ = false;
+        ApplyFullMetadataVisible(LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible));
         hasWindowedStateToRestore_ = true;
         windowFitMode_ = WindowFitMode::Regular;
         hasRegularPlacementBeforeFit_ = false;
