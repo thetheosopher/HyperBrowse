@@ -322,7 +322,7 @@ namespace hyperbrowse::ui
         void StartPersistentThumbnailCacheMaintenance(bool purge);
         void ShowDiagnosticsSnapshot();
         void ResetDiagnosticsState();
-        void ShowImageInformation();
+        void ShowImageInformation(HWND ownerWindow = nullptr);
         void StartRenameSelectedImage();
         void StartBatchRenameSelection();
         void StartCompareSelected();
@@ -366,7 +366,7 @@ namespace hyperbrowse::ui
         void PasteClipboardFilesIntoCurrentFolder();
         void ShowSelectedFileProperties() const;
         void SetDesktopWallpaperFromImageFile(const std::wstring& imagePath);
-        void ShowImageInformationForPath(const std::wstring& filePath);
+        void ShowImageInformationForPath(const std::wstring& filePath, HWND ownerWindow = nullptr);
         void CopySelectedImagePixelsToClipboard(std::wstring_view preferredPath = {});
         void StartDuplicateSelection();
         void StartSlideshow(bool selectionScope);

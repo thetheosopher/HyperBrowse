@@ -2886,6 +2886,17 @@ namespace hyperbrowse::viewer
         AppendMenuW(menu, MF_STRING, kContextMenuImageInformation, L"Image &Information\tCtrl+I");
         AppendMenuW(menu, MF_STRING, kContextMenuProperties, L"P&roperties\tAlt+Enter");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu,
+                MF_STRING,
+                kContextMenuToggleInfoOverlays,
+            infoOverlaysVisible_ ? L"Hide &Overlays\tTab" : L"Show &Overlays\tTab");
+        AppendMenuW(menu,
+            MF_STRING
+                | (fullMetadataVisible_ ? MF_CHECKED : MF_UNCHECKED)
+                | (infoOverlaysVisible_ ? MF_ENABLED : MF_DISABLED),
+                kContextMenuToggleFullMetadata,
+                L"Show &Full Metadata");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kContextMenuSetWallpaper, L"Set as Desktop &Wallpaper");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kContextMenuDelete, L"&Delete\tDel");
@@ -3053,6 +3064,25 @@ namespace hyperbrowse::viewer
                                 : TextColor(darkTheme_),
                             backgroundColor);
 
+        if ((drawItem.itemState & ODS_CHECKED) != 0)
+        {
+            const int checkMarkWidth = scaleMenuDimension(10);
+            const int checkMarkHeight = scaleMenuDimension(8);
+            const int checkMarkLeft = drawItem.rcItem.left + (checkColumnWidth - checkMarkWidth) / 2;
+            const int checkMarkTop = drawItem.rcItem.top
+                + ((drawItem.rcItem.bottom - drawItem.rcItem.top) - checkMarkHeight) / 2;
+            const COLORREF checkColor = disabled
+                ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
+                : TextColor(darkTheme_);
+            const HPEN checkPen = CreatePen(PS_SOLID, std::max(1, scaleMenuDimension(2)), checkColor);
+            const HGDIOBJ oldPen = SelectObject(drawItem.hDC, checkPen);
+            MoveToEx(drawItem.hDC, checkMarkLeft, checkMarkTop + checkMarkHeight / 2, nullptr);
+            LineTo(drawItem.hDC, checkMarkLeft + checkMarkWidth / 3, checkMarkTop + checkMarkHeight - 1);
+            LineTo(drawItem.hDC, checkMarkLeft + checkMarkWidth, checkMarkTop);
+            SelectObject(drawItem.hDC, oldPen);
+            DeleteObject(checkPen);
+        }
+
         if (!shortcut.empty())
         {
             RECT shortcutRect{labelRect.right + shortcutGap,
@@ -3135,6 +3165,12 @@ namespace hyperbrowse::viewer
 
         switch (commandId)
         {
+        case kContextMenuToggleInfoOverlays:
+            ToggleInfoOverlays();
+            return;
+        case kContextMenuToggleFullMetadata:
+            SetFullMetadataVisible(!fullMetadataVisible_);
+            return;
         case kContextMenuCopyPath:
             if (!CopyTextToClipboardLocal(hwnd_, currentPath))
             {

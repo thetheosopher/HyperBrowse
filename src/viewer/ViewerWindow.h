@@ -95,6 +95,8 @@ namespace hyperbrowse::viewer
         static constexpr UINT kContextMenuDelete = 6;
         static constexpr UINT kContextMenuDeletePermanently = 7;
         static constexpr UINT kContextMenuCopyImage = 8;
+        static constexpr UINT kContextMenuToggleInfoOverlays = 9;
+        static constexpr UINT kContextMenuToggleFullMetadata = 10;
         static constexpr WPARAM kDeleteRequestPermanent = 0x1;
 
         explicit ViewerWindow(HINSTANCE instance);

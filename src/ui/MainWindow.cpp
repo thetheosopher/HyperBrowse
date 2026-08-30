@@ -18336,17 +18336,19 @@ namespace hyperbrowse::ui
         DeleteFontIfOwned(state.bodyFont);
     }
 
-    void MainWindow::ShowImageInformation()
+    void MainWindow::ShowImageInformation(HWND ownerWindow)
     {
         if (!browserPaneController_)
         {
             return;
         }
 
+        const HWND dialogOwner = ownerWindow && IsWindow(ownerWindow) ? ownerWindow : hwnd_;
+
         const int modelIndex = browserPaneController_->PrimarySelectedModelIndex();
         if (modelIndex < 0)
         {
-            MessageBoxW(hwnd_, L"Select an image first.", L"Image Information", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(dialogOwner, L"Select an image first.", L"Image Information", MB_OK | MB_ICONINFORMATION);
             return;
         }
 
@@ -18364,7 +18366,7 @@ namespace hyperbrowse::ui
 
         if (!metadata)
         {
-            MessageBoxW(hwnd_,
+            MessageBoxW(dialogOwner,
                         errorMessage.empty() ? L"No metadata is available for the selected image." : errorMessage.c_str(),
                         L"Image Information",
                         MB_OK | MB_ICONINFORMATION);
@@ -18374,7 +18376,7 @@ namespace hyperbrowse::ui
         const std::wstring content = services::FormatImageInfoContent(item);
         const std::wstring expanded = services::FormatImageInfoExpanded(*metadata);
 
-        ShowImageInformationDialog(hwnd_,
+        ShowImageInformationDialog(dialogOwner,
                        instance_,
                        themeMode_ == ThemeMode::Dark,
                        appTextSize_,
@@ -19471,7 +19473,7 @@ namespace hyperbrowse::ui
                            {});
     }
 
-    void MainWindow::ShowImageInformationForPath(const std::wstring& filePath)
+    void MainWindow::ShowImageInformationForPath(const std::wstring& filePath, HWND ownerWindow)
     {
         if (!browserPaneController_ || !browserModel_ || filePath.empty())
         {
@@ -19490,7 +19492,7 @@ namespace hyperbrowse::ui
             browserPaneController_->RestoreSelectionByFilePaths({filePath}, filePath);
         }
 
-        ShowImageInformation();
+        ShowImageInformation(ownerWindow);
     }
 
     void MainWindow::SetSelectionRating(int rating)
@@ -23442,7 +23444,7 @@ namespace hyperbrowse::ui
             CopySelectedImagePixelsToClipboard(currentPath);
             break;
         case viewer::ViewerWindow::kContextMenuImageInformation:
-            ShowImageInformationForPath(currentPath);
+            ShowImageInformationForPath(currentPath, viewerWindow_->Hwnd());
             break;
         case viewer::ViewerWindow::kContextMenuSetWallpaper:
             SetDesktopWallpaperFromImageFile(currentPath);
