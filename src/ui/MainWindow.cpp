@@ -88,6 +88,7 @@ namespace
     constexpr wchar_t kRegistryValueWindowTop[] = L"WindowTop";
     constexpr wchar_t kRegistryValueWindowWidth[] = L"WindowWidth";
     constexpr wchar_t kRegistryValueWindowHeight[] = L"WindowHeight";
+    constexpr LONG kWindowCascadeOffset = 32;
     constexpr wchar_t kRegistryValueSortMode[] = L"SortMode";
     constexpr wchar_t kRegistryValueSortAscending[] = L"SortAscending";
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
@@ -1149,6 +1150,54 @@ namespace
             && bounds.top >= monitorInfo.rcWork.top
             && bounds.right <= monitorInfo.rcWork.right
             && bounds.bottom <= monitorInfo.rcWork.bottom;
+    }
+
+    BOOL CALLBACK CountMainWindowInstances(HWND window, LPARAM parameter)
+    {
+        wchar_t className[64]{};
+        if (GetClassNameW(window, className, static_cast<int>(std::size(className))) > 0
+            && wcscmp(className, L"HyperBrowseMainWindow") == 0)
+        {
+            ++*reinterpret_cast<int*>(parameter);
+        }
+
+        return TRUE;
+    }
+
+    void CascadeWindowBoundsForAdditionalInstance(RECT* bounds)
+    {
+        if (!bounds)
+        {
+            return;
+        }
+
+        int existingWindowCount = 0;
+        EnumWindows(&CountMainWindowInstances, reinterpret_cast<LPARAM>(&existingWindowCount));
+        if (existingWindowCount <= 0)
+        {
+            return;
+        }
+
+        const LONG width = bounds->right - bounds->left;
+        const LONG height = bounds->bottom - bounds->top;
+        HMONITOR monitor = MonitorFromRect(bounds, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo))
+        {
+            return;
+        }
+
+        const RECT& workArea = monitorInfo.rcWork;
+        const LONG horizontalRange = std::max<LONG>(0, (workArea.right - workArea.left) - width);
+        const LONG verticalRange = std::max<LONG>(0, (workArea.bottom - workArea.top) - height);
+        const long long offset = static_cast<long long>(existingWindowCount) * kWindowCascadeOffset;
+        const long long horizontalPosition = static_cast<long long>(bounds->left - workArea.left) + offset;
+        const long long verticalPosition = static_cast<long long>(bounds->top - workArea.top) + offset;
+        bounds->left = workArea.left + static_cast<LONG>(horizontalRange == 0 ? 0 : horizontalPosition % (horizontalRange + 1));
+        bounds->top = workArea.top + static_cast<LONG>(verticalRange == 0 ? 0 : verticalPosition % (verticalRange + 1));
+        bounds->right = bounds->left + width;
+        bounds->bottom = bounds->top + height;
     }
 
     bool TryReadQwordValue(HKEY key, const wchar_t* valueName, std::uint64_t* value)
@@ -10892,10 +10941,12 @@ namespace hyperbrowse::ui
         int initialWindowHeight = CW_USEDEFAULT;
         if (hasPersistedWindowBounds_)
         {
-            initialWindowX = persistedWindowBounds_.left;
-            initialWindowY = persistedWindowBounds_.top;
-            initialWindowWidth = persistedWindowBounds_.right - persistedWindowBounds_.left;
-            initialWindowHeight = persistedWindowBounds_.bottom - persistedWindowBounds_.top;
+            RECT initialWindowBounds = persistedWindowBounds_;
+            CascadeWindowBoundsForAdditionalInstance(&initialWindowBounds);
+            initialWindowX = initialWindowBounds.left;
+            initialWindowY = initialWindowBounds.top;
+            initialWindowWidth = initialWindowBounds.right - initialWindowBounds.left;
+            initialWindowHeight = initialWindowBounds.bottom - initialWindowBounds.top;
         }
 
         hwnd_ = CreateWindowExW(

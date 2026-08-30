@@ -64,6 +64,10 @@ namespace
     constexpr wchar_t kRegistryValueViewerEscapeKeyBehavior[] = L"ViewerEscapeKeyBehavior";
     constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
     constexpr wchar_t kRegistryValueAppTextSize[] = L"AppTextSize";
+    constexpr wchar_t kRegistryValueWindowLeft[] = L"WindowLeft";
+    constexpr wchar_t kRegistryValueWindowTop[] = L"WindowTop";
+    constexpr wchar_t kRegistryValueWindowWidth[] = L"WindowWidth";
+    constexpr wchar_t kRegistryValueWindowHeight[] = L"WindowHeight";
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
     constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
@@ -3473,6 +3477,54 @@ namespace
         }
     }
 
+        void RunMainWindowCascadeScenario(HINSTANCE instance)
+        {
+         ScopedRegistryDwordBackup windowLeftBackup(kRegistryPath, kRegistryValueWindowLeft);
+         ScopedRegistryDwordBackup windowTopBackup(kRegistryPath, kRegistryValueWindowTop);
+         ScopedRegistryDwordBackup windowWidthBackup(kRegistryPath, kRegistryValueWindowWidth);
+         ScopedRegistryDwordBackup windowHeightBackup(kRegistryPath, kRegistryValueWindowHeight);
+
+         const HMONITOR monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTONEAREST);
+         MONITORINFO monitorInfo{};
+         monitorInfo.cbSize = sizeof(monitorInfo);
+         Expect(monitor != nullptr && GetMonitorInfoW(monitor, &monitorInfo),
+             "Could not read a monitor work area for main-window cascade coverage");
+
+         const LONG workAreaWidth = monitorInfo.rcWork.right - monitorInfo.rcWork.left;
+         const LONG workAreaHeight = monitorInfo.rcWork.bottom - monitorInfo.rcWork.top;
+         const LONG persistedWidth = workAreaWidth - 128;
+         const LONG persistedHeight = workAreaHeight - 128;
+         Expect(persistedWidth >= 960 && persistedHeight >= 640,
+             "The monitor work area is too small for main-window cascade coverage");
+
+         SetRegistryDwordValue(kRegistryPath, kRegistryValueWindowLeft, static_cast<DWORD>(monitorInfo.rcWork.left));
+         SetRegistryDwordValue(kRegistryPath, kRegistryValueWindowTop, static_cast<DWORD>(monitorInfo.rcWork.top));
+         SetRegistryDwordValue(kRegistryPath, kRegistryValueWindowWidth, static_cast<DWORD>(persistedWidth));
+         SetRegistryDwordValue(kRegistryPath, kRegistryValueWindowHeight, static_cast<DWORD>(persistedHeight));
+
+         hyperbrowse::ui::MainWindow firstWindow(instance);
+         hyperbrowse::ui::MainWindow secondWindow(instance);
+         Expect(firstWindow.Create(), "Failed to create the first MainWindow for cascade coverage");
+         Expect(secondWindow.Create(), "Failed to create the second MainWindow for cascade coverage");
+
+         RECT firstRect{};
+         RECT secondRect{};
+         Expect(GetWindowRect(firstWindow.Hwnd(), &firstRect) != FALSE,
+             "Could not read the first MainWindow rectangle for cascade coverage");
+         Expect(GetWindowRect(secondWindow.Hwnd(), &secondRect) != FALSE,
+             "Could not read the second MainWindow rectangle for cascade coverage");
+         Expect(firstRect.right - firstRect.left == secondRect.right - secondRect.left
+                 && firstRect.bottom - firstRect.top == secondRect.bottom - secondRect.top,
+             "Cascaded MainWindows did not retain the persisted size");
+         Expect(firstRect.left != secondRect.left || firstRect.top != secondRect.top,
+             "A second MainWindow opened on top of the first");
+
+         DestroyWindow(secondWindow.Hwnd());
+         PumpMessagesFor(100);
+         DestroyWindow(firstWindow.Hwnd());
+         PumpMessagesFor(100);
+        }
+
     void RunDefaultSettingsScenario(HINSTANCE instance)
     {
         using hyperbrowse::ui::command_ids::ID_VIEW_SETTINGS;
@@ -3944,6 +3996,7 @@ int main(int argc, char* argv[])
             RunQuickSendModelScenario();
             RunViewerWindowScenario(instance, hwnd);
             RunAppTextSizeScenario(instance);
+            RunMainWindowCascadeScenario(instance);
             RunStartupViewerEnumerationScenario(instance);
             RunMainWindowFolderTreeScenario(instance);
         }
