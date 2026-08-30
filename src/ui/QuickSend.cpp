@@ -109,6 +109,14 @@ namespace hyperbrowse::ui
             return static_cast<int>(kQuickSendDigitShortcutCount + character - L'a');
         }
 
+        const std::size_t punctuationIndex = kQuickSendPunctuationShortcuts.find(character);
+        if (punctuationIndex != std::wstring_view::npos)
+        {
+            return static_cast<int>(kQuickSendDigitShortcutCount
+                                    + kQuickSendLetterShortcutCount
+                                    + punctuationIndex);
+        }
+
         return std::nullopt;
     }
 
@@ -122,8 +130,13 @@ namespace hyperbrowse::ui
         {
             return static_cast<wchar_t>(L'0' + shortcut);
         }
+        if (shortcut < static_cast<int>(kQuickSendDigitShortcutCount + kQuickSendLetterShortcutCount))
+        {
+            return static_cast<wchar_t>(L'A' + shortcut - static_cast<int>(kQuickSendDigitShortcutCount));
+        }
 
-        return static_cast<wchar_t>(L'A' + shortcut - static_cast<int>(kQuickSendDigitShortcutCount));
+        return kQuickSendPunctuationShortcuts[
+            static_cast<std::size_t>(shortcut - static_cast<int>(kQuickSendDigitShortcutCount + kQuickSendLetterShortcutCount))];
     }
 
     QuickSendAssignmentResult QuickSendModel::SetShortcutForDestination(

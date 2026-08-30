@@ -11,7 +11,10 @@ namespace hyperbrowse::ui
 {
     inline constexpr std::size_t kQuickSendDigitShortcutCount = 10;
     inline constexpr std::size_t kQuickSendLetterShortcutCount = 26;
-    inline constexpr std::size_t kQuickSendShortcutCount = kQuickSendDigitShortcutCount + kQuickSendLetterShortcutCount;
+    inline constexpr std::wstring_view kQuickSendPunctuationShortcuts = L"`~!@#$%^&*()-_=+[{]}\\|;:'\",<.>/?";
+    inline constexpr std::size_t kQuickSendShortcutCount = kQuickSendDigitShortcutCount
+        + kQuickSendLetterShortcutCount
+        + kQuickSendPunctuationShortcuts.size();
 
     enum class QuickSendAssignmentResult
     {

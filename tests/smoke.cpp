@@ -2541,13 +2541,27 @@ namespace
             "Quick Send did not normalize the last lowercase letter shortcut");
         Expect(QuickSendModel::ShortcutIndexFromText(L"AB") == std::nullopt,
             "Quick Send accepted a multi-character shortcut key");
-        Expect(QuickSendModel::ShortcutIndexFromText(L"!") == std::nullopt,
-            "Quick Send accepted a non-alphanumeric shortcut key");
+        for (const wchar_t character : hyperbrowse::ui::kQuickSendPunctuationShortcuts)
+        {
+            const std::wstring shortcutText(1, character);
+            const std::optional<int> shortcutIndex = QuickSendModel::ShortcutIndexFromText(shortcutText);
+            Expect(shortcutIndex.has_value()
+                    && QuickSendModel::ShortcutCharacter(*shortcutIndex) == character,
+                "Quick Send did not round-trip a printable punctuation shortcut");
+        }
+        Expect(QuickSendModel::ShortcutIndexFromText(L" ") == std::nullopt,
+            "Quick Send accepted a whitespace shortcut key");
+        Expect(QuickSendModel::ShortcutIndexFromText(L"\x00E9") == std::nullopt,
+            "Quick Send accepted an unsupported non-ASCII shortcut key");
+        Expect(QuickSendModel::ShortcutIndexFromText(L"F1") == std::nullopt,
+            "Quick Send accepted a function-key name as a shortcut");
         Expect(QuickSendModel::ShortcutCharacter(0) == L'0'
                 && QuickSendModel::ShortcutCharacter(9) == L'9'
                 && QuickSendModel::ShortcutCharacter(10) == L'A'
                 && QuickSendModel::ShortcutCharacter(35) == L'Z'
-                && QuickSendModel::ShortcutCharacter(36) == L'\0',
+                && QuickSendModel::ShortcutCharacter(36) == L'`'
+                && QuickSendModel::ShortcutCharacter(static_cast<int>(hyperbrowse::ui::kQuickSendShortcutCount - 1)) == L'?'
+                && QuickSendModel::ShortcutCharacter(static_cast<int>(hyperbrowse::ui::kQuickSendShortcutCount)) == L'\0',
             "Quick Send did not map shortcut indexes to display keys");
 
         Expect(model.SetShortcutForDestination(L"c:/FAVORITES/one/", L"2")
@@ -2575,8 +2589,9 @@ namespace
                 && model.ShortcutForDestination(L"D:\\Favorites\\Two") == 33,
             "Quick Send did not accept and normalize a lowercase letter shortcut");
         Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"!")
-                == QuickSendAssignmentResult::InvalidShortcut,
-            "Quick Send accepted a non-alphanumeric shortcut");
+                == QuickSendAssignmentResult::Accepted
+                && model.ShortcutForDestination(L"D:\\Favorites\\Two") == 38,
+            "Quick Send did not accept a printable punctuation shortcut");
         Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", {})
                 == QuickSendAssignmentResult::Accepted,
             "Quick Send did not accept a blank shortcut to clear an assignment");
@@ -2643,7 +2658,7 @@ namespace
         fullFavorites.push_back(L"C:\\Favorites\\New");
         fullModel.SetFavoriteDestinations(fullFavorites);
         Expect(fullModel.AssignNextAvailableShortcut(L"C:\\Favorites\\New") == std::nullopt,
-            "Quick Send assigned a shortcut when all alphanumeric keys were already occupied");
+            "Quick Send assigned a shortcut when all supported keys were already occupied");
     }
 
     void RunViewerWindowFitModeChecks(hyperbrowse::viewer::ViewerWindow& viewer,

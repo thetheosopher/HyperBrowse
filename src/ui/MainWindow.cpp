@@ -13459,7 +13459,7 @@ namespace hyperbrowse::ui
         std::wstring label;
         std::wstring shortcut;
         SplitMenuDisplayText(drawData->text, &label, &shortcut);
-        const int mnemonicIndex = FindMenuMnemonicDisplayIndex(drawData->text);
+        const int mnemonicIndex = drawData->mnemonicDisplayIndex;
 
         if (checked)
         {
@@ -13610,7 +13610,7 @@ namespace hyperbrowse::ui
         std::wstring label;
         std::wstring shortcut;
         SplitMenuDisplayText(drawData->text, &label, &shortcut);
-        const int mnemonicIndex = FindMenuMnemonicDisplayIndex(drawData->text);
+        const int mnemonicIndex = drawData->mnemonicDisplayIndex;
 
         const auto scaleMenuDimension = [this](int dimension)
         {
@@ -13669,7 +13669,12 @@ namespace hyperbrowse::ui
             labelRect.right -= MeasureTextWidth(menuFont, shortcut) + shortcutGap;
         }
         std::wstring gdiLabel = label;
-        if (mnemonicIndex >= 0 && mnemonicIndex < static_cast<int>(gdiLabel.size()))
+        UINT labelFormat = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
+        if (drawData->mnemonic == L'&')
+        {
+            labelFormat |= DT_NOPREFIX;
+        }
+        else if (mnemonicIndex >= 0 && mnemonicIndex < static_cast<int>(gdiLabel.size()))
         {
             gdiLabel.insert(
                 static_cast<std::wstring::size_type>(mnemonicIndex),
@@ -13681,9 +13686,33 @@ namespace hyperbrowse::ui
                             gdiLabel.c_str(),
                             -1,
                             labelRect,
-                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+                            labelFormat,
                             labelColor,
                             backgroundColor);
+
+        if (drawData->mnemonic == L'&' && !label.empty())
+        {
+            const int savedDc = SaveDC(drawItem.hDC);
+            if (savedDc != 0)
+            {
+                SelectObject(drawItem.hDC, menuFont);
+                SIZE mnemonicSize{};
+                if (GetTextExtentPoint32W(drawItem.hDC, label.c_str(), 1, &mnemonicSize))
+                {
+                    const HPEN mnemonicPen = CreatePen(PS_SOLID, 1, labelColor);
+                    if (mnemonicPen)
+                    {
+                        const HGDIOBJ oldPen = SelectObject(drawItem.hDC, mnemonicPen);
+                        const LONG underlineY = itemRect.bottom - std::max<LONG>(2, mnemonicSize.cy / 10);
+                        MoveToEx(drawItem.hDC, labelRect.left, underlineY, nullptr);
+                        LineTo(drawItem.hDC, labelRect.left + mnemonicSize.cx, underlineY);
+                        SelectObject(drawItem.hDC, oldPen);
+                        DeleteObject(mnemonicPen);
+                    }
+                }
+                RestoreDC(drawItem.hDC, savedDc);
+            }
+        }
 
         if (!shortcut.empty())
         {
@@ -14402,6 +14431,8 @@ namespace hyperbrowse::ui
             {
                 auto drawData = std::make_unique<MenuDrawItemData>();
                 drawData->text = std::move(text);
+                drawData->mnemonic = FindMenuMnemonic(drawData->text);
+                drawData->mnemonicDisplayIndex = FindMenuMnemonicDisplayIndex(drawData->text);
                 drawData->separator = separator;
                 drawData->hasSubmenu = hasSubmenu;
 
@@ -16395,7 +16426,7 @@ namespace hyperbrowse::ui
                 toolInfo.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
                 toolInfo.hwnd = hwnd_;
                 toolInfo.uId = reinterpret_cast<UINT_PTR>(edit);
-                toolInfo.lpszText = const_cast<LPWSTR>(L"Quick Actions hotkey: enter one digit or letter from 0 through 9 or A through Z.");
+                toolInfo.lpszText = const_cast<LPWSTR>(L"Quick Actions hotkey: enter one supported printable keyboard character. Function, control, and navigation keys are not supported.");
                 SendMessageW(tooltipControl_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
             }
         }
@@ -23322,6 +23353,29 @@ namespace hyperbrowse::ui
 
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems;
         PrepareMenuForOwnerDraw(popupMenu, menuDrawItems, true);
+        for (std::size_t index = 0; index < destinations.size(); ++index)
+        {
+            const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(destinations[index]);
+            if (!assignedShortcut)
+            {
+                continue;
+            }
+
+            MENUITEMINFOW itemInfo{};
+            itemInfo.cbSize = sizeof(itemInfo);
+            itemInfo.fMask = MIIM_DATA;
+            if (!GetMenuItemInfoW(popupMenu, static_cast<UINT>(index + 2), TRUE, &itemInfo))
+            {
+                continue;
+            }
+
+            auto* drawData = reinterpret_cast<MenuDrawItemData*>(itemInfo.dwItemData);
+            if (drawData)
+            {
+                drawData->mnemonic = QuickSendModel::ShortcutCharacter(*assignedShortcut);
+                drawData->mnemonicDisplayIndex = 0;
+            }
+        }
         if (menuBackgroundBrush_)
         {
             MENUINFO menuInfo{};
@@ -26508,7 +26562,10 @@ namespace hyperbrowse::ui
                     continue;
                 }
 
-                if (FindMenuMnemonic(drawData->text) != pressed)
+                const wchar_t mnemonic = drawData->mnemonic != L'\0'
+                    ? drawData->mnemonic
+                    : FindMenuMnemonic(drawData->text);
+                if (towupper(mnemonic) != pressed)
                 {
                     continue;
                 }

@@ -210,6 +210,8 @@ namespace hyperbrowse::ui
         struct MenuDrawItemData
         {
             std::wstring text;
+            wchar_t mnemonic{};
+            int mnemonicDisplayIndex{-1};
             bool separator{};
             bool hasSubmenu{};
         };
