@@ -47,6 +47,7 @@
 #include "ui/QuickSend.h"
 #include "ui/ShortcutCatalog.h"
 #include "util/BackgroundExecutor.h"
+#include "util/SettingsRegistry.h"
 #include "util/UiTextSize.h"
 #include "viewer/ViewerWindow.h"
 
@@ -57,7 +58,8 @@ namespace
     using Microsoft::WRL::ComPtr;
 
     constexpr wchar_t kTestWindowClassName[] = L"HyperBrowseFolderEnumerationTestWindow";
-    constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
+    std::wstring gSmokeRegistryPath;
+    const wchar_t* kRegistryPath = nullptr;
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
     constexpr wchar_t kRegistryValueViewerWindowedFullMetadataVisible[] = L"ViewerWindowedFullMetadataVisible";
@@ -73,6 +75,15 @@ namespace
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
     constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
+
+    bool ConfigureSmokeSettingsRegistry()
+    {
+        gSmokeRegistryPath = L"Software\\HyperBrowse\\SmokeTests\\" + std::to_wstring(GetCurrentProcessId());
+        kRegistryPath = gSmokeRegistryPath.c_str();
+        return SetEnvironmentVariableW(
+            hyperbrowse::util::kSettingsRegistryEnvironmentVariable,
+            gSmokeRegistryPath.c_str()) != FALSE;
+    }
 
     struct EnumerationResult
     {
@@ -3966,6 +3977,7 @@ int main(int argc, char* argv[])
     {
         ComScope comScope;
         HINSTANCE instance = GetModuleHandleW(nullptr);
+        Expect(ConfigureSmokeSettingsRegistry(), "Failed to configure the smoke-test settings registry path");
         INITCOMMONCONTROLSEX commonControls{};
         commonControls.dwSize = sizeof(commonControls);
         commonControls.dwICC = ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES | ICC_STANDARD_CLASSES;

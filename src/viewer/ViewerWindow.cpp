@@ -28,6 +28,7 @@
 #include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
+#include "util/SettingsRegistry.h"
 #include "util/Timing.h"
 
 namespace
@@ -39,7 +40,6 @@ namespace
     constexpr CLSID kColorMatrixEffectClsid =
         {0x921f03d6, 0x641c, 0x47df, {0x85, 0x2d, 0xb4, 0xbb, 0x61, 0x53, 0xae, 0x11}};
 
-    constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
     constexpr wchar_t kRegistryValueViewerWindowedFullMetadataVisible[] = L"ViewerWindowedFullMetadataVisible";
@@ -325,7 +325,7 @@ namespace
     bool LoadViewerInfoOverlaysVisibleSetting()
     {
         HKEY key{};
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        if (hyperbrowse::util::OpenSettingsRegistryKey(KEY_READ, &key) != ERROR_SUCCESS)
         {
             return true;
         }
@@ -339,16 +339,7 @@ namespace
     void SaveViewerInfoOverlaysVisibleSetting(bool visible)
     {
         HKEY key{};
-        DWORD disposition = 0;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER,
-                            kRegistryPath,
-                            0,
-                            nullptr,
-                            0,
-                            KEY_WRITE,
-                            nullptr,
-                            &key,
-                            &disposition) != ERROR_SUCCESS)
+        if (hyperbrowse::util::CreateSettingsRegistryKey(KEY_WRITE, &key) != ERROR_SUCCESS)
         {
             return;
         }
@@ -373,7 +364,7 @@ namespace
     InfoOverlayTextSize LoadViewerInfoOverlayTextSizeSetting()
     {
         HKEY key{};
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        if (hyperbrowse::util::OpenSettingsRegistryKey(KEY_READ, &key) != ERROR_SUCCESS)
         {
             return InfoOverlayTextSize::Small;
         }
@@ -387,16 +378,7 @@ namespace
     void SaveViewerInfoOverlayTextSizeSetting(InfoOverlayTextSize size)
     {
         HKEY key{};
-        DWORD disposition = 0;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER,
-                            kRegistryPath,
-                            0,
-                            nullptr,
-                            0,
-                            KEY_WRITE,
-                            nullptr,
-                            &key,
-                            &disposition) != ERROR_SUCCESS)
+        if (hyperbrowse::util::CreateSettingsRegistryKey(KEY_WRITE, &key) != ERROR_SUCCESS)
         {
             return;
         }
@@ -408,7 +390,7 @@ namespace
     bool LoadViewerFullMetadataVisibleSetting(const wchar_t* valueName)
     {
         HKEY key{};
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        if (hyperbrowse::util::OpenSettingsRegistryKey(KEY_READ, &key) != ERROR_SUCCESS)
         {
             return false;
         }
@@ -426,16 +408,7 @@ namespace
     void SaveViewerFullMetadataVisibleSetting(const wchar_t* valueName, bool visible)
     {
         HKEY key{};
-        DWORD disposition = 0;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER,
-                            kRegistryPath,
-                            0,
-                            nullptr,
-                            0,
-                            KEY_WRITE,
-                            nullptr,
-                            &key,
-                            &disposition) != ERROR_SUCCESS)
+        if (hyperbrowse::util::CreateSettingsRegistryKey(KEY_WRITE, &key) != ERROR_SUCCESS)
         {
             return;
         }

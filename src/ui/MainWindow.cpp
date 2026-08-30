@@ -54,6 +54,7 @@
 #include "util/Log.h"
 #include "util/ResourcePng.h"
 #include "util/ResourceSizing.h"
+#include "util/SettingsRegistry.h"
 #include "util/StringConvert.h"
 #include "util/Timing.h"
 #include "util/UiTextSize.h"
@@ -71,7 +72,6 @@ namespace
 {
     thread_local hyperbrowse::ui::MainWindow* g_commandBarMenuFilterWindow = nullptr;
 
-    constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueLeftPaneWidth[] = L"LeftPaneWidth";
     constexpr wchar_t kRegistryValueBrowserMode[] = L"BrowserMode";
     constexpr wchar_t kRegistryValueThemeMode[] = L"ThemeMode";
@@ -14159,7 +14159,7 @@ namespace hyperbrowse::ui
     void MainWindow::LoadQuickSendStateFromRegistry()
     {
         HKEY key{};
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        if (hyperbrowse::util::OpenSettingsRegistryKey(KEY_READ, &key) != ERROR_SUCCESS)
         {
             return;
         }
@@ -14188,8 +14188,7 @@ namespace hyperbrowse::ui
     void MainWindow::SaveQuickSendStateToRegistry() const
     {
         HKEY key{};
-        DWORD disposition = 0;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, nullptr, 0, KEY_WRITE, nullptr, &key, &disposition) != ERROR_SUCCESS)
+        if (hyperbrowse::util::CreateSettingsRegistryKey(KEY_WRITE, &key) != ERROR_SUCCESS)
         {
             return;
         }
@@ -22331,7 +22330,7 @@ namespace hyperbrowse::ui
         persistedWindowBounds_ = {};
 
         HKEY key{};
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) == ERROR_SUCCESS)
+        if (hyperbrowse::util::OpenSettingsRegistryKey(KEY_READ, &key) == ERROR_SUCCESS)
         {
             DWORD value = 0;
 
@@ -22588,8 +22587,7 @@ namespace hyperbrowse::ui
     void MainWindow::SaveWindowState() const
     {
         HKEY key{};
-        DWORD disposition = 0;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, nullptr, 0, KEY_WRITE, nullptr, &key, &disposition) == ERROR_SUCCESS)
+        if (hyperbrowse::util::CreateSettingsRegistryKey(KEY_WRITE, &key) == ERROR_SUCCESS)
         {
             const std::wstring selectedFolderPath = browserModel_ && !browserModel_->FolderPath().empty()
                 ? NormalizeFolderPath(browserModel_->FolderPath())

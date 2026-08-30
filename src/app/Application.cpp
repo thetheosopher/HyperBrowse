@@ -12,13 +12,13 @@
 #include "ui/MainWindow.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
+#include "util/SettingsRegistry.h"
 #include "util/Timing.h"
 
 namespace
 {
     constexpr wchar_t kSingleInstanceMutexName[] = L"Local\\TheTheosopher.HyperBrowse.SingleInstance";
     constexpr wchar_t kSingleInstancePipeName[] = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch";
-    constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueSingleInstanceEnabled[] = L"SingleInstanceEnabled";
 
     struct StartupBenchmarkOptions
@@ -177,7 +177,7 @@ namespace hyperbrowse::app
     bool Application::IsSingleInstanceEnabled()
     {
         HKEY key{};
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        if (hyperbrowse::util::OpenSettingsRegistryKey(KEY_READ, &key) != ERROR_SUCCESS)
         {
             return false;
         }
@@ -200,16 +200,7 @@ namespace hyperbrowse::app
     void Application::SetSingleInstanceEnabled(bool enabled)
     {
         HKEY key{};
-        DWORD disposition = 0;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER,
-                            kRegistryPath,
-                            0,
-                            nullptr,
-                            0,
-                            KEY_WRITE,
-                            nullptr,
-                            &key,
-                            &disposition) != ERROR_SUCCESS)
+        if (hyperbrowse::util::CreateSettingsRegistryKey(KEY_WRITE, &key) != ERROR_SUCCESS)
         {
             return;
         }
