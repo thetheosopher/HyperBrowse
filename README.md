@@ -49,7 +49,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 
 ### Viewer Quick Actions
 
-Quick Actions supports up to 36 saved destinations. Each newly added destination is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`; its key field accepts one digit or letter and can be edited later. Assignments persist by folder path and remain associated with the same destination when the list is reordered. Recent folders are not included.
+Quick Actions supports saved destinations with one-character shortcuts from digits, letters, and supported printable punctuation. Each newly added destination is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`, followed by punctuation; its key field accepts one supported character and can be edited later. Assignments persist by folder path and remain associated with the same destination when the list is reordered. Recent folders are not included.
 
 In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed.
 
@@ -294,6 +294,18 @@ Release **2.0.0** expands HyperBrowse from a fast image browser into a more comp
 
 ## Version History
 
+### 2.1.0
+
+- Added a consolidated, themed Settings experience with tabs for slideshow, viewer, appearance, performance, and behavior preferences, Apply/OK/Cancel staging, persisted cache and slideshow values, a Direct2D/DirectWrite presentation path, and an environment-controlled legacy-dialog fallback.
+- Expanded Direct2D rendering and resource recovery across the main window and viewer, while improving dialog color handling and text rendering helpers.
+- Added viewer Fit Height and expanded fit/window sizing controls, keyboard panning while zoomed, independent full-metadata visibility for windowed and full-screen modes, context-menu toggles for overlays and metadata, configurable full-screen Escape behavior, and improved focus, activation, and fullscreen restoration.
+- Renamed Quick Send to Quick Actions, added persistent shortcut and destination state that is safe across multiple instances, remembered the last destination, added confirmation before clearing favorites, and expanded assignments from digits and letters to supported printable punctuation.
+- Added a shared shortcut catalog and Help documentation for browser and viewer keyboard workflows, plus command-bar mnemonic support and clearer viewer overlay metrics.
+- Improved startup viewer synchronization when a file is opened before a large folder finishes enumerating, and added cascading placement for multiple main-window instances.
+- Hardened settings registry access and isolated smoke-test settings so tests do not overwrite the user's application preferences.
+- Improved WIC and general image decoding with on-demand caching, EXIF orientation handling, scaled decode paths, safer unexpected-property handling, and detailed thumbnail failure diagnostics.
+- Expanded smoke coverage for settings, viewer metadata and fit behavior, startup enumeration, JPEG decoding and orientation, Quick Actions shortcut persistence, and the associated regression fixes.
+
 ### 2.0.0
 
 - Added a redesigned command bar and reorganized menus with clearer browser, viewer, slideshow, metadata, organize, convert, and advanced workflows.
@@ -396,7 +408,7 @@ Release **2.0.0** expands HyperBrowse from a fast image browser into a more comp
 
 ## Next Features
 
-Planned near-term areas after 1.2.7 include:
+Planned near-term areas after 2.1.0 include:
 
 - Viewer polish and workflow depth improvements that keep navigation fast while expanding compare/cull ergonomics.
 - Additional browser workflow refinements for high-volume folder organization.
