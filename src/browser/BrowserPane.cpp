@@ -1496,6 +1496,23 @@ namespace hyperbrowse::browser
         return services::FormatImageMetadataReport(item, *metadata);
     }
 
+    std::wstring BrowserPane::ThumbnailDecodeFailureMessageForModelIndex(int modelIndex) const
+    {
+        if (!model_ || !thumbnailScheduler_ || modelIndex < 0 || modelIndex >= static_cast<int>(model_->Items().size()))
+        {
+            return {};
+        }
+
+        const BrowserItem& item = model_->Items()[static_cast<std::size_t>(modelIndex)];
+        if (item.isDirectory || !decode::CanDecodeThumbnail(item))
+        {
+            return {};
+        }
+
+        const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+        return thumbnailScheduler_->KnownFailureMessage(MakeThumbnailCacheKey(item, layout.previewWidth, layout.previewHeight));
+    }
+
     bool BrowserPane::RegisterClass() const
     {
         WNDCLASSEXW windowClass{};
@@ -4659,6 +4676,12 @@ namespace hyperbrowse::browser
             {
                 tooltip.append(L"\r\n");
                 tooltip.append(UnavailableThumbnailTooltipText(failureKind));
+                const std::wstring failureMessage = thumbnailScheduler_->KnownFailureMessage(cacheKey);
+                if (!failureMessage.empty())
+                {
+                    tooltip.append(L"\r\nDecode detail: ");
+                    tooltip.append(failureMessage);
+                }
             }
         }
 

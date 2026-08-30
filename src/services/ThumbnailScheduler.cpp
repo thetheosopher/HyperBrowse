@@ -386,7 +386,9 @@ namespace hyperbrowse::services
                 continue;
             }
 
+            const auto key = iterator->first;
             iterator = failedKeys_.erase(iterator);
+            failureMessages_.erase(key);
         }
     }
 
@@ -467,6 +469,13 @@ namespace hyperbrowse::services
         return iterator == failedKeys_.end()
             ? decode::ThumbnailDecodeFailureKind::None
             : iterator->second;
+    }
+
+    std::wstring ThumbnailScheduler::KnownFailureMessage(const cache::ThumbnailCacheKey& key) const
+    {
+        std::scoped_lock lock(mutex_);
+        const auto iterator = failureMessages_.find(key);
+        return iterator == failureMessages_.end() ? std::wstring{} : iterator->second;
     }
 
     std::size_t ThumbnailScheduler::CacheBytes() const
@@ -632,6 +641,7 @@ namespace hyperbrowse::services
             std::vector<std::size_t> missingIndices;
             std::vector<cache::ThumbnailCacheKey> missingKeys;
             std::vector<decode::ThumbnailDecodeFailureKind> failureKinds(jobs.size(), decode::ThumbnailDecodeFailureKind::None);
+            std::vector<std::wstring> failureMessages(jobs.size());
             std::vector<bool> cancelled(jobs.size(), false);
             const bool useDiskCache = IsDiskCacheEnabled();
             bool allowDiskCacheStore = false;
@@ -658,10 +668,12 @@ namespace hyperbrowse::services
                 catch (const std::exception&)
                 {
                     failureKinds[index] = decode::ThumbnailDecodeFailureKind::DecodeFailed;
+                    failureMessages[index] = L"Thumbnail cache lookup raised an unexpected exception.";
                 }
                 catch (...)
                 {
                     failureKinds[index] = decode::ThumbnailDecodeFailureKind::DecodeFailed;
+                    failureMessages[index] = L"Thumbnail cache lookup raised an unexpected exception.";
                 }
                 if (!thumbnails[index])
                 {
@@ -709,25 +721,29 @@ namespace hyperbrowse::services
             {
                 if (missingKeys.size() > 1)
                 {
+                    std::vector<std::wstring> decodedFailureMessages;
                     std::vector<decode::ThumbnailDecodeFailureKind> decodedFailureKinds;
-                    std::vector<std::shared_ptr<const cache::CachedThumbnail>> decodedBatch = decode::DecodeThumbnailBatch(missingKeys, nullptr, &decodedFailureKinds);
+                    std::vector<std::shared_ptr<const cache::CachedThumbnail>> decodedBatch = decode::DecodeThumbnailBatch(missingKeys, &decodedFailureMessages, &decodedFailureKinds);
                     for (std::size_t index = 0; index < missingIndices.size(); ++index)
                     {
                         thumbnails[missingIndices[index]] = std::move(decodedBatch[index]);
+                        failureMessages[missingIndices[index]] = std::move(decodedFailureMessages[index]);
                         failureKinds[missingIndices[index]] = decodedFailureKinds[index];
                     }
                 }
                 else if (missingKeys.size() == 1)
                 {
+                    std::wstring failureMessage;
                     decode::ThumbnailDecodeFailureKind failureKind = decode::ThumbnailDecodeFailureKind::None;
                     if (jobs.front().workItem.preferCpu)
                     {
-                        thumbnails[missingIndices.front()] = decode::DecodeThumbnailCpuOnly(missingKeys.front(), nullptr, &failureKind);
+                        thumbnails[missingIndices.front()] = decode::DecodeThumbnailCpuOnly(missingKeys.front(), &failureMessage, &failureKind);
                     }
                     else
                     {
-                        thumbnails[missingIndices.front()] = decode::DecodeThumbnail(missingKeys.front(), nullptr, &failureKind);
+                        thumbnails[missingIndices.front()] = decode::DecodeThumbnail(missingKeys.front(), &failureMessage, &failureKind);
                     }
+                    failureMessages[missingIndices.front()] = std::move(failureMessage);
                     failureKinds[missingIndices.front()] = failureKind;
                 }
             }
@@ -737,6 +753,7 @@ namespace hyperbrowse::services
                 for (const std::size_t index : missingIndices)
                 {
                     failureKinds[index] = decode::ThumbnailDecodeFailureKind::DecodeFailed;
+                    failureMessages[index] = L"Thumbnail decoding raised an unexpected exception.";
                 }
             }
             catch (...)
@@ -745,6 +762,7 @@ namespace hyperbrowse::services
                 for (const std::size_t index : missingIndices)
                 {
                     failureKinds[index] = decode::ThumbnailDecodeFailureKind::DecodeFailed;
+                    failureMessages[index] = L"Thumbnail decoding raised an unexpected exception.";
                 }
             }
 
@@ -783,12 +801,16 @@ namespace hyperbrowse::services
                     else if (thumbnail)
                     {
                         failedKeys_.erase(jobs[index].workItem.cacheKey);
+                        failureMessages_.erase(jobs[index].workItem.cacheKey);
                     }
                     else
                     {
                         failedKeys_[jobs[index].workItem.cacheKey] = failureKinds[index] == decode::ThumbnailDecodeFailureKind::None
                             ? decode::ThumbnailDecodeFailureKind::DecodeFailed
                             : failureKinds[index];
+                        failureMessages_[jobs[index].workItem.cacheKey] = failureMessages[index].empty()
+                            ? L"The thumbnail decoder did not provide an error description."
+                            : failureMessages[index];
                     }
 
                     const auto inflight = inflightJobs_.find(jobs[index].workItem.cacheKey);

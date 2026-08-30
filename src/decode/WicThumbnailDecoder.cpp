@@ -7,15 +7,17 @@
 
 namespace hyperbrowse::decode
 {
-    std::shared_ptr<const cache::CachedThumbnail> WicThumbnailDecoder::Decode(const cache::ThumbnailCacheKey& key) const
+    std::shared_ptr<const cache::CachedThumbnail> WicThumbnailDecoder::Decode(const cache::ThumbnailCacheKey& key,
+                                                                               std::wstring* errorMessage) const
     {
         using Microsoft::WRL::ComPtr;
         namespace wic = hyperbrowse::decode::wic_support;
 
-        std::wstring errorMessage;
+        std::wstring localErrorMessage;
+        std::wstring* decodeError = errorMessage ? errorMessage : &localErrorMessage;
         wic::ComInitializationScope comInitialization(
             COINIT_MULTITHREADED,
-            &errorMessage,
+            decodeError,
             L"Failed to initialize COM for image decode.");
         if (!comInitialization.Succeeded())
         {
@@ -23,7 +25,7 @@ namespace hyperbrowse::decode
         }
 
         ComPtr<IWICImagingFactory> factory;
-        if (!wic::InitializeWicFactory(&factory, &errorMessage))
+        if (!wic::InitializeWicFactory(&factory, decodeError))
         {
             return {};
         }
@@ -37,6 +39,7 @@ namespace hyperbrowse::decode
             &decoder);
         if (FAILED(result))
         {
+            wic::SetError(decodeError, L"Failed to open the image with the WIC decoder.", result);
             return {};
         }
 
@@ -44,6 +47,7 @@ namespace hyperbrowse::decode
         result = decoder->GetFrame(0, &frame);
         if (FAILED(result))
         {
+            wic::SetError(decodeError, L"Failed to read the first image frame.", result);
             return {};
         }
 
@@ -52,6 +56,11 @@ namespace hyperbrowse::decode
         result = frame->GetSize(&sourceWidth, &sourceHeight);
         if (FAILED(result) || sourceWidth == 0 || sourceHeight == 0)
         {
+            wic::SetError(decodeError,
+                          sourceWidth == 0 || sourceHeight == 0
+                              ? L"The selected image does not report valid dimensions."
+                              : L"Failed to read the image dimensions.",
+                          result);
             return {};
         }
 
@@ -81,6 +90,7 @@ namespace hyperbrowse::decode
                     scaledWidth,
                     WICBitmapInterpolationModeFant)))
                 {
+                    wic::SetError(decodeError, L"Failed to scale the decoded image.", result);
                     return {};
                 }
 
@@ -92,6 +102,7 @@ namespace hyperbrowse::decode
                 result = factory->CreateBitmapFromSource(frame.Get(), WICBitmapCacheOnLoad, &cachedFrame);
                 if (FAILED(result))
                 {
+                    wic::SetError(decodeError, L"Failed to apply image orientation.", result);
                     return {};
                 }
 
@@ -102,6 +113,7 @@ namespace hyperbrowse::decode
             result = factory->CreateBitmapFlipRotator(&rotator);
             if (FAILED(result) || FAILED(rotator->Initialize(source.Get(), transform)))
             {
+                wic::SetError(decodeError, L"Failed to apply image orientation.", result);
                 return {};
             }
 
@@ -114,6 +126,7 @@ namespace hyperbrowse::decode
             result = factory->CreateBitmapScaler(&scaler);
             if (FAILED(result) || FAILED(scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant)))
             {
+                wic::SetError(decodeError, L"Failed to scale the decoded image.", result);
                 return {};
             }
 
@@ -130,6 +143,7 @@ namespace hyperbrowse::decode
             0.0,
             WICBitmapPaletteTypeCustom)))
         {
+            wic::SetError(decodeError, L"Failed to convert the decoded image into the viewer pixel format.", result);
             return {};
         }
 
@@ -141,6 +155,7 @@ namespace hyperbrowse::decode
             {
                 DeleteObject(bitmap);
             }
+            wic::SetError(decodeError, L"Failed to allocate the destination bitmap.", E_OUTOFMEMORY);
             return {};
         }
 
@@ -150,6 +165,7 @@ namespace hyperbrowse::decode
         if (FAILED(result))
         {
             DeleteObject(bitmap);
+            wic::SetError(decodeError, L"Failed to copy decoded pixels into the destination bitmap.", result);
             return {};
         }
 

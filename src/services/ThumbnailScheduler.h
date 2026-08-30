@@ -69,6 +69,7 @@ namespace hyperbrowse::services
         std::shared_ptr<const cache::CachedThumbnail> FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const;
         bool HasKnownFailure(const cache::ThumbnailCacheKey& key) const;
         decode::ThumbnailDecodeFailureKind KnownFailureKind(const cache::ThumbnailCacheKey& key) const;
+        std::wstring KnownFailureMessage(const cache::ThumbnailCacheKey& key) const;
         std::size_t CacheBytes() const;
         std::size_t CacheCapacityBytes() const;
         std::size_t WorkerCount() const;
@@ -136,6 +137,7 @@ namespace hyperbrowse::services
         std::unordered_map<cache::ThumbnailCacheKey, std::vector<InflightDecode>, cache::ThumbnailCacheKeyHasher> inflightJobs_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> requestedKeys_;
         std::unordered_map<cache::ThumbnailCacheKey, decode::ThumbnailDecodeFailureKind, cache::ThumbnailCacheKeyHasher> failedKeys_;
+        std::unordered_map<cache::ThumbnailCacheKey, std::wstring, cache::ThumbnailCacheKeyHasher> failureMessages_;
         std::size_t activeWorkerCount_{};
         std::size_t activeDecodeLimit_{1};
         std::vector<std::thread> generalWorkers_;

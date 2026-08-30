@@ -417,10 +417,7 @@ namespace
         HRESULT result = decoder->GetFrame(0, &frame);
         if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to read the first image frame.";
-            }
+            wic::SetError(errorMessage, L"Failed to read the first image frame.", result);
             return {};
         }
 
@@ -429,10 +426,11 @@ namespace
         result = frame->GetSize(&sourceWidth, &sourceHeight);
         if (FAILED(result) || sourceWidth == 0 || sourceHeight == 0)
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"The selected image does not report valid dimensions.";
-            }
+            wic::SetError(errorMessage,
+                          sourceWidth == 0 || sourceHeight == 0
+                              ? L"The selected image does not report valid dimensions."
+                              : L"Failed to read the image dimensions.",
+                          result);
             return {};
         }
 
@@ -465,10 +463,7 @@ namespace
                     scaledWidth,
                     WICBitmapInterpolationModeFant)))
             {
-                    if (errorMessage)
-                    {
-                        *errorMessage = L"Failed to scale the decoded image.";
-                    }
+                    wic::SetError(errorMessage, L"Failed to scale the decoded image.", result);
                     return {};
                 }
 
@@ -480,10 +475,7 @@ namespace
                 result = factory->CreateBitmapFromSource(frame.Get(), WICBitmapCacheOnLoad, &cachedFrame);
                 if (FAILED(result))
                 {
-                    if (errorMessage)
-                    {
-                        *errorMessage = L"Failed to apply image orientation.";
-                    }
+                    wic::SetError(errorMessage, L"Failed to apply image orientation.", result);
                     return {};
                 }
 
@@ -494,10 +486,7 @@ namespace
             result = factory->CreateBitmapFlipRotator(&rotator);
             if (FAILED(result) || FAILED(rotator->Initialize(source.Get(), transform)))
             {
-                if (errorMessage)
-                {
-                    *errorMessage = L"Failed to apply image orientation.";
-                }
+                wic::SetError(errorMessage, L"Failed to apply image orientation.", result);
                 return {};
             }
 
@@ -510,10 +499,7 @@ namespace
             result = factory->CreateBitmapScaler(&scaler);
             if (FAILED(result) || FAILED(scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant)))
             {
-                if (errorMessage)
-                {
-                    *errorMessage = L"Failed to scale the decoded image.";
-                }
+                wic::SetError(errorMessage, L"Failed to scale the decoded image.", result);
                 return {};
             }
 
@@ -530,10 +516,7 @@ namespace
             0.0,
             WICBitmapPaletteTypeCustom)))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to convert the decoded image into the viewer pixel format.";
-            }
+            wic::SetError(errorMessage, L"Failed to convert the decoded image into the viewer pixel format.", result);
             return {};
         }
 
@@ -546,10 +529,7 @@ namespace
                 DeleteObject(bitmap);
             }
 
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to allocate the destination bitmap.";
-            }
+            wic::SetError(errorMessage, L"Failed to allocate the destination bitmap.", E_OUTOFMEMORY);
             return {};
         }
 
@@ -559,10 +539,7 @@ namespace
         if (FAILED(result))
         {
             DeleteObject(bitmap);
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to copy decoded pixels into the destination bitmap.";
-            }
+            wic::SetError(errorMessage, L"Failed to copy decoded pixels into the destination bitmap.", result);
             return {};
         }
 
@@ -622,10 +599,7 @@ namespace
         result = factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder);
         if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to create a WIC decoder for the embedded RAW preview.";
-            }
+            wic::SetError(errorMessage, L"Failed to create a WIC decoder for the embedded RAW preview.", result);
             return {};
         }
 
@@ -664,19 +638,17 @@ namespace
                                                                   &decoder);
         if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to open the selected image for decode.";
-            }
+            wic::SetError(errorMessage, L"Failed to open the selected image for decode.", result);
             return {};
         }
 
         return DecodeWicSource(factory.Get(), decoder.Get(), 0, 0, 0, 0, errorMessage);
     }
 
-    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> TryDecodeRawThumbnailWithWic(const hyperbrowse::cache::ThumbnailCacheKey& key)
+    std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> TryDecodeRawThumbnailWithWic(const hyperbrowse::cache::ThumbnailCacheKey& key,
+                                                                                              std::wstring* errorMessage)
     {
-        return hyperbrowse::decode::WicThumbnailDecoder{}.Decode(key);
+        return hyperbrowse::decode::WicThumbnailDecoder{}.Decode(key, errorMessage);
     }
 
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> TryDecodeRawFullImageWithWic(const hyperbrowse::browser::BrowserItem& item)
@@ -1568,7 +1540,7 @@ namespace hyperbrowse::decode
         const std::wstring fileType = FileTypeFromPath(key.filePath);
         if (IsWicFileType(fileType))
         {
-            auto thumbnail = WicThumbnailDecoder{}.Decode(key);
+            auto thumbnail = WicThumbnailDecoder{}.Decode(key, errorMessage);
             const double elapsedMs = stopwatch.ElapsedMilliseconds();
             hyperbrowse::util::RecordTiming(L"thumbnail.decode.wic", elapsedMs);
             if (fileType == L"jpg" || fileType == L"jpeg")
@@ -1584,7 +1556,8 @@ namespace hyperbrowse::decode
 
         if (IsRawFileType(fileType))
         {
-            if (auto thumbnail = TryDecodeRawThumbnailWithWic(key))
+            std::wstring wicError;
+            if (auto thumbnail = TryDecodeRawThumbnailWithWic(key, &wicError))
             {
                 hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw.wic", stopwatch.ElapsedMilliseconds());
                 return thumbnail;
@@ -1595,6 +1568,10 @@ namespace hyperbrowse::decode
             auto thumbnail = IsLibRawOutOfProcessEnabled() && IsLibRawHelperExecutableAvailable()
                 ? DecodeRawThumbnailWithHelper(key, errorMessage, &rawFailureKind)
                 : DecodeRawThumbnail(key, errorMessage, &rawFailureKind);
+            if (!thumbnail && errorMessage && errorMessage->empty())
+            {
+                *errorMessage = std::move(wicError);
+            }
             hyperbrowse::util::RecordTiming(L"thumbnail.decode.raw", stopwatch.ElapsedMilliseconds());
             if (!thumbnail && failureKind)
             {

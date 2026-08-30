@@ -7,11 +7,54 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iomanip>
 #include <string>
 #include <string_view>
+#include <sstream>
 
 namespace hyperbrowse::decode::wic_support
 {
+    inline const wchar_t* HResultName(HRESULT result) noexcept
+    {
+        switch (result)
+        {
+        case WINCODEC_ERR_UNKNOWNIMAGEFORMAT:
+            return L"WINCODEC_ERR_UNKNOWNIMAGEFORMAT";
+        case WINCODEC_ERR_BADIMAGE:
+            return L"WINCODEC_ERR_BADIMAGE";
+        case WINCODEC_ERR_BADHEADER:
+            return L"WINCODEC_ERR_BADHEADER";
+        case WINCODEC_ERR_BADSTREAMDATA:
+            return L"WINCODEC_ERR_BADSTREAMDATA";
+        case WINCODEC_ERR_FRAMEMISSING:
+            return L"WINCODEC_ERR_FRAMEMISSING";
+        default:
+            return nullptr;
+        }
+    }
+
+    inline void SetError(std::wstring* errorMessage,
+                         std::wstring_view operation,
+                         HRESULT result)
+    {
+        if (!errorMessage)
+        {
+            return;
+        }
+
+        std::wostringstream stream;
+        stream << operation
+               << L" (HRESULT 0x"
+               << std::uppercase << std::hex << std::setw(8) << std::setfill(L'0')
+               << static_cast<unsigned long>(result)
+               << L")";
+        if (const wchar_t* name = HResultName(result))
+        {
+            stream << L" [" << name << L"]";
+        }
+        *errorMessage = stream.str();
+    }
+
     class ComInitializationScope
     {
     public:
@@ -24,7 +67,7 @@ namespace hyperbrowse::decode::wic_support
             succeeded_ = SUCCEEDED(result) || result == S_FALSE || result == RPC_E_CHANGED_MODE;
             if (!succeeded_ && errorMessage)
             {
-                *errorMessage = std::wstring(initializationErrorMessage);
+                SetError(errorMessage, initializationErrorMessage, result);
             }
         }
 
@@ -56,10 +99,7 @@ namespace hyperbrowse::decode::wic_support
             IID_PPV_ARGS(factory->GetAddressOf()));
         if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to create the WIC imaging factory.";
-            }
+            SetError(errorMessage, L"Failed to create the WIC imaging factory.", result);
             return false;
         }
 

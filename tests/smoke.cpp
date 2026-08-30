@@ -1679,11 +1679,16 @@ namespace
         const fs::path pngPath = root.Root() / L"sample.png";
         const fs::path gifPath = root.Root() / L"sample.gif";
         const fs::path tiffPath = root.Root() / L"sample.tif";
+        const fs::path corruptJpegPath = root.Root() / L"corrupt.jpg";
 
         WriteTestImage(jpegPath, TestImageFormat::Jpeg, 24, 48, 6);
         WriteTestImage(pngPath, TestImageFormat::Png, 96, 48);
         WriteTestImage(gifPath, TestImageFormat::Gif, 36, 18);
         WriteTestImage(tiffPath, TestImageFormat::Tiff, 18, 54);
+        {
+            std::ofstream corruptJpeg(corruptJpegPath, std::ios::binary);
+            corruptJpeg << "not a JPEG";
+        }
 
         hyperbrowse::decode::WicThumbnailDecoder decoder;
 
@@ -1716,6 +1721,12 @@ namespace
          Expect(tiffThumbnail != nullptr, "WIC failed to decode the TIFF first page thumbnail");
          Expect(tiffThumbnail->SourceWidth() == 18 && tiffThumbnail->SourceHeight() == 54,
              "WIC did not surface the TIFF source dimensions");
+
+         std::wstring corruptJpegError;
+         const auto corruptJpegThumbnail = decoder.Decode(MakeCacheKey(corruptJpegPath, 5), &corruptJpegError);
+         Expect(corruptJpegThumbnail == nullptr, "WIC unexpectedly decoded a corrupt JPEG");
+         Expect(corruptJpegError.find(L"HRESULT 0x") != std::wstring::npos,
+             "WIC did not provide an HRESULT for the corrupt JPEG decode failure");
     }
 
     void RunJpegOrientationAdjustmentScenario()
@@ -1912,6 +1923,8 @@ namespace
              "Thumbnail scheduler did not retain the failed-thumbnail state");
          Expect(scheduler.KnownFailureKind(missingRawKey) == hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed,
              "Thumbnail scheduler misclassified a generic decode failure");
+         Expect(!scheduler.KnownFailureMessage(missingRawKey).empty(),
+             "Thumbnail scheduler did not retain the decoder failure details");
 
          ResetThumbnailResult(state, 8);
          scheduler.Schedule(8, 2, {{0, missingRawKey, 0, true}});

@@ -18510,13 +18510,21 @@ namespace hyperbrowse::ui
 
         const std::wstring content = services::FormatImageInfoContent(item);
         const std::wstring expanded = services::FormatImageInfoExpanded(*metadata);
+        std::wstring diagnostic = browserPaneController_->ThumbnailDecodeFailureMessageForModelIndex(modelIndex);
+        if (!diagnostic.empty())
+        {
+            diagnostic.insert(0, L"Decode diagnostic:\r\n");
+        }
+        const std::wstring contentWithDiagnostic = diagnostic.empty()
+            ? content
+            : content + L"\r\n\r\n" + diagnostic;
 
         ShowImageInformationDialog(dialogOwner,
                        instance_,
                        themeMode_ == ThemeMode::Dark,
                        appTextSize_,
                        item.fileName,
-                       content,
+                       contentWithDiagnostic,
                        expanded);
     }
 
