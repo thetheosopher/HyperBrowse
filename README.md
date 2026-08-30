@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.0.0-2EA043)
+![Version](https://img.shields.io/badge/Version-2.1.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -145,13 +145,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.0.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.1.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.0.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.1.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -215,7 +215,7 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **2.0.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.0.0-portable-win64.zip` and `HyperBrowse-2.0.0-installer.exe`).
+Current release: **2.1.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.1.0-portable-win64.zip` and `HyperBrowse-2.1.0-installer.exe`).
 
 Release **2.0.0** expands HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It adds richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
