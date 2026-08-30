@@ -51,6 +51,7 @@ namespace
     constexpr std::size_t kViewerAggressiveBackgroundQueueCapacity = 256;
     constexpr double kKeyboardPanStep = 64.0;
     constexpr double kMaximumZoomScale = 64.0;
+    constexpr float kViewerOverlayScale = 0.90f;
     constexpr int kContextMenuItemHeight = 28;
     constexpr int kContextMenuSeparatorHeight = 10;
     constexpr int kContextMenuCheckColumnWidth = 24;
@@ -566,6 +567,32 @@ namespace
         }
     }
 
+    ViewerOverlayMetrics ViewerOverlayMetricsForWindow(HWND hwnd, InfoOverlayTextSize size)
+    {
+        ViewerOverlayMetrics metrics = ViewerOverlayMetricsForTextSize(size);
+        const UINT dpi = hwnd ? GetDpiForWindow(hwnd) : 96;
+        const float scale = (static_cast<float>(dpi == 0 ? 96 : dpi) / 96.0f) * kViewerOverlayScale;
+        metrics.nameFontSize *= scale;
+        metrics.infoFontSize *= scale;
+        metrics.bottomInfoFontSize *= scale;
+        metrics.metadataFontSize *= scale;
+        metrics.topPanelPaddingX *= scale;
+        metrics.topPanelPaddingY *= scale;
+        metrics.bottomPanelPaddingX *= scale;
+        metrics.bottomPanelPaddingY *= scale;
+        metrics.topNameHeight *= scale;
+        metrics.topInfoHeight *= scale;
+        metrics.bottomInfoHeight *= scale;
+        metrics.loadingTextInset *= scale;
+        metrics.loadingTitleHeight *= scale;
+        metrics.loadingBodyHeight *= scale;
+        metrics.loadingGap *= scale;
+        metrics.metadataPanelPadding *= scale;
+        metrics.metadataGap *= scale;
+        metrics.overlayWidthScale *= kViewerOverlayScale;
+        return metrics;
+    }
+
     using NavigationCursorPolygon = std::array<POINT, 7>;
 
     NavigationCursorPolygon MakeBaseNavigationCursorPolygon(int width, int height)
@@ -938,6 +965,9 @@ namespace hyperbrowse::viewer
 
         if (!hwnd_)
         {
+            infoOverlaysVisible_ = LoadViewerInfoOverlaysVisibleSetting();
+            infoOverlayTextSize_ = LoadViewerInfoOverlayTextSizeSetting();
+            fullMetadataVisible_ = LoadViewerFullMetadataVisibleSetting();
             if (!RegisterWindowClass())
             {
                 return false;
@@ -1560,7 +1590,7 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
+        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
         d2dNameFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.nameFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         d2dInfoFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.infoFontSize, DWRITE_FONT_WEIGHT_NORMAL);
     d2dBottomInfoFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.bottomInfoFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD);
@@ -3930,6 +3960,7 @@ namespace hyperbrowse::viewer
                          suggested->right - suggested->left,
                          suggested->bottom - suggested->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+            RebuildD2DTextFormats();
             RequestRepaint();
             return 0;
         }
@@ -4460,15 +4491,16 @@ namespace hyperbrowse::viewer
 
                     const float maxPanelWidth = std::max(320.0f, clientWidth - 48.0f);
                     const float maxPanelHeight = std::max(140.0f, clientHeight - 36.0f);
-                    const float loadingTextBlockHeight = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTitleHeight
-                        + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingGap
-                        + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingBodyHeight;
+                    const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
+                    const float loadingTextBlockHeight = overlayMetrics.loadingTitleHeight
+                        + overlayMetrics.loadingGap
+                        + overlayMetrics.loadingBodyHeight;
                     float renderedIconSize = 0.0f;
                     float panelWidth = std::max(320.0f, std::min(560.0f, clientWidth - 64.0f));
                     float panelHeight = showIcon
                         ? std::min(198.0f, std::max(152.0f, clientHeight - 64.0f))
                         : std::min(maxPanelHeight,
-                            std::max(126.0f, (ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset * 2.0f) + loadingTextBlockHeight));
+                            std::max(126.0f, (overlayMetrics.loadingTextInset * 2.0f) + loadingTextBlockHeight));
 
                     if (showIcon && d2dStatusArtBitmap_)
                     {
@@ -4488,7 +4520,7 @@ namespace hyperbrowse::viewer
                     else
                     {
                         panelHeight = std::min(maxPanelHeight,
-                            std::max(panelHeight, (ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset * 2.0f) + loadingTextBlockHeight));
+                            std::max(panelHeight, (overlayMetrics.loadingTextInset * 2.0f) + loadingTextBlockHeight));
                     }
 
                     const float panelLeft = (clientWidth - panelWidth) / 2.0f;
@@ -4518,29 +4550,29 @@ namespace hyperbrowse::viewer
 
                         const float contentLeft = iconX + renderedIconSize + kIconTextGap;
                         const float contentRight = panelLeft + panelWidth - kPanelPaddingRight;
-                        const float textBlockHeight = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTitleHeight
-                            + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingGap
-                            + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingBodyHeight;
+                        const float textBlockHeight = overlayMetrics.loadingTitleHeight
+                            + overlayMetrics.loadingGap
+                            + overlayMetrics.loadingBodyHeight;
                         const float contentTop = panelTop + std::max(kPanelPaddingVertical, (panelHeight - textBlockHeight) / 2.0f);
                         titleRect = D2D1::RectF(contentLeft,
                                                 contentTop,
                                                 contentRight,
-                                                contentTop + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTitleHeight);
+                                                contentTop + overlayMetrics.loadingTitleHeight);
                         bodyRect = D2D1::RectF(contentLeft,
-                                              titleRect.bottom + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingGap,
+                                              titleRect.bottom + overlayMetrics.loadingGap,
                                               contentRight,
-                                              titleRect.bottom + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingGap + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingBodyHeight);
+                                              titleRect.bottom + overlayMetrics.loadingGap + overlayMetrics.loadingBodyHeight);
                     }
                     else
                     {
-                        titleRect = D2D1::RectF(panelLeft + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset,
-                                                panelTop + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset,
-                                                panelLeft + panelWidth - ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset,
-                                                panelTop + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTitleHeight);
-                        bodyRect = D2D1::RectF(panelLeft + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset,
-                                               titleRect.bottom + ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingGap,
-                                               panelLeft + panelWidth - ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset,
-                                               panelTop + panelHeight - ViewerOverlayMetricsForTextSize(infoOverlayTextSize_).loadingTextInset);
+                        titleRect = D2D1::RectF(panelLeft + overlayMetrics.loadingTextInset,
+                                                panelTop + overlayMetrics.loadingTextInset,
+                                                panelLeft + panelWidth - overlayMetrics.loadingTextInset,
+                                                panelTop + overlayMetrics.loadingTextInset + overlayMetrics.loadingTitleHeight);
+                        bodyRect = D2D1::RectF(panelLeft + overlayMetrics.loadingTextInset,
+                                               titleRect.bottom + overlayMetrics.loadingGap,
+                                               panelLeft + panelWidth - overlayMetrics.loadingTextInset,
+                                               panelTop + panelHeight - overlayMetrics.loadingTextInset);
                     }
 
                     if (d2dNameFormat_ && d2dTextBrush_)
@@ -5603,7 +5635,7 @@ namespace hyperbrowse::viewer
                     const bool fullMetadataShown = fullMetadataVisible_ && infoOverlaysVisible_;
                     if (infoOverlaysVisible_)
                     {
-                        const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
+                        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
                         std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
                         if (compareLayout && compareItem)
                         {
@@ -5704,7 +5736,7 @@ namespace hyperbrowse::viewer
 
                     if (fullMetadataShown)
                     {
-                        const ViewerOverlayMetrics& overlayMetrics = ViewerOverlayMetricsForTextSize(infoOverlayTextSize_);
+                        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
                         const float metadataLeft = std::max(16.0f, (clientWidth * (2.0f / 3.0f)) + 8.0f);
                         const std::wstring metadataBody = metadataLoading_
                             ? std::wstring(L"Loading metadata...")

@@ -407,6 +407,19 @@ namespace
          using hyperbrowse::ui::ShortcutDefinition;
          using namespace hyperbrowse::ui::command_ids;
 
+         Expect(hyperbrowse::ui::kMainMenuMnemonicCatalogValid,
+             "Main command-bar menu contains duplicate access keys");
+         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('F') == 0,
+             "Alt+F does not select the File menu");
+         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('E') == 1,
+             "Alt+E does not select the Edit menu");
+         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('V') == 2,
+             "Alt+V does not select the View menu");
+         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('H') == 3,
+             "Alt+H does not select the Help menu");
+         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('x') == -1,
+             "An unrelated access key selected a command-bar menu");
+
          Expect(hyperbrowse::ui::kShortcutCatalogValid,
              "Main-window shortcut catalog contains duplicate accelerator ownership");
          Expect(!hyperbrowse::ui::HasDuplicateShortcuts(hyperbrowse::ui::kViewerShortcutCatalog),
@@ -3178,6 +3191,16 @@ namespace
 
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);
+
+         viewer.SetOverlayTextSize(hyperbrowse::viewer::InfoOverlayTextSize::Small);
+         hyperbrowse::viewer::ViewerWindow::SetDefaultOverlayTextSize(
+             hyperbrowse::viewer::InfoOverlayTextSize::Large);
+         Expect(viewer.Open(ownerWindow, items, 0, false),
+             "Viewer failed to reopen after changing the closed-viewer overlay default");
+         Expect(viewer.OverlayTextSize() == hyperbrowse::viewer::InfoOverlayTextSize::Large,
+             "Viewer did not reload the saved overlay text size when reopening a reused window object");
+         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
+         PumpMessagesFor(100);
 
          hyperbrowse::viewer::ViewerWindow restoredViewer(instance);
          Expect(restoredViewer.Open(ownerWindow, items, 0, false), "Restored viewer window failed to open");

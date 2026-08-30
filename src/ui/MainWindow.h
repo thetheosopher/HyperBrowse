@@ -215,6 +215,7 @@ namespace hyperbrowse::ui
         struct CommandBarMenuButton
         {
             std::wstring label;
+            wchar_t mnemonic{};
             HMENU menu{};
             RECT rect{};
         };
@@ -394,6 +395,7 @@ namespace hyperbrowse::ui
                            LPARAM lParam,
                            UINT_PTR subclassId,
                            DWORD_PTR refData);
+        static LRESULT CALLBACK CommandBarMenuFilterProc(int code, WPARAM wParam, LPARAM lParam);
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeBeginDrag(const NMTREEVIEWW& treeView);
@@ -566,6 +568,7 @@ namespace hyperbrowse::ui
         std::array<CommandBarMenuButton, 4> commandBarMenuButtons_{};
         int commandBarHotIndex_{-1};
         int commandBarPressedIndex_{-1};
+        int commandBarMenuNavigationIndex_{-1};
         HWND commandBarPreviousFocus_{};
         bool commandBarKeyboardActive_{};
         bool menuLoopActive_{};

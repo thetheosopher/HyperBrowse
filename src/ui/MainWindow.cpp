@@ -11,6 +11,7 @@
 #include <richedit.h>
 #include <wtsapi32.h>
 #include <wrl/client.h>
+#include <uxtheme.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -68,6 +69,8 @@ using namespace hyperbrowse::ui::command_ids;
 
 namespace
 {
+    thread_local hyperbrowse::ui::MainWindow* g_commandBarMenuFilterWindow = nullptr;
+
     constexpr wchar_t kRegistryPath[] = L"Software\\HyperBrowse";
     constexpr wchar_t kRegistryValueLeftPaneWidth[] = L"LeftPaneWidth";
     constexpr wchar_t kRegistryValueBrowserMode[] = L"BrowserMode";
@@ -766,10 +769,12 @@ namespace
         std::vector<HWND> formatCheckWindows;
         std::vector<HWND> formatDescriptionWindows;
         std::vector<bool> initialDefaults;
+        std::vector<bool> checkedDefaults;
         std::vector<bool> selectedDefaults;
         std::wstring title;
         std::wstring instruction;
         std::wstring footnote;
+        bool darkMode{};
         bool accepted{};
         bool done{};
     };
@@ -1495,6 +1500,35 @@ namespace
         *shortcut = NormalizeMenuDisplayText(shortcutView);
     }
 
+    int FindMenuMnemonicDisplayIndex(std::wstring_view text)
+    {
+        int displayIndex = 0;
+        for (std::size_t index = 0; index < text.size() && text[index] != L'\t'; ++index)
+        {
+            if (text[index] != L'&')
+            {
+                ++displayIndex;
+                continue;
+            }
+
+            if (index + 1 >= text.size())
+            {
+                break;
+            }
+
+            if (text[index + 1] == L'&')
+            {
+                ++index;
+                ++displayIndex;
+                continue;
+            }
+
+            return displayIndex;
+        }
+
+        return -1;
+    }
+
     wchar_t FindMenuMnemonic(std::wstring_view text)
     {
         for (std::size_t index = 0; index < text.size(); ++index)
@@ -1519,21 +1553,6 @@ namespace
         }
 
         return L'\0';
-    }
-
-    int CommandBarMenuIndexFromVirtualKey(WPARAM virtualKey)
-    {
-        switch (towupper(static_cast<wchar_t>(virtualKey)))
-        {
-        case L'F':
-            return 0;
-        case L'V':
-            return 1;
-        case L'H':
-            return 2;
-        default:
-            return -1;
-        }
     }
 
     int MeasureTextBlockHeight(HFONT font,
@@ -7281,21 +7300,10 @@ namespace
                        TRUE);
         }
 
-        const HWND formatGroupWindow = GetDlgItem(hwnd, kFileAssociationsDialogFormatGroupControlId);
-        if (formatGroupWindow)
-        {
-            MoveWindow(formatGroupWindow,
-                       metrics.margin,
-                       metrics.formatGroupTop,
-                       contentWidth,
-                       metrics.formatGroupHeight,
-                       TRUE);
-        }
-
         const int columnGap = hyperbrowse::util::ScaleAppTextDimension(28, state.appTextSize);
         const int columnWidth = std::max(0, (contentWidth - columnGap) / 2);
         const int formatLeft = metrics.margin + hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
-        const int descriptionRightInset = hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
+        const int descriptionRightInset = hyperbrowse::util::ScaleAppTextDimension(24, state.appTextSize);
         const int formatColumnCount = std::max(1, static_cast<int>((state.formatCheckWindows.size() + 1) / 2));
         for (std::size_t index = 0; index < state.formatCheckWindows.size(); ++index)
         {
@@ -7377,14 +7385,149 @@ namespace
         }
     }
 
-    void SetFileAssociationChecks(const FileAssociationsDialogState& state, bool checked)
+    void DrawFileAssociationsFormatGroup(HDC dc,
+                                         const FileAssociationsDialogState& state,
+                                         int clientWidth)
     {
-        for (const HWND formatWindow : state.formatCheckWindows)
+        if (!dc)
         {
+            return;
+        }
+
+        const FileAssociationsDialogLayoutMetrics metrics = BuildFileAssociationsDialogLayoutMetrics(
+            clientWidth,
+            state,
+            state.formatCheckWindows.size());
+        const int captionGap = hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize);
+        const int captionHeight = MeasureSingleLineTextHeight(state.bodyFont, 20);
+        RECT frameRect{
+            metrics.margin,
+            metrics.formatGroupTop + captionHeight / 2,
+            metrics.margin + metrics.contentWidth,
+            metrics.formatGroupTop + metrics.formatGroupHeight};
+        RECT captionRect{
+            frameRect.left + captionGap,
+            metrics.formatGroupTop,
+            frameRect.left + captionGap + MeasureDialogButtonWidth(state.bodyFont,
+                                                                      L"Supported formats",
+                                                                      0),
+            metrics.formatGroupTop + captionHeight};
+
+        const HGDIOBJ oldFont = SelectObject(dc,
+                                             state.bodyFont
+                                                 ? state.bodyFont
+                                                 : GetStockObject(DEFAULT_GUI_FONT));
+        SetBkMode(dc, OPAQUE);
+        SetBkColor(dc, state.theme.windowBackground);
+        SetTextColor(dc, state.theme.text);
+        const HPEN framePen = CreatePen(PS_SOLID, 1, state.theme.border);
+        const HGDIOBJ oldPen = SelectObject(dc, framePen);
+        const HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+        Rectangle(dc, frameRect.left, frameRect.top, frameRect.right, frameRect.bottom);
+        SelectObject(dc, oldBrush);
+        SelectObject(dc, oldPen);
+        DeleteObject(framePen);
+        DrawTextW(dc,
+                  L"Supported formats",
+                  -1,
+                  &captionRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, oldFont);
+    }
+
+    void SetFileAssociationChecks(FileAssociationsDialogState& state, bool checked)
+    {
+        for (std::size_t index = 0; index < state.formatCheckWindows.size(); ++index)
+        {
+            if (index < state.checkedDefaults.size())
+            {
+                state.checkedDefaults[index] = checked;
+            }
+            const HWND formatWindow = state.formatCheckWindows[index];
             if (formatWindow)
             {
-                SendMessageW(formatWindow, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+                InvalidateRect(formatWindow, nullptr, FALSE);
             }
+        }
+    }
+
+    void ToggleFileAssociationCheck(FileAssociationsDialogState& state, std::size_t index)
+    {
+        if (index >= state.checkedDefaults.size())
+        {
+            return;
+        }
+
+        state.checkedDefaults[index] = !state.checkedDefaults[index];
+        if (index < state.formatCheckWindows.size() && state.formatCheckWindows[index])
+        {
+            InvalidateRect(state.formatCheckWindows[index], nullptr, FALSE);
+            UpdateWindow(state.formatCheckWindows[index]);
+        }
+    }
+
+    void DrawFileAssociationsCheckbox(const DRAWITEMSTRUCT& drawItem, const FileAssociationsDialogState& state)
+    {
+        if (!drawItem.hDC || !drawItem.hwndItem)
+        {
+            return;
+        }
+
+        RECT itemRect = drawItem.rcItem;
+        const HBRUSH backgroundBrush = CreateSolidBrush(state.theme.windowBackground);
+        FillRect(drawItem.hDC, &itemRect, backgroundBrush);
+        DeleteObject(backgroundBrush);
+
+        const int controlId = static_cast<int>(GetDlgCtrlID(drawItem.hwndItem));
+        const int formatIndex = controlId - kFileAssociationsDialogFormatBaseControlId;
+        const bool checked = formatIndex >= 0
+            && formatIndex < static_cast<int>(state.checkedDefaults.size())
+            && state.checkedDefaults[static_cast<std::size_t>(formatIndex)];
+        const bool disabled = (drawItem.itemState & ODS_DISABLED) != 0;
+        const int itemHeight = static_cast<int>(itemRect.bottom - itemRect.top);
+        const int boxSize = std::min(18, std::max(12, itemHeight - 6));
+        const int boxTop = itemRect.top + ((itemRect.bottom - itemRect.top) - boxSize) / 2;
+        const RECT boxRect{itemRect.left + 2, boxTop, itemRect.left + 2 + boxSize, boxTop + boxSize};
+        const COLORREF boxFill = disabled
+            ? state.theme.surfaceBackground
+            : (checked ? state.theme.accent : state.theme.fieldBackground);
+        const COLORREF boxBorder = disabled ? state.theme.border : state.theme.accent;
+        const HBRUSH boxBrush = CreateSolidBrush(boxFill);
+        const HPEN boxPen = CreatePen(PS_SOLID, 1, boxBorder);
+        const HGDIOBJ oldBrush = SelectObject(drawItem.hDC, boxBrush);
+        const HGDIOBJ oldPen = SelectObject(drawItem.hDC, boxPen);
+        RoundRect(drawItem.hDC, boxRect.left, boxRect.top, boxRect.right, boxRect.bottom, 4, 4);
+        SelectObject(drawItem.hDC, oldPen);
+        SelectObject(drawItem.hDC, oldBrush);
+        DeleteObject(boxPen);
+        DeleteObject(boxBrush);
+
+        if (checked)
+        {
+            const HPEN markPen = CreatePen(PS_SOLID, 2, state.theme.accentText);
+            const HGDIOBJ oldMarkPen = SelectObject(drawItem.hDC, markPen);
+            MoveToEx(drawItem.hDC, boxRect.left + 4, boxRect.top + (boxSize / 2), nullptr);
+            LineTo(drawItem.hDC, boxRect.left + (boxSize / 2) - 1, boxRect.bottom - 4);
+            LineTo(drawItem.hDC, boxRect.right - 3, boxRect.top + 4);
+            SelectObject(drawItem.hDC, oldMarkPen);
+            DeleteObject(markPen);
+        }
+
+        wchar_t label[64]{};
+        GetWindowTextW(drawItem.hwndItem, label, static_cast<int>(std::size(label)));
+        RECT textRect{boxRect.right + 6, itemRect.top, itemRect.right, itemRect.bottom};
+        SetBkMode(drawItem.hDC, TRANSPARENT);
+        SetTextColor(drawItem.hDC, disabled ? state.theme.mutedText : state.theme.text);
+        DrawTextW(drawItem.hDC,
+                  label,
+                  -1,
+                  &textRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        if ((drawItem.itemState & ODS_FOCUS) != 0)
+        {
+            RECT focusRect = textRect;
+            InflateRect(&focusRect, -1, -2);
+            DrawFocusRect(drawItem.hDC, &focusRect);
         }
     }
 
@@ -7397,10 +7540,9 @@ namespace
 
         state->selectedDefaults.clear();
         state->selectedDefaults.reserve(state->formatCheckWindows.size());
-        for (const HWND formatWindow : state->formatCheckWindows)
+        for (std::size_t index = 0; index < state->formatCheckWindows.size(); ++index)
         {
-            state->selectedDefaults.push_back(formatWindow
-                && SendMessageW(formatWindow, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            state->selectedDefaults.push_back(index < state->checkedDefaults.size() && state->checkedDefaults[index]);
         }
 
         std::wstring errorMessage;
@@ -7475,19 +7617,6 @@ namespace
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogInstructionControlId)),
                 hInstance,
                 nullptr);
-            const HWND formatGroupWindow = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Supported formats",
-                WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
-                0,
-                0,
-                100,
-                100,
-                hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogFormatGroupControlId)),
-                hInstance,
-                nullptr);
             const HWND selectAllButton = CreateWindowExW(
                 0,
                 L"BUTTON",
@@ -7542,7 +7671,7 @@ namespace
                     0,
                     L"BUTTON",
                     label.c_str(),
-                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                     0,
                     0,
                     100,
@@ -7570,13 +7699,6 @@ namespace
                 if (!state->firstFormatWindow)
                 {
                     state->firstFormatWindow = formatWindow;
-                }
-                if (formatWindow && index < state->initialDefaults.size())
-                {
-                    SendMessageW(formatWindow,
-                                 BM_SETCHECK,
-                                 state->initialDefaults[index] ? BST_CHECKED : BST_UNCHECKED,
-                                 0);
                 }
             }
 
@@ -7635,20 +7757,32 @@ namespace
 
             const HWND windows[] = {
                 instructionWindow,
-                formatGroupWindow,
-                selectAllButton,
-                clearAllButton,
-                defaultAppsButton,
                 footnoteWindow,
                 dividerWindow,
-                state->okButton,
-                cancelButton,
             };
             for (HWND window : windows)
             {
                 if (window)
                 {
                     SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                }
+            }
+            const HWND buttons[] = {
+                selectAllButton,
+                clearAllButton,
+                defaultAppsButton,
+                state->okButton,
+                cancelButton,
+            };
+            for (HWND button : buttons)
+            {
+                if (button)
+                {
+                    if (state->darkMode)
+                    {
+                        SetWindowTheme(button, L"", L"");
+                    }
+                    SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 }
             }
             for (const HWND formatWindow : state->formatCheckWindows)
@@ -7684,11 +7818,39 @@ namespace
                 LayoutFileAssociationsDialogControls(hwnd, *state);
             }
             return 0;
+        case WM_PAINT:
+            if (state)
+            {
+                PAINTSTRUCT paint{};
+                BeginPaint(hwnd, &paint);
+                RECT clientRect{};
+                GetClientRect(hwnd, &clientRect);
+                DrawFileAssociationsFormatGroup(paint.hdc, *state, clientRect.right - clientRect.left);
+                EndPaint(hwnd, &paint);
+                return 0;
+            }
+            break;
         case WM_SHOWWINDOW:
             if (wParam != FALSE && state)
             {
                 SetFocus(state->firstFormatWindow ? state->firstFormatWindow : state->okButton);
                 return FALSE;
+            }
+            break;
+        case WM_DRAWITEM:
+            if (state)
+            {
+                const auto* drawItem = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+                const int controlId = drawItem ? static_cast<int>(drawItem->CtlID) : 0;
+                if (drawItem
+                    && drawItem->CtlType == ODT_BUTTON
+                    && controlId >= kFileAssociationsDialogFormatBaseControlId
+                    && controlId < kFileAssociationsDialogFormatBaseControlId
+                        + static_cast<int>(state->formatCheckWindows.size()))
+                {
+                    DrawFileAssociationsCheckbox(*drawItem, *state);
+                    return TRUE;
+                }
             }
             break;
         case WM_CTLCOLORDLG:
@@ -7739,6 +7901,19 @@ namespace
             if (LOWORD(wParam) == kFileAssociationsDialogClearAllControlId)
             {
                 SetFileAssociationChecks(*state, false);
+                return 0;
+            }
+
+            if (HIWORD(wParam) == BN_CLICKED
+                && LOWORD(wParam) >= kFileAssociationsDialogFormatBaseControlId
+                && LOWORD(wParam) < kFileAssociationsDialogFormatBaseControlId
+                    + static_cast<int>(state->formatCheckWindows.size()))
+            {
+                const int formatIndex = static_cast<int>(LOWORD(wParam)) - kFileAssociationsDialogFormatBaseControlId;
+                if (formatIndex >= 0)
+                {
+                    ToggleFileAssociationCheck(*state, static_cast<std::size_t>(formatIndex));
+                }
                 return 0;
             }
 
@@ -7823,11 +7998,13 @@ namespace
         state.ownerWindow = ownerWindow;
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
         state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
+        state.darkMode = darkTheme;
         state.bodyFont = CreateDialogUiFont(10, FW_NORMAL, state.appTextSize);
         state.title = L"File Associations";
         state.instruction = L"Select the formats HyperBrowse should open by default.";
         state.footnote = L"Checked formats become defaults; unchecked formats are left unchanged. Windows may protect an existing choice; use Default apps if a format is rejected.";
         state.initialDefaults = initialDefaults;
+        state.checkedDefaults = initialDefaults;
 
         const FileAssociationsDialogLayoutMetrics layoutMetrics = BuildFileAssociationsDialogLayoutMetrics(
             kFileAssociationsDialogWidth,
@@ -7871,6 +8048,12 @@ namespace
         }
 
         SetWindowTextW(dialogWindow, state.title.c_str());
+    ApplyWindowFrameTheme(dialogWindow,
+                  darkTheme,
+                  state.theme.windowBackground,
+                  state.theme.text,
+                  state.theme.border);
+    RefreshWindowNonClientArea(dialogWindow);
         ShowWindow(dialogWindow, SW_SHOWNORMAL);
         UpdateWindow(dialogWindow);
 
@@ -10826,6 +11009,14 @@ namespace hyperbrowse::ui
             return true;
         }
 
+        if ((message->message == WM_SYSKEYDOWN || message->message == WM_SYSCHAR)
+            && message->hwnd
+            && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
+            && HandleCommandBarKeyboardInput(message->message, message->wParam, message->lParam))
+        {
+            return true;
+        }
+
         if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
             && message->hwnd
             && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
@@ -10966,21 +11157,21 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_FOLDER, L"&Open Folder...\tCtrl+O");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_FOLDER, L"Open &Folder...\tCtrl+O");
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(openRecentFolderMenu_), L"Open &Recent Folder");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, L"Add Current Folder to Quick &Actions");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_CLEAR_FAVORITE_DESTINATIONS, L"Clear All Quick &Actions");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_CLEAR_FAVORITE_DESTINATIONS, L"&Clear All Quick Actions");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COMPARE_SELECTED, L"Compare &Selected");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information\tCtrl+I");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PROPERTIES, L"P&roperties\tAlt+Enter");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_PROPERTIES, L"&Properties\tAlt+Enter");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REVEAL_IN_EXPLORER, L"Reveal in &Explorer\tCtrl+E");
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing &Folder");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_CONTAINING_FOLDER, L"Open Containing Fol&der");
         AppendMenuW(editMenu, MF_STRING, ID_EDIT_UNDO, L"&Undo\tCtrl+Z");
         AppendMenuW(editMenu, MF_STRING, ID_EDIT_REDO, L"&Redo\tCtrl+Y");
         AppendMenuW(editMenu, MF_SEPARATOR, 0, nullptr);
@@ -11028,10 +11219,10 @@ namespace hyperbrowse::ui
         AppendMenuW(fileConvertMenu, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
         AppendMenuW(fileConvertMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileConvertMenu, MF_STRING, ID_FILE_BATCH_CONVERT_CANCEL, L"&Cancel Batch Convert");
-        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileConvertMenu), L"&Convert");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileConvertMenu), L"Con&vert");
 
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ESCAPE, closeMainWindowOnEscape_ ? L"&Close\tEsc" : L"&Minimize\tEsc");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ESCAPE, closeMainWindowOnEscape_ ? L"C&lose\tEsc" : L"Minimi&ze\tEsc");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_EXIT, L"E&xit");
 
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode\tCtrl+1");
@@ -11092,12 +11283,16 @@ namespace hyperbrowse::ui
 
         RefreshPersistentMenuOwnerDraw();
         commandBarMenuButtons_[0].label = L"File";
+        commandBarMenuButtons_[0].mnemonic = L'F';
         commandBarMenuButtons_[0].menu = fileMenu_;
         commandBarMenuButtons_[1].label = L"Edit";
+        commandBarMenuButtons_[1].mnemonic = L'E';
         commandBarMenuButtons_[1].menu = editMenu_;
         commandBarMenuButtons_[2].label = L"View";
+        commandBarMenuButtons_[2].mnemonic = L'V';
         commandBarMenuButtons_[2].menu = viewMenu_;
         commandBarMenuButtons_[3].label = L"Help";
+        commandBarMenuButtons_[3].mnemonic = L'H';
         commandBarMenuButtons_[3].menu = helpMenu_;
 
         SetMenu(hwnd_, nullptr);
@@ -13129,6 +13324,7 @@ namespace hyperbrowse::ui
         std::wstring label;
         std::wstring shortcut;
         SplitMenuDisplayText(drawData->text, &label, &shortcut);
+        const int mnemonicIndex = FindMenuMnemonicDisplayIndex(drawData->text);
 
         if (checked)
         {
@@ -13187,12 +13383,37 @@ namespace hyperbrowse::ui
         {
             labelRect.right -= static_cast<int>(renderer.MeasureTextWidth(shortcut, menuFormat.Get()) + 0.5f) + shortcutGap;
         }
-        renderTarget->DrawText(
-            label.c_str(),
-            static_cast<UINT32>(label.size()),
-            menuFormat.Get(),
-            hyperbrowse::render::ToD2DRect(labelRect),
-            labelBrush.Get());
+        const bool hasMnemonic = mnemonicIndex >= 0 && mnemonicIndex < static_cast<int>(label.size());
+        if (hasMnemonic)
+        {
+            const auto labelLayout = renderer.CreateTextLayout(
+                label,
+                menuFormat.Get(),
+                static_cast<float>(std::max<LONG>(1, labelRect.right - labelRect.left)),
+                static_cast<float>(std::max<LONG>(1, labelRect.bottom - labelRect.top)));
+            if (!labelLayout)
+            {
+                renderTarget->EndDraw();
+                return false;
+            }
+
+            labelLayout->SetUnderline(TRUE, DWRITE_TEXT_RANGE{
+                static_cast<UINT32>(mnemonicIndex),
+                1});
+            renderTarget->DrawTextLayout(
+                hyperbrowse::render::ToD2DPoint(static_cast<float>(labelRect.left), static_cast<float>(labelRect.top)),
+                labelLayout.Get(),
+                labelBrush.Get());
+        }
+        else
+        {
+            renderTarget->DrawText(
+                label.c_str(),
+                static_cast<UINT32>(label.size()),
+                menuFormat.Get(),
+                hyperbrowse::render::ToD2DRect(labelRect),
+                labelBrush.Get());
+        }
 
         if (!shortcut.empty())
         {
@@ -13254,6 +13475,7 @@ namespace hyperbrowse::ui
         std::wstring label;
         std::wstring shortcut;
         SplitMenuDisplayText(drawData->text, &label, &shortcut);
+        const int mnemonicIndex = FindMenuMnemonicDisplayIndex(drawData->text);
 
         const auto scaleMenuDimension = [this](int dimension)
         {
@@ -13311,9 +13533,17 @@ namespace hyperbrowse::ui
         {
             labelRect.right -= MeasureTextWidth(menuFont, shortcut) + shortcutGap;
         }
+        std::wstring gdiLabel = label;
+        if (mnemonicIndex >= 0 && mnemonicIndex < static_cast<int>(gdiLabel.size()))
+        {
+            gdiLabel.insert(
+                static_cast<std::wstring::size_type>(mnemonicIndex),
+                1,
+                L'&');
+        }
         render::DrawGdiText(drawItem.hDC,
                             menuFont,
-                            label.c_str(),
+                            gdiLabel.c_str(),
                             -1,
                             labelRect,
                             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -13407,7 +13637,7 @@ namespace hyperbrowse::ui
 
     bool MainWindow::HandleCommandBarKeyboardInput(UINT message, WPARAM wParam, LPARAM lParam)
     {
-        const int mnemonicIndex = CommandBarMenuIndexFromVirtualKey(wParam);
+        const int mnemonicIndex = MainMenuMnemonicIndexFromVirtualKey(static_cast<WORD>(wParam));
         const bool shiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         const bool isRepeat = (lParam & 0x40000000) != 0;
 
@@ -13519,45 +13749,100 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const CommandBarMenuButton& button = commandBarMenuButtons_[static_cast<std::size_t>(index)];
-        if (!button.menu || IsRectEmpty(&button.rect))
-        {
-            return;
-        }
-
         const bool keyboardOpen = commandBarKeyboardActive_;
-        if (keyboardOpen)
+        int menuIndex = index;
+        for (;;)
         {
-            commandBarHotIndex_ = index;
-            InvalidateToolbarStrip();
-            if (GetFocus() != hwnd_)
+            const CommandBarMenuButton& button = commandBarMenuButtons_[static_cast<std::size_t>(menuIndex)];
+            if (!button.menu || IsRectEmpty(&button.rect))
+            {
+                return;
+            }
+
+            if (keyboardOpen)
+            {
+                commandBarHotIndex_ = menuIndex;
+                InvalidateToolbarStrip();
+                if (GetFocus() != hwnd_)
+                {
+                    SetFocus(hwnd_);
+                }
+            }
+
+            RECT screenRect = button.rect;
+            MapWindowPoints(hwnd_, HWND_DESKTOP, reinterpret_cast<LPPOINT>(&screenRect), 2);
+            commandBarMenuNavigationIndex_ = -1;
+            SetForegroundWindow(hwnd_);
+
+            HHOOK menuFilterHook = nullptr;
+            if (keyboardOpen)
+            {
+                g_commandBarMenuFilterWindow = this;
+                menuFilterHook = SetWindowsHookExW(WH_MSGFILTER,
+                                                   &MainWindow::CommandBarMenuFilterProc,
+                                                   nullptr,
+                                                   GetCurrentThreadId());
+            }
+
+            const UINT commandId = TrackPopupMenuEx(button.menu,
+                                                    TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+                                                    screenRect.left,
+                                                    screenRect.bottom,
+                                                    hwnd_,
+                                                    nullptr);
+
+            if (menuFilterHook)
+            {
+                UnhookWindowsHookEx(menuFilterHook);
+            }
+            g_commandBarMenuFilterWindow = nullptr;
+            PostMessageW(hwnd_, WM_NULL, 0, 0);
+
+            if (keyboardOpen && commandBarMenuNavigationIndex_ >= 0)
+            {
+                menuIndex = commandBarMenuNavigationIndex_;
+                continue;
+            }
+
+            if (commandId != 0)
+            {
+                if (keyboardOpen)
+                {
+                    DeactivateCommandBarKeyboardMode(true);
+                }
+                HandleCommand(commandId);
+            }
+            else if (keyboardOpen && hwnd_ && GetFocus() != hwnd_)
             {
                 SetFocus(hwnd_);
             }
+            return;
+        }
+    }
+
+    LRESULT CALLBACK MainWindow::CommandBarMenuFilterProc(int code, WPARAM wParam, LPARAM lParam)
+    {
+        if (code == MSGF_MENU && g_commandBarMenuFilterWindow)
+        {
+            const auto* message = reinterpret_cast<const MSG*>(lParam);
+            if (message
+                && (message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
+                && (message->wParam == VK_LEFT || message->wParam == VK_RIGHT))
+            {
+                const int menuCount = static_cast<int>(g_commandBarMenuFilterWindow->commandBarMenuButtons_.size());
+                const int currentIndex = std::clamp(g_commandBarMenuFilterWindow->commandBarHotIndex_, 0, menuCount - 1);
+                g_commandBarMenuFilterWindow->commandBarMenuNavigationIndex_ = message->wParam == VK_LEFT
+                    ? (currentIndex + menuCount - 1) % menuCount
+                    : (currentIndex + 1) % menuCount;
+                if (EndMenu())
+                {
+                    return 1;
+                }
+                g_commandBarMenuFilterWindow->commandBarMenuNavigationIndex_ = -1;
+            }
         }
 
-        RECT screenRect = button.rect;
-        MapWindowPoints(hwnd_, HWND_DESKTOP, reinterpret_cast<LPPOINT>(&screenRect), 2);
-        SetForegroundWindow(hwnd_);
-        const UINT commandId = TrackPopupMenuEx(button.menu,
-                                                TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-                                                screenRect.left,
-                                                screenRect.bottom,
-                                                hwnd_,
-                                                nullptr);
-        PostMessageW(hwnd_, WM_NULL, 0, 0);
-        if (commandId != 0)
-        {
-            if (keyboardOpen)
-            {
-                DeactivateCommandBarKeyboardMode(true);
-            }
-            HandleCommand(commandId);
-        }
-        else if (keyboardOpen && hwnd_ && GetFocus() != hwnd_)
-        {
-            SetFocus(hwnd_);
-        }
+        return CallNextHookEx(nullptr, code, wParam, lParam);
     }
 
     void MainWindow::RecordRecentFolder(std::wstring folderPath)
@@ -20818,9 +21103,9 @@ namespace hyperbrowse::ui
             ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE,
             CommandIdFromViewerMouseWheelBehavior(viewerMouseWheelBehavior_),
             MF_BYCOMMAND);
-        const viewer::InfoOverlayTextSize overlayTextSize = viewerWindow_
+        const viewer::InfoOverlayTextSize overlayTextSize = viewerWindow_ && viewerWindow_->IsOpen()
             ? viewerWindow_->OverlayTextSize()
-            : viewer::InfoOverlayTextSize::Small;
+            : viewer::ViewerWindow::DefaultOverlayTextSize();
         CheckMenuRadioItem(
             menu_,
             ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL,
@@ -24208,6 +24493,7 @@ namespace hyperbrowse::ui
             return;
         }
 
+        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
         const ThemePalette palette = GetThemePalette();
         const auto createBrush = [renderTarget](COLORREF color)
         {
@@ -24302,7 +24588,42 @@ namespace hyperbrowse::ui
             RECT textRect = button.rect;
             InflateRect(&textRect, -kCommandBarMenuButtonPadding, 0);
             textRect.right -= kCommandBarMenuChevronWidth + 4;
-            drawText(button.label, textRect, palette.text);
+            if (commandBarKeyboardActive_ && button.mnemonic != L'\0')
+            {
+                const auto mnemonicIt = std::find_if(button.label.begin(), button.label.end(), [&button](wchar_t character)
+                {
+                    return towupper(character) == towupper(button.mnemonic);
+                });
+                const auto labelLayout = mnemonicIt == button.label.end()
+                    ? hyperbrowse::render::ComPtr<IDWriteTextLayout>{}
+                    : renderer.CreateTextLayout(
+                        button.label,
+                        d2dToolbarTextFormat_.Get(),
+                        static_cast<float>(std::max<LONG>(1, textRect.right - textRect.left)),
+                        static_cast<float>(std::max<LONG>(1, textRect.bottom - textRect.top)));
+                if (labelLayout)
+                {
+                    labelLayout->SetUnderline(TRUE, DWRITE_TEXT_RANGE{
+                        static_cast<UINT32>(std::distance(button.label.begin(), mnemonicIt)),
+                        1});
+                    const auto labelBrush = createBrush(palette.text);
+                    if (labelBrush)
+                    {
+                        renderTarget->DrawTextLayout(
+                            hyperbrowse::render::ToD2DPoint(static_cast<float>(textRect.left), static_cast<float>(textRect.top)),
+                            labelLayout.Get(),
+                            labelBrush.Get());
+                    }
+                }
+                else
+                {
+                    drawText(button.label, textRect, palette.text);
+                }
+            }
+            else
+            {
+                drawText(button.label, textRect, palette.text);
+            }
 
             const int chevronX = button.rect.right - kCommandBarMenuButtonPadding - kCommandBarMenuChevronWidth;
             const int chevronY = button.rect.top + ((button.rect.bottom - button.rect.top) - kCommandBarMenuChevronWidth) / 2;
@@ -24521,9 +24842,24 @@ namespace hyperbrowse::ui
             RECT textRect = buttonRect;
             textRect.left += kCommandBarMenuButtonPadding;
             textRect.right -= kCommandBarMenuButtonPadding + kCommandBarMenuChevronWidth + 4;
+            std::wstring buttonLabel = button.label;
+            if (commandBarKeyboardActive_ && button.mnemonic != L'\0')
+            {
+                const auto mnemonicIt = std::find_if(buttonLabel.begin(), buttonLabel.end(), [&button](wchar_t character)
+                {
+                    return towupper(character) == towupper(button.mnemonic);
+                });
+                if (mnemonicIt != buttonLabel.end())
+                {
+                    buttonLabel.insert(
+                        static_cast<std::wstring::size_type>(std::distance(buttonLabel.begin(), mnemonicIt)),
+                        1,
+                        L'&');
+                }
+            }
             render::DrawGdiText(hdc,
                                 detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                button.label.c_str(),
+                                buttonLabel.c_str(),
                                 -1,
                                 textRect,
                                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,

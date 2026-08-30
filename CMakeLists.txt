@@ -151,6 +151,7 @@ target_link_libraries(HyperBrowseCore PUBLIC
     dwrite
     msimg32
     propsys
+    uxtheme
     windowscodecs
     shell32
     shlwapi

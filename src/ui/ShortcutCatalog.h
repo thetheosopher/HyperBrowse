@@ -26,6 +26,52 @@ namespace hyperbrowse::ui
         std::wstring_view group;
     };
 
+    struct MenuMnemonicDefinition
+    {
+        wchar_t mnemonic;
+        std::wstring_view label;
+    };
+
+    inline constexpr std::array kMainMenuMnemonicCatalog{
+        MenuMnemonicDefinition{L'F', L"File"},
+        MenuMnemonicDefinition{L'E', L"Edit"},
+        MenuMnemonicDefinition{L'V', L"View"},
+        MenuMnemonicDefinition{L'H', L"Help"},
+    };
+
+    template <std::size_t Count>
+    constexpr bool HasDuplicateMenuMnemonics(const std::array<MenuMnemonicDefinition, Count>& catalog) noexcept
+    {
+        for (std::size_t index = 0; index < Count; ++index)
+        {
+            for (std::size_t otherIndex = index + 1; otherIndex < Count; ++otherIndex)
+            {
+                if (catalog[index].mnemonic == catalog[otherIndex].mnemonic)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    constexpr int MainMenuMnemonicIndexFromVirtualKey(WORD virtualKey) noexcept
+    {
+        const wchar_t key = virtualKey >= static_cast<WORD>('a') && virtualKey <= static_cast<WORD>('z')
+            ? static_cast<wchar_t>(virtualKey - (static_cast<WORD>('a') - static_cast<WORD>('A')))
+            : static_cast<wchar_t>(virtualKey);
+        for (std::size_t index = 0; index < kMainMenuMnemonicCatalog.size(); ++index)
+        {
+            if (kMainMenuMnemonicCatalog[index].mnemonic == key)
+            {
+                return static_cast<int>(index);
+            }
+        }
+        return -1;
+    }
+
+    inline constexpr bool kMainMenuMnemonicCatalogValid = !HasDuplicateMenuMnemonics(kMainMenuMnemonicCatalog);
+
     inline constexpr std::array kMainWindowShortcutCatalog{
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_OPEN_FOLDER, static_cast<WORD>('O'), FCONTROL, L"Ctrl+O", L"Open folder", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_HELP_USER_GUIDE, VK_F1, 0, L"F1", L"Open user guide", L"Help"},
