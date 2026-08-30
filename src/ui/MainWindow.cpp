@@ -42,6 +42,7 @@
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
+#include "ui/DialogTheme.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/CommandIds.h"
 #include "ui/ShortcutCatalog.h"
@@ -283,7 +284,7 @@ namespace
     constexpr int kTextInputDialogEditTopGap = 8;
     constexpr int kTextInputDialogDividerTopGap = 14;
     constexpr int kTextInputDialogButtonTopGap = 10;
-    constexpr int kTextInputEditHeight = 24;
+    constexpr int kTextInputEditHeight = 30;
     constexpr int kTextInputButtonWidth = 88;
     constexpr int kTextInputButtonHeight = 28;
     constexpr int kTextInputEditControlId = 100;
@@ -599,6 +600,9 @@ namespace
         HWND editWindow{};
         HWND okButton{};
         HFONT bodyFont{};
+        hyperbrowse::ui::DialogTheme theme{};
+        HBRUSH backgroundBrush{};
+        HBRUSH fieldBrush{};
         hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         std::wstring title;
         std::wstring instruction;
@@ -3292,6 +3296,9 @@ namespace
                              static_cast<LPARAM>(state->selectionEnd));
             }
 
+            state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
+            state->fieldBrush = CreateSolidBrush(state->theme.fieldBackground);
+
             CenterWindowOnOwner(hwnd, state->ownerWindow);
             return 0;
         }
@@ -3303,12 +3310,50 @@ namespace
             }
             break;
         case WM_CTLCOLORDLG:
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state && state->backgroundBrush)
+            {
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
         case WM_CTLCOLORSTATIC:
-            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_CTLCOLOREDIT:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, OPAQUE);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.fieldBackground);
+                return reinterpret_cast<INT_PTR>(state->fieldBrush);
+            }
+            break;
+        case WM_CTLCOLORBTN:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_ERASEBKGND:
+            if (state && state->backgroundBrush)
+            {
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                FillRect(reinterpret_cast<HDC>(wParam), &client, state->backgroundBrush);
+                return 1;
+            }
+            break;
         case WM_COMMAND:
             if (!state)
             {
@@ -3342,6 +3387,16 @@ namespace
         case WM_DESTROY:
             if (state)
             {
+                if (state->backgroundBrush)
+                {
+                    DeleteObject(state->backgroundBrush);
+                    state->backgroundBrush = nullptr;
+                }
+                if (state->fieldBrush)
+                {
+                    DeleteObject(state->fieldBrush);
+                    state->fieldBrush = nullptr;
+                }
                 state->done = true;
             }
             return 0;
@@ -8327,6 +8382,7 @@ namespace
     bool PromptForSingleLineText(HWND ownerWindow,
                                  HINSTANCE instance,
                                  hyperbrowse::util::AppTextSize appTextSize,
+                                 bool darkTheme,
                                  const std::wstring& title,
                                  const std::wstring& instruction,
                                  const std::wstring& confirmLabel,
@@ -8348,7 +8404,7 @@ namespace
             windowClass.hInstance = instance;
             windowClass.lpszClassName = kTextInputDialogClassName;
             windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            windowClass.hbrBackground = nullptr;
             if (RegisterClassExW(&windowClass) == 0)
             {
                 return false;
@@ -8358,6 +8414,7 @@ namespace
         TextInputDialogState state;
         state.ownerWindow = ownerWindow;
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
         state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
         if (!state.bodyFont)
         {
@@ -8471,6 +8528,7 @@ namespace
     bool PromptForRenameLeafName(HWND ownerWindow,
                                  HINSTANCE instance,
                                  hyperbrowse::util::AppTextSize appTextSize,
+                                 bool darkTheme,
                                  std::wstring title,
                                  std::wstring instruction,
                                  std::wstring currentLeafName,
@@ -8487,6 +8545,7 @@ namespace
         while (PromptForSingleLineText(ownerWindow,
                                        instance,
                                        appTextSize,
+                                       darkTheme,
                                        title,
                                        instruction,
                                        L"Rename",
@@ -17415,6 +17474,7 @@ namespace hyperbrowse::ui
         if (!PromptForRenameLeafName(hwnd_,
                                      instance_,
                                      appTextSize_,
+                                     themeMode_ == ThemeMode::Dark,
                                      L"Rename File",
                                      L"Enter a new file name.",
                                      item.fileName,
@@ -17565,6 +17625,7 @@ namespace hyperbrowse::ui
         while (PromptForSingleLineText(hwnd_,
                                        instance_,
                                        appTextSize_,
+                                       themeMode_ == ThemeMode::Dark,
                                        L"Move to New Child Folder",
                                        L"Enter a name for the new child folder.",
                                        L"Create and Move",
@@ -17643,6 +17704,7 @@ namespace hyperbrowse::ui
         if (!PromptForRenameLeafName(hwnd_,
                                      instance_,
                                      appTextSize_,
+                                     themeMode_ == ThemeMode::Dark,
                                      L"Rename Folder",
                                      L"Enter a new folder name.",
                                      currentLeafName,
@@ -17736,6 +17798,7 @@ namespace hyperbrowse::ui
         while (PromptForSingleLineText(hwnd_,
                                        instance_,
                                        appTextSize_,
+                                       themeMode_ == ThemeMode::Dark,
                                        L"New Folder",
                                        L"Enter a name for the new folder.",
                                        L"Create",
@@ -18530,6 +18593,7 @@ namespace hyperbrowse::ui
         if (!PromptForSingleLineText(hwnd_,
                                      instance_,
                                      appTextSize_,
+                                     themeMode_ == ThemeMode::Dark,
                                      L"Edit Tags",
                                      L"Enter comma-separated tags for the selected images. Leave blank to clear tags.",
                                      L"Apply",

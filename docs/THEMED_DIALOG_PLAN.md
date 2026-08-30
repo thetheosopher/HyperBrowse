@@ -16,8 +16,9 @@ The app theme currently applies to the main window and several custom surfaces, 
 ## Phases
 
 - [x] Record the implementation plan and acceptance criteria.
-- [ ] Add a shared dialog palette and control-color helpers.
-- [ ] Wire the shared palette into the single-line text dialog.
+- [x] Add the initial shared dialog palette value type.
+- [x] Wire the palette into the single-line text dialog.
+- [ ] Extract the remaining shared control-color helper once the other dialog control differences are characterized.
 - [ ] Wire the palette into batch rename, performance settings, file associations, and slideshow settings.
 - [ ] Update consolidated settings background, controls, and owner-drawn tabs to use the palette.
 - [ ] Replace `ShowImageInformation` / `TaskDialogIndirect` with an ordinary themed dialog that preserves expandable metadata.
