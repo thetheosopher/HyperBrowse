@@ -116,7 +116,7 @@ namespace hyperbrowse::ui
     };
 
     inline constexpr std::array kViewerShortcutCatalog{
-        ShortcutDefinition{ShortcutContext::Viewer, 0, VK_ESCAPE, 0, L"Esc", L"Leave full screen or close the viewer", L"Viewer delete and exit"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, VK_ESCAPE, 0, L"Esc", L"Use the configured full-screen Escape action, or close the viewer when windowed", L"Viewer delete and exit"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('W'), FCONTROL, L"Ctrl+W", L"Close the viewer", L"Viewer delete and exit"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_LEFT, 0, L"Left", L"Navigate or pan left", L"Viewer navigation"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_RIGHT, 0, L"Right", L"Navigate or pan right", L"Viewer navigation"},
@@ -144,8 +144,8 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('1'), 0, L"1", L"Show the image at actual size", L"Viewer compare and display"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('H'), 0, L"H", L"Fit the image to the window height", L"Viewer zoom and display"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('W'), 0, L"W", L"Fit the image to the window width", L"Viewer zoom and display"},
-        ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('H'), FCONTROL | FSHIFT, L"Ctrl+Shift+H", L"Size the window to the monitor work-area height", L"Viewer window"},
-        ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('W'), FCONTROL | FSHIFT, L"Ctrl+Shift+W", L"Size the window to the monitor work-area width", L"Viewer window"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('H'), FCONTROL | FSHIFT, L"Ctrl+Shift+H", L"Size the window to the monitor work-area height (windowed mode only)", L"Viewer window"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('W'), FCONTROL | FSHIFT, L"Ctrl+Shift+W", L"Size the window to the monitor work-area width (windowed mode only)", L"Viewer window"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('L'), 0, L"L", L"Rotate the image left", L"Viewer transform and compare"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('R'), 0, L"R", L"Rotate the image right", L"Viewer transform and compare"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('C'), 0, L"C", L"Toggle comparison mode", L"Viewer transform and compare"},

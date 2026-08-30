@@ -97,6 +97,7 @@ namespace
     constexpr wchar_t kRegistryValueDetailsStripVisible[] = L"DetailsStripVisible";
     constexpr wchar_t kRegistryValueDetailsPanelWidth[] = L"DetailsPanelWidth";
     constexpr wchar_t kRegistryValueViewerMouseWheelBehavior[] = L"ViewerMouseWheelBehavior";
+    constexpr wchar_t kRegistryValueViewerEscapeKeyBehavior[] = L"ViewerEscapeKeyBehavior";
         constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
@@ -442,6 +443,7 @@ namespace
         ShowSubfolders,
         CloseOnEscape,
         SingleInstance,
+        EscapeKeyBehavior,
         Count,
     };
 
@@ -849,6 +851,12 @@ namespace
         const wchar_t* label;
     };
 
+    struct EscapeKeyBehaviorOption
+    {
+        hyperbrowse::viewer::EscapeKeyBehavior behavior;
+        const wchar_t* label;
+    };
+
     struct SlideshowSettingsDialogState
     {
         HWND ownerWindow{};
@@ -892,6 +900,7 @@ namespace
         hyperbrowse::util::ResourceProfile resourceProfile{hyperbrowse::util::ResourceProfile::Balanced};
         hyperbrowse::browser::ThumbnailSizePreset thumbnailSizePreset{static_cast<hyperbrowse::browser::ThumbnailSizePreset>(192)};
         hyperbrowse::viewer::MouseWheelBehavior viewerMouseWheelBehavior{hyperbrowse::viewer::MouseWheelBehavior::Zoom};
+        hyperbrowse::viewer::EscapeKeyBehavior viewerEscapeKeyBehavior{hyperbrowse::viewer::EscapeKeyBehavior::Close};
             bool invertKeyboardPanning{};
         hyperbrowse::viewer::TransitionStyle slideshowTransitionStyle{hyperbrowse::viewer::TransitionStyle::Crossfade};
         hyperbrowse::viewer::InfoOverlayTextSize overlayTextSize{hyperbrowse::viewer::InfoOverlayTextSize::Small};
@@ -2380,6 +2389,13 @@ namespace
         {hyperbrowse::viewer::TransitionStyle::ZoomFade, L"Zoom Fade"},
     }};
 
+    constexpr std::array<EscapeKeyBehaviorOption, 4> kEscapeKeyBehaviorOptions = {{
+        {hyperbrowse::viewer::EscapeKeyBehavior::Close, L"Close"},
+        {hyperbrowse::viewer::EscapeKeyBehavior::FitWidth, L"Fit Width"},
+        {hyperbrowse::viewer::EscapeKeyBehavior::FitHeight, L"Fit Height"},
+        {hyperbrowse::viewer::EscapeKeyBehavior::ActualSize, L"Actual Size"},
+    }};
+
     int SlideshowTransitionComboIndex(hyperbrowse::viewer::TransitionStyle style)
     {
         for (std::size_t index = 0; index < kSlideshowTransitionOptions.size(); ++index)
@@ -2391,6 +2407,19 @@ namespace
         }
 
         return SlideshowTransitionComboIndex(hyperbrowse::viewer::TransitionStyle::Crossfade);
+    }
+
+    int EscapeKeyBehaviorComboIndex(hyperbrowse::viewer::EscapeKeyBehavior behavior)
+    {
+        for (std::size_t index = 0; index < kEscapeKeyBehaviorOptions.size(); ++index)
+        {
+            if (kEscapeKeyBehaviorOptions[index].behavior == behavior)
+            {
+                return static_cast<int>(index);
+            }
+        }
+
+        return 0;
     }
 
     bool TryReadDialogUInt(HWND window, UINT minimum, UINT maximum, UINT* value)
@@ -5055,10 +5084,13 @@ namespace
 
         const int wheelIndex = isChecked(ConsolidatedSettingsControl::ViewerWheelNavigate) ? 1 : 0;
         const int overlaySizeIndex = comboIndex(ConsolidatedSettingsControl::OverlayTextSize);
+        const int escapeKeyBehaviorIndex = comboIndex(ConsolidatedSettingsControl::EscapeKeyBehavior);
         const int appTextSizeIndex = comboIndex(ConsolidatedSettingsControl::AppTextSize);
         const int thumbnailSizeIndex = comboIndex(ConsolidatedSettingsControl::ThumbnailSize);
         const int resourceProfileIndex = comboIndex(ConsolidatedSettingsControl::ResourceProfile);
-        if (overlaySizeIndex < 0 || overlaySizeIndex > 2 || appTextSizeIndex < 0 || appTextSizeIndex > 2
+        if (overlaySizeIndex < 0 || overlaySizeIndex > 2
+            || escapeKeyBehaviorIndex < 0 || escapeKeyBehaviorIndex >= static_cast<int>(kEscapeKeyBehaviorOptions.size())
+            || appTextSizeIndex < 0 || appTextSizeIndex > 2
             || thumbnailSizeIndex < 0 || thumbnailSizeIndex >= static_cast<int>(kThumbnailSizePresets.size())
             || resourceProfileIndex < 0 || resourceProfileIndex > 3)
         {
@@ -5071,6 +5103,7 @@ namespace
         state->slideshowTransitionStyle = kSlideshowTransitionOptions[static_cast<std::size_t>(transitionIndex)].style;
         state->useSlideshowTransition = isChecked(ConsolidatedSettingsControl::TransitionEnabled);
         state->viewerMouseWheelBehavior = static_cast<hyperbrowse::viewer::MouseWheelBehavior>(wheelIndex);
+        state->viewerEscapeKeyBehavior = kEscapeKeyBehaviorOptions[static_cast<std::size_t>(escapeKeyBehaviorIndex)].behavior;
             state->invertKeyboardPanning = isChecked(ConsolidatedSettingsControl::InvertKeyboardPanning);
         state->rawJpegPairedOperationsEnabled = isChecked(ConsolidatedSettingsControl::RawPairingEnabled);
         state->pairedRawJpegViewerPreference = isChecked(ConsolidatedSettingsControl::RawPreferJpeg)
@@ -5189,6 +5222,7 @@ namespace
                 L"Mouse wheel",
                 L"Paired viewer preference",
                 L"Overlay text size",
+                L"ESC key behavior in full screen",
                 L"Application text size",
                 L"Thumbnail size",
                 L"Theme",
@@ -5222,6 +5256,7 @@ namespace
                 L"Small",
                 L"Medium",
                 L"Large",
+                L"Actual Size",
                 L"640 px",
                 L"Conservative",
                 L"Balanced",
@@ -5324,6 +5359,9 @@ namespace
             y += rowHeight + rowGap;
             label(ConsolidatedSettingsPage::Viewer, L"Overlay text size", y);
             combo(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::OverlayTextSize, y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Viewer, L"ESC key behavior in full screen", y);
+            combo(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::EscapeKeyBehavior, y);
 
             y = pageTop + 16;
             label(ConsolidatedSettingsPage::Appearance, L"Theme", y);
@@ -5390,6 +5428,10 @@ namespace
             addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Small");
             addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Medium");
             addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Large");
+            for (const EscapeKeyBehaviorOption& option : kEscapeKeyBehaviorOptions)
+            {
+                addComboText(ConsolidatedSettingsControl::EscapeKeyBehavior, option.label);
+            }
             addComboText(ConsolidatedSettingsControl::AppTextSize, L"Small");
             addComboText(ConsolidatedSettingsControl::AppTextSize, L"Medium");
             addComboText(ConsolidatedSettingsControl::AppTextSize, L"Large");
@@ -5407,6 +5449,8 @@ namespace
                          SlideshowTransitionComboIndex(state->slideshowTransitionStyle), 0);
             SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::OverlayTextSize), CB_SETCURSEL,
                          static_cast<int>(state->overlayTextSize), 0);
+            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::EscapeKeyBehavior), CB_SETCURSEL,
+                         EscapeKeyBehaviorComboIndex(state->viewerEscapeKeyBehavior), 0);
             SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::AppTextSize), CB_SETCURSEL,
                          static_cast<int>(state->appTextSize), 0);
             const auto thumbnailIterator = std::find(kThumbnailSizePresets.begin(), kThumbnailSizePresets.end(), state->thumbnailSizePreset);
@@ -5833,6 +5877,7 @@ namespace
         {
         case ConsolidatedSettingsControl::TransitionStyle:
         case ConsolidatedSettingsControl::OverlayTextSize:
+        case ConsolidatedSettingsControl::EscapeKeyBehavior:
         case ConsolidatedSettingsControl::AppTextSize:
         case ConsolidatedSettingsControl::ThumbnailSize:
         case ConsolidatedSettingsControl::ResourceProfile:
@@ -5858,6 +5903,11 @@ namespace
             return settings.overlayTextSize == hyperbrowse::viewer::InfoOverlayTextSize::Large
                 ? std::wstring(L"Large")
                 : settings.overlayTextSize == hyperbrowse::viewer::InfoOverlayTextSize::Medium ? std::wstring(L"Medium") : std::wstring(L"Small");
+        case ConsolidatedSettingsControl::EscapeKeyBehavior:
+        {
+            const int index = EscapeKeyBehaviorComboIndex(settings.viewerEscapeKeyBehavior);
+            return std::wstring(kEscapeKeyBehaviorOptions[static_cast<std::size_t>(index)].label);
+        }
         case ConsolidatedSettingsControl::AppTextSize:
             return settings.appTextSize == hyperbrowse::util::AppTextSize::Large
                 ? std::wstring(L"Large")
@@ -5983,6 +6033,8 @@ namespace
             check(ConsolidatedSettingsControl::FullMetadata, L"Show full metadata", y);
             y += rowHeight + rowGap;
             labelValue(L"Overlay text size", ConsolidatedSettingsControl::OverlayTextSize, y);
+            y += rowHeight + rowGap;
+            labelValue(L"ESC key behavior in full screen", ConsolidatedSettingsControl::EscapeKeyBehavior, y);
             break;
         case ConsolidatedSettingsPage::Appearance:
             ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Theme");
@@ -6078,6 +6130,7 @@ namespace
         };
         setChoiceVisibility(ConsolidatedSettingsControl::TransitionStyle, ConsolidatedSettingsPage::Slideshow);
         setChoiceVisibility(ConsolidatedSettingsControl::OverlayTextSize, ConsolidatedSettingsPage::Viewer);
+        setChoiceVisibility(ConsolidatedSettingsControl::EscapeKeyBehavior, ConsolidatedSettingsPage::Viewer);
         setChoiceVisibility(ConsolidatedSettingsControl::AppTextSize, ConsolidatedSettingsPage::Appearance);
         setChoiceVisibility(ConsolidatedSettingsControl::ThumbnailSize, ConsolidatedSettingsPage::Appearance);
         setChoiceVisibility(ConsolidatedSettingsControl::ResourceProfile, ConsolidatedSettingsPage::Performance);
@@ -6092,6 +6145,7 @@ namespace
         };
         positionChoice(ConsolidatedSettingsControl::TransitionStyle);
         positionChoice(ConsolidatedSettingsControl::OverlayTextSize);
+        positionChoice(ConsolidatedSettingsControl::EscapeKeyBehavior);
         positionChoice(ConsolidatedSettingsControl::AppTextSize);
         positionChoice(ConsolidatedSettingsControl::ThumbnailSize);
         positionChoice(ConsolidatedSettingsControl::ResourceProfile);
@@ -6144,6 +6198,11 @@ namespace
             else if (control == ConsolidatedSettingsControl::OverlayTextSize)
             {
                 settings.overlayTextSize = static_cast<hyperbrowse::viewer::InfoOverlayTextSize>((static_cast<int>(settings.overlayTextSize) + 1) % 3);
+            }
+            else if (control == ConsolidatedSettingsControl::EscapeKeyBehavior)
+            {
+                const int current = EscapeKeyBehaviorComboIndex(settings.viewerEscapeKeyBehavior);
+                settings.viewerEscapeKeyBehavior = kEscapeKeyBehaviorOptions[static_cast<std::size_t>((current + 1) % kEscapeKeyBehaviorOptions.size())].behavior;
             }
             else if (control == ConsolidatedSettingsControl::AppTextSize)
             {
@@ -6568,6 +6627,15 @@ namespace
             createChoice(ConsolidatedSettingsControl::OverlayTextSize,
                          {L"Small", L"Medium", L"Large"},
                          static_cast<int>(state->settings->overlayTextSize));
+            std::vector<std::wstring> escapeKeyBehaviorValues;
+            escapeKeyBehaviorValues.reserve(kEscapeKeyBehaviorOptions.size());
+            for (const EscapeKeyBehaviorOption& option : kEscapeKeyBehaviorOptions)
+            {
+                escapeKeyBehaviorValues.emplace_back(option.label);
+            }
+            createChoice(ConsolidatedSettingsControl::EscapeKeyBehavior,
+                         escapeKeyBehaviorValues,
+                         EscapeKeyBehaviorComboIndex(state->settings->viewerEscapeKeyBehavior));
             createChoice(ConsolidatedSettingsControl::AppTextSize,
                          {L"Small", L"Medium", L"Large"},
                          static_cast<int>(state->settings->appTextSize));
@@ -6863,6 +6931,11 @@ namespace
                 else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::OverlayTextSize)] && selected < 3)
                 {
                     state->settings->overlayTextSize = static_cast<hyperbrowse::viewer::InfoOverlayTextSize>(selected);
+                }
+                else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::EscapeKeyBehavior)]
+                         && selected < static_cast<int>(kEscapeKeyBehaviorOptions.size()))
+                {
+                    state->settings->viewerEscapeKeyBehavior = kEscapeKeyBehaviorOptions[static_cast<std::size_t>(selected)].behavior;
                 }
                 else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::AppTextSize)] && selected < 3)
                 {
@@ -11044,11 +11117,11 @@ namespace hyperbrowse::ui
             && message->wParam == VK_ESCAPE
             && message->hwnd
             && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
-            && viewerWindow_
-            && viewerWindow_->IsOpen())
+            && viewerWindow_)
         {
             const HWND viewerHwnd = viewerWindow_->Hwnd();
-            if (viewerHwnd && PostMessageW(viewerHwnd, WM_CLOSE, 0, 0))
+            if (viewerHwnd && IsWindow(viewerHwnd) != FALSE
+                && SendMessageW(viewerHwnd, WM_KEYDOWN, VK_ESCAPE, message->lParam) == 0)
             {
                 return true;
             }
@@ -15932,6 +16005,7 @@ namespace hyperbrowse::ui
         viewerWindow_->SetAppTextSize(appTextSize_);
         viewerWindow_->SetResourceProfile(resourceProfile_);
         viewerWindow_->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
+        viewerWindow_->SetEscapeKeyBehavior(viewerEscapeKeyBehavior_);
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
             if (startSlideshow)
@@ -21503,6 +21577,14 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ApplyViewerEscapeKeyBehavior()
+    {
+        if (viewerWindow_)
+        {
+            viewerWindow_->SetEscapeKeyBehavior(viewerEscapeKeyBehavior_);
+        }
+    }
+
     void MainWindow::ApplyViewerTransitionSettings()
     {
         if (viewerWindow_)
@@ -21915,6 +21997,7 @@ namespace hyperbrowse::ui
         state.resourceProfile = resourceProfile_;
         state.thumbnailSizePreset = thumbnailSizePreset_;
         state.viewerMouseWheelBehavior = viewerMouseWheelBehavior_;
+        state.viewerEscapeKeyBehavior = viewerEscapeKeyBehavior_;
         state.invertKeyboardPanning = invertKeyboardPanning_;
         state.slideshowTransitionStyle = slideshowTransitionStyle_;
         state.slideshowIntervalMs = NormalizeSlideshowDuration(slideshowIntervalMs_);
@@ -21977,6 +22060,7 @@ namespace hyperbrowse::ui
             slideshowTransitionDurationMs_ = NormalizeSlideshowTransitionDuration(draft.slideshowTransitionDurationMs);
             useSlideshowTransition_ = draft.useSlideshowTransition;
             viewerMouseWheelBehavior_ = draft.viewerMouseWheelBehavior;
+            viewerEscapeKeyBehavior_ = draft.viewerEscapeKeyBehavior;
             invertKeyboardPanning_ = draft.invertKeyboardPanning;
             rawJpegPairedOperationsEnabled_ = draft.rawJpegPairedOperationsEnabled;
             pairedRawJpegViewerPreference_ = draft.pairedRawJpegViewerPreference;
@@ -22022,6 +22106,7 @@ namespace hyperbrowse::ui
                 }
             }
             ApplyViewerMouseWheelSetting();
+            ApplyViewerEscapeKeyBehavior();
             if (slideshowTransitionChanged)
             {
                 ApplyViewerTransitionSettings();
@@ -22311,6 +22396,12 @@ namespace hyperbrowse::ui
                 viewerMouseWheelBehavior_ = static_cast<viewer::MouseWheelBehavior>(value);
             }
 
+            if (TryReadDwordValue(key, kRegistryValueViewerEscapeKeyBehavior, &value)
+                && value <= static_cast<DWORD>(viewer::EscapeKeyBehavior::ActualSize))
+            {
+                viewerEscapeKeyBehavior_ = static_cast<viewer::EscapeKeyBehavior>(value);
+            }
+
             if (TryReadDwordValue(key, kRegistryValueInvertKeyboardPanning, &value))
             {
                 invertKeyboardPanning_ = value != 0;
@@ -22490,6 +22581,7 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueDetailsPanelWidth, static_cast<DWORD>(std::max(detailsPanelWidth_, kDetailsPanelMinWidth)));
             WriteDwordValue(key, kRegistryValueViewerMouseWheelBehavior, static_cast<DWORD>(viewerMouseWheelBehavior_));
+            WriteDwordValue(key, kRegistryValueViewerEscapeKeyBehavior, static_cast<DWORD>(viewerEscapeKeyBehavior_));
             WriteDwordValue(key, kRegistryValueInvertKeyboardPanning, invertKeyboardPanning_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValuePairedRawJpegViewerPreference, static_cast<DWORD>(pairedRawJpegViewerPreference_));

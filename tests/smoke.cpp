@@ -61,6 +61,7 @@ namespace
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
     constexpr wchar_t kRegistryValueViewerFullMetadataVisible[] = L"ViewerFullMetadataVisible";
+    constexpr wchar_t kRegistryValueViewerEscapeKeyBehavior[] = L"ViewerEscapeKeyBehavior";
     constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
     constexpr wchar_t kRegistryValueAppTextSize[] = L"AppTextSize";
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
@@ -2843,9 +2844,12 @@ namespace
         Expect(SetKeyboardState(originalKeyboardState) != FALSE,
             "Failed to restore the keyboard state after testing fullscreen geometry shortcuts");
 
+        viewer.SetEscapeKeyBehavior(hyperbrowse::viewer::EscapeKeyBehavior::ActualSize);
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
         PumpMessagesFor(100);
         Expect(!viewer.IsFullScreen(), "Failed to leave fullscreen before testing window geometry shortcuts");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, '0', 0);
+        PumpMessagesFor(100);
         MONITORINFO monitorInfo{sizeof(MONITORINFO)};
         const HMONITOR monitor = MonitorFromWindow(viewer.Hwnd(), MONITOR_DEFAULTTONEAREST);
         Expect(monitor != nullptr && GetMonitorInfoW(monitor, &monitorInfo) != FALSE,
@@ -2872,6 +2876,39 @@ namespace
             "Ctrl+Shift+W did not size the window to the monitor work-area width");
         Expect(SetKeyboardState(originalKeyboardState) != FALSE,
             "Failed to restore the keyboard state after testing window geometry shortcuts");
+
+        viewer.SetEscapeKeyBehavior(hyperbrowse::viewer::EscapeKeyBehavior::FitWidth);
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+        PumpMessagesFor(100);
+        RECT escapeWidthRect{};
+        Expect(!viewer.IsFullScreen()
+                && GetWindowRect(viewer.Hwnd(), &escapeWidthRect) != FALSE
+                && escapeWidthRect.left == monitorInfo.rcWork.left
+                && escapeWidthRect.right == monitorInfo.rcWork.right,
+            "Fullscreen Escape Fit Width did not use the window work-area width action");
+
+        viewer.SetEscapeKeyBehavior(hyperbrowse::viewer::EscapeKeyBehavior::FitHeight);
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+        PumpMessagesFor(100);
+        RECT escapeHeightRect{};
+        Expect(!viewer.IsFullScreen()
+                && GetWindowRect(viewer.Hwnd(), &escapeHeightRect) != FALSE
+                && escapeHeightRect.top == monitorInfo.rcWork.top
+                && escapeHeightRect.bottom == monitorInfo.rcWork.bottom,
+            "Fullscreen Escape Fit Height did not use the window work-area height action");
+
+        viewer.SetEscapeKeyBehavior(hyperbrowse::viewer::EscapeKeyBehavior::ActualSize);
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+        PumpMessagesFor(100);
+        Expect(!viewer.IsFullScreen() && viewer.CurrentZoomPercent() == 100,
+            "Fullscreen Escape Actual Size did not use native image scale when it fit");
+
     }
 
     void RunViewerWindowFitModeScenario(HINSTANCE instance, HWND ownerWindow)
@@ -2934,6 +2971,32 @@ namespace
             "Failed to restore the keyboard state after testing viewer boundary shortcuts");
 
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
+        PumpMessagesFor(100);
+
+        const fs::path oversizedPath = root.Root() / L"oversized.png";
+        MONITORINFO oversizedMonitorInfo{sizeof(MONITORINFO)};
+        const HMONITOR oversizedMonitor = MonitorFromWindow(ownerWindow, MONITOR_DEFAULTTONEAREST);
+        Expect(oversizedMonitor != nullptr && GetMonitorInfoW(oversizedMonitor, &oversizedMonitorInfo) != FALSE,
+            "Failed to read the monitor work area for oversized-image Escape coverage");
+        const LONG workWidth = oversizedMonitorInfo.rcWork.right - oversizedMonitorInfo.rcWork.left;
+        const LONG workHeight = oversizedMonitorInfo.rcWork.bottom - oversizedMonitorInfo.rcWork.top;
+        WriteTestImage(oversizedPath, TestImageFormat::Png, static_cast<int>(workWidth + 1), static_cast<int>(workHeight + 1));
+        std::vector<hyperbrowse::browser::BrowserItem> oversizedItems;
+        oversizedItems.push_back(hyperbrowse::browser::BrowserItem{
+            L"oversized.png", oversizedPath.wstring(), L"PNG", L"2026-04-11 12:04", 5, 50, 256, 256});
+        hyperbrowse::viewer::ViewerWindow oversizedViewer(instance);
+        oversizedViewer.SetEscapeKeyBehavior(hyperbrowse::viewer::EscapeKeyBehavior::ActualSize);
+        Expect(oversizedViewer.Open(ownerWindow, oversizedItems, 0, false),
+            "Oversized-image viewer failed to open for fullscreen Escape fallback coverage");
+        Expect(PumpMessagesUntil([&]() { return oversizedViewer.CurrentZoomPercent() > 0; }, 5000),
+            "Oversized-image viewer did not finish its initial image decode");
+        SendMessageW(oversizedViewer.Hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+        PumpMessagesFor(100);
+        Expect(!oversizedViewer.IsFullScreen(),
+            "Fullscreen Escape Actual Size did not leave fullscreen for an oversized image");
+        Expect(oversizedViewer.CurrentZoomPercent() < 100,
+            "Fullscreen Escape Actual Size showed an oversized image at clipped native scale");
+        SendMessageW(oversizedViewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);
     }
 
@@ -3253,6 +3316,15 @@ namespace
 
         RunViewerWindowFitModeChecks(viewer, 640, 320);
 
+        viewer.SetEscapeKeyBehavior(hyperbrowse::viewer::EscapeKeyBehavior::Close);
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        PumpMessagesFor(100);
+        const HWND closeHandle = viewer.Hwnd();
+        SendMessageW(closeHandle, WM_KEYDOWN, VK_ESCAPE, 0);
+        PumpMessagesFor(100);
+        Expect(closeHandle != nullptr && IsWindow(closeHandle) == FALSE && !viewer.IsOpen(),
+            "Fullscreen Escape Close did not close the viewer window");
+
         SendMessageW(viewer.Hwnd(), WM_CLOSE, 0, 0);
         PumpMessagesFor(100);
 
@@ -3300,13 +3372,20 @@ namespace
 
         ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
         ScopedRegistryDwordBackup overlayTextSizeBackup(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
+        ScopedRegistryDwordBackup escapeKeyBehaviorBackup(kRegistryPath, kRegistryValueViewerEscapeKeyBehavior);
         DeleteRegistryValue(kRegistryPath, kRegistryValueAppTextSize);
         SetRegistryDwordValue(kRegistryPath,
                               kRegistryValueViewerInfoOverlayTextSize,
                               static_cast<DWORD>(hyperbrowse::viewer::InfoOverlayTextSize::Large));
+        SetRegistryDwordValue(kRegistryPath,
+                              kRegistryValueViewerEscapeKeyBehavior,
+                              static_cast<DWORD>(hyperbrowse::viewer::EscapeKeyBehavior::FitHeight));
         {
             hyperbrowse::ui::MainWindow mainWindow(instance);
             Expect(mainWindow.Create(), "Failed to create MainWindow for app text-size smoke coverage");
+
+            Expect(mainWindow.ViewerEscapeKeyBehavior() == hyperbrowse::viewer::EscapeKeyBehavior::FitHeight,
+                   "Viewer fullscreen Escape behavior did not restore its persisted setting");
 
             Expect(mainWindow.AppTextSize() == AppTextSize::Medium,
                    "App text size did not default to Medium when no value was persisted");
@@ -3439,6 +3518,7 @@ namespace
             HWND appTextCombo = nullptr;
             HWND thumbnailCombo = nullptr;
             HWND resourceCombo = nullptr;
+            HWND escapeBehaviorCombo = nullptr;
             const ULONGLONG controlsDeadline = GetTickCount64() + 10000;
             while (GetTickCount64() < controlsDeadline)
             {
@@ -3447,30 +3527,34 @@ namespace
                 appTextCombo = GetDlgItem(dialog, 5818);
                 thumbnailCombo = GetDlgItem(dialog, 5819);
                 resourceCombo = GetDlgItem(dialog, 5823);
-                if (transitionCombo && overlayTextCombo && appTextCombo && thumbnailCombo && resourceCombo
+                escapeBehaviorCombo = GetDlgItem(dialog, 5836);
+                if (transitionCombo && overlayTextCombo && appTextCombo && thumbnailCombo && resourceCombo && escapeBehaviorCombo
                     && SendMessageW(transitionCombo, CB_GETCOUNT, 0, 0) >= 2
                     && SendMessageW(overlayTextCombo, CB_GETCOUNT, 0, 0) == 3
                     && SendMessageW(appTextCombo, CB_GETCOUNT, 0, 0) == 3
                     && SendMessageW(thumbnailCombo, CB_GETCOUNT, 0, 0) >= 2
-                    && SendMessageW(resourceCombo, CB_GETCOUNT, 0, 0) == 4)
+                    && SendMessageW(resourceCombo, CB_GETCOUNT, 0, 0) == 4
+                    && SendMessageW(escapeBehaviorCombo, CB_GETCOUNT, 0, 0) == 4)
                 {
                     break;
                 }
                 Sleep(10);
             }
-            if (!transitionCombo || !overlayTextCombo || !appTextCombo || !thumbnailCombo || !resourceCombo
+            if (!transitionCombo || !overlayTextCombo || !appTextCombo || !thumbnailCombo || !resourceCombo || !escapeBehaviorCombo
                 || SendMessageW(transitionCombo, CB_GETCOUNT, 0, 0) < 2
                 || SendMessageW(overlayTextCombo, CB_GETCOUNT, 0, 0) != 3
                 || SendMessageW(appTextCombo, CB_GETCOUNT, 0, 0) != 3
                 || SendMessageW(thumbnailCombo, CB_GETCOUNT, 0, 0) < 2
-                || SendMessageW(resourceCombo, CB_GETCOUNT, 0, 0) != 4)
+                || SendMessageW(resourceCombo, CB_GETCOUNT, 0, 0) != 4
+                || SendMessageW(escapeBehaviorCombo, CB_GETCOUNT, 0, 0) != 4)
             {
                 failAndClose("Experimental Settings did not create/populate all native combo boxes (transition="
                     + std::to_string(transitionCombo != nullptr) + ", overlay="
                     + std::to_string(overlayTextCombo != nullptr) + ", app="
                     + std::to_string(appTextCombo != nullptr) + ", thumbnail="
                     + std::to_string(thumbnailCombo != nullptr) + ", resource="
-                    + std::to_string(resourceCombo != nullptr) + ")");
+                    + std::to_string(resourceCombo != nullptr) + ", escape="
+                    + std::to_string(escapeBehaviorCombo != nullptr) + ")");
                 return;
             }
             SendMessageW(transitionCombo, CB_SHOWDROPDOWN, TRUE, 0);
@@ -3721,6 +3805,10 @@ namespace
     void RunStartupViewerEnumerationScenario(HINSTANCE instance)
     {
         TempFolder root(L"HyperBrowseStartupViewerEnumeration");
+        ScopedRegistryDwordBackup escapeKeyBehaviorBackup(kRegistryPath, kRegistryValueViewerEscapeKeyBehavior);
+        SetRegistryDwordValue(kRegistryPath,
+                              kRegistryValueViewerEscapeKeyBehavior,
+                              static_cast<DWORD>(hyperbrowse::viewer::EscapeKeyBehavior::FitHeight));
         const fs::path targetPath = root.Root() / L"000-target.jpg";
         WriteTestImage(targetPath, TestImageFormat::Jpeg, 48, 24, 6);
         for (int index = 1; index < 40; ++index)
@@ -3751,6 +3839,25 @@ namespace
         }, 5000);
         Expect(openedWithCompleteFolder,
                "Viewer opened from a startup launch path with only the initial enumeration batch");
+
+         Expect(mainWindow.ViewerEscapeKeyBehavior() == hyperbrowse::viewer::EscapeKeyBehavior::FitHeight,
+             "Startup viewer did not receive the persisted Escape behavior");
+         MONITORINFO monitorInfo{sizeof(MONITORINFO)};
+         const HMONITOR monitor = MonitorFromWindow(mainWindow.Hwnd(), MONITOR_DEFAULTTONEAREST);
+         Expect(monitor != nullptr && GetMonitorInfoW(monitor, &monitorInfo) != FALSE,
+             "Failed to read the monitor work area for startup viewer Escape coverage");
+         MSG escapeMessage{};
+         escapeMessage.hwnd = mainWindow.Hwnd();
+         escapeMessage.message = WM_KEYDOWN;
+         escapeMessage.wParam = VK_ESCAPE;
+         Expect(mainWindow.TranslateAcceleratorMessage(&escapeMessage),
+             "MainWindow did not consume the forwarded startup viewer Escape message");
+         PumpMessagesFor(100);
+         RECT escapeRect{};
+         Expect(viewerHandle && GetWindowRect(viewerHandle, &escapeRect) != FALSE,
+             "MainWindow Escape routing left no readable viewer window");
+         Expect(escapeRect.top == monitorInfo.rcWork.top && escapeRect.bottom == monitorInfo.rcWork.bottom,
+             "MainWindow Escape routing did not apply the viewer's Fit Height behavior");
 
         if (viewerHandle && IsWindow(viewerHandle) != FALSE)
         {

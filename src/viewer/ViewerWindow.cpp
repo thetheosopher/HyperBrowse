@@ -1167,6 +1167,11 @@ namespace hyperbrowse::viewer
         keyboardPanningInverted_ = inverted;
     }
 
+    void ViewerWindow::SetEscapeKeyBehavior(EscapeKeyBehavior behavior) noexcept
+    {
+        escapeKeyBehavior_ = behavior;
+    }
+
     bool ViewerWindow::IsKeyboardPanningInverted() const noexcept
     {
         return keyboardPanningInverted_;
@@ -2709,6 +2714,30 @@ namespace hyperbrowse::viewer
         {
             windowFitMode_ = mode;
         }
+    }
+
+    bool ViewerWindow::CurrentImageFitsWorkArea() const noexcept
+    {
+        if (!hwnd_ || !currentImage_)
+        {
+            return false;
+        }
+
+        MONITORINFO monitorInfo{sizeof(MONITORINFO)};
+        const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+        if (!monitor || GetMonitorInfoW(monitor, &monitorInfo) == FALSE)
+        {
+            return false;
+        }
+
+        const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+        const int imageWidth = swapDimensions ? currentImage_->SourceHeight() : currentImage_->SourceWidth();
+        const int imageHeight = swapDimensions ? currentImage_->SourceWidth() : currentImage_->SourceHeight();
+        const LONG workWidth = monitorInfo.rcWork.right - monitorInfo.rcWork.left;
+        const LONG workHeight = monitorInfo.rcWork.bottom - monitorInfo.rcWork.top;
+        return imageWidth > 0 && imageHeight > 0
+            && imageWidth <= workWidth
+            && imageHeight <= workHeight;
     }
 
     bool ViewerWindow::ResizeWindowForFitMode(WindowFitMode mode)
@@ -4316,9 +4345,32 @@ namespace hyperbrowse::viewer
                 ToggleFullScreen();
                 return 0;
             case VK_ESCAPE:
-                if (fullScreen_ && hasWindowedStateToRestore_)
+                if (fullScreen_)
                 {
-                    SetFullScreen(false);
+                    switch (escapeKeyBehavior_)
+                    {
+                    case EscapeKeyBehavior::FitWidth:
+                        SetWindowFitMode(WindowFitMode::Width);
+                        break;
+                    case EscapeKeyBehavior::FitHeight:
+                        SetWindowFitMode(WindowFitMode::Height);
+                        break;
+                    case EscapeKeyBehavior::ActualSize:
+                        SetFullScreen(false);
+                        if (CurrentImageFitsWorkArea())
+                        {
+                            SetActualSize();
+                        }
+                        else
+                        {
+                            FitToWindow();
+                        }
+                        break;
+                    case EscapeKeyBehavior::Close:
+                    default:
+                        PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+                        break;
+                    }
                 }
                 else
                 {

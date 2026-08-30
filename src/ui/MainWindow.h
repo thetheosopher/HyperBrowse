@@ -56,6 +56,7 @@ namespace hyperbrowse::cache
 namespace hyperbrowse::viewer
 {
     enum class CompareDirection : int;
+    enum class EscapeKeyBehavior : int;
     enum class MouseWheelBehavior : int;
     enum class TransitionStyle : int;
     class ViewerWindow;
@@ -86,6 +87,7 @@ namespace hyperbrowse::ui
         bool TranslateAcceleratorMessage(MSG* message);
         HWND Hwnd() const noexcept { return hwnd_; }
         hyperbrowse::util::AppTextSize AppTextSize() const noexcept { return appTextSize_; }
+        hyperbrowse::viewer::EscapeKeyBehavior ViewerEscapeKeyBehavior() const noexcept { return viewerEscapeKeyBehavior_; }
 
         static constexpr UINT kExternalLaunchMessage = WM_APP + 71;
 
@@ -251,6 +253,7 @@ namespace hyperbrowse::ui
         void UpdateMenuState();
         void UpdateWindowTitle() const;
         void ApplyViewerMouseWheelSetting();
+        void ApplyViewerEscapeKeyBehavior();
         void ApplyViewerTransitionSettings();
         void ApplyThumbnailMemoryPressureState();
         void ApplyResourceProfileSetting();
@@ -763,6 +766,7 @@ namespace hyperbrowse::ui
         bool detailsStripVisible_{true};
         viewer::MouseWheelBehavior viewerMouseWheelBehavior_{};
         bool invertKeyboardPanning_{};
+        viewer::EscapeKeyBehavior viewerEscapeKeyBehavior_{};
         UINT_PTR memoryPressureTimerId_{};
         UINT_PTR displaySurfaceRecoveryTimerId_{};
         int displaySurfaceRecoveryAttempt_{};

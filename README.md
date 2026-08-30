@@ -94,7 +94,8 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 
 | Shortcut | Action |
 | --- | --- |
-| `Esc` / `Ctrl+W` | Close the viewer |
+| `Esc` | In full screen, use the Viewer Settings action: close, fit width, fit height, or actual size; when windowed, close the viewer |
+| `Ctrl+W` | Close the viewer |
 | Arrow keys | Navigate, or pan when zoomed |
 | `Shift` + Arrow keys | Navigate the comparison pair |
 | `Page Up` / `Page Down` | Navigate to the previous / next image |
@@ -108,7 +109,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Enter` | Toggle between fit and actual-size viewing |
 | `0` / `1` | Fit the image to the window / show it at actual size |
 | `H` / `W` | Fit the image to the window height / width |
-| `Ctrl+Shift+H` / `Ctrl+Shift+W` | Size the window to the monitor work-area height / width (windowed mode) |
+| `Ctrl+Shift+H` / `Ctrl+Shift+W` | Size the window to the monitor work-area height / width (windowed mode only; no effect in full-screen mode) |
 | `L` / `R` | Rotate the image left / right |
 | `C` | Toggle comparison mode |
 | `X` | Activate the compared image |

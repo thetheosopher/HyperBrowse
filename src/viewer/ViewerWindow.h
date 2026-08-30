@@ -37,6 +37,14 @@ namespace hyperbrowse::viewer
         Navigate = 1,
     };
 
+    enum class EscapeKeyBehavior : int
+    {
+        Close = 0,
+        FitWidth = 1,
+        FitHeight = 2,
+        ActualSize = 3,
+    };
+
     enum class TransitionStyle : int
     {
         Cut = 0,
@@ -132,6 +140,7 @@ namespace hyperbrowse::viewer
         void SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept;
         void SetKeyboardPanningInverted(bool inverted) noexcept;
         bool IsKeyboardPanningInverted() const noexcept;
+        void SetEscapeKeyBehavior(EscapeKeyBehavior behavior) noexcept;
         void SetTransitionSettings(TransitionStyle style, UINT durationMs);
         void SetManualTransitionEnabled(bool enabled);
         void SetInfoOverlaysVisible(bool visible);
@@ -229,6 +238,7 @@ namespace hyperbrowse::viewer
         HMONITOR ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept;
         void SetWindowFitMode(WindowFitMode mode);
         bool ResizeWindowForFitMode(WindowFitMode mode);
+        bool CurrentImageFitsWorkArea() const noexcept;
         void RefreshWindowFitForCurrentImage();
         void RestoreRegularWindowPlacement();
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
@@ -338,6 +348,7 @@ namespace hyperbrowse::viewer
         std::wstring currentMetadataText_;
         MouseWheelBehavior mouseWheelBehavior_{MouseWheelBehavior::Zoom};
         bool keyboardPanningInverted_{};
+        EscapeKeyBehavior escapeKeyBehavior_{EscapeKeyBehavior::Close};
         bool panning_{};
         POINT lastPanPoint_{};
         bool fullScreen_{};
