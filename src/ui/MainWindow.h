@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -283,6 +284,10 @@ namespace hyperbrowse::ui
         void UpdateQuickAccessSortTooltip();
         void UpdateQuickAccessShortcutEditControls();
         void HideQuickAccessShortcutEditControls();
+        void MutateQuickSendState(const std::function<void()>& mutation);
+        void LoadQuickSendStateFromRegistry();
+        void SaveQuickSendStateToRegistry() const;
+        void SortFavoriteDestinationsByShortcutInMemory();
         bool IsQuickAccessShortcutEdit(HWND control) const;
         bool IsQuickAccessDestinationCurrentFolder(std::wstring_view folderPath) const;
         bool CanNavigateToQuickAccessDestination(std::wstring_view folderPath) const;

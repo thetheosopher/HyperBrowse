@@ -99,6 +99,7 @@ namespace
     constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
     constexpr wchar_t kRegistryValueLastQuickSendDestination[] = L"LastQuickSendDestination";
     constexpr wchar_t kRegistryValueQuickSendShortcutPrefix[] = L"QuickSendShortcut";
+    constexpr wchar_t kQuickSendStateMutexName[] = L"Local\\TheTheosopher.HyperBrowse.QuickSendState";
     constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
     constexpr wchar_t kRegistryValuePairedRawJpegViewerPreference[] = L"PairedRawJpegViewerPreference";
     constexpr wchar_t kRegistryValueDefaultViewerToSecondaryMonitor[] = L"DefaultViewerToSecondaryMonitor";
@@ -13405,10 +13406,102 @@ namespace hyperbrowse::ui
         quickSendModel_.SetFavoriteDestinations(favoriteDestinationFolders_);
     }
 
-    void MainWindow::SortFavoriteDestinationsByShortcut()
+    void MainWindow::MutateQuickSendState(const std::function<void()>& mutation)
+    {
+        HANDLE mutex = CreateMutexW(nullptr, FALSE, kQuickSendStateMutexName);
+        if (!mutex)
+        {
+            mutation();
+            SaveQuickSendStateToRegistry();
+            return;
+        }
+
+        const DWORD waitResult = WaitForSingleObject(mutex, INFINITE);
+        if (waitResult == WAIT_OBJECT_0 || waitResult == WAIT_ABANDONED)
+        {
+            LoadQuickSendStateFromRegistry();
+            mutation();
+            SaveQuickSendStateToRegistry();
+            ReleaseMutex(mutex);
+        }
+        else
+        {
+            mutation();
+            SaveQuickSendStateToRegistry();
+        }
+        CloseHandle(mutex);
+    }
+
+    void MainWindow::LoadQuickSendStateFromRegistry()
+    {
+        HKEY key{};
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        {
+            return;
+        }
+
+        std::wstring serializedPaths;
+        if (TryReadStringValue(key, kRegistryValueFavoriteDestinationFolders, &serializedPaths))
+        {
+            favoriteDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kFavoriteDestinationLimit);
+        }
+
+        TryReadStringValue(key, kRegistryValueLastQuickSendDestination, &lastQuickSendDestination_);
+
+        SyncQuickSendModel();
+        QuickSendModel::ShortcutAssignments shortcutAssignments{};
+        for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
+        {
+            const std::wstring valueName = std::wstring(kRegistryValueQuickSendShortcutPrefix)
+                + std::to_wstring(index);
+            TryReadStringValue(key, valueName.c_str(), &shortcutAssignments[index]);
+        }
+        quickSendModel_.SetShortcutAssignments(shortcutAssignments);
+        SortFavoriteDestinationsByShortcutInMemory();
+        RegCloseKey(key);
+    }
+
+    void MainWindow::SaveQuickSendStateToRegistry() const
+    {
+        HKEY key{};
+        DWORD disposition = 0;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, kRegistryPath, 0, nullptr, 0, KEY_WRITE, nullptr, &key, &disposition) != ERROR_SUCCESS)
+        {
+            return;
+        }
+
+        WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, SerializeFolderPathList(favoriteDestinationFolders_));
+        if (!lastQuickSendDestination_.empty())
+        {
+            WriteStringValue(key, kRegistryValueLastQuickSendDestination, lastQuickSendDestination_);
+        }
+        else
+        {
+            RegDeleteValueW(key, kRegistryValueLastQuickSendDestination);
+        }
+
+        const QuickSendModel::ShortcutAssignments& shortcutAssignments = quickSendModel_.ShortcutAssignmentsByKey();
+        for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
+        {
+            const std::wstring valueName = std::wstring(kRegistryValueQuickSendShortcutPrefix)
+                + std::to_wstring(index);
+            WriteStringValue(key, valueName.c_str(), shortcutAssignments[index]);
+        }
+        RegCloseKey(key);
+    }
+
+    void MainWindow::SortFavoriteDestinationsByShortcutInMemory()
     {
         quickSendModel_.SortFavoriteDestinationsByShortcut();
         favoriteDestinationFolders_ = quickSendModel_.FavoriteDestinations();
+    }
+
+    void MainWindow::SortFavoriteDestinationsByShortcut()
+    {
+        MutateQuickSendState([this]
+        {
+            SortFavoriteDestinationsByShortcutInMemory();
+        });
     }
 
     void MainWindow::RefreshQuickAccessMenus()
@@ -16073,18 +16166,28 @@ namespace hyperbrowse::ui
 
     void MainWindow::RemoveFavoriteDestination(std::wstring_view folderPath)
     {
-        const auto newEnd = std::remove_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(),
-                                           [&](const std::wstring& candidate)
-                                           {
-                                               return FolderPathsEqual(candidate, folderPath);
-                                           });
-        if (newEnd == favoriteDestinationFolders_.end())
+        bool removed = false;
+        MutateQuickSendState([&]
+        {
+            const auto newEnd = std::remove_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(),
+                                               [&](const std::wstring& candidate)
+                                               {
+                                                   return FolderPathsEqual(candidate, folderPath);
+                                               });
+            if (newEnd == favoriteDestinationFolders_.end())
+            {
+                return;
+            }
+
+            favoriteDestinationFolders_.erase(newEnd, favoriteDestinationFolders_.end());
+            SyncQuickSendModel();
+            removed = true;
+        });
+        if (!removed)
         {
             return;
         }
 
-        favoriteDestinationFolders_.erase(newEnd, favoriteDestinationFolders_.end());
-        SyncQuickSendModel();
         if (treePane_)
         {
             InvalidateRect(treePane_, nullptr, FALSE);
@@ -16118,13 +16221,23 @@ namespace hyperbrowse::ui
 
     void MainWindow::ClearFavoriteDestinations()
     {
-        if (favoriteDestinationFolders_.empty())
+        bool cleared = false;
+        MutateQuickSendState([&]
+        {
+            if (favoriteDestinationFolders_.empty())
+            {
+                return;
+            }
+
+            favoriteDestinationFolders_.clear();
+            SyncQuickSendModel();
+            cleared = true;
+        });
+        if (!cleared)
         {
             return;
         }
 
-        favoriteDestinationFolders_.clear();
-        SyncQuickSendModel();
         if (treePane_)
         {
             InvalidateRect(treePane_, nullptr, FALSE);
@@ -16170,26 +16283,29 @@ namespace hyperbrowse::ui
         }
 
         const std::wstring folderPath = NormalizeFolderPath(browserModel_->FolderPath());
-        const auto existing = std::find_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& candidate)
-        {
-            return FolderPathsEqual(candidate, folderPath);
-        });
         bool addedFavorite = false;
+        MutateQuickSendState([&]
+        {
+            const auto existing = std::find_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& candidate)
+            {
+                return FolderPathsEqual(candidate, folderPath);
+            });
 
-        if (existing != favoriteDestinationFolders_.end())
-        {
-            favoriteDestinationFolders_.erase(existing);
-        }
-        else
-        {
-            addedFavorite = InsertFolderPath(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
-        }
-        SyncQuickSendModel();
-        if (addedFavorite)
-        {
-            quickSendModel_.AssignNextAvailableShortcut(folderPath);
-        }
-        SortFavoriteDestinationsByShortcut();
+            if (existing != favoriteDestinationFolders_.end())
+            {
+                favoriteDestinationFolders_.erase(existing);
+            }
+            else
+            {
+                addedFavorite = InsertFolderPath(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
+            }
+            SyncQuickSendModel();
+            if (addedFavorite)
+            {
+                quickSendModel_.AssignNextAvailableShortcut(folderPath);
+            }
+            SortFavoriteDestinationsByShortcutInMemory();
+        });
 
         if (treePane_)
         {
@@ -16265,7 +16381,10 @@ namespace hyperbrowse::ui
                                conflictPolicy,
                                std::move(targetLeafNames)))
         {
-            lastQuickSendDestination_ = quickSendDestination;
+            MutateQuickSendState([&]
+            {
+                lastQuickSendDestination_ = quickSendDestination;
+            });
         }
     }
 
@@ -16841,25 +16960,28 @@ namespace hyperbrowse::ui
             break;
         case kToggleFavoriteCommandId:
         {
-            const auto existing = std::find_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& candidate)
-            {
-                return FolderPathsEqual(candidate, folderPath);
-            });
             bool addedFavorite = false;
-            if (existing != favoriteDestinationFolders_.end())
+            MutateQuickSendState([&]
             {
-                favoriteDestinationFolders_.erase(existing);
-            }
-            else
-            {
-                addedFavorite = InsertFolderPath(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
-            }
-            SyncQuickSendModel();
-            if (addedFavorite)
-            {
-                quickSendModel_.AssignNextAvailableShortcut(folderPath);
-            }
-            SortFavoriteDestinationsByShortcut();
+                const auto existing = std::find_if(favoriteDestinationFolders_.begin(), favoriteDestinationFolders_.end(), [&](const std::wstring& candidate)
+                {
+                    return FolderPathsEqual(candidate, folderPath);
+                });
+                if (existing != favoriteDestinationFolders_.end())
+                {
+                    favoriteDestinationFolders_.erase(existing);
+                }
+                else
+                {
+                    addedFavorite = InsertFolderPath(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
+                }
+                SyncQuickSendModel();
+                if (addedFavorite)
+                {
+                    quickSendModel_.AssignNextAvailableShortcut(folderPath);
+                }
+                SortFavoriteDestinationsByShortcutInMemory();
+            });
             if (treePane_)
             {
                 InvalidateRect(treePane_, nullptr, FALSE);
@@ -21110,7 +21232,7 @@ namespace hyperbrowse::ui
                 TryReadStringValue(key, valueName.c_str(), &shortcutAssignments[index]);
             }
             quickSendModel_.SetShortcutAssignments(shortcutAssignments);
-            SortFavoriteDestinationsByShortcut();
+            SortFavoriteDestinationsByShortcutInMemory();
 
             if (TryReadDwordValue(key, kRegistryValueSortMode, &value) && value <= static_cast<DWORD>(browser::BrowserSortMode::Tags))
             {
@@ -21326,22 +21448,6 @@ namespace hyperbrowse::ui
             }
             WriteStringValue(key, kRegistryValueRecentFolders, SerializeFolderPathList(recentFolders_));
             WriteStringValue(key, kRegistryValueRecentDestinationFolders, SerializeFolderPathList(recentDestinationFolders_));
-            WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, SerializeFolderPathList(favoriteDestinationFolders_));
-            if (!lastQuickSendDestination_.empty())
-            {
-                WriteStringValue(key, kRegistryValueLastQuickSendDestination, lastQuickSendDestination_);
-            }
-            else
-            {
-                RegDeleteValueW(key, kRegistryValueLastQuickSendDestination);
-            }
-            const QuickSendModel::ShortcutAssignments& shortcutAssignments = quickSendModel_.ShortcutAssignmentsByKey();
-            for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
-            {
-                const std::wstring valueName = std::wstring(kRegistryValueQuickSendShortcutPrefix)
-                    + std::to_wstring(index);
-                WriteStringValue(key, valueName.c_str(), shortcutAssignments[index]);
-            }
             if (browserPaneController_)
             {
                 WriteDwordValue(key, kRegistryValueSortMode, static_cast<DWORD>(browserPaneController_->GetSortMode()));
@@ -22194,7 +22300,10 @@ namespace hyperbrowse::ui
             pendingViewerQuickSend_ = {};
             return false;
         }
-        lastQuickSendDestination_ = quickSendDestination;
+        MutateQuickSendState([&]
+        {
+            lastQuickSendDestination_ = quickSendDestination;
+        });
 
         if (type == services::FileOperationType::Move)
         {
@@ -25324,9 +25433,13 @@ namespace hyperbrowse::ui
                         shortcutText.resize(wcslen(shortcutText.c_str()));
 
                         QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
-                        const QuickSendAssignmentResult result = quickSendModel_.SetShortcutForDestination(
-                            row.destinationPath,
-                            shortcutText);
+                        QuickSendAssignmentResult result = QuickSendAssignmentResult::DestinationNotFavorite;
+                        MutateQuickSendState([&]
+                        {
+                            result = quickSendModel_.SetShortcutForDestination(
+                                row.destinationPath,
+                                shortcutText);
+                        });
                         if (result != QuickSendAssignmentResult::Accepted)
                         {
                             std::wstring restoredShortcut;
