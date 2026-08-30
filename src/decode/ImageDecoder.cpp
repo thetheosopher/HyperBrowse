@@ -596,7 +596,7 @@ namespace
         }
 
         ComPtr<IWICBitmapDecoder> decoder;
-        result = factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder);
+        result = factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder);
         if (FAILED(result))
         {
             wic::SetError(errorMessage, L"Failed to create a WIC decoder for the embedded RAW preview.", result);
@@ -634,7 +634,7 @@ namespace
         const HRESULT result = factory->CreateDecoderFromFilename(item.filePath.c_str(),
                                                                   nullptr,
                                                                   GENERIC_READ,
-                                                                  WICDecodeMetadataCacheOnLoad,
+                                                                  WICDecodeMetadataCacheOnDemand,
                                                                   &decoder);
         if (FAILED(result))
         {

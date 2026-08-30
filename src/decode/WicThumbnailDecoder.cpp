@@ -35,7 +35,7 @@ namespace hyperbrowse::decode
             key.filePath.c_str(),
             nullptr,
             GENERIC_READ,
-            WICDecodeMetadataCacheOnLoad,
+            WICDecodeMetadataCacheOnDemand,
             &decoder);
         if (FAILED(result))
         {

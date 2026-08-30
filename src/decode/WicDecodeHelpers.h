@@ -28,6 +28,8 @@ namespace hyperbrowse::decode::wic_support
             return L"WINCODEC_ERR_BADSTREAMDATA";
         case WINCODEC_ERR_FRAMEMISSING:
             return L"WINCODEC_ERR_FRAMEMISSING";
+        case WINCODEC_ERR_PROPERTYUNEXPECTEDTYPE:
+            return L"WINCODEC_ERR_PROPERTYUNEXPECTEDTYPE";
         default:
             return nullptr;
         }
