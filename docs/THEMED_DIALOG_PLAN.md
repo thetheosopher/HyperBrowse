@@ -19,10 +19,10 @@ The app theme currently applies to the main window and several custom surfaces, 
 - [x] Add the initial shared dialog palette value type.
 - [x] Wire the palette into the single-line text dialog.
 - [ ] Extract the remaining shared control-color helper once the other dialog control differences are characterized.
-- [ ] Wire the palette into batch rename, performance settings, file associations, and slideshow settings.
-- [ ] Update consolidated settings background, controls, and owner-drawn tabs to use the palette.
-- [ ] Replace `ShowImageInformation` / `TaskDialogIndirect` with an ordinary themed dialog that preserves expandable metadata.
-- [ ] Re-audit custom dialog code for `COLOR_WINDOW`, `COLOR_WINDOWTEXT`, `COLOR_HIGHLIGHT`, and `COLOR_WINDOW + 1` dependencies.
+- [x] Wire the palette into batch rename, performance settings, file associations, and slideshow settings.
+- [x] Update consolidated settings background, controls, and owner-drawn tabs to use the palette.
+- [x] Replace `ShowImageInformation` / `TaskDialogIndirect` with an ordinary themed dialog that preserves expandable metadata.
+- [x] Re-audit custom dialog code for `COLOR_WINDOW`, `COLOR_WINDOWTEXT`, `COLOR_HIGHLIGHT`, and `COLOR_WINDOW + 1` dependencies.
 - [ ] Add focused automated seams where practical and complete light/dark, metadata expand/collapse, theme-change, and DPI validation.
 
 ## Design Decisions
@@ -46,3 +46,5 @@ The app theme currently applies to the main window and several custom surfaces, 
 ## Validation Log
 
 - 2026-08-29: Confirmed `ShowImageInformation` calls `TaskDialogIndirect`; six legacy dialog procedures contain the reported system-color handlers. Existing `ThemePalette` and themed custom-dialog implementations provide the palette source and local patterns.
+- 2026-08-29: The five remaining legacy dialogs now receive palette snapshots, paint their backgrounds and native controls from owned brushes, and use palette-backed list/tab rendering where applicable. Debug target builds cleanly.
+- 2026-08-29: `ShowImageInformation()` now uses an app-owned ordinary modal dialog with read-only content, expandable metadata, palette-backed controls, and preserved owner restoration. The custom-dialog audit found no remaining `GetSysColor` usage in `MainWindow.cpp`; three unrelated `COLOR_WINDOW + 1` surface fallbacks remain outside this dialog scope.

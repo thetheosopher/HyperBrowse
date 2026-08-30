@@ -643,6 +643,10 @@ namespace
         HWND previewListWindow{};
         HWND okButton{};
         HFONT bodyFont{};
+        hyperbrowse::ui::DialogTheme theme{};
+        HBRUSH backgroundBrush{};
+        HBRUSH fieldBrush{};
+        HBRUSH surfaceBrush{};
         hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         std::wstring title;
         std::wstring instruction;
@@ -723,6 +727,9 @@ namespace
         HWND ownerWindow{};
         HFONT titleFont{};
         HFONT bodyFont{};
+        hyperbrowse::ui::DialogTheme theme{};
+        HBRUSH backgroundBrush{};
+        HBRUSH fieldBrush{};
         hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         HWND instructionWindow{};
         HWND summaryWindow{};
@@ -751,6 +758,8 @@ namespace
     {
         HWND ownerWindow{};
         HFONT bodyFont{};
+        hyperbrowse::ui::DialogTheme theme{};
+        HBRUSH backgroundBrush{};
         hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         HWND firstFormatWindow{};
         HWND okButton{};
@@ -845,6 +854,9 @@ namespace
         HWND transitionDurationSpinWindow{};
         HWND okButton{};
         HFONT bodyFont{};
+        hyperbrowse::ui::DialogTheme theme{};
+        HBRUSH backgroundBrush{};
+        HBRUSH fieldBrush{};
         hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         std::wstring title;
         std::wstring instruction;
@@ -864,6 +876,9 @@ namespace
         HWND dialogWindow{};
         HWND tabWindow{};
         HFONT bodyFont{};
+        hyperbrowse::ui::DialogTheme theme{};
+        HBRUSH backgroundBrush{};
+        HBRUSH fieldBrush{};
         std::wstring title;
         std::array<std::vector<HWND>, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> pageControls;
         std::array<HWND, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controls{};
@@ -2816,6 +2831,8 @@ namespace
             const HFONT font = state->bodyFont
                 ? state->bodyFont
                 : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
+            state->fieldBrush = CreateSolidBrush(state->theme.fieldBackground);
             const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
 
             const HWND titleWindow = CreateWindowExW(
@@ -3129,17 +3146,48 @@ namespace
             }
             break;
         case WM_CTLCOLORDLG:
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            return state && state->backgroundBrush
+                ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
+                : 0;
         case WM_CTLCOLORSTATIC:
-            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_CTLCOLOREDIT:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, OPAQUE);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.fieldBackground);
+                return reinterpret_cast<INT_PTR>(state->fieldBrush);
+            }
+            break;
         case WM_CTLCOLORBTN:
-            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_ERASEBKGND:
+            if (state && state->backgroundBrush)
+            {
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                FillRect(reinterpret_cast<HDC>(wParam), &client, state->backgroundBrush);
+                return 1;
+            }
+            break;
         case WM_COMMAND:
             if (!state)
             {
@@ -3175,6 +3223,16 @@ namespace
         case WM_DESTROY:
             if (state)
             {
+                if (state->backgroundBrush)
+                {
+                    DeleteObject(state->backgroundBrush);
+                    state->backgroundBrush = nullptr;
+                }
+                if (state->fieldBrush)
+                {
+                    DeleteObject(state->fieldBrush);
+                    state->fieldBrush = nullptr;
+                }
                 state->done = true;
             }
             return 0;
@@ -3615,6 +3673,9 @@ namespace
             const HFONT font = state->bodyFont
                 ? state->bodyFont
                 : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
+            state->fieldBrush = CreateSolidBrush(state->theme.fieldBackground);
+            state->surfaceBrush = CreateSolidBrush(state->theme.surfaceBackground);
             const HWND instructionWindow = CreateWindowExW(
                 0,
                 L"STATIC",
@@ -3709,6 +3770,9 @@ namespace
             {
                 ListView_SetExtendedListViewStyle(state->previewListWindow,
                                                   LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+                ListView_SetBkColor(state->previewListWindow, state->theme.surfaceBackground);
+                ListView_SetTextBkColor(state->previewListWindow, state->theme.surfaceBackground);
+                ListView_SetTextColor(state->previewListWindow, state->theme.text);
 
                 LVCOLUMNW column{};
                 column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
@@ -3753,17 +3817,48 @@ namespace
             }
             break;
         case WM_CTLCOLORDLG:
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            return state && state->backgroundBrush
+                ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
+                : 0;
         case WM_CTLCOLORSTATIC:
-            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_CTLCOLOREDIT:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, OPAQUE);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.fieldBackground);
+                return reinterpret_cast<INT_PTR>(state->fieldBrush);
+            }
+            break;
         case WM_CTLCOLORBTN:
-            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_ERASEBKGND:
+            if (state && state->backgroundBrush)
+            {
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                FillRect(reinterpret_cast<HDC>(wParam), &client, state->backgroundBrush);
+                return 1;
+            }
+            break;
         case WM_COMMAND:
             if (!state)
             {
@@ -3798,6 +3893,21 @@ namespace
         case WM_DESTROY:
             if (state)
             {
+                if (state->backgroundBrush)
+                {
+                    DeleteObject(state->backgroundBrush);
+                    state->backgroundBrush = nullptr;
+                }
+                if (state->fieldBrush)
+                {
+                    DeleteObject(state->fieldBrush);
+                    state->fieldBrush = nullptr;
+                }
+                if (state->surfaceBrush)
+                {
+                    DeleteObject(state->surfaceBrush);
+                    state->surfaceBrush = nullptr;
+                }
                 state->done = true;
             }
             return 0;
@@ -3811,6 +3921,7 @@ namespace
     bool PromptForBatchRenamePattern(HWND ownerWindow,
                                      HINSTANCE instance,
                                      hyperbrowse::util::AppTextSize appTextSize,
+                                     bool darkTheme,
                                      std::wstring initialPattern,
                                      std::vector<hyperbrowse::browser::BrowserItem> items,
                                      std::vector<std::wstring>* resultLeafNames)
@@ -3828,7 +3939,7 @@ namespace
             windowClass.hInstance = instance;
             windowClass.lpszClassName = kBatchRenameDialogClassName;
             windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            windowClass.hbrBackground = nullptr;
             if (RegisterClassExW(&windowClass) == 0)
             {
                 return false;
@@ -3838,6 +3949,7 @@ namespace
         BatchRenameDialogState state;
         state.ownerWindow = ownerWindow;
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
         state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
         if (!state.bodyFont)
         {
@@ -4990,6 +5102,9 @@ namespace
                 return -1;
             }
             state->dialogWindow = hwnd;
+            state->theme = hyperbrowse::ui::MakeDialogTheme(state->darkTheme);
+            state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
+            state->fieldBrush = CreateSolidBrush(state->theme.fieldBackground);
             const HFONT font = state->bodyFont ? state->bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const int tabLeft = kConsolidatedSettingsMargin;
             const int tabTop = kConsolidatedSettingsMargin;
@@ -5008,7 +5123,7 @@ namespace
             SendMessageW(state->tabWindow,
                          kTabControlSetBackgroundColorMessage,
                          0,
-                         static_cast<LPARAM>(GetSysColor(COLOR_WINDOW)));
+                         static_cast<LPARAM>(state->theme.windowBackground));
             const wchar_t* tabNames[] = {L"Slideshow", L"Viewer", L"Appearance", L"Performance", L"Behavior"};
             for (std::size_t tabIndex = 0; tabIndex < std::size(tabNames); ++tabIndex)
             {
@@ -5358,32 +5473,53 @@ namespace
             return 0;
         }
         case WM_CTLCOLORDLG:
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            return state && state->backgroundBrush
+                ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
+                : 0;
         case WM_CTLCOLORSTATIC:
         {
+            if (!state)
+            {
+                break;
+            }
             const HDC dc = reinterpret_cast<HDC>(wParam);
             SetBkMode(dc, OPAQUE);
-            SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            SetTextColor(dc, state->theme.text);
+            SetBkColor(dc, state->theme.windowBackground);
+            return reinterpret_cast<INT_PTR>(state->backgroundBrush);
         }
         case WM_CTLCOLORBTN:
-        case WM_CTLCOLOREDIT:
         case WM_CTLCOLORLISTBOX:
         {
+            if (!state)
+            {
+                break;
+            }
             const HDC dc = reinterpret_cast<HDC>(wParam);
             SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            SetTextColor(dc, state->theme.text);
+            SetBkColor(dc, state->theme.windowBackground);
+            return reinterpret_cast<INT_PTR>(state->backgroundBrush);
         }
+        case WM_CTLCOLOREDIT:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, OPAQUE);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.fieldBackground);
+                return reinterpret_cast<INT_PTR>(state->fieldBrush);
+            }
+            break;
         case WM_ERASEBKGND:
-        {
-            RECT client{};
-            GetClientRect(hwnd, &client);
-            FillRect(reinterpret_cast<HDC>(wParam), &client, GetSysColorBrush(COLOR_WINDOW));
-            return 1;
-        }
+            if (state && state->backgroundBrush)
+            {
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                FillRect(reinterpret_cast<HDC>(wParam), &client, state->backgroundBrush);
+                return 1;
+            }
+            break;
         case WM_DRAWITEM:
             if (state && wParam == static_cast<WPARAM>(kConsolidatedSettingsTabControlId))
             {
@@ -5417,18 +5553,18 @@ namespace
                     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> textBrush;
                     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> accentBrush;
                     renderTarget->CreateSolidColorBrush(
-                        hyperbrowse::render::ToD2DColor(GetSysColor(COLOR_WINDOW)),
+                        hyperbrowse::render::ToD2DColor(state->theme.surfaceBackground),
                         backgroundBrush.GetAddressOf());
                     renderTarget->CreateSolidColorBrush(
-                        hyperbrowse::render::ToD2DColor(GetSysColor(COLOR_WINDOWTEXT)),
+                        hyperbrowse::render::ToD2DColor(state->theme.text),
                         textBrush.GetAddressOf());
                     renderTarget->CreateSolidColorBrush(
-                        hyperbrowse::render::ToD2DColor(GetSysColor(COLOR_HIGHLIGHT)),
+                        hyperbrowse::render::ToD2DColor(state->theme.accentFill),
                         accentBrush.GetAddressOf());
                     if (backgroundBrush && textBrush && accentBrush)
                     {
                         renderTarget->BeginDraw();
-                        renderTarget->Clear(hyperbrowse::render::ToD2DColor(GetSysColor(COLOR_WINDOW)));
+                        renderTarget->Clear(hyperbrowse::render::ToD2DColor(state->theme.surfaceBackground));
                         renderTarget->FillRectangle(
                             D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
                             backgroundBrush.Get());
@@ -5450,9 +5586,17 @@ namespace
                 }
                 else
                 {
-                    FillRect(drawItem->hDC, &itemRect, GetSysColorBrush(COLOR_WINDOW));
+                    const HBRUSH tabBrush = CreateSolidBrush(
+                        (drawItem->itemState & ODS_SELECTED) != 0
+                            ? state->theme.accentFill
+                            : state->theme.surfaceBackground);
+                    if (tabBrush)
+                    {
+                        FillRect(drawItem->hDC, &itemRect, tabBrush);
+                        DeleteObject(tabBrush);
+                    }
                     SetBkMode(drawItem->hDC, TRANSPARENT);
-                    SetTextColor(drawItem->hDC, GetSysColor(COLOR_WINDOWTEXT));
+                    SetTextColor(drawItem->hDC, state->theme.text);
                     DrawTextW(drawItem->hDC, tabText, -1, &itemRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
                 }
                 return TRUE;
@@ -5556,6 +5700,16 @@ namespace
         case WM_DESTROY:
             if (state)
             {
+                if (state->backgroundBrush)
+                {
+                    DeleteObject(state->backgroundBrush);
+                    state->backgroundBrush = nullptr;
+                }
+                if (state->fieldBrush)
+                {
+                    DeleteObject(state->fieldBrush);
+                    state->fieldBrush = nullptr;
+                }
                 state->done = true;
             }
             return 0;
@@ -5581,7 +5735,7 @@ namespace
             windowClass.hInstance = instance;
             windowClass.lpszClassName = kConsolidatedSettingsDialogClassName;
             windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            windowClass.hbrBackground = nullptr;
             if (RegisterClassExW(&windowClass) == 0)
             {
                 return false;
@@ -6885,6 +7039,7 @@ namespace
     bool PromptForPerformanceSettings(HWND ownerWindow,
                                       HINSTANCE instance,
                                       hyperbrowse::util::AppTextSize appTextSize,
+                                      bool darkTheme,
                                       hyperbrowse::util::ResourceProfile resourceProfile,
                                       std::size_t currentThumbnailCacheCapacityBytes,
                                       std::size_t currentMetadataCacheCapacityEntries,
@@ -6908,7 +7063,7 @@ namespace
             windowClass.hInstance = instance;
             windowClass.lpszClassName = kPerformanceSettingsDialogClassName;
             windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            windowClass.hbrBackground = nullptr;
             if (RegisterClassExW(&windowClass) == 0)
             {
                 return false;
@@ -6918,6 +7073,7 @@ namespace
         PerformanceSettingsDialogState state;
         state.ownerWindow = ownerWindow;
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
         state.titleFont = CreateDialogUiFont(16, FW_BOLD, state.appTextSize);
         state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
         state.title = L"Performance Settings";
@@ -7301,6 +7457,7 @@ namespace
             const HFONT font = state->bodyFont
                 ? state->bodyFont
                 : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
             const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
             const std::span<const hyperbrowse::decode::SupportedFileType> supportedFileTypes =
                 hyperbrowse::decode::SupportedFileTypes();
@@ -7535,17 +7692,38 @@ namespace
             }
             break;
         case WM_CTLCOLORDLG:
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            return state && state->backgroundBrush
+                ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
+                : 0;
         case WM_CTLCOLORSTATIC:
-            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
         case WM_CTLCOLORBTN:
-            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_ERASEBKGND:
+            if (state && state->backgroundBrush)
+            {
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                FillRect(reinterpret_cast<HDC>(wParam), &client, state->backgroundBrush);
+                return 1;
+            }
+            break;
         case WM_COMMAND:
             if (!state)
             {
@@ -7598,6 +7776,11 @@ namespace
         case WM_DESTROY:
             if (state)
             {
+                if (state->backgroundBrush)
+                {
+                    DeleteObject(state->backgroundBrush);
+                    state->backgroundBrush = nullptr;
+                }
                 state->done = true;
             }
             return 0;
@@ -7611,6 +7794,7 @@ namespace
     bool PromptForFileAssociations(HWND ownerWindow,
                                    HINSTANCE instance,
                                    hyperbrowse::util::AppTextSize appTextSize,
+                                   bool darkTheme,
                                    const std::vector<bool>& initialDefaults,
                                    std::vector<bool>* selectedDefaults)
     {
@@ -7628,7 +7812,7 @@ namespace
             windowClass.hInstance = instance;
             windowClass.lpszClassName = kFileAssociationsDialogClassName;
             windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            windowClass.hbrBackground = nullptr;
             if (RegisterClassExW(&windowClass) == 0)
             {
                 return false;
@@ -7638,6 +7822,7 @@ namespace
         FileAssociationsDialogState state;
         state.ownerWindow = ownerWindow;
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
         state.bodyFont = CreateDialogUiFont(10, FW_NORMAL, state.appTextSize);
         state.title = L"File Associations";
         state.instruction = L"Select the formats HyperBrowse should open by default.";
@@ -7865,6 +8050,8 @@ namespace
             const HFONT font = state->bodyFont
                 ? state->bodyFont
                 : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
+            state->fieldBrush = CreateSolidBrush(state->theme.fieldBackground);
             const HINSTANCE hInstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
             const SlideshowSettingsDialogLayoutMetrics metrics = BuildSlideshowSettingsDialogLayoutMetrics(*state);
             const int contentLeft = metrics.margin;
@@ -8183,12 +8370,58 @@ namespace
             }
             break;
         case WM_CTLCOLORDLG:
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            return state && state->backgroundBrush
+                ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
+                : 0;
         case WM_CTLCOLORSTATIC:
-            SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-            SetTextColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOWTEXT));
-            SetBkColor(reinterpret_cast<HDC>(wParam), GetSysColor(COLOR_WINDOW));
-            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_CTLCOLOREDIT:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, OPAQUE);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.fieldBackground);
+                return reinterpret_cast<INT_PTR>(state->fieldBrush);
+            }
+            break;
+        case WM_CTLCOLORLISTBOX:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, OPAQUE);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.fieldBackground);
+                return reinterpret_cast<INT_PTR>(state->fieldBrush);
+            }
+            break;
+        case WM_CTLCOLORBTN:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_ERASEBKGND:
+            if (state && state->backgroundBrush)
+            {
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                FillRect(reinterpret_cast<HDC>(wParam), &client, state->backgroundBrush);
+                return 1;
+            }
+            break;
         case WM_NOTIFY:
             if (!state)
             {
@@ -8252,6 +8485,16 @@ namespace
         case WM_DESTROY:
             if (state)
             {
+                if (state->backgroundBrush)
+                {
+                    DeleteObject(state->backgroundBrush);
+                    state->backgroundBrush = nullptr;
+                }
+                if (state->fieldBrush)
+                {
+                    DeleteObject(state->fieldBrush);
+                    state->fieldBrush = nullptr;
+                }
                 state->done = true;
             }
             return 0;
@@ -8265,6 +8508,7 @@ namespace
     bool PromptForSlideshowSettings(HWND ownerWindow,
                                     HINSTANCE instance,
                                     hyperbrowse::util::AppTextSize appTextSize,
+                                    bool darkTheme,
                                     UINT initialSlideshowDurationMs,
                                     hyperbrowse::viewer::TransitionStyle initialTransitionStyle,
                                     UINT initialTransitionDurationMs,
@@ -8285,7 +8529,7 @@ namespace
             windowClass.hInstance = instance;
             windowClass.lpszClassName = kSlideshowSettingsDialogClassName;
             windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-            windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            windowClass.hbrBackground = nullptr;
             if (RegisterClassExW(&windowClass) == 0)
             {
                 return false;
@@ -8295,6 +8539,7 @@ namespace
         SlideshowSettingsDialogState state;
         state.ownerWindow = ownerWindow;
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
         state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
         if (!state.bodyFont)
         {
@@ -17372,6 +17617,440 @@ namespace hyperbrowse::ui
         MessageBoxW(hwnd_, L"Diagnostics timings and counters were reset.", L"Diagnostics", MB_OK | MB_ICONINFORMATION);
     }
 
+    struct ImageInformationDialogState
+    {
+        HWND ownerWindow{};
+        HINSTANCE instance{};
+        HWND filenameWindow{};
+        HWND contentWindow{};
+        HWND metadataWindow{};
+        HWND metadataToggleButton{};
+        HWND okButton{};
+        HFONT titleFont{};
+        HFONT bodyFont{};
+        hyperbrowse::ui::DialogTheme theme{};
+        HBRUSH backgroundBrush{};
+        HBRUSH fieldBrush{};
+        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
+        std::wstring filename;
+        std::wstring content;
+        std::wstring metadata;
+        bool expanded{};
+        bool done{};
+    };
+
+    constexpr wchar_t kImageInformationDialogClassName[] = L"HyperBrowseImageInformationDialog";
+    constexpr int kImageInformationDialogWidth = 640;
+    constexpr int kImageInformationDialogCollapsedHeight = 370;
+    constexpr int kImageInformationDialogExpandedHeight = 570;
+    constexpr int kImageInformationDialogMargin = 18;
+    constexpr int kImageInformationDialogButtonHeight = 30;
+    constexpr int kImageInformationDialogButtonWidth = 96;
+    constexpr int kImageInformationDialogToggleWidth = 230;
+    constexpr int kImageInformationDialogToggleId = 5703;
+    constexpr int kImageInformationDialogGap = 10;
+
+    void LayoutImageInformationDialog(HWND hwnd, ImageInformationDialogState& state)
+    {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const int clientWidth = client.right - client.left;
+        const int clientHeight = client.bottom - client.top;
+        const int contentLeft = kImageInformationDialogMargin;
+        const int contentWidth = clientWidth - (kImageInformationDialogMargin * 2);
+        const int buttonsTop = clientHeight
+            - kImageInformationDialogMargin
+            - kImageInformationDialogButtonHeight;
+        const int toggleTop = buttonsTop - kImageInformationDialogGap - kImageInformationDialogButtonHeight;
+        const int contentTop = kImageInformationDialogMargin + 34;
+        const int metadataHeight = state.expanded ? 160 : 0;
+        const int metadataTop = toggleTop - kImageInformationDialogGap - metadataHeight;
+        const int contentBottom = metadataTop - (state.expanded ? kImageInformationDialogGap : 0);
+        const int contentHeight = std::max(40, contentBottom - contentTop);
+
+        if (state.filenameWindow)
+        {
+            SetWindowPos(state.filenameWindow,
+                         nullptr,
+                         contentLeft,
+                         kImageInformationDialogMargin,
+                         contentWidth,
+                         28,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (state.contentWindow)
+        {
+            SetWindowPos(state.contentWindow,
+                         nullptr,
+                         contentLeft,
+                         contentTop,
+                         contentWidth,
+                         contentHeight,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (state.metadataWindow)
+        {
+            SetWindowPos(state.metadataWindow,
+                         nullptr,
+                         contentLeft,
+                         metadataTop,
+                         contentWidth,
+                         metadataHeight,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (state.metadataToggleButton)
+        {
+            SetWindowPos(state.metadataToggleButton,
+                         nullptr,
+                         contentLeft,
+                         toggleTop,
+                         kImageInformationDialogToggleWidth,
+                         kImageInformationDialogButtonHeight,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (state.okButton)
+        {
+            SetWindowPos(state.okButton,
+                         nullptr,
+                         clientWidth - kImageInformationDialogMargin - kImageInformationDialogButtonWidth,
+                         buttonsTop,
+                         kImageInformationDialogButtonWidth,
+                         kImageInformationDialogButtonHeight,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+
+    void ResizeImageInformationDialog(HWND hwnd, ImageInformationDialogState& state)
+    {
+        RECT windowRect{0,
+                        0,
+                        kImageInformationDialogWidth,
+                        state.expanded
+                            ? kImageInformationDialogExpandedHeight
+                            : kImageInformationDialogCollapsedHeight};
+        AdjustWindowRectEx(&windowRect,
+                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                           FALSE,
+                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        SetWindowPos(hwnd,
+                     nullptr,
+                     0,
+                     0,
+                     windowRect.right - windowRect.left,
+                     windowRect.bottom - windowRect.top,
+                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        CenterWindowOnOwner(hwnd, state.ownerWindow);
+        LayoutImageInformationDialog(hwnd, state);
+    }
+
+    LRESULT CALLBACK ImageInformationDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* state = reinterpret_cast<ImageInformationDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (message)
+        {
+        case WM_NCCREATE:
+        {
+            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
+            return TRUE;
+        }
+        case WM_CREATE:
+        {
+            state = reinterpret_cast<ImageInformationDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (!state)
+            {
+                return -1;
+            }
+
+            state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
+            state->fieldBrush = CreateSolidBrush(state->theme.fieldBackground);
+            state->filenameWindow = CreateWindowExW(
+                0,
+                L"STATIC",
+                state->filename.c_str(),
+                WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS,
+                0,
+                0,
+                100,
+                28,
+                hwnd,
+                nullptr,
+                state->instance,
+                nullptr);
+            state->contentWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                state->content.c_str(),
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | ES_NOHIDESEL,
+                0,
+                0,
+                100,
+                100,
+                hwnd,
+                nullptr,
+                state->instance,
+                nullptr);
+            state->metadataWindow = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                state->metadata.c_str(),
+                WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | ES_NOHIDESEL,
+                0,
+                0,
+                100,
+                100,
+                hwnd,
+                nullptr,
+                state->instance,
+                nullptr);
+            state->metadataToggleButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Show Metadata Details",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                0,
+                0,
+                kImageInformationDialogToggleWidth,
+                kImageInformationDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kImageInformationDialogToggleId)),
+                state->instance,
+                nullptr);
+            state->okButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"OK",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                0,
+                0,
+                kImageInformationDialogButtonWidth,
+                kImageInformationDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
+                state->instance,
+                nullptr);
+
+            const HWND windows[] = {
+                state->filenameWindow,
+                state->contentWindow,
+                state->metadataWindow,
+                state->metadataToggleButton,
+                state->okButton,
+            };
+            for (HWND window : windows)
+            {
+                if (window)
+                {
+                    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(state->bodyFont), TRUE);
+                }
+            }
+            if (state->filenameWindow && state->titleFont)
+            {
+                SendMessageW(state->filenameWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->titleFont), TRUE);
+            }
+            for (HWND editWindow : {state->contentWindow, state->metadataWindow})
+            {
+                if (editWindow)
+                {
+                    SendMessageW(editWindow, EM_SETBKGNDCOLOR, 0, static_cast<LPARAM>(state->theme.fieldBackground));
+                    SendMessageW(editWindow, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
+                }
+            }
+
+            LayoutImageInformationDialog(hwnd, *state);
+            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            SetFocus(state->okButton);
+            return 0;
+        }
+        case WM_SIZE:
+            if (state)
+            {
+                LayoutImageInformationDialog(hwnd, *state);
+            }
+            return 0;
+        case WM_CTLCOLORDLG:
+            return state && state->backgroundBrush
+                ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
+                : 0;
+        case WM_CTLCOLORSTATIC:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_CTLCOLOREDIT:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, OPAQUE);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.fieldBackground);
+                return reinterpret_cast<INT_PTR>(state->fieldBrush);
+            }
+            break;
+        case WM_CTLCOLORBTN:
+            if (state)
+            {
+                const HDC dc = reinterpret_cast<HDC>(wParam);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, state->theme.text);
+                SetBkColor(dc, state->theme.windowBackground);
+                return reinterpret_cast<INT_PTR>(state->backgroundBrush);
+            }
+            break;
+        case WM_ERASEBKGND:
+            if (state && state->backgroundBrush)
+            {
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                FillRect(reinterpret_cast<HDC>(wParam), &client, state->backgroundBrush);
+                return 1;
+            }
+            break;
+        case WM_COMMAND:
+            if (!state)
+            {
+                break;
+            }
+            if (LOWORD(wParam) == kImageInformationDialogToggleId && HIWORD(wParam) == BN_CLICKED)
+            {
+                state->expanded = !state->expanded;
+                SetWindowTextW(state->metadataToggleButton,
+                               state->expanded ? L"Hide Metadata Details" : L"Show Metadata Details");
+                ShowWindow(state->metadataWindow, state->expanded ? SW_SHOW : SW_HIDE);
+                ResizeImageInformationDialog(hwnd, *state);
+                return 0;
+            }
+            if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            if (state)
+            {
+                if (state->backgroundBrush)
+                {
+                    DeleteObject(state->backgroundBrush);
+                    state->backgroundBrush = nullptr;
+                }
+                if (state->fieldBrush)
+                {
+                    DeleteObject(state->fieldBrush);
+                    state->fieldBrush = nullptr;
+                }
+                state->done = true;
+            }
+            return 0;
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    void ShowImageInformationDialog(HWND ownerWindow,
+                                    HINSTANCE instance,
+                                    bool darkTheme,
+                                    hyperbrowse::util::AppTextSize appTextSize,
+                                    std::wstring filename,
+                                    std::wstring content,
+                                    std::wstring metadata)
+    {
+        WNDCLASSEXW windowClass{};
+        if (GetClassInfoExW(instance, kImageInformationDialogClassName, &windowClass) == FALSE)
+        {
+            windowClass.cbSize = sizeof(windowClass);
+            windowClass.lpfnWndProc = &ImageInformationDialogProc;
+            windowClass.hInstance = instance;
+            windowClass.lpszClassName = kImageInformationDialogClassName;
+            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+            windowClass.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_HYPERBROWSE));
+            windowClass.hIconSm = windowClass.hIcon;
+            windowClass.hbrBackground = nullptr;
+            if (RegisterClassExW(&windowClass) == 0)
+            {
+                return;
+            }
+        }
+
+        ImageInformationDialogState state;
+        state.ownerWindow = ownerWindow;
+        state.instance = instance;
+        state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
+        state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
+        state.titleFont = CreateDialogUiFont(12, FW_BOLD, state.appTextSize);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        state.filename = std::move(filename);
+        state.content = std::move(content);
+        state.metadata = std::move(metadata);
+        if (!state.bodyFont)
+        {
+            state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        }
+
+        RECT windowRect{0, 0, kImageInformationDialogWidth, kImageInformationDialogCollapsedHeight};
+        AdjustWindowRectEx(&windowRect,
+                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                           FALSE,
+                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, FALSE);
+        }
+        HWND dialogWindow = CreateWindowExW(
+            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+            kImageInformationDialogClassName,
+            L"Image Information",
+            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
+            ownerWindow,
+            nullptr,
+            instance,
+            &state);
+        if (dialogWindow)
+        {
+            SetWindowTextW(dialogWindow, L"Image Information");
+            ApplyWindowFrameTheme(dialogWindow,
+                                  darkTheme,
+                                  state.theme.windowBackground,
+                                  state.theme.text,
+                                  state.theme.border);
+            RefreshWindowNonClientArea(dialogWindow);
+            ShowWindow(dialogWindow, SW_SHOWNORMAL);
+            UpdateWindow(dialogWindow);
+            MSG message{};
+            while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
+            {
+                if (!IsDialogMessageW(dialogWindow, &message))
+                {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+        }
+        if (ownerWindow)
+        {
+            EnableWindow(ownerWindow, TRUE);
+            SetForegroundWindow(ownerWindow);
+            SetActiveWindow(ownerWindow);
+        }
+        DeleteFontIfOwned(state.titleFont);
+        DeleteFontIfOwned(state.bodyFont);
+    }
+
     void MainWindow::ShowImageInformation()
     {
         if (!browserPaneController_)
@@ -17410,21 +18089,13 @@ namespace hyperbrowse::ui
         const std::wstring content = services::FormatImageInfoContent(item);
         const std::wstring expanded = services::FormatImageInfoExpanded(*metadata);
 
-        TASKDIALOGCONFIG config{};
-        config.cbSize = sizeof(config);
-        config.hwndParent = hwnd_;
-        config.hInstance = instance_;
-        config.dwFlags = TDF_EXPAND_FOOTER_AREA;
-        config.dwCommonButtons = TDCBF_OK_BUTTON;
-        config.pszWindowTitle = L"Image Information";
-        config.pszMainIcon = MAKEINTRESOURCEW(IDI_HYPERBROWSE);
-        config.pszMainInstruction = item.fileName.c_str();
-        config.pszContent = content.c_str();
-        config.pszExpandedInformation = expanded.c_str();
-        config.pszCollapsedControlText = L"Show Metadata Details";
-        config.pszExpandedControlText = L"Hide Metadata Details";
-
-        TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
+        ShowImageInformationDialog(hwnd_,
+                       instance_,
+                       themeMode_ == ThemeMode::Dark,
+                       appTextSize_,
+                       item.fileName,
+                       content,
+                       expanded);
     }
 
     void MainWindow::StartCopySelection()
@@ -17538,6 +18209,7 @@ namespace hyperbrowse::ui
         if (!PromptForBatchRenamePattern(hwnd_,
                                          instance_,
                                          appTextSize_,
+                                         themeMode_ == ThemeMode::Dark,
                                          std::move(initialPattern),
                                          std::move(selectedItems),
                                          &targetLeafNames))
@@ -20937,7 +21609,12 @@ namespace hyperbrowse::ui
         }
 
         std::vector<bool> selectedDefaults;
-        PromptForFileAssociations(hwnd_, instance_, appTextSize_, defaults, &selectedDefaults);
+        PromptForFileAssociations(hwnd_,
+                      instance_,
+                      appTextSize_,
+                      themeMode_ == ThemeMode::Dark,
+                      defaults,
+                      &selectedDefaults);
     }
 
     void MainWindow::ShowConsolidatedSettingsDialog()
@@ -21124,6 +21801,7 @@ namespace hyperbrowse::ui
         if (!PromptForSlideshowSettings(hwnd_,
                                         instance_,
                                         appTextSize_,
+                                        themeMode_ == ThemeMode::Dark,
                                         slideshowIntervalMs_,
                                         slideshowTransitionStyle_,
                                         slideshowTransitionDurationMs_,
@@ -21168,6 +21846,7 @@ namespace hyperbrowse::ui
         if (!PromptForPerformanceSettings(hwnd_,
                                           instance_,
                                           appTextSize_,
+                                          themeMode_ == ThemeMode::Dark,
                                           resourceProfile_,
                                           currentThumbnailCacheCapacityBytes,
                                           currentMetadataCacheCapacityEntries,
