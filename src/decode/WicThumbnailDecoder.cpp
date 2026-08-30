@@ -63,12 +63,44 @@ namespace hyperbrowse::decode
             std::swap(orientedWidth, orientedHeight);
         }
 
+        UINT scaledWidth = 0;
+        UINT scaledHeight = 0;
+        wic::ComputeScaledSize(orientedWidth, orientedHeight, key.targetWidth, key.targetHeight, &scaledWidth, &scaledHeight);
+
         ComPtr<IWICBitmapSource> source = frame;
+        const bool swapsDimensions = wic::TransformSwapsDimensions(transform);
         if (transform != WICBitmapTransformRotate0)
         {
+            if (swapsDimensions && (scaledWidth != orientedWidth || scaledHeight != orientedHeight))
+            {
+                ComPtr<IWICBitmapScaler> preRotationScaler;
+                result = factory->CreateBitmapScaler(&preRotationScaler);
+                if (FAILED(result) || FAILED(preRotationScaler->Initialize(
+                    frame.Get(),
+                    scaledHeight,
+                    scaledWidth,
+                    WICBitmapInterpolationModeFant)))
+                {
+                    return {};
+                }
+
+                source = preRotationScaler;
+            }
+            else if (swapsDimensions)
+            {
+                ComPtr<IWICBitmap> cachedFrame;
+                result = factory->CreateBitmapFromSource(frame.Get(), WICBitmapCacheOnLoad, &cachedFrame);
+                if (FAILED(result))
+                {
+                    return {};
+                }
+
+                source = cachedFrame;
+            }
+
             ComPtr<IWICBitmapFlipRotator> rotator;
             result = factory->CreateBitmapFlipRotator(&rotator);
-            if (FAILED(result) || FAILED(rotator->Initialize(frame.Get(), transform)))
+            if (FAILED(result) || FAILED(rotator->Initialize(source.Get(), transform)))
             {
                 return {};
             }
@@ -76,11 +108,7 @@ namespace hyperbrowse::decode
             source = rotator;
         }
 
-        UINT scaledWidth = 0;
-        UINT scaledHeight = 0;
-        wic::ComputeScaledSize(orientedWidth, orientedHeight, key.targetWidth, key.targetHeight, &scaledWidth, &scaledHeight);
-
-        if (scaledWidth != orientedWidth || scaledHeight != orientedHeight)
+        if (!swapsDimensions && (scaledWidth != orientedWidth || scaledHeight != orientedHeight))
         {
             ComPtr<IWICBitmapScaler> scaler;
             result = factory->CreateBitmapScaler(&scaler);

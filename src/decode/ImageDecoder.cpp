@@ -444,12 +444,55 @@ namespace
             std::swap(orientedWidth, orientedHeight);
         }
 
+        UINT scaledWidth = orientedWidth;
+        UINT scaledHeight = orientedHeight;
+        if (targetWidth > 0 && targetHeight > 0)
+        {
+            wic::ComputeScaledSize(orientedWidth, orientedHeight, targetWidth, targetHeight, &scaledWidth, &scaledHeight);
+        }
+
         ComPtr<IWICBitmapSource> source = frame;
+        const bool swapsDimensions = wic::TransformSwapsDimensions(transform);
         if (transform != WICBitmapTransformRotate0)
         {
+            if (swapsDimensions && (scaledWidth != orientedWidth || scaledHeight != orientedHeight))
+            {
+                ComPtr<IWICBitmapScaler> preRotationScaler;
+                result = factory->CreateBitmapScaler(&preRotationScaler);
+                if (FAILED(result) || FAILED(preRotationScaler->Initialize(
+                    frame.Get(),
+                    scaledHeight,
+                    scaledWidth,
+                    WICBitmapInterpolationModeFant)))
+            {
+                    if (errorMessage)
+                    {
+                        *errorMessage = L"Failed to scale the decoded image.";
+                    }
+                    return {};
+                }
+
+                source = preRotationScaler;
+            }
+            else if (swapsDimensions)
+            {
+                ComPtr<IWICBitmap> cachedFrame;
+                result = factory->CreateBitmapFromSource(frame.Get(), WICBitmapCacheOnLoad, &cachedFrame);
+                if (FAILED(result))
+                {
+                    if (errorMessage)
+                    {
+                        *errorMessage = L"Failed to apply image orientation.";
+                    }
+                    return {};
+                }
+
+                source = cachedFrame;
+            }
+
             ComPtr<IWICBitmapFlipRotator> rotator;
             result = factory->CreateBitmapFlipRotator(&rotator);
-            if (FAILED(result) || FAILED(rotator->Initialize(frame.Get(), transform)))
+            if (FAILED(result) || FAILED(rotator->Initialize(source.Get(), transform)))
             {
                 if (errorMessage)
                 {
@@ -461,26 +504,20 @@ namespace
             source = rotator;
         }
 
-        UINT scaledWidth = orientedWidth;
-        UINT scaledHeight = orientedHeight;
-        if (targetWidth > 0 && targetHeight > 0)
+        if (!swapsDimensions && (scaledWidth != orientedWidth || scaledHeight != orientedHeight))
         {
-            wic::ComputeScaledSize(orientedWidth, orientedHeight, targetWidth, targetHeight, &scaledWidth, &scaledHeight);
-            if (scaledWidth != orientedWidth || scaledHeight != orientedHeight)
+            ComPtr<IWICBitmapScaler> scaler;
+            result = factory->CreateBitmapScaler(&scaler);
+            if (FAILED(result) || FAILED(scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant)))
             {
-                ComPtr<IWICBitmapScaler> scaler;
-                result = factory->CreateBitmapScaler(&scaler);
-                if (FAILED(result) || FAILED(scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant)))
+                if (errorMessage)
                 {
-                    if (errorMessage)
-                    {
-                        *errorMessage = L"Failed to scale the decoded image.";
-                    }
-                    return {};
+                    *errorMessage = L"Failed to scale the decoded image.";
                 }
-
-                source = scaler;
+                return {};
             }
+
+            source = scaler;
         }
 
         ComPtr<IWICFormatConverter> converter;

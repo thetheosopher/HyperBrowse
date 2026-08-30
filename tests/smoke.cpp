@@ -1693,6 +1693,14 @@ namespace
          Expect(jpegThumbnail->SourceWidth() == 48 && jpegThumbnail->SourceHeight() == 24,
              "WIC did not surface the oriented JPEG source dimensions");
 
+         const auto jpegItem = hyperbrowse::browser::BuildBrowserItemFromPath(jpegPath);
+         std::wstring fullImageError;
+         const auto jpegFullImage = hyperbrowse::decode::DecodeFullImage(jpegItem, &fullImageError);
+         Expect(jpegFullImage != nullptr,
+             std::string("WIC failed to decode the rotated JPEG full image: ") + Utf8FromWide(fullImageError));
+         Expect(jpegFullImage->Width() == 48 && jpegFullImage->Height() == 24,
+             "WIC did not apply JPEG EXIF orientation to the full image");
+
         const auto pngThumbnail = decoder.Decode(MakeCacheKey(pngPath, 2));
         Expect(pngThumbnail != nullptr, "WIC failed to decode the PNG thumbnail");
          Expect(pngThumbnail->Width() <= 160 && pngThumbnail->Height() <= 112, "PNG thumbnail scaling exceeded the target bounds");
