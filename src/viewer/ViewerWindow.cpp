@@ -963,6 +963,7 @@ namespace hyperbrowse::viewer
             windowedPlacement_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
         }
 
+        const bool reusedExistingWindow = hwnd_ != nullptr;
         if (!hwnd_)
         {
             infoOverlaysVisible_ = LoadViewerInfoOverlaysVisibleSetting();
@@ -1008,6 +1009,10 @@ namespace hyperbrowse::viewer
         }
 
         SetFullScreen(true, targetMonitor);
+        if (!reusedExistingWindow)
+        {
+            hasWindowedStateToRestore_ = false;
+        }
         SetForegroundWindow(hwnd_);
         NotifyCurrentItemChanged();
         LoadCurrentImageAsync(LoadReason::Open);
@@ -1742,7 +1747,7 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        ResetViewState(zoomMode_ == ZoomMode::FitHeight);
+        ResetViewState(zoomMode_ == ZoomMode::FitHeight || zoomMode_ == ZoomMode::FitWidth);
         UpdateWindowTitle();
         NotifyZoomChanged(0);
         if (hwnd_)
@@ -2448,14 +2453,15 @@ namespace hyperbrowse::viewer
         RECT clientRect{};
         GetClientRect(hwnd_, &clientRect);
         const double fitScale = FitScaleForClient(clientRect);
-        const double minimumScale = zoomMode_ == ZoomMode::FitHeight
+        const bool fitHeight = zoomMode_ == ZoomMode::FitHeight;
+        const bool fitWidth = zoomMode_ == ZoomMode::FitWidth;
+        const double minimumScale = fitHeight
             ? FitHeightScaleForClient(clientRect)
-            : fitScale;
+            : (fitWidth ? FitWidthScaleForClient(clientRect) : fitScale);
         const bool smoothZoomActive = smoothZoomTimerId_ != 0;
         const double baseScale = smoothZoomActive
             ? smoothZoomTarget_
-            : (zoomMode_ == ZoomMode::Fit ? fitScale
-                : (zoomMode_ == ZoomMode::FitHeight ? minimumScale : customZoomScale_));
+            : (zoomMode_ == ZoomMode::Fit || fitHeight || fitWidth ? minimumScale : customZoomScale_);
         double targetPanX = panOffsetX_;
         double targetPanY = panOffsetY_;
 
@@ -2468,9 +2474,13 @@ namespace hyperbrowse::viewer
                 KillTimer(hwnd_, kSmoothZoomTimerId);
                 smoothZoomTimerId_ = 0;
             }
-            if (zoomMode_ == ZoomMode::FitHeight)
+            if (fitHeight)
             {
                 FitToHeight();
+            }
+            else if (fitWidth)
+            {
+                FitToWidth();
             }
             else
             {
@@ -2481,8 +2491,7 @@ namespace hyperbrowse::viewer
 
         const double currentScale = smoothZoomActive
             ? smoothZoomCurrent_
-            : (zoomMode_ == ZoomMode::Fit ? fitScale
-                : (zoomMode_ == ZoomMode::FitHeight ? minimumScale : customZoomScale_));
+            : (zoomMode_ == ZoomMode::Fit || fitHeight || fitWidth ? minimumScale : customZoomScale_);
 
         if (anchorPoint)
         {
@@ -2527,6 +2536,22 @@ namespace hyperbrowse::viewer
     void ViewerWindow::FitToHeight()
     {
         zoomMode_ = ZoomMode::FitHeight;
+        panOffsetX_ = 0.0;
+        panOffsetY_ = 0.0;
+        if (smoothZoomTimerId_)
+        {
+            KillTimer(hwnd_, kSmoothZoomTimerId);
+            smoothZoomTimerId_ = 0;
+        }
+        if (hwnd_)
+        {
+            RequestRepaint();
+        }
+    }
+
+    void ViewerWindow::FitToWidth()
+    {
+        zoomMode_ = ZoomMode::FitWidth;
         panOffsetX_ = 0.0;
         panOffsetY_ = 0.0;
         if (smoothZoomTimerId_)
@@ -2797,6 +2822,7 @@ namespace hyperbrowse::viewer
         {
             if (!fullScreen_)
             {
+                hasWindowedStateToRestore_ = true;
                 if (windowFitMode_ != WindowFitMode::Regular)
                 {
                     RestoreRegularWindowPlacement();
@@ -2826,6 +2852,7 @@ namespace hyperbrowse::viewer
                          monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top,
                          SWP_FRAMECHANGED | SWP_SHOWWINDOW);
             fullScreen_ = true;
+            FitToWindow();
             return;
         }
 
@@ -2840,6 +2867,7 @@ namespace hyperbrowse::viewer
         SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         fullScreen_ = false;
+        hasWindowedStateToRestore_ = true;
         windowFitMode_ = WindowFitMode::Regular;
         hasRegularPlacementBeforeFit_ = false;
         regularPlacementBeforeFit_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};
@@ -3330,10 +3358,11 @@ namespace hyperbrowse::viewer
         wraparoundMessage_.clear();
     }
 
-    void ViewerWindow::ResetViewState(bool preserveFitHeight)
+    void ViewerWindow::ResetViewState(bool preserveFitMode)
     {
-        const bool keepFitHeight = preserveFitHeight && zoomMode_ == ZoomMode::FitHeight;
-        zoomMode_ = keepFitHeight ? ZoomMode::FitHeight : ZoomMode::Fit;
+        const bool keepFitMode = preserveFitMode
+            && (zoomMode_ == ZoomMode::FitHeight || zoomMode_ == ZoomMode::FitWidth);
+        zoomMode_ = keepFitMode ? zoomMode_ : ZoomMode::Fit;
         customZoomScale_ = 1.0;
         currentZoomPercent_ = 0;
         rotationQuarterTurns_ = 0;
@@ -3552,6 +3581,14 @@ namespace hyperbrowse::viewer
         return static_cast<double>(clientHeight) / std::max(1.0, imageHeight);
     }
 
+    double ViewerWindow::FitWidthScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const
+    {
+        const int clientWidth = std::max(1, static_cast<int>(clientRect.right - clientRect.left));
+        const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+        const double imageWidth = static_cast<double>(swapDimensions ? image.SourceHeight() : image.SourceWidth());
+        return static_cast<double>(clientWidth) / std::max(1.0, imageWidth);
+    }
+
     double ViewerWindow::FitScaleForClient(const RECT& clientRect) const
     {
         if (!currentImage_)
@@ -3572,6 +3609,16 @@ namespace hyperbrowse::viewer
         return FitHeightScaleForImage(*currentImage_, clientRect);
     }
 
+    double ViewerWindow::FitWidthScaleForClient(const RECT& clientRect) const
+    {
+        if (!currentImage_)
+        {
+            return 1.0;
+        }
+
+        return FitWidthScaleForImage(*currentImage_, clientRect);
+    }
+
     double ViewerWindow::EffectiveScaleForClient(const RECT& clientRect) const
     {
         if (zoomMode_ == ZoomMode::Fit)
@@ -3581,6 +3628,10 @@ namespace hyperbrowse::viewer
         if (zoomMode_ == ZoomMode::FitHeight)
         {
             return FitHeightScaleForClient(clientRect);
+        }
+        if (zoomMode_ == ZoomMode::FitWidth)
+        {
+            return FitWidthScaleForClient(clientRect);
         }
         return customZoomScale_;
     }
@@ -3832,7 +3883,7 @@ namespace hyperbrowse::viewer
         preserveDisplayedImageWhileLoading_ = false;
         if (deferredSwap)
         {
-            ResetViewState(zoomMode_ == ZoomMode::FitHeight);
+            ResetViewState(zoomMode_ == ZoomMode::FitHeight || zoomMode_ == ZoomMode::FitWidth);
             UpdateWindowTitle();
             NotifyZoomChanged(0);
         }
@@ -4079,11 +4130,32 @@ namespace hyperbrowse::viewer
                 return 0;
             }
 
-            if (wParam == static_cast<WPARAM>('W')
-                && (GetKeyState(VK_CONTROL) & 0x8000) != 0)
             {
-                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
-                return 0;
+                const bool controlPressed = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                const bool shiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                const bool menuPressed = (GetKeyState(VK_MENU) & 0x8000) != 0;
+                if ((wParam == static_cast<WPARAM>('H') || wParam == static_cast<WPARAM>('W'))
+                    && controlPressed
+                    && shiftPressed
+                    && !menuPressed)
+                {
+                    if (!fullScreen_)
+                    {
+                        SetWindowFitMode(wParam == static_cast<WPARAM>('H')
+                            ? WindowFitMode::Height
+                            : WindowFitMode::Width);
+                    }
+                    return 0;
+                }
+
+                if (wParam == static_cast<WPARAM>('W')
+                    && controlPressed
+                    && !shiftPressed
+                    && !menuPressed)
+                {
+                    PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+                    return 0;
+                }
             }
 
             switch (wParam)
@@ -4190,7 +4262,14 @@ namespace hyperbrowse::viewer
                 ZoomBy(0.8);
                 return 0;
             case VK_RETURN:
-                if (zoomMode_ == ZoomMode::Fit || zoomMode_ == ZoomMode::FitHeight)
+                if ((GetKeyState(VK_CONTROL) & 0x8000) != 0)
+                {
+                    ToggleFullScreen();
+                    return 0;
+                }
+                if (zoomMode_ == ZoomMode::Fit
+                    || zoomMode_ == ZoomMode::FitHeight
+                    || zoomMode_ == ZoomMode::FitWidth)
                 {
                     SetActualSize();
                 }
@@ -4209,7 +4288,7 @@ namespace hyperbrowse::viewer
                 FitToHeight();
                 return 0;
             case 'W':
-                SetWindowFitMode(WindowFitMode::Width);
+                FitToWidth();
                 return 0;
             case 'L':
                 RotateLeft();
@@ -4237,7 +4316,14 @@ namespace hyperbrowse::viewer
                 ToggleFullScreen();
                 return 0;
             case VK_ESCAPE:
-                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+                if (fullScreen_ && hasWindowedStateToRestore_)
+                {
+                    SetFullScreen(false);
+                }
+                else
+                {
+                    PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+                }
                 return 0;
             default:
                 break;
@@ -5701,7 +5787,9 @@ namespace hyperbrowse::viewer
                         bottomLine.append(L"  |  ");
                         bottomLine.append(zoomMode_ == ZoomMode::Fit
                             ? L"Fit"
-                            : (zoomMode_ == ZoomMode::FitHeight ? L"Fit Height" : L"Custom"));
+                            : (zoomMode_ == ZoomMode::FitHeight
+                                ? L"Fit Height"
+                                : (zoomMode_ == ZoomMode::FitWidth ? L"Fit Width" : L"Custom")));
                         if (compareLayout)
                         {
                             bottomLine.append(compareImage
@@ -6030,6 +6118,7 @@ namespace hyperbrowse::viewer
             ReleaseD2DResources();
             asyncState_->targetWindow.store(nullptr, std::memory_order_release);
             fullScreen_ = false;
+            hasWindowedStateToRestore_ = false;
             windowFitMode_ = WindowFitMode::Regular;
             hasRegularPlacementBeforeFit_ = false;
             regularPlacementBeforeFit_ = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)};

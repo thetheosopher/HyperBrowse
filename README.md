@@ -65,7 +65,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Ctrl+O` | Open a folder |
 | `Backspace` / `Alt+Left` | Navigate to the previous folder |
 | `Alt+Right` | Navigate to the next folder |
-| `Esc` | Minimize the main window, or close it when configured in Settings |
+| `Esc` | Close the main window when enabled in Settings; otherwise do nothing |
 | `Ctrl+W` | Minimize the main window |
 | `F5` | Refresh the folder tree |
 | `F2` | Rename the selected item |
@@ -108,11 +108,12 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Enter` | Toggle between fit and actual-size viewing |
 | `0` / `1` | Fit the image to the window / show it at actual size |
 | `H` / `W` | Fit the image to the window height / width |
+| `Ctrl+Shift+H` / `Ctrl+Shift+W` | Size the window to the monitor work-area height / width (windowed mode) |
 | `L` / `R` | Rotate the image left / right |
 | `C` | Toggle comparison mode |
 | `X` | Activate the compared image |
 | `Space` | Start or stop the slideshow |
-| `F11` | Toggle full-screen mode |
+| `F11` / `Ctrl+Enter` | Toggle full-screen mode |
 | `Del` / `Shift+Del` | Move the displayed file to the Recycle Bin / delete it permanently |
 
 ## Architecture Overview

@@ -78,7 +78,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_BACK_FOLDER, VK_BACK, 0, L"Backspace", L"Navigate to the previous folder", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_BACK_FOLDER, VK_LEFT, FALT, L"Alt+Left", L"Navigate to the previous folder", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_FORWARD_FOLDER, VK_RIGHT, FALT, L"Alt+Right", L"Navigate to the next folder", L"View and navigation"},
-        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_ESCAPE, VK_ESCAPE, 0, L"Esc", L"Minimize or close the main window", L"File"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_ESCAPE, VK_ESCAPE, 0, L"Esc", L"Close the main window when enabled", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_MINIMIZE, static_cast<WORD>('W'), FCONTROL, L"Ctrl+W", L"Minimize the main window", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_REFRESH_TREE, VK_F5, 0, L"F5", L"Refresh the folder tree", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_RENAME_SELECTED, VK_F2, 0, L"F2", L"Rename the selected item", L"File and selection actions"},
@@ -116,7 +116,7 @@ namespace hyperbrowse::ui
     };
 
     inline constexpr std::array kViewerShortcutCatalog{
-        ShortcutDefinition{ShortcutContext::Viewer, 0, VK_ESCAPE, 0, L"Esc", L"Close the viewer", L"Viewer delete and exit"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, VK_ESCAPE, 0, L"Esc", L"Leave full screen or close the viewer", L"Viewer delete and exit"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('W'), FCONTROL, L"Ctrl+W", L"Close the viewer", L"Viewer delete and exit"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_LEFT, 0, L"Left", L"Navigate or pan left", L"Viewer navigation"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_RIGHT, 0, L"Right", L"Navigate or pan right", L"Viewer navigation"},
@@ -144,12 +144,15 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('1'), 0, L"1", L"Show the image at actual size", L"Viewer compare and display"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('H'), 0, L"H", L"Fit the image to the window height", L"Viewer zoom and display"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('W'), 0, L"W", L"Fit the image to the window width", L"Viewer zoom and display"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('H'), FCONTROL | FSHIFT, L"Ctrl+Shift+H", L"Size the window to the monitor work-area height", L"Viewer window"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('W'), FCONTROL | FSHIFT, L"Ctrl+Shift+W", L"Size the window to the monitor work-area width", L"Viewer window"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('L'), 0, L"L", L"Rotate the image left", L"Viewer transform and compare"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('R'), 0, L"R", L"Rotate the image right", L"Viewer transform and compare"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('C'), 0, L"C", L"Toggle comparison mode", L"Viewer transform and compare"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('X'), 0, L"X", L"Activate the compared image", L"Viewer transform and compare"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_SPACE, 0, L"Space", L"Start or stop the slideshow", L"Viewer slideshow and Quick Actions"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_F11, 0, L"F11", L"Toggle full-screen mode", L"Viewer window"},
+        ShortcutDefinition{ShortcutContext::Viewer, 0, VK_RETURN, FCONTROL, L"Ctrl+Enter", L"Toggle full-screen mode", L"Viewer window"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_DELETE, 0, L"Del", L"Move the displayed file to the Recycle Bin", L"Viewer delete and exit"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_DELETE, FSHIFT, L"Shift+Del", L"Delete the displayed file permanently", L"Viewer delete and exit"},
     };

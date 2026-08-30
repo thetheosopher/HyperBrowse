@@ -156,6 +156,7 @@ namespace hyperbrowse::viewer
         {
             Fit,
             FitHeight,
+            FitWidth,
             Custom,
         };
 
@@ -218,6 +219,7 @@ namespace hyperbrowse::viewer
         void ZoomBy(double factor, const POINT* anchorPoint = nullptr);
         void FitToWindow();
         void FitToHeight();
+        void FitToWidth();
         void SetActualSize();
         void RotateLeft();
         void RotateRight();
@@ -248,7 +250,7 @@ namespace hyperbrowse::viewer
         void BeginTransitionFromPending();
         void StopTransition(bool clearPending = true);
         TransitionStyle ResolveActiveTransitionStyle() noexcept;
-        void ResetViewState(bool preserveFitHeight = false);
+        void ResetViewState(bool preserveFitMode = false);
         void CalculatePanLimits(double& maxPanX, double& maxPanY) const;
         void ClampPanOffsets();
         bool CanPanHorizontally() const;
@@ -258,8 +260,10 @@ namespace hyperbrowse::viewer
         int ActiveCompareIndex() const noexcept;
         double FitScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const;
         double FitHeightScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const;
+        double FitWidthScaleForImage(const cache::CachedThumbnail& image, const RECT& clientRect) const;
         double FitScaleForClient(const RECT& clientRect) const;
         double FitHeightScaleForClient(const RECT& clientRect) const;
+        double FitWidthScaleForClient(const RECT& clientRect) const;
         double EffectiveScaleForClient(const RECT& clientRect) const;
         void DrawImageBitmap(ID2D1RenderTarget* renderTarget,
                              ID2D1Bitmap* bitmap,
@@ -337,6 +341,7 @@ namespace hyperbrowse::viewer
         bool panning_{};
         POINT lastPanPoint_{};
         bool fullScreen_{};
+        bool hasWindowedStateToRestore_{};
         WindowFitMode windowFitMode_{WindowFitMode::Regular};
         bool hasRegularPlacementBeforeFit_{};
         WINDOWPLACEMENT regularPlacementBeforeFit_{sizeof(WINDOWPLACEMENT)};

@@ -11222,7 +11222,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileConvertMenu), L"Con&vert");
 
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ESCAPE, closeMainWindowOnEscape_ ? L"C&lose\tEsc" : L"Minimi&ze\tEsc");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_ESCAPE, closeMainWindowOnEscape_ ? L"C&lose\tEsc" : L"I&gnore\tEsc");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_EXIT, L"E&xit");
 
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode\tCtrl+1");
@@ -23683,10 +23683,6 @@ namespace hyperbrowse::ui
             {
                 PostMessageW(hwnd_, WM_CLOSE, 0, 0);
             }
-            else
-            {
-                ShowWindow(hwnd_, SW_MINIMIZE);
-            }
             return true;
         case ID_FILE_MINIMIZE:
             ShowWindow(hwnd_, SW_MINIMIZE);
@@ -23697,7 +23693,7 @@ namespace hyperbrowse::ui
                         ID_FILE_ESCAPE,
                         MF_BYCOMMAND | MF_STRING,
                         ID_FILE_ESCAPE,
-                        closeMainWindowOnEscape_ ? L"&Close\tEsc" : L"&Minimize\tEsc");
+                        closeMainWindowOnEscape_ ? L"&Close\tEsc" : L"&Ignore\tEsc");
             RefreshPersistentMenuOwnerDraw();
             UpdateMenuState();
             return true;
