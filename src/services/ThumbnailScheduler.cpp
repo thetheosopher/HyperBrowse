@@ -200,9 +200,11 @@ namespace hyperbrowse::services
 
     ThumbnailScheduler::ThumbnailScheduler(std::size_t cacheCapacityBytes,
                                            std::size_t workerCount,
-                                           util::ResourceProfile resourceProfile)
+                                           util::ResourceProfile resourceProfile,
+                                           std::function<void()> persistenceBeforeJobHook)
         : cache_(ResolveThumbnailCacheCapacityBytes(cacheCapacityBytes, resourceProfile))
         , diskCache_(cache_.CapacityBytes())
+        , persistenceBeforeJobHook_(std::move(persistenceBeforeJobHook))
     {
         const std::size_t totalWorkerCount = ResolveWorkerCount(workerCount, resourceProfile);
         const std::size_t rawWorkerCount = ResolveRawWorkerCount(totalWorkerCount, resourceProfile);
@@ -212,9 +214,10 @@ namespace hyperbrowse::services
         generalWorkers_.reserve(generalWorkerCount);
         for (std::size_t index = 0; index < generalWorkerCount; ++index)
         {
-            generalWorkers_.emplace_back([this]()
+            const bool foregroundLane = index == 0;
+            generalWorkers_.emplace_back([this, foregroundLane]()
             {
-                WorkerLoop(WorkerKind::General);
+                WorkerLoop(WorkerKind::General, foregroundLane);
             });
         }
 
@@ -227,25 +230,14 @@ namespace hyperbrowse::services
             });
         }
 
-        diskInvalidationWorker_ = std::thread([this]()
+        diskPersistenceWorker_ = std::thread([this]()
         {
-            DiskInvalidationLoop();
+            DiskPersistenceLoop();
         });
     }
 
     ThumbnailScheduler::~ThumbnailScheduler()
     {
-        {
-            std::scoped_lock lock(diskInvalidationMutex_);
-            diskInvalidationShuttingDown_ = true;
-            pendingDiskInvalidations_.clear();
-        }
-        diskInvalidationAvailable_.notify_all();
-        if (diskInvalidationWorker_.joinable())
-        {
-            diskInvalidationWorker_.join();
-        }
-
         {
             std::scoped_lock lock(mutex_);
             shuttingDown_ = true;
@@ -262,6 +254,16 @@ namespace hyperbrowse::services
             {
                 worker.join();
             }
+        }
+
+        {
+            std::scoped_lock lock(diskPersistenceMutex_);
+            diskPersistenceShuttingDown_ = true;
+        }
+        diskPersistenceAvailable_.notify_all();
+        if (diskPersistenceWorker_.joinable())
+        {
+            diskPersistenceWorker_.join();
         }
 
         for (std::thread& worker : rawWorkers_)
@@ -285,6 +287,7 @@ namespace hyperbrowse::services
             std::scoped_lock lock(mutex_);
             activeSessionId_ = sessionId;
             activeRequestEpoch_ = requestEpoch;
+            foregroundLaneEnabled_ = false;
             requestedKeys_.clear();
             pendingJobs_.clear();
             queuedKeys_.clear();
@@ -296,6 +299,8 @@ namespace hyperbrowse::services
                 {
                     continue;
                 }
+
+                foregroundLaneEnabled_ = foregroundLaneEnabled_ || workItem.priority == 0;
 
                 const auto inflight = inflightJobs_.find(workItem.cacheKey);
                 if (inflight != inflightJobs_.end())
@@ -363,13 +368,16 @@ namespace hyperbrowse::services
         // blocks for seconds behind concurrent thumbnail stores. Callers include the
         // UI thread, which must not stall on disk I/O.
         {
-            std::scoped_lock diskLock(diskInvalidationMutex_);
-            if (!diskInvalidationShuttingDown_)
+            std::scoped_lock diskLock(diskPersistenceMutex_);
+            if (!diskPersistenceShuttingDown_)
             {
-                pendingDiskInvalidations_.push_back(filePaths);
+                DiskPersistenceJob job;
+                job.kind = DiskPersistenceJob::Kind::Invalidate;
+                job.filePaths = filePaths;
+                pendingDiskPersistence_.push_back(std::move(job));
             }
         }
-        diskInvalidationAvailable_.notify_one();
+        diskPersistenceAvailable_.notify_one();
 
         std::unordered_set<std::wstring> normalizedPaths;
         normalizedPaths.reserve(filePaths.size());
@@ -393,31 +401,78 @@ namespace hyperbrowse::services
         }
     }
 
-    void ThumbnailScheduler::DiskInvalidationLoop()
+    void ThumbnailScheduler::EnqueueDiskStore(const cache::ThumbnailCacheKey& cacheKey,
+                                               std::shared_ptr<const cache::CachedThumbnail> thumbnail)
+    {
+        if (!thumbnail)
+        {
+            return;
+        }
+
+        {
+            std::scoped_lock lock(diskPersistenceMutex_);
+            if (diskPersistenceShuttingDown_)
+            {
+                return;
+            }
+
+            DiskPersistenceJob job;
+            job.kind = DiskPersistenceJob::Kind::Store;
+            job.cacheKey = cacheKey;
+            job.thumbnail = std::move(thumbnail);
+            pendingDiskPersistence_.push_back(std::move(job));
+        }
+        diskPersistenceAvailable_.notify_one();
+    }
+
+    void ThumbnailScheduler::DiskPersistenceLoop()
     {
         for (;;)
         {
-            std::vector<std::wstring> filePaths;
+            DiskPersistenceJob job;
             {
-                std::unique_lock lock(diskInvalidationMutex_);
-                diskInvalidationAvailable_.wait(lock, [this]()
+                std::unique_lock lock(diskPersistenceMutex_);
+                diskPersistenceAvailable_.wait(lock, [this]()
                 {
-                    return diskInvalidationShuttingDown_ || !pendingDiskInvalidations_.empty();
+                    return diskPersistenceShuttingDown_ || !pendingDiskPersistence_.empty();
                 });
 
-                if (diskInvalidationShuttingDown_)
+                if (diskPersistenceShuttingDown_ && pendingDiskPersistence_.empty())
                 {
-                    // Pending invalidations are dropped on shutdown; stale entries are
-                    // keyed by path plus modified timestamp, so they can never produce a
-                    // wrong thumbnail, and cache compaction reclaims their disk space.
                     return;
                 }
 
-                filePaths = std::move(pendingDiskInvalidations_.front());
-                pendingDiskInvalidations_.pop_front();
+                job = std::move(pendingDiskPersistence_.front());
+                pendingDiskPersistence_.pop_front();
             }
 
-            diskCache_.InvalidateFilePaths(filePaths);
+            try
+            {
+                if (persistenceBeforeJobHook_)
+                {
+                    persistenceBeforeJobHook_();
+                }
+
+                util::Stopwatch diskPersistenceTimer;
+                if (job.kind == DiskPersistenceJob::Kind::Store)
+                {
+                    diskCache_.Store(job.cacheKey, std::move(job.thumbnail));
+                    util::RecordTiming(L"thumbnail.disk.store", diskPersistenceTimer.ElapsedMilliseconds());
+                }
+                else
+                {
+                    diskCache_.InvalidateFilePaths(job.filePaths);
+                    util::RecordTiming(L"thumbnail.disk.invalidate", diskPersistenceTimer.ElapsedMilliseconds());
+                }
+            }
+            catch (const std::exception&)
+            {
+                util::IncrementCounter(L"thumbnail.disk_persistence.exception");
+            }
+            catch (...)
+            {
+                util::IncrementCounter(L"thumbnail.disk_persistence.unknown_exception");
+            }
         }
     }
 
@@ -511,11 +566,34 @@ namespace hyperbrowse::services
 
     bool ThumbnailScheduler::HasDispatchableWorkLocked(WorkerKind kind) const
     {
-        (void)kind;
-        return !pendingJobs_.empty() && activeWorkerCount_ < activeDecodeLimit_;
+        return HasDispatchableWorkLocked(kind, false);
     }
 
-    void ThumbnailScheduler::WorkerLoop(WorkerKind kind)
+    bool ThumbnailScheduler::HasDispatchableWorkLocked(WorkerKind kind, bool foregroundLane) const
+    {
+        (void)kind;
+        if (activeWorkerCount_ >= activeDecodeLimit_)
+        {
+            return false;
+        }
+
+        if (!foregroundLane)
+        {
+            return !pendingJobs_.empty();
+        }
+
+        if (!foregroundLaneEnabled_)
+        {
+            return false;
+        }
+
+        return std::any_of(pendingJobs_.begin(), pendingJobs_.end(), [](const PendingJob& job)
+        {
+            return job.workItem.priority == 0;
+        });
+    }
+
+    void ThumbnailScheduler::WorkerLoop(WorkerKind kind, bool foregroundLane)
     {
         while (true)
         {
@@ -524,9 +602,9 @@ namespace hyperbrowse::services
                 && decode::IsNvJpegRuntimeAvailable();
             {
                 std::unique_lock lock(mutex_);
-                workAvailable_.wait(lock, [this, kind]()
+                workAvailable_.wait(lock, [this, kind, foregroundLane]()
                 {
-                    return shuttingDown_ || HasDispatchableWorkLocked(kind);
+                    return shuttingDown_ || HasDispatchableWorkLocked(kind, foregroundLane);
                 });
 
                 if (shuttingDown_)
@@ -541,6 +619,20 @@ namespace hyperbrowse::services
 
                 const auto selectJobsForKind = [&](WorkerKind jobKind)
                 {
+                    if (foregroundLane)
+                    {
+                        for (auto iterator = pendingJobs_.begin(); iterator != pendingJobs_.end(); ++iterator)
+                        {
+                            if (iterator->workItem.priority == 0)
+                            {
+                                jobs.push_back(*iterator);
+                                selectedIterators.push_back(iterator);
+                                break;
+                            }
+                        }
+                        return;
+                    }
+
                     if (jobKind == WorkerKind::Raw)
                     {
                         for (auto iterator = pendingJobs_.begin(); iterator != pendingJobs_.end(); ++iterator)
@@ -599,7 +691,7 @@ namespace hyperbrowse::services
                 };
 
                 selectJobsForKind(kind);
-                if (jobs.empty())
+                if (jobs.empty() && !foregroundLane)
                 {
                     const WorkerKind fallbackKind = kind == WorkerKind::Raw
                         ? WorkerKind::General
@@ -636,10 +728,34 @@ namespace hyperbrowse::services
                 if (job.isRaw)
                 {
                     hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.raw", queueWaitMs);
+                    if (job.workItem.priority == 0)
+                    {
+                        hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.raw.priority0", queueWaitMs);
+                    }
+                    else if (job.workItem.priority == 1)
+                    {
+                        hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.raw.priority1", queueWaitMs);
+                    }
+                    else if (job.workItem.priority == 2)
+                    {
+                        hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.raw.priority2", queueWaitMs);
+                    }
                 }
                 else
                 {
                     hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.general", queueWaitMs);
+                    if (job.workItem.priority == 0)
+                    {
+                        hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.general.priority0", queueWaitMs);
+                    }
+                    else if (job.workItem.priority == 1)
+                    {
+                        hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.general.priority1", queueWaitMs);
+                    }
+                    else if (job.workItem.priority == 2)
+                    {
+                        hyperbrowse::util::RecordTiming(L"thumbnail.queue.wait.general.priority2", queueWaitMs);
+                    }
                 }
             }
 
@@ -664,7 +780,9 @@ namespace hyperbrowse::services
                     thumbnails[index] = cache_.Find(jobs[index].workItem.cacheKey);
                     if (!thumbnails[index] && useDiskCache)
                     {
+                        util::Stopwatch diskLoadTimer;
                         thumbnails[index] = diskCache_.TryLoad(jobs[index].workItem.cacheKey);
+                        util::RecordTiming(L"thumbnail.disk.load", diskLoadTimer.ElapsedMilliseconds());
                         if (thumbnails[index])
                         {
                             cache_.Insert(jobs[index].workItem.cacheKey, thumbnails[index]);
@@ -692,9 +810,9 @@ namespace hyperbrowse::services
             // queue. If every job's request epoch is now stale we skip the decode entirely
             // (nothing is observing the result). This stops scroll-driven decode storms
             // from continuing after the user has already moved on.
+            std::vector<bool> relevant(jobs.size(), false);
             bool batchStillRelevant = false;
             {
-                std::scoped_lock lock(mutex_);
                 if (shuttingDown_)
                 {
                     if (activeWorkerCount_ > 0)
@@ -704,13 +822,13 @@ namespace hyperbrowse::services
                     workAvailable_.notify_all();
                     return;
                 }
-                for (const PendingJob& job : jobs)
+                for (std::size_t index = 0; index < jobs.size(); ++index)
                 {
-                    if (job.requestEpoch == activeRequestEpoch_
-                        || requestedKeys_.contains(job.workItem.cacheKey))
+                    relevant[index] = jobs[index].requestEpoch == activeRequestEpoch_
+                        || requestedKeys_.contains(jobs[index].workItem.cacheKey);
+                    if (relevant[index])
                     {
                         batchStillRelevant = true;
-                        break;
                     }
                 }
             }
@@ -721,6 +839,28 @@ namespace hyperbrowse::services
                 std::fill(cancelled.begin(), cancelled.end(), true);
                 missingKeys.clear();
                 missingIndices.clear();
+            }
+            else
+            {
+                std::vector<std::size_t> relevantMissingIndices;
+                std::vector<cache::ThumbnailCacheKey> relevantMissingKeys;
+                relevantMissingIndices.reserve(missingIndices.size());
+                relevantMissingKeys.reserve(missingKeys.size());
+                for (std::size_t index = 0; index < missingIndices.size(); ++index)
+                {
+                    const std::size_t jobIndex = missingIndices[index];
+                    if (!relevant[jobIndex])
+                    {
+                        cancelled[jobIndex] = true;
+                        util::IncrementCounter(L"thumbnail.batch.cancelled_stale_items");
+                        continue;
+                    }
+
+                    relevantMissingIndices.push_back(jobIndex);
+                    relevantMissingKeys.push_back(std::move(missingKeys[index]));
+                }
+                missingIndices = std::move(relevantMissingIndices);
+                missingKeys = std::move(relevantMissingKeys);
             }
 
             try
@@ -774,16 +914,13 @@ namespace hyperbrowse::services
 
             for (std::size_t index = 0; index < jobs.size(); ++index)
             {
+                util::Stopwatch readyNotificationTimer;
                 const std::shared_ptr<const cache::CachedThumbnail>& thumbnail = thumbnails[index];
                 if (thumbnail)
                 {
                     try
                     {
                         cache_.Insert(jobs[index].workItem.cacheKey, thumbnail);
-                        if (allowDiskCacheStore)
-                        {
-                            diskCache_.Store(jobs[index].workItem.cacheKey, thumbnail);
-                        }
                     }
                     catch (const std::exception&)
                     {
@@ -846,13 +983,22 @@ namespace hyperbrowse::services
 
                 if (shouldNotify)
                 {
-                    PostReady(jobs[index].sessionId,
-                              jobs[index].requestEpoch,
-                              jobs[index].workItem.modelIndex,
-                              jobs[index].workItem.cacheKey,
-                              thumbnail ? thumbnail->SourceWidth() : 0,
-                              thumbnail ? thumbnail->SourceHeight() : 0,
-                              thumbnail != nullptr);
+                    const bool readyPosted = PostReady(jobs[index].sessionId,
+                                                        jobs[index].requestEpoch,
+                                                        jobs[index].workItem.modelIndex,
+                                                        jobs[index].workItem.cacheKey,
+                                                        thumbnail ? thumbnail->SourceWidth() : 0,
+                                                        thumbnail ? thumbnail->SourceHeight() : 0,
+                                                        thumbnail != nullptr);
+                    if (readyPosted)
+                    {
+                        util::RecordTiming(L"thumbnail.ready.post", readyNotificationTimer.ElapsedMilliseconds());
+                    }
+                }
+
+                if (thumbnail && allowDiskCacheStore)
+                {
+                    EnqueueDiskStore(jobs[index].workItem.cacheKey, thumbnail);
                 }
             }
 
@@ -867,7 +1013,7 @@ namespace hyperbrowse::services
         }
     }
 
-    void ThumbnailScheduler::PostReady(std::uint64_t sessionId,
+    bool ThumbnailScheduler::PostReady(std::uint64_t sessionId,
                                        std::uint64_t requestEpoch,
                                        int modelIndex,
                                        const cache::ThumbnailCacheKey& cacheKey,
@@ -883,7 +1029,7 @@ namespace hyperbrowse::services
 
         if (!targetWindow)
         {
-            return;
+            return false;
         }
 
         auto update = std::make_unique<ThumbnailReadyUpdate>();
@@ -897,9 +1043,10 @@ namespace hyperbrowse::services
 
         if (!PostMessageW(targetWindow, kMessageId, 0, reinterpret_cast<LPARAM>(update.get())))
         {
-            return;
+            return false;
         }
 
         update.release();
+        return true;
     }
 }

@@ -47,6 +47,7 @@
 #include "ui/QuickSend.h"
 #include "ui/ShortcutCatalog.h"
 #include "util/BackgroundExecutor.h"
+#include "util/Diagnostics.h"
 #include "util/SettingsRegistry.h"
 #include "util/UiTextSize.h"
 #include "viewer/ViewerWindow.h"
@@ -1899,6 +1900,57 @@ namespace
         scheduler.Schedule(7, 2, requests);
         PumpMessagesFor(300);
         Expect(state->thumbnailResult.readyCount == 0, "Cached thumbnails should not be re-decoded on the next schedule pass");
+
+        const auto diagnostics = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+        const auto readyTiming = std::find_if(diagnostics.timings.begin(), diagnostics.timings.end(), [](const auto& timing)
+        {
+            return timing.name == L"thumbnail.ready.post";
+        });
+        Expect(readyTiming != diagnostics.timings.end() && readyTiming->count > 0,
+               "Thumbnail scheduler did not record ready-message posting latency");
+
+        const auto visibleQueueTiming = std::find_if(diagnostics.timings.begin(), diagnostics.timings.end(), [](const auto& timing)
+        {
+            return timing.name == L"thumbnail.queue.wait.general.priority0";
+        });
+        Expect(visibleQueueTiming != diagnostics.timings.end() && visibleQueueTiming->count > 0,
+               "Thumbnail scheduler did not record visible general-worker queue latency");
+    }
+
+    void RunThumbnailReadyBeforePersistenceScenario(HWND hwnd, TestWindowState* state)
+    {
+        TempFolder root(L"HyperBrowseThumbnailReadyBeforePersistence");
+        const fs::path imagePath = root.Root() / L"visible.jpg";
+        WriteTestImage(imagePath, TestImageFormat::Jpeg, 24, 48, 6);
+        const auto key = MakeCacheKey(imagePath, 21);
+
+        std::atomic<bool> persistenceStarted{false};
+        std::atomic<bool> releasePersistence{false};
+        hyperbrowse::services::ThumbnailScheduler scheduler(
+            8ULL * 1024ULL * 1024ULL,
+            1,
+            hyperbrowse::util::ResourceProfile::Balanced,
+            [&]()
+            {
+                persistenceStarted.store(true, std::memory_order_release);
+                while (!releasePersistence.load(std::memory_order_acquire))
+                {
+                    Sleep(1);
+                }
+            });
+        scheduler.BindTargetWindow(hwnd);
+
+        ResetThumbnailResult(state, 9);
+        scheduler.Schedule(9, 1, {{0, key, 0, true}});
+        const bool readyPostedWhilePersistenceWasBlocked = PumpMessagesUntil([&]()
+        {
+            return state->thumbnailResult.readyCount >= 1
+                && persistenceStarted.load(std::memory_order_acquire);
+        }, 5000);
+        releasePersistence.store(true, std::memory_order_release);
+
+        Expect(readyPostedWhilePersistenceWasBlocked,
+               "Thumbnail ready update did not arrive while persistent storage was deliberately blocked");
     }
 
         void RunThumbnailSchedulerFailureScenario(HWND hwnd, TestWindowState* state)
@@ -4067,6 +4119,7 @@ int main(int argc, char* argv[])
             RunFileConflictPlanningScenario();
             RunThumbnailSchedulerWorkerAllocationScenario();
             RunThumbnailSchedulerScenario(hwnd, &state);
+            RunThumbnailReadyBeforePersistenceScenario(hwnd, &state);
             RunThumbnailSchedulerFailureScenario(hwnd, &state);
             RunThumbnailFailureClassificationScenario();
             RunImageMetadataServiceScenario();

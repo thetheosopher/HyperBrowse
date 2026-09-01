@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -51,7 +52,8 @@ namespace hyperbrowse::services
 
         explicit ThumbnailScheduler(std::size_t cacheCapacityBytes = 0,
                                     std::size_t workerCount = 0,
-                                    util::ResourceProfile resourceProfile = util::ResourceProfile::Balanced);
+                                    util::ResourceProfile resourceProfile = util::ResourceProfile::Balanced,
+                                    std::function<void()> persistenceBeforeJobHook = {});
         ~ThumbnailScheduler();
 
         static std::size_t ResolveCacheCapacityBytes(std::size_t requestedCapacityBytes,
@@ -115,16 +117,33 @@ namespace hyperbrowse::services
             bool preferCpu{};
         };
 
+        struct DiskPersistenceJob
+        {
+            enum class Kind
+            {
+                Store,
+                Invalidate,
+            };
+
+            Kind kind{Kind::Store};
+            cache::ThumbnailCacheKey cacheKey;
+            std::shared_ptr<const cache::CachedThumbnail> thumbnail;
+            std::vector<std::wstring> filePaths;
+        };
+
         bool HasDispatchableWorkLocked(WorkerKind kind) const;
-        void WorkerLoop(WorkerKind kind);
-        void DiskInvalidationLoop();
-        void PostReady(std::uint64_t sessionId,
-                       std::uint64_t requestEpoch,
-                       int modelIndex,
-                       const cache::ThumbnailCacheKey& cacheKey,
-                       int imageWidth,
-                       int imageHeight,
-                       bool success) const;
+        bool HasDispatchableWorkLocked(WorkerKind kind, bool foregroundLane) const;
+        void WorkerLoop(WorkerKind kind, bool foregroundLane = false);
+        void DiskPersistenceLoop();
+        void EnqueueDiskStore(const cache::ThumbnailCacheKey& cacheKey,
+                              std::shared_ptr<const cache::CachedThumbnail> thumbnail);
+        bool PostReady(std::uint64_t sessionId,
+                   std::uint64_t requestEpoch,
+                   int modelIndex,
+                   const cache::ThumbnailCacheKey& cacheKey,
+                   int imageWidth,
+                   int imageHeight,
+                   bool success) const;
 
         mutable std::mutex mutex_;
         std::condition_variable workAvailable_;
@@ -141,21 +160,19 @@ namespace hyperbrowse::services
         std::unordered_map<cache::ThumbnailCacheKey, std::wstring, cache::ThumbnailCacheKeyHasher> failureMessages_;
         std::size_t activeWorkerCount_{};
         std::size_t activeDecodeLimit_{1};
+        bool foregroundLaneEnabled_{};
         std::vector<std::thread> generalWorkers_;
         std::vector<std::thread> rawWorkers_;
         cache::ThumbnailCache cache_;
         cache::DiskThumbnailCache diskCache_;
         bool diskCacheEnabled_{true};
         bool pressureModeEnabled_{};
+        std::function<void()> persistenceBeforeJobHook_;
 
-        // Persistent-cache invalidation is serialized behind a process-wide filesystem
-        // mutex and rewrites the whole on-disk index, so it can block for seconds while
-        // thumbnail workers are storing entries. It is queued here and drained by a
-        // dedicated thread so callers (notably the UI thread) never wait on it.
-        mutable std::mutex diskInvalidationMutex_;
-        std::condition_variable diskInvalidationAvailable_;
-        std::deque<std::vector<std::wstring>> pendingDiskInvalidations_;
-        bool diskInvalidationShuttingDown_{};
-        std::thread diskInvalidationWorker_;
+        mutable std::mutex diskPersistenceMutex_;
+        std::condition_variable diskPersistenceAvailable_;
+        std::deque<DiskPersistenceJob> pendingDiskPersistence_;
+        bool diskPersistenceShuttingDown_{};
+        std::thread diskPersistenceWorker_;
     };
 }

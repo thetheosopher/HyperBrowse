@@ -39,6 +39,7 @@ namespace
     constexpr int kNearVisiblePriority = 1;
     constexpr int kProactivePrefetchPriority = 2;
     constexpr int kThumbnailNearVisiblePrefetchRows = 2;
+    constexpr int kThumbnailActiveScrollPrefetchRows = 1;
     constexpr int kThumbnailMinimumTopOfFolderPrefetchRows = 10;
     constexpr int kThumbnailMaximumTopOfFolderPrefetchRows = 40;
     constexpr int kThumbnailMinimumLookAheadPrefetchRows = 4;
@@ -2168,6 +2169,7 @@ namespace hyperbrowse::browser
         }
 
         HideThumbnailTooltip();
+        thumbnailScrollDirection_ = clampedValue > scrollOffsetY_ ? 1 : -1;
         scrollOffsetY_ = clampedValue;
         SCROLLINFO scrollInfo{};
         scrollInfo.cbSize = sizeof(scrollInfo);
@@ -3255,17 +3257,31 @@ namespace hyperbrowse::browser
         const int columns = ColumnsForClientWidth(clientRect.right - clientRect.left);
         const int verticalStride = layout.itemHeight + layout.cellPadding;
         const int firstVisibleRow = std::max(0, scrollOffsetY_ / verticalStride);
+        if (thumbnailScrollbarThumbTracking_
+            && firstVisibleRow == lastScheduledThumbnailViewportRow_)
+        {
+            return;
+        }
         const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
         const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
-        const int proactivePrefetchRows = scrollOffsetY_ == 0
-            ? std::clamp(visibleRowCount * TopOfFolderThumbnailWarmUpMultiplier(resourceProfile_),
-                         kThumbnailMinimumTopOfFolderPrefetchRows,
-                         kThumbnailMaximumTopOfFolderPrefetchRows)
-            : std::clamp(visibleRowCount * LookAheadThumbnailWarmUpMultiplier(resourceProfile_),
-                         kThumbnailMinimumLookAheadPrefetchRows,
-                         kThumbnailMaximumLookAheadPrefetchRows);
-        const int requestStartRow = std::max(0, firstVisibleRow - kThumbnailNearVisiblePrefetchRows);
-        const int requestEndRow = lastVisibleRow + kThumbnailNearVisiblePrefetchRows + proactivePrefetchRows;
+        const bool activelyScrolling = thumbnailScrollbarThumbTracking_ || smoothScrollTimerId_ != 0;
+        const int proactivePrefetchRows = activelyScrolling
+            ? kThumbnailActiveScrollPrefetchRows
+            : (scrollOffsetY_ == 0
+                ? std::clamp(visibleRowCount * TopOfFolderThumbnailWarmUpMultiplier(resourceProfile_),
+                             kThumbnailMinimumTopOfFolderPrefetchRows,
+                             kThumbnailMaximumTopOfFolderPrefetchRows)
+                : std::clamp(visibleRowCount * LookAheadThumbnailWarmUpMultiplier(resourceProfile_),
+                             kThumbnailMinimumLookAheadPrefetchRows,
+                             kThumbnailMaximumLookAheadPrefetchRows));
+        const int backwardPrefetchRows = thumbnailScrollDirection_ < 0
+            ? proactivePrefetchRows
+            : kThumbnailNearVisiblePrefetchRows;
+        const int forwardPrefetchRows = thumbnailScrollDirection_ > 0
+            ? proactivePrefetchRows
+            : kThumbnailNearVisiblePrefetchRows;
+        const int requestStartRow = std::max(0, firstVisibleRow - backwardPrefetchRows);
+        const int requestEndRow = lastVisibleRow + forwardPrefetchRows;
         const int firstIndex = requestStartRow * columns;
         const int lastIndex = std::min(static_cast<int>(orderedModelIndices_.size()), (requestEndRow + 1) * columns);
         const int targetWidth = layout.previewWidth;
@@ -3310,6 +3326,7 @@ namespace hyperbrowse::browser
         }
 
         ++thumbnailRequestEpoch_;
+        lastScheduledThumbnailViewportRow_ = firstVisibleRow;
         thumbnailScheduler_->Schedule(thumbnailSessionId_, thumbnailRequestEpoch_, std::move(workItems));
     }
 
@@ -4895,19 +4912,24 @@ namespace hyperbrowse::browser
                     nextOffset += static_cast<int>(scrollInfo.nPage);
                     break;
                 case SB_THUMBTRACK:
-                    scheduleVisibleWork = false;
-                    [[fallthrough]];
+                    thumbnailScrollbarThumbTracking_ = true;
+                    nextOffset = hasScrollInfo ? scrollInfo.nTrackPos : thumbPosition;
+                    break;
                 case SB_THUMBPOSITION:
+                    thumbnailScrollbarThumbTracking_ = false;
                     nextOffset = hasScrollInfo ? scrollInfo.nTrackPos : thumbPosition;
                     forceVisibleWork = LOWORD(wParam) == SB_THUMBPOSITION;
                     break;
                 case SB_ENDSCROLL:
+                    thumbnailScrollbarThumbTracking_ = false;
                     forceVisibleWork = true;
                     break;
                 case SB_TOP:
+                    thumbnailScrollbarThumbTracking_ = false;
                     nextOffset = 0;
                     break;
                 case SB_BOTTOM:
+                    thumbnailScrollbarThumbTracking_ = false;
                     nextOffset = scrollInfo.nMax;
                     break;
                 default:

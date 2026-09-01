@@ -348,6 +348,9 @@ namespace hyperbrowse::browser
         std::uint64_t thumbnailSessionId_{1};
         std::uint64_t metadataSessionId_{1};
         std::uint64_t thumbnailRequestEpoch_{};
+        int lastScheduledThumbnailViewportRow_{-1};
+        bool thumbnailScrollbarThumbTracking_{};
+        int thumbnailScrollDirection_{};
         bool stateChangedMessagePending_{};
         mutable std::wstring listViewTextBuffer_;
         mutable std::wstring tooltipTextBuffer_;
