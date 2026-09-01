@@ -813,6 +813,7 @@ namespace hyperbrowse::services
             std::vector<bool> relevant(jobs.size(), false);
             bool batchStillRelevant = false;
             {
+                std::scoped_lock lock(mutex_);
                 if (shuttingDown_)
                 {
                     if (activeWorkerCount_ > 0)

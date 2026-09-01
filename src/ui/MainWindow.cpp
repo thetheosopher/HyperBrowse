@@ -11533,6 +11533,9 @@ namespace hyperbrowse::ui
             toolInfo.uId = reinterpret_cast<UINT_PTR>(treePane_);
             toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
             SendMessageW(tooltipControl_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+        }
+        if (treePane_)
+        {
             SetWindowSubclass(treePane_, &MainWindow::FolderTreeTooltipSubclassProc, 1, reinterpret_cast<DWORD_PTR>(this));
         }
 
@@ -11776,7 +11779,27 @@ namespace hyperbrowse::ui
 
     void MainWindow::RefreshFolderTree()
     {
+        const std::wstring selectedFolderPath = pendingTreeMouseSelectionPath_.empty()
+            ? GetSelectedFolderTreePath()
+            : pendingTreeMouseSelectionPath_;
+        pendingTreeSelectionRestorePath_.clear();
+        pendingTreeSelectionRestoreY_ = 0;
+        if (!selectedFolderPath.empty())
+        {
+            const HTREEITEM selectedItem = FindFolderTreeItemByPath(selectedFolderPath);
+            RECT itemRect{};
+            if (selectedItem && TreeView_GetItemRect(treePane_, selectedItem, &itemRect, TRUE))
+            {
+                pendingTreeSelectionRestorePath_ = selectedFolderPath;
+                pendingTreeSelectionRestoreY_ = itemRect.top;
+            }
+        }
+        pendingTreeMouseSelectionPath_.clear();
         InitializeFolderTree();
+        if (!selectedFolderPath.empty())
+        {
+            SelectFolderInTree(selectedFolderPath);
+        }
     }
 
     HTREEITEM MainWindow::InsertFolderTreeItem(HTREEITEM parentItem,
@@ -12006,6 +12029,7 @@ namespace hyperbrowse::ui
             TreeView_SelectItem(treePane_, currentItem);
             TreeView_EnsureVisible(treePane_, currentItem);
             suppressTreeSelectionChange_ = false;
+            RestoreFolderTreeItemVerticalPosition(currentItem, normalizedPath);
             pendingTreeSelectionPath_.clear();
             return;
         }
@@ -12052,6 +12076,11 @@ namespace hyperbrowse::ui
                 if (!currentItem)
                 {
                     pendingTreeSelectionPath_.clear();
+                    if (FolderPathsEqual(pendingTreeSelectionRestorePath_, normalizedPath))
+                    {
+                        pendingTreeSelectionRestorePath_.clear();
+                        pendingTreeSelectionRestoreY_ = 0;
+                    }
                     return;
                 }
             }
@@ -12061,7 +12090,48 @@ namespace hyperbrowse::ui
         TreeView_SelectItem(treePane_, currentItem);
         TreeView_EnsureVisible(treePane_, currentItem);
         suppressTreeSelectionChange_ = false;
+        RestoreFolderTreeItemVerticalPosition(currentItem, normalizedPath);
         pendingTreeSelectionPath_.clear();
+    }
+
+    void MainWindow::RestoreFolderTreeItemVerticalPosition(HTREEITEM item, const std::wstring& selectedPath)
+    {
+        if (!treePane_ || !item || pendingTreeSelectionRestorePath_.empty()
+            || !FolderPathsEqual(pendingTreeSelectionRestorePath_, selectedPath))
+        {
+            return;
+        }
+
+        RECT itemRect{};
+        if (TreeView_GetItemRect(treePane_, item, &itemRect, TRUE))
+        {
+            const int verticalDelta = itemRect.top - pendingTreeSelectionRestoreY_;
+            if (verticalDelta != 0)
+            {
+                SCROLLINFO scrollInfo{};
+                scrollInfo.cbSize = sizeof(scrollInfo);
+                scrollInfo.fMask = SIF_ALL;
+                if (GetScrollInfo(treePane_, SB_VERT, &scrollInfo))
+                {
+                    const int pageSize = static_cast<int>(scrollInfo.nPage);
+                    const int maxPosition = std::max(
+                        scrollInfo.nMin,
+                        scrollInfo.nMax - std::max(0, pageSize - 1));
+                    const int targetPosition = std::clamp(
+                        scrollInfo.nPos + verticalDelta,
+                        scrollInfo.nMin,
+                        maxPosition);
+                    SendMessageW(
+                        treePane_,
+                        WM_VSCROLL,
+                        MAKEWPARAM(SB_THUMBPOSITION, targetPosition),
+                        0);
+                }
+            }
+        }
+
+        pendingTreeSelectionRestorePath_.clear();
+        pendingTreeSelectionRestoreY_ = 0;
     }
 
     HTREEITEM MainWindow::FindChildFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath) const
@@ -12290,6 +12360,26 @@ namespace hyperbrowse::ui
                                                                  DWORD_PTR refData)
     {
         auto* window = reinterpret_cast<MainWindow*>(refData);
+        if (window && message == WM_LBUTTONDOWN)
+        {
+            window->pendingTreeMouseSelectionPath_.clear();
+
+            if (window->pendingInlineRenameOriginalPath_.empty())
+            {
+                return DefSubclassProc(hwnd, message, wParam, lParam);
+            }
+
+            TVHITTESTINFO hitTest{};
+            hitTest.pt = POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            const HTREEITEM item = TreeView_HitTest(hwnd, &hitTest);
+            if (item && (hitTest.flags & TVHT_ONITEM) != 0)
+            {
+                if (const FolderTreeNodeData* nodeData = window->GetFolderTreeNodeData(item))
+                {
+                    window->pendingTreeMouseSelectionPath_ = nodeData->path;
+                }
+            }
+        }
         if (window && (message == WM_MOUSEMOVE || message == WM_MOUSELEAVE))
         {
             window->RelayFolderTreeTooltipEvent(message, wParam, lParam);
@@ -12325,6 +12415,11 @@ namespace hyperbrowse::ui
         if (!nodeData)
         {
             return 0;
+        }
+
+        if (pendingInlineRenameOriginalPath_.empty())
+        {
+            pendingTreeMouseSelectionPath_.clear();
         }
 
         if (!browserModel_ || !FolderPathsEqual(browserModel_->FolderPath(), nodeData->path))
@@ -12364,6 +12459,7 @@ namespace hyperbrowse::ui
             return TRUE;
         }
 
+        pendingInlineRenameOriginalPath_ = nodeData->path;
         return FALSE; // allow edit
     }
 
@@ -12372,12 +12468,16 @@ namespace hyperbrowse::ui
         // pszText is null when the user cancelled (Esc).
         if (!dispInfo.item.pszText)
         {
+            pendingInlineRenameOriginalPath_.clear();
+            pendingTreeMouseSelectionPath_.clear();
             return 0;
         }
 
         const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(dispInfo.item.hItem);
         if (!nodeData || nodeData->path.empty())
         {
+            pendingInlineRenameOriginalPath_.clear();
+            pendingTreeMouseSelectionPath_.clear();
             return 0;
         }
 
@@ -12385,23 +12485,32 @@ namespace hyperbrowse::ui
         const std::wstring currentLeafName = fs::path(nodeData->path).filename().wstring();
         if (newLeafName.empty() || newLeafName == currentLeafName)
         {
+            pendingInlineRenameOriginalPath_.clear();
+            pendingTreeMouseSelectionPath_.clear();
             return 0; // no change; keep the old label
         }
 
         std::wstring validationError;
         if (!IsValidFolderName(newLeafName, &validationError))
         {
+            pendingInlineRenameOriginalPath_.clear();
+            pendingTreeMouseSelectionPath_.clear();
             MessageBoxW(hwnd_, validationError.c_str(), L"Rename Folder", MB_OK | MB_ICONWARNING);
             return 0;
         }
 
         const std::wstring folderPath = nodeData->path;
         activeTreeFolderRenamePath_ = folderPath;
-        StartFileOperation(services::FileOperationType::Rename,
-                           {folderPath},
-                           {},
-                           services::FileConflictPolicy::PromptShell,
-                           {newLeafName});
+        if (!StartFileOperation(services::FileOperationType::Rename,
+                                {folderPath},
+                                {},
+                                services::FileConflictPolicy::PromptShell,
+                                {newLeafName}))
+        {
+            activeTreeFolderRenamePath_.clear();
+            pendingInlineRenameOriginalPath_.clear();
+            pendingTreeMouseSelectionPath_.clear();
+        }
         // Return 0 so the tree does not apply the label itself; the folder-watch /
         // operation-completion path will refresh the node with the real new name.
         return 0;
@@ -18848,11 +18957,16 @@ namespace hyperbrowse::ui
         }
 
         activeTreeFolderRenamePath_ = folderPath;
-        StartFileOperation(services::FileOperationType::Rename,
-                           {folderPath},
-                           {},
-                           services::FileConflictPolicy::PromptShell,
-                           {renamedLeafName});
+        if (!StartFileOperation(services::FileOperationType::Rename,
+                                {folderPath},
+                                {},
+                                services::FileConflictPolicy::PromptShell,
+                                {renamedLeafName}))
+        {
+            activeTreeFolderRenamePath_.clear();
+            pendingInlineRenameOriginalPath_.clear();
+            pendingTreeMouseSelectionPath_.clear();
+        }
     }
 
     bool MainWindow::BeginFolderTreeInlineRename(const std::wstring& folderPath)
@@ -20256,6 +20370,8 @@ namespace hyperbrowse::ui
         }
 
         std::wstring treeFolderReloadPath;
+        std::wstring treeFolderRenameCreatedPath;
+        bool treeFolderRenameSucceeded = false;
         if (!treeFolderRenamePath.empty() && update.type == services::FileOperationType::Rename)
         {
             const std::size_t renamePairCount = std::min(update.succeededSourcePaths.size(), update.createdPaths.size());
@@ -20267,6 +20383,7 @@ namespace hyperbrowse::ui
                 }
 
                 refreshFolderTree = true;
+                treeFolderRenameCreatedPath = NormalizeFolderPath(update.createdPaths[index]);
                 if (browserModel_ && !browserModel_->FolderPath().empty())
                 {
                     if (browser::PathHasPrefix(browserModel_->FolderPath(), treeFolderRenamePath))
@@ -20282,7 +20399,28 @@ namespace hyperbrowse::ui
                         treeFolderReloadPath = browserModel_->FolderPath();
                     }
                 }
+                treeFolderRenameSucceeded = true;
                 break;
+            }
+        }
+
+        if (treeFolderRenameSucceeded && !pendingTreeMouseSelectionPath_.empty())
+        {
+            if (FolderPathsEqual(pendingTreeMouseSelectionPath_, treeFolderRenamePath)
+                || browser::PathHasPrefix(pendingTreeMouseSelectionPath_, treeFolderRenamePath))
+            {
+                pendingTreeMouseSelectionPath_ = RewritePathPrefix(
+                    pendingTreeMouseSelectionPath_,
+                    treeFolderRenamePath,
+                    treeFolderRenameCreatedPath);
+            }
+
+            treeFolderReloadPath.clear();
+            if (!browserModel_
+                || browserModel_->FolderPath().empty()
+                || !FolderPathsEqual(browserModel_->FolderPath(), pendingTreeMouseSelectionPath_))
+            {
+                treeFolderReloadPath = pendingTreeMouseSelectionPath_;
             }
         }
 
@@ -20711,6 +20849,9 @@ namespace hyperbrowse::ui
         {
             RefreshFolderTree();
         }
+
+        pendingInlineRenameOriginalPath_.clear();
+        pendingTreeMouseSelectionPath_.clear();
 
         if (!fallbackFolderPath.empty())
         {

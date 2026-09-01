@@ -245,6 +245,7 @@ namespace hyperbrowse::ui
         void ShowSelectedFolderInTree();
         void SelectFolderInTree(const std::wstring& folderPath);
         void ContinueSelectingFolderInTree();
+        void RestoreFolderTreeItemVerticalPosition(HTREEITEM item, const std::wstring& selectedPath);
         HTREEITEM FindChildFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath) const;
         HTREEITEM FindFolderTreeItemByPath(const std::wstring& folderPath) const;
         void InsertFolderTreeFolderIfParentLoaded(const std::wstring& folderPath);
@@ -647,6 +648,9 @@ namespace hyperbrowse::ui
         std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
         std::unordered_map<std::uint64_t, std::vector<HTREEITEM>> pendingFolderTreeChildPresenceItems_;
         std::wstring pendingTreeSelectionPath_;
+        std::wstring pendingTreeMouseSelectionPath_;
+        std::wstring pendingTreeSelectionRestorePath_;
+        int pendingTreeSelectionRestoreY_{};
         HTREEITEM treeDragSourceItem_{};
         HTREEITEM treeDragHoverItem_{};
         std::wstring treeDragSourcePath_;
