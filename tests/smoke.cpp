@@ -1964,6 +1964,17 @@ namespace
              "Thumbnail scheduler did not allocate the expected number of general workers");
          Expect(scaledScheduler.RawWorkerCount() == 2,
              "Thumbnail scheduler did not scale the RAW worker allocation above one lane");
+         Expect(scaledScheduler.CacheCapacityBytes() == 8ULL * 1024ULL * 1024ULL,
+             "Thumbnail scheduler did not preserve the configured memory cache capacity");
+         Expect(scaledScheduler.DiskCacheCapacityBytes() == 8ULL * 1024ULL * 1024ULL,
+             "Thumbnail scheduler did not apply the configured capacity to the persistent cache");
+
+         constexpr std::size_t sixteenGigabytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
+         hyperbrowse::services::ThumbnailScheduler largeBudgetScheduler(sixteenGigabytes, 2);
+         Expect(largeBudgetScheduler.CacheCapacityBytes() == sixteenGigabytes,
+             "Thumbnail scheduler did not preserve a 16 GiB memory cache capacity");
+         Expect(largeBudgetScheduler.DiskCacheCapacityBytes() == sixteenGigabytes,
+             "Thumbnail scheduler did not preserve a 16 GiB persistent cache capacity");
         }
 
     void RunImageMetadataServiceScenario()

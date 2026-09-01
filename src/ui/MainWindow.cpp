@@ -21907,12 +21907,15 @@ namespace hyperbrowse::ui
         cacheMaintenanceActive_ = true;
         const HWND targetWindow = hwnd_;
         const auto state = cacheMaintenanceState_;
-        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, state]()
+        const std::size_t persistentCacheCapacityBytes = services::ThumbnailScheduler::ResolveCacheCapacityBytes(
+            thumbnailCacheCapacityOverrideBytes_,
+            resourceProfile_);
+        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, state, persistentCacheCapacityBytes]()
         {
             bool succeeded = true;
             try
             {
-                cache::DiskThumbnailCache persistentCache;
+                cache::DiskThumbnailCache persistentCache(persistentCacheCapacityBytes);
                 auto statistics = persistentCache.QueryStatistics();
                 {
                     std::scoped_lock lock(state->mutex);
@@ -21952,12 +21955,15 @@ namespace hyperbrowse::ui
 
         cacheMaintenanceActive_ = true;
         const HWND targetWindow = hwnd_;
-        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, purge]()
+        const std::size_t persistentCacheCapacityBytes = services::ThumbnailScheduler::ResolveCacheCapacityBytes(
+            thumbnailCacheCapacityOverrideBytes_,
+            resourceProfile_);
+        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, purge, persistentCacheCapacityBytes]()
         {
             bool succeeded = true;
             try
             {
-                cache::DiskThumbnailCache persistentCache;
+                cache::DiskThumbnailCache persistentCache(persistentCacheCapacityBytes);
                 if (purge)
                 {
                     persistentCache.Clear();

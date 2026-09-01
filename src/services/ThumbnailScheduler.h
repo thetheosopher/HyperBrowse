@@ -72,6 +72,7 @@ namespace hyperbrowse::services
         std::wstring KnownFailureMessage(const cache::ThumbnailCacheKey& key) const;
         std::size_t CacheBytes() const;
         std::size_t CacheCapacityBytes() const;
+        std::size_t DiskCacheCapacityBytes() const noexcept;
         std::size_t WorkerCount() const;
         std::size_t GeneralWorkerCount() const;
         std::size_t RawWorkerCount() const;

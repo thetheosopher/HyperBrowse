@@ -202,6 +202,7 @@ namespace hyperbrowse::services
                                            std::size_t workerCount,
                                            util::ResourceProfile resourceProfile)
         : cache_(ResolveThumbnailCacheCapacityBytes(cacheCapacityBytes, resourceProfile))
+        , diskCache_(cache_.CapacityBytes())
     {
         const std::size_t totalWorkerCount = ResolveWorkerCount(workerCount, resourceProfile);
         const std::size_t rawWorkerCount = ResolveRawWorkerCount(totalWorkerCount, resourceProfile);
@@ -486,6 +487,11 @@ namespace hyperbrowse::services
     std::size_t ThumbnailScheduler::CacheCapacityBytes() const
     {
         return cache_.CapacityBytes();
+    }
+
+    std::size_t ThumbnailScheduler::DiskCacheCapacityBytes() const noexcept
+    {
+        return diskCache_.CapacityBytes();
     }
 
     std::size_t ThumbnailScheduler::WorkerCount() const
