@@ -5880,9 +5880,7 @@ namespace hyperbrowse::viewer
                         const float bottomPanelHeight = (overlayMetrics.bottomPanelPaddingY * 2.0f)
                             + overlayMetrics.bottomInfoHeight;
                         const float bottomPanelLeft = clientWidth - 16.0f - bottomPanelWidth;
-                        const float bottomPanelTop = fullMetadataShown
-                            ? clientHeight - 16.0f - bottomPanelHeight
-                            : 16.0f;
+                        const float bottomPanelTop = clientHeight - 16.0f - bottomPanelHeight;
                         D2D1_RECT_F topPanel = D2D1::RectF(16, 16, 16 + topPanelWidth, 16 + topPanelHeight);
                         D2D1_RECT_F bottomPanel = D2D1::RectF(bottomPanelLeft,
                                                               bottomPanelTop,
