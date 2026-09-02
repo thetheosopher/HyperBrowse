@@ -236,6 +236,8 @@ namespace
     constexpr UINT kQuickSendPopupBrowseCommand = kQuickSendPopupCommandBase;
     constexpr UINT kQuickSendPopupDestinationBase = kQuickSendPopupCommandBase + 1;
     constexpr std::size_t kIncrementalFolderWatchEventLimit = 64;
+    constexpr std::uint64_t kFolderTreeChildPresenceCacheTtlMs = 3000;
+    constexpr std::size_t kDeferredLargeFolderPresentationItemLimit = 2048;
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
     constexpr UINT_PTR kFolderEnumerationPresentationTimerId = 9102;
     constexpr UINT kFolderEnumerationPresentationIntervalMs = 50;
@@ -11814,6 +11816,16 @@ namespace hyperbrowse::ui
             return nullptr;
         }
 
+        if (!childrenKnown && requestPresence)
+        {
+            bool cachedHasChildren = false;
+            if (TryGetCachedFolderTreeChildPresence(normalizedPath, &cachedHasChildren))
+            {
+                childrenKnown = true;
+                hasChildren = cachedHasChildren;
+            }
+        }
+
         const ShellTreeItemInfo shellInfo = QueryShellTreeItemInfo(normalizedPath);
 
         auto nodeData = std::make_unique<FolderTreeNodeData>();
@@ -11921,6 +11933,54 @@ namespace hyperbrowse::ui
         UpdateStatusText();
     }
 
+    bool MainWindow::TryGetCachedFolderTreeChildPresence(std::wstring_view folderPath, bool* hasChildren) const
+    {
+        if (!hasChildren || folderPath.empty())
+        {
+            return false;
+        }
+
+        const std::wstring normalizedPath = NormalizeFolderPath(std::wstring(folderPath));
+        const auto iterator = folderTreeChildPresenceCache_.find(normalizedPath);
+        if (iterator == folderTreeChildPresenceCache_.end()
+            || static_cast<std::uint64_t>(GetTickCount64()) - iterator->second.checkedTickCount
+                > kFolderTreeChildPresenceCacheTtlMs)
+        {
+            return false;
+        }
+
+        *hasChildren = iterator->second.hasChildren;
+        return true;
+    }
+
+    void MainWindow::CacheFolderTreeChildPresence(std::wstring_view folderPath, bool hasChildren)
+    {
+        if (folderPath.empty())
+        {
+            return;
+        }
+
+        folderTreeChildPresenceCache_[NormalizeFolderPath(std::wstring(folderPath))] =
+            FolderTreeChildPresenceCacheEntry{hasChildren, static_cast<std::uint64_t>(GetTickCount64())};
+    }
+
+    void MainWindow::InvalidateFolderTreeChildPresence(std::wstring_view folderPath)
+    {
+        if (folderPath.empty())
+        {
+            return;
+        }
+
+        const std::wstring normalizedPath = NormalizeFolderPath(std::wstring(folderPath));
+        folderTreeChildPresenceCache_.erase(normalizedPath);
+
+        const std::wstring parentPath = NormalizeFolderPath(fs::path(normalizedPath).parent_path().wstring());
+        if (!parentPath.empty())
+        {
+            folderTreeChildPresenceCache_.erase(parentPath);
+        }
+    }
+
     void MainWindow::UpdateFolderTreeChildrenIndicator(HTREEITEM item)
     {
         FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
@@ -11964,6 +12024,7 @@ namespace hyperbrowse::ui
 
         nodeData->childrenKnown = true;
         nodeData->hasChildren = !childFolders.empty();
+        CacheFolderTreeChildPresence(nodeData->path, nodeData->hasChildren);
         nodeData->childPresenceLoading = false;
         nodeData->childPresenceRequestId = 0;
         nodeData->childrenLoaded = true;
@@ -20277,6 +20338,14 @@ namespace hyperbrowse::ui
         applyingUndoRedo_ = false;
 
         RecordUndoableOperation(update);
+        for (const std::wstring& path : update.succeededSourcePaths)
+        {
+            InvalidateFolderTreeChildPresence(path);
+        }
+        for (const std::wstring& path : update.createdPaths)
+        {
+            InvalidateFolderTreeChildPresence(path);
+        }
 
         const HWND activationRestoreWindow = foregroundWindowAtFileOperationStart_;
         foregroundWindowAtFileOperationStart_ = nullptr;
@@ -20975,6 +21044,16 @@ namespace hyperbrowse::ui
         if (!browserModel_ || !browserPaneController_)
         {
             return;
+        }
+
+        if (update.requiresFullReload)
+        {
+            folderTreeChildPresenceCache_.clear();
+        }
+        for (const services::FolderWatchEvent& event : update.events)
+        {
+            InvalidateFolderTreeChildPresence(event.path);
+            InvalidateFolderTreeChildPresence(event.oldPath);
         }
 
         const auto reloadFolderPreservingSelection = [&](std::wstring folderPath)
@@ -22940,6 +23019,16 @@ namespace hyperbrowse::ui
         }
 
         folderEnumerationPresentationPending_ = false;
+        if (!clearStartupPathsIfNotFound
+            && folderEnumerationActive_
+            && browserModel_
+            && browserModel_->IsRecursive()
+            && browserModel_->Items().size() > kDeferredLargeFolderPresentationItemLimit)
+        {
+            ScheduleFolderEnumerationPresentation();
+            return;
+        }
+
         util::ScopedTimer timer(L"MainWindow::FlushFolderEnumerationPresentation");
         RefreshBrowserPane();
         TryRestorePendingStartupSelectionPath(clearStartupPathsIfNotFound);
@@ -23175,6 +23264,7 @@ namespace hyperbrowse::ui
                 nodeData->childPresenceRequestId = 0;
                 nodeData->childrenKnown = true;
                 nodeData->hasChildren = childPresence.hasChildren;
+                CacheFolderTreeChildPresence(childPresence.path, childPresence.hasChildren);
                 if (nodeData->hasChildren)
                 {
                     AddFolderTreePlaceholder(item);
@@ -24073,6 +24163,7 @@ namespace hyperbrowse::ui
             UpdateMenuState();
             return true;
         case ID_FILE_REFRESH_TREE:
+            folderTreeChildPresenceCache_.clear();
             RefreshFolderTree();
             return true;
         case ID_FILE_OPEN_SELECTED:

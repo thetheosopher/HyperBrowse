@@ -104,6 +104,12 @@ namespace hyperbrowse::ui
             std::uint64_t childPresenceRequestId{};
         };
 
+        struct FolderTreeChildPresenceCacheEntry
+        {
+            bool hasChildren{};
+            std::uint64_t checkedTickCount{};
+        };
+
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
         static constexpr UINT kDeferredMenuStateMessage = WM_APP + 73;
         static constexpr UINT_PTR kDisplaySurfaceRecoveryTimerId = 9103;
@@ -239,6 +245,9 @@ namespace hyperbrowse::ui
                                        bool requestPresence = true);
             void AddFolderTreePlaceholder(HTREEITEM parentItem);
         void RequestFolderTreeChildPresence(const std::vector<HTREEITEM>& items);
+        bool TryGetCachedFolderTreeChildPresence(std::wstring_view folderPath, bool* hasChildren) const;
+        void CacheFolderTreeChildPresence(std::wstring_view folderPath, bool hasChildren);
+        void InvalidateFolderTreeChildPresence(std::wstring_view folderPath);
         void UpdateFolderTreeChildrenIndicator(HTREEITEM item);
         void RequestFolderTreeChildren(HTREEITEM item);
         void ApplyFolderTreeChildren(HTREEITEM item, std::vector<services::FolderTreeChild> childFolders);
@@ -630,6 +639,7 @@ namespace hyperbrowse::ui
         QuickSendModel quickSendModel_;
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems_;
         std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
+        std::unordered_map<std::wstring, FolderTreeChildPresenceCacheEntry> folderTreeChildPresenceCache_;
         std::unique_ptr<browser::BrowserModel> browserModel_;
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
         std::unique_ptr<services::BatchConvertService> batchConvertService_;
