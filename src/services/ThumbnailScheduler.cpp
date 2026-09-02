@@ -917,25 +917,29 @@ namespace hyperbrowse::services
             {
                 util::Stopwatch readyNotificationTimer;
                 const std::shared_ptr<const cache::CachedThumbnail>& thumbnail = thumbnails[index];
-                if (thumbnail)
-                {
-                    try
-                    {
-                        cache_.Insert(jobs[index].workItem.cacheKey, thumbnail);
-                    }
-                    catch (const std::exception&)
-                    {
-                        util::IncrementCounter(L"thumbnail.cache_store.exception");
-                    }
-                    catch (...)
-                    {
-                        util::IncrementCounter(L"thumbnail.cache_store.unknown_exception");
-                    }
-                }
-
                 bool shouldNotify = false;
                 {
                     std::scoped_lock lock(mutex_);
+                    const bool stillRelevant = jobs[index].requestEpoch == activeRequestEpoch_
+                        || requestedKeys_.contains(jobs[index].workItem.cacheKey);
+                    cancelled[index] = cancelled[index] || !stillRelevant;
+
+                    if (thumbnail && !cancelled[index])
+                    {
+                        try
+                        {
+                            cache_.Insert(jobs[index].workItem.cacheKey, thumbnail);
+                        }
+                        catch (const std::exception&)
+                        {
+                            util::IncrementCounter(L"thumbnail.cache_store.exception");
+                        }
+                        catch (...)
+                        {
+                            util::IncrementCounter(L"thumbnail.cache_store.unknown_exception");
+                        }
+                    }
+
                     if (cancelled[index])
                     {
                         // Cancelled jobs leave failedKeys_ untouched: a cancelled decode
@@ -997,7 +1001,7 @@ namespace hyperbrowse::services
                     }
                 }
 
-                if (thumbnail && allowDiskCacheStore)
+                if (thumbnail && !cancelled[index] && allowDiskCacheStore)
                 {
                     EnqueueDiskStore(jobs[index].workItem.cacheKey, thumbnail);
                 }

@@ -3265,15 +3265,18 @@ namespace hyperbrowse::browser
         const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
         const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
         const bool activelyScrolling = thumbnailScrollbarThumbTracking_ || smoothScrollTimerId_ != 0;
+        const bool loadingFolder = model_->IsEnumerating();
         const int proactivePrefetchRows = activelyScrolling
             ? kThumbnailActiveScrollPrefetchRows
-            : (scrollOffsetY_ == 0
-                ? std::clamp(visibleRowCount * TopOfFolderThumbnailWarmUpMultiplier(resourceProfile_),
-                             kThumbnailMinimumTopOfFolderPrefetchRows,
-                             kThumbnailMaximumTopOfFolderPrefetchRows)
-                : std::clamp(visibleRowCount * LookAheadThumbnailWarmUpMultiplier(resourceProfile_),
-                             kThumbnailMinimumLookAheadPrefetchRows,
-                             kThumbnailMaximumLookAheadPrefetchRows));
+            : (loadingFolder
+                ? kThumbnailNearVisiblePrefetchRows
+                : (scrollOffsetY_ == 0
+                    ? std::clamp(visibleRowCount * TopOfFolderThumbnailWarmUpMultiplier(resourceProfile_),
+                                 kThumbnailMinimumTopOfFolderPrefetchRows,
+                                 kThumbnailMaximumTopOfFolderPrefetchRows)
+                    : std::clamp(visibleRowCount * LookAheadThumbnailWarmUpMultiplier(resourceProfile_),
+                                 kThumbnailMinimumLookAheadPrefetchRows,
+                                 kThumbnailMaximumLookAheadPrefetchRows)));
         const int backwardPrefetchRows = thumbnailScrollDirection_ < 0
             ? proactivePrefetchRows
             : kThumbnailNearVisiblePrefetchRows;
