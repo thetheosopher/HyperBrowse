@@ -14,7 +14,7 @@ Keep thumbnail creation responsive while browsing large folders. Thumbnails in t
 - Scrollbar thumb tracking updates the viewport without scheduling new visible work until the drag completes.
 - JPEG batches can include work that becomes stale during a scroll.
 - A completed decode currently performs the persistent disk-cache write before posting the ready notification to the UI.
-- `DiskThumbnailCache` serializes file access and index updates behind a process-wide mutex; stores can therefore delay unrelated workers.
+- `DiskThumbnailCache` serializes file access behind a process-wide mutex. Persistent metadata now uses an append-only journal, so stores and access batches do not rewrite the full index.
 
 ## Work Plan
 
@@ -54,6 +54,16 @@ Success criteria: rapid scrolling produces less stale decode work while idle bro
 
 Success criteria: improved time-to-first-visible-thumbnail without unacceptable idle-folder warm-up regression or memory pressure.
 
+### Phase 5: Journal persistence
+
+1. [x] Keep `index.tsv` as an atomically replaced compact snapshot and append mutations to `index.journal.tsv`.
+2. [x] Replay valid journal records after the snapshot, ignoring malformed or incomplete final records.
+3. [x] Compact the snapshot and truncate the journal only after the snapshot replacement succeeds.
+4. [x] Persist batched access metadata as journal records and journalize removals, invalidations, clears, and evictions.
+5. [x] Add smoke coverage for restart replay, invalidation replay, malformed journal tails, and compaction.
+
+Success criteria: persistent-cache mutations avoid full index rewrites while restart and corruption behavior remain correct.
+
 ## Guardrails
 
 - Preserve request session and epoch checks so stale work cannot update the browser model.
@@ -76,3 +86,4 @@ Record at minimum:
 ## Decision Log
 
 - 2026-09-01: Start with ready-before-disk-store because the disk cache holds a process-wide filesystem lock and currently sits before the UI notification. This is a small, reversible change with a direct user-visible latency benefit.
+- 2026-09-01: Replace per-mutation index rewrites with an append-only journal and atomic snapshot compaction. The journal preserves replayable metadata while reducing write amplification for stores and access updates.

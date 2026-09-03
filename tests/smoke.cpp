@@ -1518,6 +1518,7 @@ namespace
 
         hyperbrowse::cache::DiskThumbnailCache cache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
         cache.Store(key, thumbnail);
+        Expect(cache.Compact(), "Persistent thumbnail cache did not compact its initial journal");
          std::wstring indexLineBeforeHit;
          {
              std::wifstream indexStream(cacheRoot / L"index.tsv");
@@ -1538,15 +1539,19 @@ namespace
              Expect(cache.TryLoad(key) != nullptr,
                  "Persistent thumbnail cache failed during bounded access persistence testing");
          }
-         std::wstring indexLineAfterBatch;
+         std::wstring journalLineAfterBatch;
          bool accessMetadataPersisted = false;
          for (int attempt = 0; attempt < 100 && !accessMetadataPersisted; ++attempt)
          {
-             indexLineAfterBatch.clear();
-             std::wifstream indexStream(cacheRoot / L"index.tsv");
-             if (std::getline(indexStream, indexLineAfterBatch))
+             journalLineAfterBatch.clear();
+             std::wifstream journalStream(cacheRoot / L"index.journal.tsv");
+             while (std::getline(journalStream, journalLineAfterBatch))
              {
-                 accessMetadataPersisted = indexLineAfterBatch != indexLineBeforeHit;
+                 if (journalLineAfterBatch.starts_with(L"T\t"))
+                 {
+                     accessMetadataPersisted = true;
+                     break;
+                 }
              }
              if (!accessMetadataPersisted)
              {
@@ -1554,7 +1559,32 @@ namespace
              }
          }
          Expect(accessMetadataPersisted,
-             "Persistent thumbnail cache did not persist batched access metadata");
+             "Persistent thumbnail cache did not append batched access metadata to its journal");
+
+        const fs::path journalReplayRoot = root.Root() / L"journal-replay-cache";
+           fs::create_directories(journalReplayRoot);
+        {
+            hyperbrowse::cache::DiskThumbnailCache journalCache(4ULL * 1024ULL * 1024ULL, journalReplayRoot.wstring());
+            journalCache.Store(key, thumbnail);
+            std::wofstream journalStream(journalReplayRoot / L"index.journal.tsv", std::ios::app);
+            journalStream << L"P\t";
+        }
+        {
+            hyperbrowse::cache::DiskThumbnailCache replayedCache(4ULL * 1024ULL * 1024ULL, journalReplayRoot.wstring());
+            Expect(replayedCache.TryLoad(key) != nullptr,
+                "Persistent thumbnail cache did not replay a journal entry after restart");
+            replayedCache.InvalidateFilePaths({key.filePath});
+            Expect(replayedCache.Compact(),
+                "Persistent thumbnail cache did not compact after replaying an invalidation");
+        }
+        {
+            hyperbrowse::cache::DiskThumbnailCache invalidatedCache(4ULL * 1024ULL * 1024ULL, journalReplayRoot.wstring());
+            Expect(invalidatedCache.TryLoad(key) == nullptr,
+                "Persistent thumbnail cache replayed an invalidated entry");
+            std::error_code journalError;
+            Expect(fs::file_size(journalReplayRoot / L"index.journal.tsv", journalError) == 0 && !journalError,
+                "Persistent thumbnail cache did not truncate its journal after compaction");
+        }
 
 #pragma pack(push, 1)
         struct TestDiskThumbnailHeader
@@ -1639,6 +1669,9 @@ namespace
                         << L"C:\\invalid\\zero-width.jpg\t1\t0\t29\t0123456789abcdef.thumb\t100\t1\n"
                         << L"C:\\invalid\\unsafe-name.jpg\t1\t29\t29\t..\\outside.thumb\t100\t1\n";
         }
+        {
+            std::wofstream journalStream(cacheRoot / L"index.journal.tsv", std::ios::trunc);
+        }
 
          {
              hyperbrowse::cache::DiskThumbnailCache reloadedCache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
@@ -1664,6 +1697,9 @@ namespace
                         << L"\t..\\outside.thumb\t"
                         << (sizeof(TestDiskThumbnailHeader) + key.targetWidth * key.targetHeight * 4)
                         << L"\t1\n";
+        }
+        {
+            std::wofstream journalStream(cacheRoot / L"index.journal.tsv", std::ios::trunc);
         }
 
          hyperbrowse::cache::DiskThumbnailCache reloadedCache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());

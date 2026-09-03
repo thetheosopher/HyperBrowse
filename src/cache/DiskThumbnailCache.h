@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -57,7 +58,10 @@ namespace hyperbrowse::cache
         void EnsureLoadedLocked();
         void ReloadIndexLocked();
         bool LoadIndexLocked();
-        void SaveIndexLocked() const;
+        bool SaveIndexLocked() const;
+        bool AppendJournalRecordLocked(std::wstring_view record);
+        void ReplayJournalRecordLocked(const std::wstring& record);
+        bool CompactIndexLocked();
         void AccessPersistenceLoop();
         void EvictIfNeededLocked();
         std::wstring EnsureCacheDirectoryLocked();
@@ -67,11 +71,14 @@ namespace hyperbrowse::cache
         bool loaded_{};
         std::wstring cacheDirectory_;
         std::size_t currentBytes_{};
+        std::size_t journalBytes_{};
         std::uint64_t nextAccessOrdinal_{1};
         mutable std::size_t pendingAccessUpdates_{};
+        mutable std::vector<ThumbnailCacheKey> pendingAccessKeys_;
         std::unordered_map<ThumbnailCacheKey, Entry, ThumbnailCacheKeyHasher> entries_;
         std::condition_variable accessPersistenceAvailable_;
         std::thread accessPersistenceThread_;
         bool shuttingDown_{};
+        bool compactionRequested_{};
     };
 }

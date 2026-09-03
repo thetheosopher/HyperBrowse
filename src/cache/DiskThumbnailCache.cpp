@@ -43,6 +43,8 @@ namespace
     constexpr std::uint64_t kMaximumThumbnailFileBytes = sizeof(DiskThumbnailHeader)
         + kMaximumThumbnailPixelBytes;
     constexpr std::size_t kAccessPersistenceInterval = 64;
+    constexpr std::size_t kJournalCompactionThresholdBytes = 8ULL * 1024ULL * 1024ULL;
+    constexpr std::wstring_view kJournalFileName = L"index.journal.tsv";
 
     struct ParsedIndexEntry
     {
@@ -299,6 +301,16 @@ namespace
             + L"\t" + std::to_wstring(lastAccessOrdinal);
     }
 
+    std::wstring BuildJournalRecord(wchar_t operation, std::wstring_view payload)
+    {
+        std::wstring record;
+        record.reserve(payload.size() + 2);
+        record.push_back(operation);
+        record.push_back(L'\t');
+        record.append(payload);
+        return record;
+    }
+
     bool TryParseUnsignedField(std::wstring_view value, std::uint64_t* parsedValue) noexcept
     {
         if (!parsedValue || value.empty())
@@ -458,6 +470,7 @@ namespace hyperbrowse::cache
             cachePath = (fs::path(EnsureCacheDirectoryLocked()) / iterator->second.cacheFileName).wstring();
             iterator->second.lastAccessOrdinal = nextAccessOrdinal_++;
             ++pendingAccessUpdates_;
+            pendingAccessKeys_.push_back(normalizedKey);
         }
         accessPersistenceAvailable_.notify_one();
 
@@ -471,11 +484,17 @@ namespace hyperbrowse::cache
                 const auto iterator = entries_.find(normalizedKey);
                 if (iterator != entries_.end())
                 {
+                    const std::wstring journalRecord = BuildJournalRecord(
+                        L'R',
+                        BuildIndexLine(normalizedKey,
+                                       iterator->second.cacheFileName,
+                                       iterator->second.fileBytes,
+                                       iterator->second.lastAccessOrdinal));
                     currentBytes_ = iterator->second.fileBytes > currentBytes_
                         ? 0
                         : currentBytes_ - iterator->second.fileBytes;
                     entries_.erase(iterator);
-                    SaveIndexLocked();
+                    AppendJournalRecordLocked(journalRecord);
                 }
             }
 
@@ -619,19 +638,27 @@ namespace hyperbrowse::cache
             return;
         }
 
-        std::scoped_lock lock(mutex_);
-        ReloadIndexLocked();
-        const auto existing = entries_.find(normalizedKey);
-        if (existing != entries_.end())
         {
-            currentBytes_ -= existing->second.fileBytes;
-            entries_.erase(existing);
-        }
+            std::scoped_lock lock(mutex_);
+            EnsureLoadedLocked();
+            const auto existing = entries_.find(normalizedKey);
+            if (existing != entries_.end())
+            {
+                currentBytes_ -= existing->second.fileBytes;
+                entries_.erase(existing);
+            }
 
-        entries_[normalizedKey] = entry;
-        currentBytes_ += entry.fileBytes;
-        EvictIfNeededLocked();
-        SaveIndexLocked();
+            entries_[normalizedKey] = entry;
+            currentBytes_ += entry.fileBytes;
+            AppendJournalRecordLocked(BuildJournalRecord(
+                L'P',
+                BuildIndexLine(normalizedKey,
+                               entry.cacheFileName,
+                               entry.fileBytes,
+                               entry.lastAccessOrdinal)));
+            EvictIfNeededLocked();
+        }
+        accessPersistenceAvailable_.notify_one();
     }
 
     void DiskThumbnailCache::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
@@ -667,8 +694,13 @@ namespace hyperbrowse::cache
                 cacheFilesToDelete.push_back(iterator->second.cacheFileName);
                 iterator = entries_.erase(iterator);
             }
-            SaveIndexLocked();
+            for (const std::wstring& normalizedPath : normalizedPaths)
+            {
+                AppendJournalRecordLocked(BuildJournalRecord(L'I', EscapeField(normalizedPath)));
+            }
         }
+
+        accessPersistenceAvailable_.notify_one();
 
         if (!cacheFilesToDelete.empty())
         {
@@ -697,7 +729,7 @@ namespace hyperbrowse::cache
             }
             entries_.clear();
             currentBytes_ = 0;
-            SaveIndexLocked();
+            AppendJournalRecordLocked(L"C");
 
             std::error_code directoryError;
             for (const fs::directory_entry& directoryEntry : fs::directory_iterator(fs::path(cacheDirectory), directoryError))
@@ -723,6 +755,9 @@ namespace hyperbrowse::cache
             std::error_code error;
             fs::remove(cacheDirectoryPath / cacheFileName, error);
         }
+
+        std::scoped_lock lock(mutex_);
+        CompactIndexLocked();
     }
 
     bool DiskThumbnailCache::Compact()
@@ -754,7 +789,7 @@ namespace hyperbrowse::cache
             }
 
             const std::wstring fileName = directoryEntry.path().filename().wstring();
-            if (fileName == kIndexFileName)
+            if (fileName == kIndexFileName || fileName == kJournalFileName)
             {
                 continue;
             }
@@ -800,8 +835,7 @@ namespace hyperbrowse::cache
         }
 
         EvictIfNeededLocked();
-        SaveIndexLocked();
-        return true;
+        return CompactIndexLocked();
     }
 
     DiskThumbnailCache::Statistics DiskThumbnailCache::QueryStatistics() const
@@ -858,6 +892,10 @@ namespace hyperbrowse::cache
                 statistics.indexFileBytes = static_cast<std::size_t>(fileSize);
                 continue;
             }
+            if (fileName == kJournalFileName)
+            {
+                continue;
+            }
 
             statistics.cacheFileCount += 1;
             statistics.cacheFileBytes += static_cast<std::size_t>(fileSize);
@@ -909,6 +947,153 @@ namespace hyperbrowse::cache
         loaded_ = true;
     }
 
+    bool DiskThumbnailCache::AppendJournalRecordLocked(std::wstring_view record)
+    {
+        if (cacheDirectory_.empty() || record.empty())
+        {
+            return false;
+        }
+
+        const fs::path journalPath = fs::path(cacheDirectory_) / kJournalFileName;
+        std::wofstream stream(journalPath, std::ios::app);
+        if (!stream)
+        {
+            return false;
+        }
+
+        stream << record << L'\n';
+        stream.flush();
+        if (!stream)
+        {
+            return false;
+        }
+
+        if (record.size() < std::numeric_limits<std::size_t>::max()
+            && record.size() + 1 <= (std::numeric_limits<std::size_t>::max() - journalBytes_) / sizeof(wchar_t))
+        {
+            journalBytes_ += (record.size() + 1) * sizeof(wchar_t);
+            if (journalBytes_ >= kJournalCompactionThresholdBytes)
+            {
+                compactionRequested_ = true;
+            }
+        }
+        return true;
+    }
+
+    void DiskThumbnailCache::ReplayJournalRecordLocked(const std::wstring& record)
+    {
+        if (record == L"C")
+        {
+            entries_.clear();
+            currentBytes_ = 0;
+            nextAccessOrdinal_ = 1;
+            return;
+        }
+
+        if (record.size() < 3 || record[1] != L'\t')
+        {
+            return;
+        }
+
+        const wchar_t operation = record[0];
+        if (operation == L'I')
+        {
+            const std::wstring path = UnescapeField(std::wstring_view(record).substr(2));
+            for (auto iterator = entries_.begin(); iterator != entries_.end();)
+            {
+                if (iterator->first.filePath != path)
+                {
+                    ++iterator;
+                    continue;
+                }
+
+                currentBytes_ = iterator->second.fileBytes > currentBytes_
+                    ? 0
+                    : currentBytes_ - iterator->second.fileBytes;
+                iterator = entries_.erase(iterator);
+            }
+            return;
+        }
+
+        if (operation != L'P' && operation != L'R' && operation != L'T')
+        {
+            return;
+        }
+
+        ParsedIndexEntry parsedEntry;
+        if (!TryParseIndexEntry(std::wstring(record.substr(2)), &parsedEntry))
+        {
+            return;
+        }
+
+        const auto existing = entries_.find(parsedEntry.key);
+        if (operation == L'R')
+        {
+            if (existing != entries_.end())
+            {
+                currentBytes_ = existing->second.fileBytes > currentBytes_
+                    ? 0
+                    : currentBytes_ - existing->second.fileBytes;
+                entries_.erase(existing);
+            }
+            return;
+        }
+
+        if (operation == L'T')
+        {
+            if (existing != entries_.end())
+            {
+                existing->second.lastAccessOrdinal = parsedEntry.lastAccessOrdinal;
+                nextAccessOrdinal_ = std::max(nextAccessOrdinal_, parsedEntry.lastAccessOrdinal + 1);
+            }
+            return;
+        }
+
+        Entry entry;
+        entry.cacheFileName = std::move(parsedEntry.cacheFileName);
+        entry.fileBytes = parsedEntry.fileBytes;
+        entry.lastAccessOrdinal = parsedEntry.lastAccessOrdinal;
+        if (existing != entries_.end())
+        {
+            currentBytes_ = existing->second.fileBytes > currentBytes_
+                ? 0
+                : currentBytes_ - existing->second.fileBytes;
+            entries_.erase(existing);
+        }
+
+        const ThumbnailCacheKey key = parsedEntry.key;
+        entries_.emplace(key, std::move(entry));
+        currentBytes_ += entries_.find(key)->second.fileBytes;
+        nextAccessOrdinal_ = std::max(nextAccessOrdinal_, parsedEntry.lastAccessOrdinal + 1);
+    }
+
+    bool DiskThumbnailCache::CompactIndexLocked()
+    {
+        if (!SaveIndexLocked())
+        {
+            return false;
+        }
+
+        const fs::path journalPath = fs::path(cacheDirectory_) / kJournalFileName;
+        std::wofstream stream(journalPath, std::ios::trunc);
+        if (!stream)
+        {
+            return false;
+        }
+
+        stream.flush();
+        if (!stream)
+        {
+            return false;
+        }
+
+        pendingAccessUpdates_ = 0;
+        pendingAccessKeys_.clear();
+        journalBytes_ = 0;
+        compactionRequested_ = false;
+        return true;
+    }
+
     void DiskThumbnailCache::AccessPersistenceLoop()
     {
         std::unique_lock lock(mutex_);
@@ -916,10 +1101,10 @@ namespace hyperbrowse::cache
         {
             accessPersistenceAvailable_.wait(lock, [this]()
             {
-                return shuttingDown_ || pendingAccessUpdates_ >= kAccessPersistenceInterval;
+                return shuttingDown_ || pendingAccessUpdates_ >= kAccessPersistenceInterval || compactionRequested_;
             });
 
-            if (pendingAccessUpdates_ == 0 && shuttingDown_)
+            if (pendingAccessUpdates_ == 0 && !compactionRequested_ && shuttingDown_)
             {
                 return;
             }
@@ -928,13 +1113,30 @@ namespace hyperbrowse::cache
             {
                 std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
                 lock.lock();
-                if (pendingAccessUpdates_ > 0)
+                for (const ThumbnailCacheKey& key : pendingAccessKeys_)
                 {
-                    SaveIndexLocked();
+                    const auto iterator = entries_.find(key);
+                    if (iterator == entries_.end())
+                    {
+                        continue;
+                    }
+
+                    AppendJournalRecordLocked(BuildJournalRecord(
+                        L'T',
+                        BuildIndexLine(key,
+                                       iterator->second.cacheFileName,
+                                       iterator->second.fileBytes,
+                                       iterator->second.lastAccessOrdinal)));
+                }
+                pendingAccessUpdates_ = 0;
+                pendingAccessKeys_.clear();
+                if (compactionRequested_)
+                {
+                    CompactIndexLocked();
                 }
             }
 
-            if (shuttingDown_ && pendingAccessUpdates_ == 0)
+            if (shuttingDown_ && pendingAccessUpdates_ == 0 && !compactionRequested_)
             {
                 return;
             }
@@ -945,51 +1147,79 @@ namespace hyperbrowse::cache
     {
         entries_.clear();
         currentBytes_ = 0;
+        journalBytes_ = 0;
         nextAccessOrdinal_ = 1;
 
-        const fs::path indexPath = fs::path(EnsureCacheDirectoryLocked()) / kIndexFileName;
-        std::wifstream stream(indexPath);
-        if (!stream)
+        const std::wstring cacheDirectory = EnsureCacheDirectoryLocked();
+        if (cacheDirectory.empty())
         {
             return false;
         }
 
-        std::wstring line;
-        while (std::getline(stream, line))
+        const fs::path indexPath = fs::path(cacheDirectory) / kIndexFileName;
+        std::wifstream stream(indexPath);
+        if (stream)
         {
-            ParsedIndexEntry parsedEntry;
-            if (!TryParseIndexEntry(line, &parsedEntry))
+            std::wstring line;
+            while (std::getline(stream, line))
             {
-                continue;
-            }
+                ParsedIndexEntry parsedEntry;
+                if (!TryParseIndexEntry(line, &parsedEntry))
+                {
+                    continue;
+                }
 
-            Entry entry;
-            entry.cacheFileName = std::move(parsedEntry.cacheFileName);
-            entry.fileBytes = parsedEntry.fileBytes;
-            entry.lastAccessOrdinal = parsedEntry.lastAccessOrdinal;
-            if (entry.fileBytes > std::numeric_limits<std::size_t>::max() - currentBytes_)
+                Entry entry;
+                entry.cacheFileName = std::move(parsedEntry.cacheFileName);
+                entry.fileBytes = parsedEntry.fileBytes;
+                entry.lastAccessOrdinal = parsedEntry.lastAccessOrdinal;
+                if (entry.fileBytes > std::numeric_limits<std::size_t>::max() - currentBytes_)
+                {
+                    continue;
+                }
+
+                const auto [iterator, inserted] = entries_.emplace(std::move(parsedEntry.key), std::move(entry));
+                if (!inserted)
+                {
+                    continue;
+                }
+
+                currentBytes_ += iterator->second.fileBytes;
+                nextAccessOrdinal_ = std::max(nextAccessOrdinal_, iterator->second.lastAccessOrdinal + 1);
+            }
+        }
+
+        const fs::path journalPath = fs::path(cacheDirectory) / kJournalFileName;
+        std::error_code journalSizeError;
+        const std::uintmax_t journalFileBytes = fs::file_size(journalPath, journalSizeError);
+        if (!journalSizeError)
+        {
+            journalBytes_ = journalFileBytes > std::numeric_limits<std::size_t>::max()
+                ? std::numeric_limits<std::size_t>::max()
+                : static_cast<std::size_t>(journalFileBytes);
+        }
+        std::wifstream journalStream(journalPath);
+        if (journalStream)
+        {
+            std::wstring line;
+            while (std::getline(journalStream, line))
             {
-                continue;
+                if (journalStream.eof())
+                {
+                    break;
+                }
+                ReplayJournalRecordLocked(line);
             }
-
-            const auto [iterator, inserted] = entries_.emplace(std::move(parsedEntry.key), std::move(entry));
-            if (!inserted)
-            {
-                continue;
-            }
-
-            currentBytes_ += iterator->second.fileBytes;
-            nextAccessOrdinal_ = std::max(nextAccessOrdinal_, iterator->second.lastAccessOrdinal + 1);
         }
 
         return true;
     }
 
-    void DiskThumbnailCache::SaveIndexLocked() const
+    bool DiskThumbnailCache::SaveIndexLocked() const
     {
         if (cacheDirectory_.empty())
         {
-            return;
+            return false;
         }
 
         const fs::path indexPath = fs::path(cacheDirectory_) / kIndexFileName;
@@ -997,7 +1227,7 @@ namespace hyperbrowse::cache
         std::wofstream stream(temporaryPath, std::ios::trunc);
         if (!stream)
         {
-            return;
+            return false;
         }
 
         for (const auto& [key, entry] : entries_)
@@ -1011,7 +1241,7 @@ namespace hyperbrowse::cache
             stream.close();
             std::error_code error;
             fs::remove(temporaryPath, error);
-            return;
+            return false;
         }
 
         stream.close();
@@ -1024,8 +1254,10 @@ namespace hyperbrowse::cache
         }
         else
         {
-            pendingAccessUpdates_ = 0;
+            return true;
         }
+
+        return false;
     }
 
     void DiskThumbnailCache::EvictIfNeededLocked()
@@ -1062,6 +1294,12 @@ namespace hyperbrowse::cache
 
             std::error_code error;
             fs::remove(cacheDirectory / iterator->second.cacheFileName, error);
+            AppendJournalRecordLocked(BuildJournalRecord(
+                L'R',
+                BuildIndexLine(key,
+                               iterator->second.cacheFileName,
+                               iterator->second.fileBytes,
+                               iterator->second.lastAccessOrdinal)));
             currentBytes_ -= iterator->second.fileBytes;
             entries_.erase(iterator);
         }
