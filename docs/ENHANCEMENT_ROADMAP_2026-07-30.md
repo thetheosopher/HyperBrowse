@@ -1,145 +1,190 @@
 # HyperBrowse Enhancement Roadmap
 
-Review conducted: 2026-07-30
+Original review: 2026-07-30
+Status refresh: 2026-09-03
 Reviewer: GitHub Copilot
 Perspectives: Software Optimization Engineering + Product Management
 Codebase: HyperBrowse
 
 ## Summary
 
-| Item | Category | Perspective | Effort | Impact | Area |
+| Item | Category | Status | Next priority | Effort | Area |
 | --- | --- | --- | --- | --- | --- |
-| QW1 Validate persistent thumbnail payloads | Reliability/Security | Engineering | XS | High | `src/cache/DiskThumbnailCache.cpp` |
-| QW2 Preserve split folder-rename state | Reliability | Both | S | High | `src/services/FolderWatchService.*` |
-| QW3 Add malformed-cache regression tests | Reliability | Engineering | S | High | `tests/` |
-| QW4 Wire startup budgets into CI | Performance | Both | S | High | `.github/workflows/`, `tools/` |
-| QW5 Correct architecture/UI/backlog docs | DX | Both | S | Medium | `specs/` |
-| QW6 Add worker exception containment | Reliability | Engineering | S | Medium | `src/services/ThumbnailScheduler.cpp` |
-| MP1 Redesign persistent cache index/I/O | Performance | Engineering | M | High | `src/cache/`, `src/services/` |
-| MP2 Bound background service execution | Performance/Reliability | Engineering | M | Medium | `src/services/`, `src/util/` |
-| MP3 Define cancellable file-operation shutdown | Reliability/UX | Both | M | High | `FileOperationService`, `MainWindow` |
-| MP4 Establish CI quality/performance matrix | Reliability | Engineering | M | High | CI, tests, tools |
-| MP5 Split focused test targets and fixtures | DX/Reliability | Engineering | M | Medium | `tests/` |
-| MP6 Saved structured filters | Feature/UX | Product | M | Medium | browser/UI/settings |
-| SI1 Decompose MainWindow by ownership | DX/Reliability | Engineering | L | High | `src/ui/MainWindow.*` |
-| SI2 Pro compare and color-management path | Feature | Both | L | High | viewer/decode/render |
-| SI3 Search/smart-folder product decision | Feature | Product | L | High | browser/services |
-| SI4 Format frontier | Feature | Both | L | Medium | decode/viewer |
+| QW1 Validate persistent thumbnail payloads | Reliability/Security | Complete in 1.2.5 | Archived | XS | `src/cache/DiskThumbnailCache.cpp` |
+| QW2 Preserve split folder-rename state | Reliability | Complete in 1.2.5 | Archived | S | `src/services/FolderWatchService.*` |
+| QW3 Add malformed-cache regression tests | Reliability | Complete in 1.2.5 and expanded in 2.1.0 | Archived | S | `tests/` |
+| QW4 Wire startup budgets into CI | Performance | Complete in 2.0.0 | Archived | S | `.github/workflows/`, `tools/` |
+| QW5 Correct architecture/UI/backlog docs | DX | In progress in this refresh | P1 | S | `docs/`, `specs/` |
+| QW6 Add worker exception containment | Reliability | Complete in 2.0.0 | Archived | S | `src/services/ThumbnailScheduler.cpp` |
+| MP1 Redesign persistent cache index/I/O | Performance | Complete in 2.1.0 | Archived | M | `src/cache/`, `src/services/` |
+| MP2 Bound background service execution | Performance/Reliability | Open | P0 | M | `src/services/`, `src/util/` |
+| MP3 Define cancellable file-operation shutdown | Reliability/UX | Partial: cancellation exists, bounded close does not | P0 | M | `FileOperationService`, `MainWindow` |
+| MP4 Establish CI quality/performance matrix | Reliability | Partial: one Windows gate exists | P1 | M | CI, tests, tools |
+| MP5 Split focused test targets and fixtures | DX/Reliability | Partial: broad executable with four CTest entry points | P1 | M | `tests/` |
+| MP6 Saved structured filters | Feature/UX | Open | P2 | M | browser/UI/settings |
+| SI1 Decompose MainWindow by ownership | DX/Reliability | Open hygiene work | P2 | L | `src/ui/MainWindow.*` |
+| SI2 Pro compare and color-management path | Feature | Open | P2 | L | viewer/decode/render |
+| SI3 Search/smart-folder product decision | Feature | Decision needed | P2 | S | browser/services |
+| SI4 Format frontier | Feature | Open, deliberately later | P3 | L | decode/viewer |
+
+## 2026-09-03 Reprioritization
+
+The July quick-win queue is no longer the active execution order. The cache,
+watcher, malformed-input, worker-containment, and startup-gate work has landed
+and has regression coverage. Release 2.1.0 also added a consolidated themed
+Settings surface, native shell drag/drop, clipboard and duplicate workflows,
+undo/redo, single-instance launch forwarding, taskbar progress, viewer
+inspection controls, decoder diagnostics, and stronger large-folder scheduling.
+
+Work should now proceed in this order:
+
+1. **P0 - Bound background execution.** Replace request-per-task
+   `std::async(std::launch::async)` in folder enumeration, folder-tree queries,
+   batch conversion, and file operations with bounded executors. Preserve
+   request epochs, cancellation checks, and shell-owner lifetime.
+2. **P0 - Define close during file operations.** Specify whether close waits,
+   cancels, or presents a bounded shutdown state. Test slow local, removable,
+   network, and shell-prompt paths without allowing completion messages to
+   target destroyed windows.
+3. **P1 - Finish the quality matrix.** Add an nvJPEG-off fallback build,
+   sanitizer/fuzz coverage for the cache and RAW-helper protocol, deterministic
+   benchmark-fixture documentation, and hosted-run variance reporting.
+4. **P1 - Improve observability.** Count invalid cache entries and watcher
+   full-reload fallbacks separately from ordinary misses, and make a redacted
+   diagnostics snapshot export available for issue reports.
+5. **P1 - Complete current-state documentation.** Keep architecture, UI, D2D,
+   and release-hardening specifications synchronized with shipped behavior.
+6. **P2 - Add saved structured filters.** Persist named current-folder
+   expressions without introducing a catalog database.
+7. **P2 - Professional compare and color management.** Validate color-profile
+   behavior first, then add synchronized 3/4-up compare and per-tile culling.
+8. **P3 - Format frontier.** Consider HEIC/AVIF, animated playback, and
+   multipage TIFF only after reliability and compare work has evidence behind
+   it.
+
+Items marked complete below remain as historical implementation notes. They are
+not requests to repeat the work.
 
 ---
 
 ## Quick Wins: Less Than One Day
 
-### QW1: Validate persistent thumbnail payloads
+### QW1: Validate persistent thumbnail payloads (Complete)
 
 - **Category:** Reliability, Security
 - **Perspective:** Engineering
 - **Effort:** XS
 - **Impact:** High
 - **Area:** [src/cache/DiskThumbnailCache.cpp](../src/cache/DiskThumbnailCache.cpp#L371-L383)
-- **Recommendation:** Before allocation, reject zero/oversized dimensions, compute `width * height * 4` with checked arithmetic, require `pixelBytes` to equal that value, and require the file to contain exactly the expected payload. Remove the index entry and file when validation fails.
-- **Acceptance:** malformed headers, truncated payloads, and dimensions above limits return a cache miss without throwing or allocating unreasonable memory.
+- **Delivered:** `TryLoad` validates the magic, dimensions, checked BGRA byte count, source dimensions, platform size limits, and exact file length before allocation. Invalid entries are removed and become cache misses.
+- **Coverage:** `tests/smoke.cpp` covers malformed headers, oversized dimensions, mismatched byte counts, truncated payloads, malformed index rows, unsafe cache names, and valid round trips.
 
-### QW2: Preserve split folder-rename state
+### QW2: Preserve split folder-rename state (Complete)
 
 - **Category:** Reliability
 - **Perspective:** Both
 - **Effort:** S
 - **Impact:** High
 - **Area:** [src/services/FolderWatchService.cpp](../src/services/FolderWatchService.cpp#L244-L268)
-- **Recommendation:** Move `pendingRenameOldPath` into watch-loop state that survives multiple `ReadDirectoryChangesW` completions. Clear it on stop/error/request change. If a new-name record arrives unpaired, request a full reload.
-- **Acceptance:** old/new records split across two parser inputs produce one rename with both paths; orphan records produce deterministic fallback behavior.
+- **Delivered:** `FolderWatchNotificationParser` retains the old name across notification buffers, resets it on stop/error, and requests a full reload for orphaned or malformed records.
+- **Coverage:** `tests/smoke.cpp` covers split and same-buffer renames, orphan old/new records, reset behavior, and malformed notifications.
 
-### QW3: Add malformed-cache regression tests
+### QW3: Add malformed-cache regression tests (Complete)
 
 - **Category:** Reliability
 - **Perspective:** Engineering
 - **Effort:** S
 - **Impact:** High
 - **Area:** `tests/`, `src/cache/DiskThumbnailCache.*`
-- **Recommendation:** allow a test cache root injection or extract payload parsing into a pure helper. Cover huge byte counts, multiplication overflow, negative-cast dimensions, truncated files, wrong magic, and valid round trips.
+- **Delivered:** the cache accepts an injected test root, and the smoke suite covers payload corruption, overflow-sized dimensions/values, truncation, strict index parsing, journal replay, malformed journal tails, invalidation replay, compaction, and valid round trips.
 
-### QW4: Wire startup budgets into CI
+### QW4: Wire startup budgets into CI (Complete)
 
 - **Category:** Performance
 - **Perspective:** Both
 - **Effort:** S
 - **Impact:** High
 - **Area:** [tools/TestStartupBenchmark.ps1](../tools/TestStartupBenchmark.ps1#L13-L15), `.github/workflows/`
-- **Recommendation:** add a Windows CI job that builds Release, runs smoke tests, invokes the script with nonzero budgets, and uploads JSON/log artifacts. Begin with generous budgets and tighten from observed runner variance.
+- **Delivered:** `.github/workflows/ci.yml` builds Debug and Release, runs CTest, invokes the startup script with explicit 2.5 s / 2.5 s / 5 s budgets, uploads benchmark/log artifacts, and validates release artifacts. Runner-variance tuning remains in MP4.
 
-### QW5: Correct documentation drift
+### QW5: Correct documentation drift (In progress)
 
 - **Category:** DX
 - **Perspective:** Both
 - **Effort:** S
 - **Impact:** Medium
 - **Area:** [specs/02-architecture.md](../specs/02-architecture.md#L8-L14), [specs/04-ui-behavior.md](../specs/04-ui-behavior.md#L133-L140), [specs/14-todo.md](../specs/14-todo.md#L224-L227), [specs/15-d2d-rendering-migration.md](../specs/15-d2d-rendering-migration.md#L26-L35)
-- **Recommendation:** describe the actual D2D/DirectWrite scope, current MainWindow size/responsibilities, implemented filter syntax, slideshow settings, F2 rename, and real CI status. Mark migration documents as historical/completed where appropriate.
+- **Current status:** this review and roadmap now reflect the current release, hybrid rendering, CI, cache, watcher, and workflow state. The architecture, UI-behavior, and D2D migration specs remain the next documentation slice.
 
-### QW6: Contain thumbnail-worker exceptions
+### QW6: Contain thumbnail-worker exceptions (Complete)
 
 - **Category:** Reliability
 - **Perspective:** Engineering
 - **Effort:** S
 - **Impact:** Medium
 - **Area:** `src/services/ThumbnailScheduler.cpp`
-- **Recommendation:** catch `std::exception` and unknown exceptions at each worker entry boundary, record a diagnostic, unwind in-flight accounting, and report a decode/cache miss rather than allowing `std::terminate`. Keep QW1 as the root fix.
+- **Delivered:** thumbnail cache lookup, decode, cache insertion, disk persistence, and file-operation worker boundaries catch standard and unknown exceptions, record diagnostics where applicable, and report failures without process termination.
 
 ---
 
 ## High-Impact Medium Projects: One to Two Weeks
 
-### MP1: Persistent cache index and I/O redesign
+### MP1: Persistent cache index and I/O redesign (Complete in 2.1.0)
 
 - **Category:** Performance, Reliability
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** High
 - **Area:** [src/cache/DiskThumbnailCache.cpp](../src/cache/DiskThumbnailCache.cpp#L329-L346), `src/services/ThumbnailScheduler.*`
-- **Recommendation:** maintain one in-memory index per process; enqueue loads/stores/access touches on a dedicated low-priority cache executor; append access records or batch them; atomically snapshot during compaction; shard files by hash prefix.
-- **Success metrics:** no whole-index rewrite on cache hit, no decode worker blocked on persistent-cache write, bounded compaction time, and correct recovery after forced termination.
+- **Delivered:** the cache maintains an authoritative in-memory index, journals mutations and batched access touches, replays valid journal records, atomically compacts the snapshot, and keeps scheduler persistence off the UI thread.
+- **Remaining scale work:** measure the process-wide filesystem mutex and directory-scan cost at large cache sizes; add sharding only if benchmarks show a user-visible regression.
+- **Success evidence:** smoke coverage verifies no index rewrite on a cache hit, journal replay after restart, malformed-tail tolerance, invalidation replay, and journal truncation after compaction.
 
 ### MP2: Bounded background service execution
 
+- **Status:** Open and highest-priority engineering work.
 - **Category:** Performance, Reliability
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** Medium
 - **Area:** `FolderEnumerationService`, `FolderTreeEnumerationService`, `BatchConvertService`, `FileOperationService`, `util/BackgroundExecutor.h`
-- **Recommendation:** replace per-request `std::async` with bounded category-specific executors. Preserve request epochs and add queue-depth/cancellation diagnostics.
+- **Recommendation:** replace per-request `std::async(std::launch::async)` in folder enumeration, folder-tree queries, batch conversion, and file operations with bounded category-specific executors. Preserve request epochs, cancellation checks, and shell-owner lifetime. `util::BackgroundExecutor` exists, but these services have not yet migrated.
 - **Success metrics:** rapid folder changes never create unbounded threads; stale queued work is dropped before filesystem access.
 
 ### MP3: Cancellable file-operation shutdown
 
+- **Status:** Partial. Cancellation and progress reporting are implemented; close behavior is still unbounded.
 - **Category:** Reliability, UX
 - **Perspective:** Both
 - **Effort:** M
 - **Impact:** High
 - **Area:** [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L477-L479), [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L627-L673), `src/ui/MainWindow.cpp`
-- **Recommendation:** add operation state and cancellation through the progress sink, define close behavior, and keep the shell owner valid until completion. Do not silently detach a worker that still references HWNDs.
+- **Recommendation:** define close behavior, keep the shell owner valid until completion, and make cancellation state observable. Do not detach a worker that can still post to a destroyed HWND. Add a test for destruction during a slow or blocked shell operation.
 - **Success metrics:** closing during a slow copy/delete either cancels promptly or presents an explicit bounded wait state; no orphan shell UI or post-destroy completion.
 
 ### MP4: CI quality and performance matrix
 
+- **Status:** Partial. The committed Windows workflow is a real startup/package gate, but not a configuration matrix.
 - **Category:** Reliability, Performance
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** High
 - **Area:** `.github/workflows/`, `CMakePresets.json`, `tools/`, `tests/`
-- **Recommendation:** build Debug/Release with LibRaw on, exercise a fallback build with nvJPEG off, run CTest, run the startup gate, and preserve diagnostics artifacts. Add a scheduled dependency/security job.
+- **Recommendation:** retain the current Debug/Release gate, add an nvJPEG-off fallback build, run the same CTest and startup checks, preserve diagnostics artifacts, and add scheduled dependency/security review. Document the hosted-run fixture and variance policy before tightening budgets.
 
 ### MP5: Focused tests and deterministic fixtures
 
+- **Status:** Partial. Coverage is materially broader, but most scenarios still live in one executable.
 - **Category:** Reliability, DX
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** Medium
 - **Area:** [tests/CMakeLists.txt](../tests/CMakeLists.txt#L1-L38), `tests/smoke.cpp`
-- **Recommendation:** split cache, watcher, service, browser, and viewer cases into focused targets or at least named CTest cases. Extract the watcher notification parser so split-buffer behavior can be tested without relying on OS timing.
+- **Recommendation:** split cache, watcher, service, browser, and viewer cases into focused targets or named CTest cases as maintenance allows. The watcher parser is already extracted and tested without OS timing; do not redo that part.
 
 ### MP6: Saved structured filters
 
+- **Status:** Open product feature.
 - **Category:** Feature, UX
 - **Perspective:** Product
 - **Effort:** M
@@ -153,13 +198,15 @@ Codebase: HyperBrowse
 
 ### SI1: Decompose MainWindow by ownership
 
-- **Problem:** a ~15,970-line coordinator owns unrelated UI, persistence, tree, drag/drop, file-operation, viewer, and watch concerns.
+- **Status:** Open engineering hygiene work, lower priority than lifecycle and CI reliability.
+- **Problem:** a ~27,263-line coordinator owns unrelated UI, persistence, tree, drag/drop, file-operation, viewer, and watch concerns.
 - **Approach:** first extract pure registry settings, then menu/toolbar command state, then folder-tree/watch coordination. Keep HWND ownership and message routing explicit; avoid a framework rewrite.
 - **Risks:** large mechanical diffs and hidden ordering dependencies.
 - **Success metrics:** MainWindow below ~7,000 lines, narrower rebuilds, unchanged smoke/startup metrics, and dedicated tests for extracted logic.
 
 ### SI2: Professional compare and color-management path
 
+- **Status:** Open product investment after the P0/P1 reliability queue.
 - **Problem:** two-up compare lacks synchronized zoom/pan and accurate monitor-profile rendering, both important for photographic inspection.
 - **Approach:** implement color transforms behind an opt-in setting, then add 3/4-up compare with synchronized transforms and per-tile rating controls.
 - **Risks:** color-transform CPU cost, multi-monitor profile changes, VRAM growth, and compare interaction complexity.
@@ -167,6 +214,7 @@ Codebase: HyperBrowse
 
 ### SI3: Search and smart-folder product decision
 
+- **Status:** Decision needed; saved current-folder filters are the smallest compatible first step.
 - **Problem:** users cannot retrieve rated/tagged work across folders, but a catalog conflicts with the stated no-database scope.
 - **Approach:** validate demand first. Choose among saved current-folder filters, transient recursive search, or a lightweight opt-in index. Do not drift into organizer/database lock-in by accident.
 - **Risks:** index freshness, privacy, startup/background cost, and product identity dilution.
@@ -174,6 +222,7 @@ Codebase: HyperBrowse
 
 ### SI4: Format frontier
 
+- **Status:** Deliberately later than reliability, diagnostics, and compare work.
 - **Problem:** HEIC/HEIF, AVIF, and animated viewer playback are increasingly expected.
 - **Approach:** prioritize WIC-backed HEIC detection/fallback, then optional AVIF, then animated GIF/WebP viewer playback. Keep every dependency optional and capability-driven.
 - **Risks:** codec availability/licensing, attack surface, frame-cache memory, and packaging size.
@@ -184,9 +233,9 @@ Codebase: HyperBrowse
 ## Debt Retirement Candidates
 
 1. Replace stale “current state” sections in specs 02 and 15 with an implemented-state architecture record.
-2. Remove dead or redundant cache-loading helpers after MP1; `EnsureLoadedLocked` should either become the real load boundary or be deleted.
-3. Retire per-request `std::async` once MP2 lands.
-4. Split the monolithic test source as touched, without pausing product work for a wholesale test-framework migration.
+2. Retire per-request `std::async` once MP2 lands.
+3. Split the monolithic test source as touched, without pausing product work for a wholesale test-framework migration.
+4. Add cache-corruption and watcher-fallback diagnostic counters so recovery is visible in field reports.
 5. Keep GDI fallback rendering only where it is exercised and documented; do not remove it solely for aesthetic consistency.
 
 ## Dependency Upgrade Path
@@ -200,22 +249,22 @@ Codebase: HyperBrowse
 
 ## Prompt Handoff
 
-### Workstream 1: Cache hardening
+### Workstream 1: Bounded background execution
 
-> Harden `DiskThumbnailCache` in `src/cache/DiskThumbnailCache.cpp` around lines 371-383. Validate width, height, checked BGRA byte count, file length, and configured limits before allocating. Invalid cache entries must become misses and be removed without throwing. Add corruption and round-trip tests under `tests/`, then run `HyperBrowseSmoke`. Do not change the persistent filename hash without a migration plan.
+> Replace request-per-task `std::async(std::launch::async)` in folder enumeration, folder-tree queries, batch conversion, and file operations with bounded executors. Preserve request epochs, cancellation checks, shell-owner lifetime, and completion-message safety. Add queue-depth and cancellation diagnostics plus rapid-navigation coverage.
 
-### Workstream 2: Folder watcher correctness
+### Workstream 2: File-operation shutdown contract
 
-> Fix split rename handling in `src/services/FolderWatchService.cpp` around lines 244-268. Preserve the old rename path across `ReadDirectoryChangesW` completions and define fallback behavior for orphan old/new records. Extract a deterministic parser/state helper and add tests for same-buffer, split-buffer, orphan, stop, and overflow cases. Verify MainWindow reconciliation around lines 12347-12357.
+> Define close behavior while `FileOperationService` is inside `IFileOperation::PerformOperations`. Keep the owner valid until completion, make cancellation state observable, and test slow local/removable/network and shell-prompt paths. Do not detach a worker that can post to a destroyed window.
 
-### Workstream 3: CI performance gate
+### Workstream 3: Quality and measurement matrix
 
-> Add a Windows CI workflow for HyperBrowse. Build Release with the supported preset, run CTest, then invoke `tools/TestStartupBenchmark.ps1` with explicit nonzero budgets and upload its JSON/log outputs. Use a deterministic image fixture and document runner variance. Correct `specs/14-todo.md` only after the workflow passes in CI.
+> Extend `.github/workflows/ci.yml` with an nvJPEG-off fallback build, sanitizer/fuzz coverage for the persistent cache and RAW-helper protocol, and a documented deterministic benchmark fixture and hosted-run variance policy. Preserve JSON/log and release artifacts.
 
-### Workstream 4: Background and shutdown lifecycle
+### Workstream 4: Diagnostics and current-state documentation
 
-> Replace request-per-thread `std::async` usage in the four services with bounded executors while preserving request IDs. Separately add explicit cancellation/shutdown behavior for `FileOperationService` around `PerformOperations` and `WaitForWorkers`. Add diagnostics for active/queued work and tests for rapid cancellation and close during an operation.
+> Add distinct counters for invalid persistent-cache entries and folder-watch full-reload fallbacks, plus a redacted diagnostics snapshot export. Then reconcile `specs/02-architecture.md`, `specs/04-ui-behavior.md`, and `specs/15-d2d-rendering-migration.md` with the hybrid renderer, current MainWindow ownership, structured filters, slideshow settings, F2 behavior, metadata visibility, and shell drag/drop.
 
-### Workstream 5: Documentation alignment
+### Workstream 5: Product depth
 
-> Reconcile `specs/02-architecture.md`, `04-ui-behavior.md`, `14-todo.md`, and `15-d2d-rendering-migration.md` with current code. Document D2D/DirectWrite scope, current MainWindow ownership, structured filters, slideshow settings, F2 rename, and actual CI status. Preserve historical design rationale but label it as historical rather than current behavior.
+> Add saved current-folder filter expressions without a catalog dependency. Next validate color-managed display, then implement synchronized 3/4-up compare and per-tile culling. Keep HEIC/AVIF, animation, and multipage TIFF behind evidence from the reliability and compare work.

@@ -1,6 +1,7 @@
 # HyperBrowse Comprehensive Code Review
 
-Review conducted: 2026-07-30
+Original review: 2026-07-30
+Status refresh: 2026-09-03
 Reviewer: GitHub Copilot
 Perspectives: Software Optimization Engineering + Product Management
 Codebase: HyperBrowse
@@ -16,17 +17,29 @@ HyperBrowse is a native Windows 10/11 x64 image browser and viewer optimized for
 - WIC for standard formats, vendored LibRaw 0.22.1 for RAW files, and optional nvJPEG/CUDA acceleration.
 - A UI-thread Win32 message loop with asynchronous enumeration, metadata, file operation, watch, thumbnail, and viewer pipelines.
 - Bounded memory caches, a persistent thumbnail cache under `%LOCALAPPDATA%`, and a separate RAW helper process.
-- One broad smoke/integration executable registered with CTest.
+- One broad smoke/integration executable with four CTest entry points.
 
-The first-party `src/` tree is approximately 41,800 physical lines. The largest units are `src/ui/MainWindow.cpp` (~15,970 lines), `src/browser/BrowserPane.cpp` (~5,110), and `src/viewer/ViewerWindow.cpp` (~4,680). The code generally uses RAII, `ComPtr`, request epochs, bounded queues/caches, and ownership-safe `PostMessageW` payload transfer.
+The current release is 2.1.0. The first-party `src/` tree is approximately 53,000 physical lines across 71 source/header files. The largest units are `src/ui/MainWindow.cpp` (~27,263 lines), `src/browser/BrowserPane.cpp` (~5,478), and `src/viewer/ViewerWindow.cpp` (~6,247). The code generally uses RAII, `ComPtr`, request epochs, bounded queues/caches, and ownership-safe `PostMessageW` payload transfer.
 
 ### Review scope and validation
 
-The review covered first-party source, tests, CMake/package scripts, README, and specs. Vendored source was reviewed only at its integration boundary. `HyperBrowseSmoke` passed on 2026-07-30. The worktree contained an uncommitted sort-state synchronization change in `src/ui/MainWindow.cpp`; its three hunks were reviewed and no defect was found.
+The original review covered first-party source, tests, CMake/package scripts, README, and specs. Vendored source was reviewed only at its integration boundary. This refresh compares the findings with `master` at `cee1fa1` and the post-review history through 2026-09-03. The July worktree sort-state change is now historical; subsequent releases and fixes are included below.
 
-The May 31 review was used as a baseline, not copied forward. Allocation-free cache-key comparison, manual extension scanning, one-time log-open warnings, decode-failure tooltips, path/cache tests, and viewer delete bitmap invalidation are present today.
+The May review was used as a baseline, not copied forward. Since the original review, cache corruption handling, split-buffer rename pairing, journal persistence, off-UI-thread cache maintenance, foreground thumbnail scheduling, early folder batches, settings isolation, decoder diagnostics, and several Windows workflow features have landed.
 
 Severity: 🔴 Critical | 🟠 High | 🟡 Medium | 🔵 Low
+
+## Status Refresh — 2026-09-03
+
+The highest-severity July findings are resolved in the current branch:
+
+- Persistent thumbnail payload validation and corrupt-entry cleanup landed in 1.2.5, with regression coverage for invalid headers, dimensions, byte counts, truncation, malformed index rows, unsafe cache names, and valid round trips.
+- Folder-watch rename state now survives notification-buffer boundaries. The deterministic parser has coverage for split, same-buffer, orphan, reset, and malformed records.
+- The persistent cache now maintains an authoritative in-memory index, appends access and mutation records to `index.journal.tsv`, replays valid journal records, and atomically compacts `index.tsv`. Cache stores and invalidations are processed off the UI thread.
+- Thumbnail scheduling now has a foreground lane, stale-work filtering, CPU-preferred visible work, early folder batches, coalesced presentation, and diagnostics for queue and persistence timings.
+- A committed Windows workflow builds Debug and Release, runs CTest, applies nonzero startup budgets, and validates release artifacts. The current workflow is a meaningful gate, but it is not yet a full compiler/configuration/dependency matrix.
+
+These changes lower the immediate reliability risk substantially. The remaining priorities are listed in the revised roadmap rather than treated as unresolved July defects.
 
 ---
 
@@ -34,51 +47,45 @@ Severity: 🔴 Critical | 🟠 High | 🟡 Medium | 🔵 Low
 
 ### 2A. Algorithmic and computational efficiency
 
-🟡 **The persistent cache turns every hit into serialized whole-index I/O.**
+🟢 **Resolved: persistent-cache hits no longer rewrite the whole index.**
 
-`DiskThumbnailCache::TryLoad` takes a process-wide filesystem mutex, reloads the full TSV index, updates one access ordinal, and rewrites the full index before reading the thumbnail ([src/cache/DiskThumbnailCache.cpp](../src/cache/DiskThumbnailCache.cpp#L329-L346)). `Store`, invalidation, statistics, and maintenance share the same mutex. Thumbnail workers therefore serialize behind O(n) index parsing and rewriting as the cache grows. Moving invalidation off the UI thread fixed the worst visible delete stall, but cache hits still consume decode-worker throughput.
+The July behavior was replaced by an authoritative in-memory index and append-only journal. Access touches are batched by a cache-owned persistence thread, and compaction atomically replaces the snapshot. The UI no longer calls persistent-cache invalidation directly. The process-wide filesystem mutex still serializes cache file access, so sharding and narrower lock scope remain worthwhile follow-up work, but the O(n) index rewrite on each hit is closed.
 
-**Recommendation:** keep an authoritative in-memory index, journal access updates asynchronously, use atomic snapshot replacement during compaction, and move all persistent-cache I/O behind one low-priority cache executor.
+**Remaining recommendation:** measure the mutex and directory-scan cost at large cache sizes, then consider sharded storage and narrower filesystem-lock scope only if benchmarks show a user-visible regression.
 
-🟡 **Four services still create one OS thread per request.**
+🟠 **Four services still create one OS thread per request.**
 
 Folder enumeration, folder-tree enumeration, file operations, and batch conversion use `std::async(std::launch::async)` ([src/services/FolderEnumerationService.cpp](../src/services/FolderEnumerationService.cpp#L244), [src/services/FolderTreeEnumerationService.cpp](../src/services/FolderTreeEnumerationService.cpp#L179), [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L498), [src/services/BatchConvertService.cpp](../src/services/BatchConvertService.cpp#L353)). Rapid navigation normally cancels old enumeration through request IDs, but blocked network/removable-volume calls can leave multiple threads alive.
 
-**Recommendation:** route cancellable short work through bounded executors and reserve a dedicated serialized executor for shell file operations.
+**Recommendation:** route folder enumeration, folder-tree queries, and batch conversion through bounded executors. Give shell file operations a serialized or explicitly bounded executor while preserving request epochs and cancellation.
 
 ### 2B. Persistent data layer
 
-🟠 **A corrupt thumbnail file can allocate attacker-controlled memory and terminate the process.**
+🟢 **Resolved: corrupt thumbnail payloads are rejected before allocation.**
 
-The cache reader validates only nonzero dimensions and byte count, then directly sizes a vector from `header.pixelBytes` before checking whether it equals `width * height * 4` or fits the file ([src/cache/DiskThumbnailCache.cpp](../src/cache/DiskThumbnailCache.cpp#L371-L383)). Cache files are user-writable and are written directly with truncation. A partial write, disk corruption, or local modification can advertise a huge byte count. `std::bad_alloc` or `std::length_error` then escapes the thumbnail worker's `std::thread` entry point and invokes `std::terminate`.
+`TryLoad` now checks the magic, dimension limits, checked BGRA byte count, source dimensions, platform size limits, and exact file length before allocating. Allocation and cache-file failures become misses, invalid entries are removed, and scheduler worker boundaries contain unexpected cache/decode exceptions. The malformed-cache regression scenario exercises these cases.
 
-**Recommendation:** reject dimensions above explicit limits, use checked multiplication, require the exact BGRA byte count, compare it with the indexed/actual file length, and catch cache/decode exceptions at the worker boundary. Delete or quarantine invalid entries.
+**Remaining recommendation:** add an explicit invalid-cache diagnostic counter so field reports can distinguish corruption from ordinary cache misses.
 
-🟡 **Index snapshots are not crash-safe.**
+🟢 **Resolved: index compaction is crash-safer.**
 
-`SaveIndexLocked` opens `index.tsv` with `std::ios::trunc` and writes in place ([src/cache/DiskThumbnailCache.cpp](../src/cache/DiskThumbnailCache.cpp#L778-L786)). A crash or storage failure can leave a partial index and orphan otherwise-valid thumbnails. This is recoverable cache data, not user data, but startup hit rate and disk usage degrade silently.
-
-**Recommendation:** write `index.tsv.tmp`, flush/close it, then atomically replace the index. Treat malformed lines as a signal to compact or rebuild.
+Compaction writes a replacement snapshot and replaces the prior index only after the new snapshot is complete. Journal replay ignores malformed or incomplete records, and malformed snapshot rows are skipped. The cache remains recoverable data rather than user data, but corruption and recovery outcomes are not yet exposed through diagnostics.
 
 ### 2C. Concurrency, async, and I/O
 
-🟠 **Folder renames can lose the old path across notification completions.**
+🟢 **Resolved: folder renames survive split notification completions.**
 
-`pendingRenameOldPath` is created inside each completed `ReadDirectoryChangesW` buffer processing pass ([src/services/FolderWatchService.cpp](../src/services/FolderWatchService.cpp#L244-L268)). If `FILE_ACTION_RENAMED_OLD_NAME` ends one completion and `FILE_ACTION_RENAMED_NEW_NAME` arrives in the next, the service emits a rename with an empty old path. MainWindow then upserts the new path but cannot remove the old model entry ([src/ui/MainWindow.cpp](../src/ui/MainWindow.cpp#L12347-L12357)), leaving a stale thumbnail until a reload.
+`FolderWatchNotificationParser` retains the pending old name across `ReadDirectoryChangesW` completions and requests a full reload for orphaned or malformed records. `tests/smoke.cpp` now asserts split and same-buffer pairing, reset behavior, and fallback handling.
 
-The only watcher smoke coverage starts and stops the service; it does not assert event semantics ([tests/smoke.cpp](../tests/smoke.cpp#L858-L868)).
+🟡 **Application shutdown can still wait for shell file operations.**
 
-**Recommendation:** retain the pending old name in watcher state across completions. If a new name arrives without an old name, emit a full-reload requirement or a conservative add event rather than a malformed rename.
+Cancellation now reaches the progress sink, and `MainWindow` requests cancellation during teardown. The service still joins the worker synchronously, and `IFileOperation::PerformOperations` may remain blocked on a long copy, unavailable network destination, elevation UI, or shell conflict prompt. There is no bounded close policy or test for destruction during a blocked shell operation.
 
-🟡 **Application shutdown can wait indefinitely for shell file operations.**
-
-`FileOperationService::~FileOperationService` synchronously waits for every future ([src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L477-L479), [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L665-L673)). A worker may be blocked in `IFileOperation::PerformOperations` ([src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L627)) on a long copy, unavailable network destination, elevation UI, or shell conflict prompt. There is no service-level shutdown/cancel signal.
-
-**Recommendation:** explicitly define close-during-operation behavior. Prefer requesting cancellation through a progress sink, keeping the owner alive until completion, and showing a bounded shutdown state rather than blocking an apparently closed app.
+**Recommendation:** define close-during-operation behavior explicitly. Keep the owner valid until completion, make cancellation state observable, and provide a bounded shutdown state or documented wait rather than silently appearing closed while a synchronous join continues.
 
 ### 2D. Memory and resource management
 
-🟠 The corrupt-cache allocation above is the primary memory safety/reliability concern. Normal runtime cache sizing is adaptive and bounded, COM/GDI resources are generally RAII-managed, and no first-party leak was identified.
+The corrupt-cache allocation risk is closed. Normal runtime cache sizing is adaptive and bounded, COM/GDI resources are generally RAII-managed, and no first-party leak was identified. The remaining resource concern is lifecycle behavior when shell operations or filesystem APIs do not return promptly.
 
 ### 2E. Network and API efficiency
 
@@ -86,26 +93,26 @@ The runtime product is local-first. Network/removable paths still matter because
 
 ### 2F. Build, bundle, and startup
 
-🟠 **The repository claims a CI performance gate that is not wired.**
+🟢 **Resolved in part: CI now runs a real startup gate and package validation.**
 
-The startup script supports budgets, but all three default to disabled (`0`) ([tools/TestStartupBenchmark.ps1](../tools/TestStartupBenchmark.ps1#L13-L15)). CTest registers only `HyperBrowseSmoke` ([tests/CMakeLists.txt](../tests/CMakeLists.txt#L38)), and no `.github/workflows/` files exist. This conflicts with the statement that GitHub Actions runs the gate ([specs/14-todo.md](../specs/14-todo.md#L224-L227)). Performance is the product's stated differentiator, so this is a release-control gap rather than optional polish.
+The committed workflow builds Debug and Release, runs the four registered CTest entry points, invokes `TestStartupBenchmark.ps1` with 2.5 s / 2.5 s / 5 s budgets, uploads benchmark output, and builds release artifacts. The budget script still defaults to disabled for local use, which is appropriate for an opt-in tool; CI supplies explicit nonzero values.
 
-**Recommendation:** commit a CI workflow with nonzero budgets, a deterministic fixture, artifact upload, and a documented variance policy.
+**Remaining recommendation:** add a deterministic fixture policy, record hosted-run variance, and expand CI to a fallback configuration with nvJPEG disabled plus dependency/security checks. The current workflow is a gate, not yet a complete quality matrix.
 
-🟡 **`MainWindow.cpp` is now approximately 15,970 lines.**
+🟡 **`MainWindow.cpp` has grown to approximately 27,263 lines.**
 
-The architecture spec still describes it as ~3,900 lines ([specs/02-architecture.md](../specs/02-architecture.md#L52)). The unit owns menus, toolbar, dialogs, persistence, folder tree, drag/drop, file operations, viewer coordination, and watch reconciliation. This raises incremental build time and makes high-risk workflow changes difficult to isolate.
+The unit still owns menus, toolbar, dialogs, persistence, folder tree, drag/drop, file operations, viewer coordination, and watch reconciliation. Recent UI work made the mismatch with the architecture spec larger, not smaller. This remains engineering hygiene rather than a reason to pause product work, but new cross-cutting behavior should be extracted behind focused helpers where practical.
 
 ### 2G. Observability and reliability
 
-- Diagnostics and startup JSON are strong foundations.
-- There is no automated field snapshot export or persisted percentile rollup.
-- Persistent-cache corruption is neither logged nor counted.
-- Watcher fallback/reload reasons are not represented as diagnostics counters.
+- Diagnostics and startup JSON are strong foundations, now including queue, decode, cache-persistence, cancellation, and failure timing/counter data.
+- There is still no automated field snapshot export or persisted percentile rollup.
+- Invalid persistent-cache entries are cleaned up but are not yet counted distinctly from ordinary misses.
+- Watcher fallback/reload reasons are still not represented as dedicated diagnostics counters.
 
 ### 2H. Security/performance intersections
 
-🟠 The unchecked cache header is both a denial-of-service path and an unbounded allocation path. The cache is local-user scoped, which lowers remote exploitability but does not make corrupted-file handling optional.
+🟢 The unchecked cache-header allocation path is closed. The cache is local-user scoped, and malformed entries are rejected and removed before allocation.
 
 🔵 RAW decoding has a useful out-of-process isolation option. Keep it enabled by default and test helper timeout/termination behavior with each LibRaw update.
 
@@ -123,23 +130,23 @@ The architecture spec still describes it as ~3,900 lines ([specs/02-architecture
 
 The product is notably more complete than the May review indicated: structured rating/tag filters, adaptive resource profiles, viewer metadata, persistent cache controls, folder organization, browser-to-tree drag/drop, slideshow settings/transitions, and quick viewer delete are implemented.
 
-The strongest evidence-based opportunities still inside the browser/viewer scope are:
+The post-review branch also shipped a consolidated themed Settings surface, Quick Actions persistence, native shell drag-out and drop-in, clipboard and duplicate workflows, undo/redo, single-instance launch forwarding, taskbar progress, viewer keyboard/focus improvements, and broader decoder diagnostics. The strongest remaining opportunities inside the browser/viewer scope are:
 
 1. **n-up compare with synchronized zoom/pan.** Two-up compare exists; 3/4-up culling and synchronized inspection remain planned ([specs/14-todo.md](../specs/14-todo.md#L265-L278)).
 2. **Color-managed display.** This is material for photographers and remains absent ([specs/14-todo.md](../specs/14-todo.md#L289-L296)).
 3. **Saved filter views.** Structured `rating:` and `tag:` parsing already exists ([src/browser/BrowserPane.cpp](../src/browser/BrowserPane.cpp#L300-L305), [src/browser/BrowserPane.cpp](../src/browser/BrowserPane.cpp#L377-L400)); persisting named expressions is a small, scope-compatible extension.
-4. **External drag-out/drop-in.** Browser-to-tree organization exists, but Explorer/mail/chat drag-out and browser drop-in remain a practical workflow gap.
+4. **Histogram and inspection polish.** A details-panel histogram tooltip exists, but clip warnings and a richer viewer inspection workflow remain open.
 5. **HEIC/AVIF and animated viewer playback.** These are valid format-frontier items after reliability and color management, not before them.
 
 Cross-folder catalog search could deliver value, but it conflicts with the explicit no-database scope. Treat it as a validated strategic decision, not an assumed missing requirement.
 
 ### 3B. UX and developer-experience gaps
 
-🟡 **Structured filters are implemented but the UI specification still documents substring-only filtering.** See [specs/04-ui-behavior.md](../specs/04-ui-behavior.md#L133-L140). The toolbar cue text helps discovery, but there is no durable syntax reference or saved-filter affordance.
+🟡 **Structured filters are implemented but the UI specification still documents substring-only filtering.** See [specs/04-ui-behavior.md](../specs/04-ui-behavior.md#L133-L140). The toolbar cue text helps discovery, but there is no saved-filter affordance.
 
 🟡 **Settings remain fragmented.** Performance settings are available, while slideshow, acceleration, theme, cache, and viewer behavior are distributed across menus. The existing roadmap's Settings/Tools consolidation is still justified if it preserves quick keyboard access.
 
-🟡 **Documentation drift is substantial.** The architecture documents claim GDI-only rendering and no D2D implementation ([specs/02-architecture.md](../specs/02-architecture.md#L8-L14), [specs/02-architecture.md](../specs/02-architecture.md#L93-L97)); the D2D migration plan also describes the pre-migration state as current ([specs/15-d2d-rendering-migration.md](../specs/15-d2d-rendering-migration.md#L26-L35)). The UI spec says slideshow interval UI and F2 rename are absent even though both are implemented.
+🟡 **Documentation drift remains.** The architecture and migration specs still need a current-state pass for the hybrid D2D/GDI renderer and the 27k-line MainWindow. The UI spec also needs to reflect structured filters, slideshow settings, F2 behavior, metadata visibility, and current drag/drop workflows.
 
 ### 3C. Data and analytics
 
@@ -161,16 +168,20 @@ Monetization instrumentation is not appropriate for the current local-first MIT 
 
 ## Test and Quality Posture
 
-`HyperBrowseSmoke` passed and covers a broad set of enumeration, decode, metadata, selection, file operation, and viewer behaviors. The important gaps are narrower than “no unit tests”:
+The broad smoke executable now contains focused scenarios for enumeration, decode, metadata, selection, file operations, viewer behavior, cache persistence, cache corruption, journal replay, folder-watch parsing, scheduler cancellation, and UI settings. CTest registers four entry points: `HyperBrowseSmoke`, `HyperBrowseViewerFitSmoke`, `HyperBrowseAppTextSizeSmoke`, and `HyperBrowseSettingsSmoke`. The important gaps are:
 
-- no persistent `DiskThumbnailCache` read/write/corruption tests;
-- no folder-watch add/remove/rename semantic tests;
-- no close-during-file-operation test;
-- no CI workflow or enforced startup budget;
-- no sanitizer/fuzz target for cache/index and RAW-helper protocol parsing.
+- no bounded executor implementation for the remaining per-request service futures;
+- no close-during-file-operation or blocked-shell-operation test;
+- no CI fallback matrix with nvJPEG disabled, sanitizers, or fuzz targets;
+- no dedicated cache corruption/recovery counters in diagnostics;
+- no focused test binaries for cache, watcher, and service domains; most scenarios remain in `tests/smoke.cpp`.
 
-## Highest-Leverage Action
+## Highest-Leverage Remaining Work
 
-Harden `DiskThumbnailCache::TryLoad` and add malformed-cache tests first. It is a small change that closes the only identified process-termination path, creates a foundation for cache-format changes, and is independently verifiable.
+1. **Bound background service execution.** Replace request-per-thread `std::async` in folder enumeration, folder-tree queries, batch conversion, and file operations with bounded execution while retaining cancellation and request epochs.
+2. **Define file-operation shutdown.** Make close during shell work explicit and test cancellation, owner-window lifetime, progress completion, and bounded user-visible shutdown behavior.
+3. **Complete the quality matrix.** Add the nvJPEG-off fallback build, sanitizer/fuzz coverage for cache and RAW-helper boundaries, and a documented benchmark fixture/variance policy.
+4. **Finish current-state documentation.** Align the architecture, UI behavior, and D2D migration specs with the implementation before adding more cross-cutting UI behavior.
+5. **Then invest in product depth.** Prioritize saved filters, synchronized 3/4-up compare, and color-managed display ahead of lower-value format expansion.
 
-See [ENHANCEMENT_ROADMAP_2026-07-30.md](ENHANCEMENT_ROADMAP_2026-07-30.md) for the prioritized implementation plan.
+See [ENHANCEMENT_ROADMAP_2026-07-30.md](ENHANCEMENT_ROADMAP_2026-07-30.md) for the prioritized implementation plan and completion ledger.
