@@ -25,6 +25,8 @@ namespace
     constexpr std::size_t kBatchSize = 64;
     constexpr std::size_t kWorkerCount = 2;
     constexpr std::size_t kMaxPendingTaskCount = 2;
+    constexpr DWORD kInitialBatchPauseMilliseconds = 8;
+    constexpr DWORD kBatchPauseMilliseconds = 1;
 
     struct EnumerationSharedStateView
     {
@@ -77,6 +79,9 @@ namespace
         update->totalBytes = totalBytes;
         PostUpdate(stateView.targetWindow, std::move(update));
         batch->clear();
+        Sleep(totalCount <= kInitialBatchItemLimit
+                  ? kInitialBatchPauseMilliseconds
+                  : kBatchPauseMilliseconds);
     }
 
     void PostFailure(const EnumerationSharedStateView& stateView,
@@ -286,6 +291,7 @@ namespace hyperbrowse::services
                                               recursive,
                                               includeSubfolders]() mutable
         {
+            SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
             util::Stopwatch stopwatch;
             EnumerateFolder(stateView, folderPath, recursive, includeSubfolders);
             util::RecordTiming(L"folder.enumeration", stopwatch.ElapsedMilliseconds());
