@@ -142,25 +142,26 @@ not requests to repeat the work.
 
 ### MP2: Bounded background service execution
 
-- **Status:** Partial. All four request-per-task service paths now use bounded executors; stress coverage and queue diagnostics remain.
+- **Status:** Partial. All four request-per-task service paths now use bounded executors; executor capacity/destruction smoke coverage and service queue-rejection counters are landed, while service-level burst coverage and capacity tuning remain.
 - **Category:** Performance, Reliability
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** Medium
 - **Area:** `FolderEnumerationService`, `FolderTreeEnumerationService`, `BatchConvertService`, `FileOperationService`, `util/BackgroundExecutor.h`
 - **Delivered:** folder enumeration, folder-tree queries, batch conversion, and file operations now use member-owned `util::BackgroundExecutor` instances with bounded worker and pending-task counts. Existing request generations and cancellation checks remain in place; stale folder work exits before filesystem access, and shell operations retain COM STA setup and owner-window assignment. Completion/progress posts are suppressed after service shutdown.
-- **Remaining:** add burst and destruction tests, expose queue rejection/active-work diagnostics, and measure whether the selected capacities are appropriate for slow local, removable, and network paths.
+- **Remaining:** add service-level burst tests, expose active-work snapshots, and measure whether the selected capacities are appropriate for slow local, removable, and network paths.
 - **Success metrics:** rapid folder changes never create unbounded threads; stale queued work exits before filesystem access; service destruction joins in-flight work without late completion posts.
 
 ### MP3: Cancellable file-operation shutdown
 
-- **Status:** Partial. Cancellation and progress reporting are implemented; close behavior is still unbounded.
+- **Status:** Partial. Cancellation, progress reporting, explicit close-pending cancellation, and pre-destruction post suppression are implemented; the shell operation can still make shutdown wait without a bounded timeout.
 - **Category:** Reliability, UX
 - **Perspective:** Both
 - **Effort:** M
 - **Impact:** High
 - **Area:** [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L477-L479), [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L627-L673), `src/ui/MainWindow.cpp`
-- **Recommendation:** define close behavior, keep the shell owner valid until completion, and make cancellation state observable. Do not detach a worker that can still post to a destroyed HWND. Add a test for destruction during a slow or blocked shell operation.
+- **Current behavior:** closing during an active file operation requests cancellation, keeps the main window alive until the completion update, and shows a cancelling status. `FileOperationService::Shutdown()` is also called from `WM_DESTROY` before the HWND can be invalidated, preventing late completion/progress posts from targeting a destroyed window.
+- **Remaining:** define the user-visible policy for a shell operation that ignores cancellation or remains blocked in Windows, and add a test for destruction during a slow or blocked shell operation. Do not detach a worker that can still post to a destroyed HWND.
 - **Success metrics:** closing during a slow copy/delete either cancels promptly or presents an explicit bounded wait state; no orphan shell UI or post-destroy completion.
 
 ### MP4: CI quality and performance matrix

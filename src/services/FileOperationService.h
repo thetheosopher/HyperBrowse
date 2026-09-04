@@ -77,6 +77,7 @@ namespace hyperbrowse::services
         ~FileOperationService();
 
         void Cancel() noexcept;
+        void Shutdown() noexcept;
 
         std::uint64_t Start(HWND targetWindow,
                             HWND ownerWindow,

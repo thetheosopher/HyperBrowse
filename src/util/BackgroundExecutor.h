@@ -70,6 +70,7 @@ namespace hyperbrowse::util
                 if (shuttingDown_
                     || (maxPendingTaskCount_ != 0 && tasks_.size() >= maxPendingTaskCount_))
                 {
+                    rejectedTaskCount_.fetch_add(1, std::memory_order_relaxed);
                     return false;
                 }
                 tasks_.push_back(std::move(task));
@@ -87,6 +88,22 @@ namespace hyperbrowse::util
         std::size_t WorkerCount() const noexcept
         {
             return workers_.size();
+        }
+
+        std::size_t PendingTaskCount() const noexcept
+        {
+            std::scoped_lock lock(mutex_);
+            return tasks_.size();
+        }
+
+        std::size_t ActiveTaskCount() const noexcept
+        {
+            return activeTaskCount_.load(std::memory_order_acquire);
+        }
+
+        std::size_t RejectedTaskCount() const noexcept
+        {
+            return rejectedTaskCount_.load(std::memory_order_acquire);
         }
 
     private:
@@ -108,6 +125,7 @@ namespace hyperbrowse::util
 
                 if (task)
                 {
+                    activeTaskCount_.fetch_add(1, std::memory_order_acq_rel);
                     try
                     {
                         task();
@@ -120,15 +138,18 @@ namespace hyperbrowse::util
                     {
                         OutputDebugStringW(L"HyperBrowse background task threw an unknown exception.\n");
                     }
+                    activeTaskCount_.fetch_sub(1, std::memory_order_acq_rel);
                 }
             }
         }
 
-        std::mutex mutex_;
+        mutable std::mutex mutex_;
         std::condition_variable condition_;
         std::deque<std::function<void()>> tasks_;
         std::vector<std::thread> workers_;
         std::size_t maxPendingTaskCount_{};
         bool shuttingDown_{false};
+        std::atomic<std::size_t> activeTaskCount_{};
+        std::atomic<std::size_t> rejectedTaskCount_{};
     };
 }

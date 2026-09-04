@@ -567,6 +567,99 @@ namespace
                "Background executor did not continue after a task exception");
     }
 
+    void RunBackgroundExecutorCapacityScenario()
+    {
+        std::mutex mutex;
+        std::condition_variable condition;
+        bool firstStarted = false;
+        bool releaseFirst = false;
+        bool secondCompleted = false;
+
+        hyperbrowse::util::BackgroundExecutor executor(1, 1);
+        Expect(executor.Post([&]()
+        {
+            std::unique_lock lock(mutex);
+            firstStarted = true;
+            condition.notify_all();
+            condition.wait(lock, [&]() { return releaseFirst; });
+        }), "Background executor rejected its active task");
+
+        {
+            std::unique_lock lock(mutex);
+            Expect(condition.wait_for(lock, std::chrono::seconds(2), [&]() { return firstStarted; }),
+                   "Background executor did not start its active task");
+        }
+        Expect(executor.ActiveTaskCount() == 1, "Background executor did not report active work");
+
+        Expect(executor.Post([&]()
+        {
+            {
+                std::scoped_lock lock(mutex);
+                secondCompleted = true;
+            }
+            condition.notify_all();
+        }), "Background executor rejected its available pending slot");
+        Expect(executor.PendingTaskCount() == 1, "Background executor did not report pending work");
+        Expect(!executor.Post([]() {}), "Background executor accepted work beyond its pending limit");
+        Expect(executor.RejectedTaskCount() == 1, "Background executor did not count rejected work");
+
+        {
+            std::scoped_lock lock(mutex);
+            releaseFirst = true;
+        }
+        condition.notify_all();
+
+        {
+            std::unique_lock lock(mutex);
+            Expect(condition.wait_for(lock, std::chrono::seconds(2), [&]() { return secondCompleted; }),
+                   "Background executor did not drain pending work");
+        }
+        Expect(executor.ActiveTaskCount() == 0, "Background executor retained an active-work count after completion");
+        Expect(executor.PendingTaskCount() == 0, "Background executor retained a pending-work count after completion");
+
+        auto destructionExecutor = std::make_unique<hyperbrowse::util::BackgroundExecutor>(1, 1);
+        firstStarted = false;
+        releaseFirst = false;
+        bool queuedRan = false;
+        bool destructionCompleted = false;
+
+        Expect(destructionExecutor->Post([&]()
+        {
+            std::unique_lock lock(mutex);
+            firstStarted = true;
+            condition.notify_all();
+            condition.wait(lock, [&]() { return releaseFirst; });
+        }), "Background executor rejected its destruction test task");
+        {
+            std::unique_lock lock(mutex);
+            Expect(condition.wait_for(lock, std::chrono::seconds(2), [&]() { return firstStarted; }),
+                   "Background executor destruction task did not start");
+        }
+        Expect(destructionExecutor->Post([&]() { queuedRan = true; }),
+               "Background executor rejected the queued destruction test task");
+
+        std::thread destructionThread([&]()
+        {
+            destructionExecutor.reset();
+            {
+                std::scoped_lock lock(mutex);
+                destructionCompleted = true;
+            }
+            condition.notify_all();
+        });
+
+        {
+            std::unique_lock lock(mutex);
+            Expect(!condition.wait_for(lock, std::chrono::milliseconds(100), [&]() { return destructionCompleted; }),
+                   "Background executor destruction returned before its active task completed");
+            releaseFirst = true;
+        }
+        condition.notify_all();
+        destructionThread.join();
+        Expect(destructionCompleted, "Background executor destruction did not complete");
+        Expect(!queuedRan, "Background executor ran queued work after destruction began");
+    }
+
     void SetRegistryDwordValue(const wchar_t* path, const wchar_t* valueName, DWORD value)
     {
         HKEY key{};
@@ -4141,6 +4234,7 @@ int main(int argc, char* argv[])
         {
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
+            RunBackgroundExecutorCapacityScenario();
             RunSingleInstanceIdleClientScenario();
             RunEnumerationScenario(hwnd, &state);
             RunFolderTreeEnumerationScenario(hwnd, &state);

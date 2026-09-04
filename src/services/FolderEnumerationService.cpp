@@ -292,6 +292,7 @@ namespace hyperbrowse::services
         });
         if (!accepted)
         {
+            util::IncrementCounter(L"service.folder_enumeration.queue_rejected");
             PostFailure(stateView, requestedFolderPath, L"Folder enumeration could not be queued.");
         }
 

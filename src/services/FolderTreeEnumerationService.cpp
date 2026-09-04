@@ -302,6 +302,7 @@ namespace hyperbrowse::services
         });
         if (!accepted)
         {
+            util::IncrementCounter(L"service.folder_tree.queue_rejected");
             PostFailure(stateView, requestedFolderPath, L"Folder tree enumeration could not be queued.");
         }
 
@@ -335,6 +336,7 @@ namespace hyperbrowse::services
         });
         if (!accepted)
         {
+            util::IncrementCounter(L"service.folder_tree_presence.queue_rejected");
             PostFailure(stateView, requestedFolderPath, L"Folder tree child-presence query could not be queued.");
         }
 

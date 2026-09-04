@@ -10876,7 +10876,7 @@ namespace hyperbrowse::ui
 
         if (fileOperationService_)
         {
-            fileOperationService_->Cancel();
+            fileOperationService_->Shutdown();
         }
 
         if (backgroundBrush_)
@@ -27225,6 +27225,10 @@ namespace hyperbrowse::ui
             if (batchConvertService_)
             {
                 batchConvertService_->Cancel();
+            }
+            if (fileOperationService_)
+            {
+                fileOperationService_->Shutdown();
             }
             SaveWindowState();
             PostQuitMessage(0);

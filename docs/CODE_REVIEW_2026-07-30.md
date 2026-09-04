@@ -1,7 +1,7 @@
 # HyperBrowse Comprehensive Code Review
 
 Original review: 2026-07-30
-Status refresh: 2026-09-03
+Status refresh: 2026-09-04
 Reviewer: GitHub Copilot
 Perspectives: Software Optimization Engineering + Product Management
 Codebase: HyperBrowse
@@ -38,6 +38,7 @@ The highest-severity July findings are resolved in the current branch:
 - The persistent cache now maintains an authoritative in-memory index, appends access and mutation records to `index.journal.tsv`, replays valid journal records, and atomically compacts `index.tsv`. Cache stores and invalidations are processed off the UI thread.
 - Thumbnail scheduling now has a foreground lane, stale-work filtering, CPU-preferred visible work, early folder batches, coalesced presentation, and diagnostics for queue and persistence timings.
 - Folder enumeration, folder-tree queries, batch conversion, and file operations now use bounded member-owned executors instead of request-per-task `std::async`; stale folder work checks cancellation before filesystem access, and shutdown suppresses late service completion posts.
+- Bounded-executor smoke coverage now verifies pending/active/rejected counts, queue limits, exception recovery, and destruction ordering. Service queue rejections are recorded in diagnostics, and file-operation shutdown is explicitly armed during `WM_DESTROY` before the main HWND can become invalid.
 - A committed Windows workflow builds Debug and Release, runs CTest, applies nonzero startup budgets, and validates release artifacts. The current workflow is a meaningful gate, but it is not yet a full compiler/configuration/dependency matrix.
 
 These changes lower the immediate reliability risk substantially. The remaining priorities are listed in the revised roadmap rather than treated as unresolved July defects.
@@ -171,7 +172,7 @@ Monetization instrumentation is not appropriate for the current local-first MIT 
 
 The broad smoke executable now contains focused scenarios for enumeration, decode, metadata, selection, file operations, viewer behavior, cache persistence, cache corruption, journal replay, folder-watch parsing, scheduler cancellation, and UI settings. CTest registers four entry points: `HyperBrowseSmoke`, `HyperBrowseViewerFitSmoke`, `HyperBrowseAppTextSizeSmoke`, and `HyperBrowseSettingsSmoke`. The important gaps are:
 
-- no service-level burst, queue-rejection, or destruction tests for the new bounded executors;
+- no service-level burst or blocked-shell-operation destruction tests for the new bounded executors;
 - no close-during-file-operation or blocked-shell-operation test;
 - no CI fallback matrix with nvJPEG disabled, sanitizers, or fuzz targets;
 - no dedicated cache corruption/recovery counters in diagnostics;
@@ -179,8 +180,8 @@ The broad smoke executable now contains focused scenarios for enumeration, decod
 
 ## Highest-Leverage Remaining Work
 
-1. **Define file-operation shutdown.** Make close during shell work explicit and test cancellation, owner-window lifetime, progress completion, and bounded user-visible shutdown behavior.
-2. **Validate bounded service execution.** Add burst, queue-rejection, and destruction tests plus executor diagnostics for the completed migration.
+1. **Define file-operation shutdown.** The close-pending/cancellation policy and pre-destruction post suppression are now explicit; next add a bounded user-visible policy and test cancellation while Windows shell work is blocked.
+2. **Validate bounded service execution.** Add service-level burst/destruction tests and active-work snapshots; executor queue limits, rejection counts, and generic destruction coverage are now in place.
 3. **Complete the quality matrix.** Add the nvJPEG-off fallback build, sanitizer/fuzz coverage for cache and RAW-helper boundaries, and a documented benchmark fixture/variance policy.
 4. **Finish current-state documentation.** Align the architecture, UI behavior, and D2D migration specs with the implementation before adding more cross-cutting UI behavior.
 5. **Then invest in product depth.** Prioritize saved filters, synchronized 3/4-up compare, and color-managed display ahead of lower-value format expansion.

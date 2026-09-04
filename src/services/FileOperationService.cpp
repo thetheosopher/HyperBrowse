@@ -14,6 +14,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "util/Diagnostics.h"
+
 namespace hyperbrowse::services
 {
     struct FileOperationSharedState
@@ -540,13 +542,18 @@ namespace hyperbrowse::services
 
     FileOperationService::~FileOperationService()
     {
-        sharedState_->shutdown.store(true, std::memory_order_release);
-        Cancel();
+        Shutdown();
     }
 
     void FileOperationService::Cancel() noexcept
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    void FileOperationService::Shutdown() noexcept
+    {
+        sharedState_->shutdown.store(true, std::memory_order_release);
+        Cancel();
     }
 
     std::uint64_t FileOperationService::Start(HWND targetWindow,
@@ -768,6 +775,7 @@ namespace hyperbrowse::services
 
         if (!accepted)
         {
+            util::IncrementCounter(L"service.file_operation.queue_rejected");
             auto update = std::make_unique<FileOperationUpdate>();
             update->requestId = requestId;
             update->type = type;

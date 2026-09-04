@@ -9,6 +9,7 @@
 
 #include "cache/ThumbnailCache.h"
 #include "decode/ImageDecoder.h"
+#include "util/Diagnostics.h"
 
 namespace fs = std::filesystem;
 
@@ -498,6 +499,7 @@ namespace hyperbrowse::services
         });
         if (!accepted)
         {
+            util::IncrementCounter(L"service.batch_convert.queue_rejected");
             auto update = std::make_unique<BatchConvertUpdate>();
             update->requestId = requestId;
             update->completedCount = requestedItemCount;
