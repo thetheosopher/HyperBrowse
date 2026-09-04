@@ -1,0 +1,92 @@
+# HyperBrowse Architecture
+
+This document describes the current implementation. The planning documents in `specs/` are useful for product intent and historical context, but source code, tests, and this document are authoritative when they disagree.
+
+## Executables and library
+
+- `HyperBrowseCore` is the static library shared by the application and smoke tests.
+- `HyperBrowse.exe` owns application startup, the Win32 message loop, and the main user-facing windows.
+- `HyperBrowseRawHelper.exe` is the optional out-of-process RAW decode helper.
+- `HyperBrowseTests.exe` runs the smoke and integration checks registered by `tests/CMakeLists.txt`.
+
+The core library is organized by responsibility:
+
+- `src/app/`: process startup and application lifecycle.
+- `src/ui/`: main window, diagnostics, command routing, and shared UI coordination.
+- `src/browser/`: browser model and thumbnail/details presentation.
+- `src/viewer/`: full-image viewer, navigation, slideshow, zoom, and prefetch.
+- `src/services/`: asynchronous enumeration, watching, metadata, thumbnails, file operations, conversion, and settings-related workflows.
+- `src/decode/`: WIC, LibRaw helper protocol, and optional nvJPEG decode paths.
+- `src/cache/`: bounded memory thumbnail caching and persistent disk thumbnail caching.
+- `src/render/`: Direct2D/DirectWrite factories and shared rendering helpers.
+- `src/util/`: logging, diagnostics, path/string helpers, settings, sizing, and common utilities.
+
+## Threading boundary
+
+The UI thread owns HWNDs, input, layout, command routing, model presentation, and invalidation/paint coordination. It must remain responsive.
+
+Potentially blocking or high-volume work belongs on worker paths:
+
+- folder and tree enumeration;
+- filesystem watching and event coalescing;
+- thumbnail and full-image decode;
+- metadata extraction;
+- file operations and batch conversion;
+- persistent thumbnail cache index/file access;
+- RAW helper process communication.
+
+Workers return results through the existing window-message or callback contracts. Every asynchronous path must account for cancellation, stale results, recipient lifetime, and shutdown ordering. A worker must not retain a raw HWND or object callback past the recipient's lifetime without an established lifetime guarantee.
+
+`DiskThumbnailCache` is especially important: its index and cache files are protected by process-wide persistence coordination, so cache operations must not be called from the UI thread. `ThumbnailScheduler` owns the asynchronous disk invalidation path.
+
+## Main data flows
+
+### Folder navigation
+
+1. `MainWindow` starts a folder load and resets the browser presentation state.
+2. `FolderEnumerationService` enumerates asynchronously and posts batches.
+3. `BrowserModel` receives incremental items and tracks enumeration state.
+4. `BrowserPane` presents early items, schedules visible/near-visible thumbnails, and requests metadata as needed.
+5. Coalesced UI updates keep large-folder enumeration from sorting, painting, or scheduling once per worker batch.
+6. `FolderWatchService` applies external changes incrementally when safe and requests a full reload for large or ambiguous event bursts.
+
+### Viewer navigation
+
+1. `ViewerWindow` changes the selected item and tries the memory/prefetch cache.
+2. A cache hit presents immediately.
+3. A miss starts asynchronous full-image loading while preserving the last valid displayed image where possible.
+4. The current image and adjacent prefetch slots are updated when decode results arrive.
+5. Delete and other list mutations explicitly invalidate index-keyed render resources before an index can refer to a different file.
+
+### File operations
+
+`FileOperationService` performs native shell operations asynchronously and reports completion/progress to `MainWindow`. Browser and viewer workflows share operation types, so operation origin must be tracked separately from the operation type. Completion logic must also account for folder-watch echoes, optimistic viewer state, selection/focus restoration, and shell-dialog foreground activation.
+
+## Rendering
+
+The current rendering split is intentional:
+
+- `BrowserPane` and `ViewerWindow` use Direct2D/DirectWrite for image presentation, thumbnail cells, overlays, and related text surfaces.
+- Main-window legacy shell surfaces, menus, dialogs, status areas, and some details paths still use GDI.
+- `D2DRenderer` centralizes factory/resource setup and fallback behavior, including WARP when hardware rendering is unavailable.
+
+When changing rendering code, preserve resource recovery on device/display loss, DPI-aware dimensions, and the distinction between content identity and list position. A numeric index alone is not a safe render-cache key across insertions, removals, or reordering.
+
+## State and persistence
+
+Application settings live under the per-user registry location described in the README, with an environment-variable override for isolated development/test runs. Window geometry is restored only when it fits the current monitor work area. Do not replace a valid persisted folder path with an empty value during shutdown or transient no-selection states.
+
+Persistent thumbnail entries include file identity information such as normalized path and file metadata. User metadata and cache indexes are bounded/coalesced to limit UI and disk contention.
+
+## Change ownership guide
+
+- Folder loading, tree actions, menu commands, focus, and application state: `src/ui/MainWindow.*`.
+- Browser item storage and path-based mutation: `src/browser/BrowserModel.*`.
+- Thumbnail painting, selection, visible-range scheduling, and details rows: `src/browser/BrowserPane.*`.
+- Viewer navigation, image lifetime, transitions, and viewer input: `src/viewer/ViewerWindow.*`.
+- Decode selection and format behavior: `src/decode/`.
+- Scheduling, worker counts, cancellation, and cache invalidation: `src/services/ThumbnailScheduler.*` and related services.
+- Persistent thumbnail files/index: `src/cache/DiskThumbnailCache.*`.
+- Shared logging and timing: `src/util/Log.*`, `src/util/Diagnostics.*`, and `src/util/Timing.h`.
+
+Start at the smallest owning component, then follow its nearest call site and test. Avoid moving responsibilities between these boundaries as part of an unrelated bug fix.

@@ -268,6 +268,11 @@ When CUDA redistributable bundling is enabled, CMake downloads the official NVID
 The `specs/` directory tracks both design intent and implementation follow-up. Useful entry points:
 
 - [docs/user-guide.html](docs/user-guide.html) for the practical, user-facing application guide.
+- [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, validation expectations, and pull request checklist.
+- [docs/architecture.md](docs/architecture.md) for current component ownership, threading boundaries, data flows, and rendering responsibilities.
+- [docs/testing.md](docs/testing.md) for build, smoke-test, benchmark, diagnostics, and manual validation guidance.
+- [.github/copilot-instructions.md](.github/copilot-instructions.md) for repository-wide coding guidance used by GitHub Copilot.
+- [docs/decisions/README.md](docs/decisions/README.md) for durable architecture decisions and invariants.
 - [specs/01-product-spec.md](specs/01-product-spec.md) for product scope and supported workflows.
 - [specs/02-architecture.md](specs/02-architecture.md) for subsystem layout and pipeline design.
 - [specs/04-ui-behavior.md](specs/04-ui-behavior.md) for the implemented UI contract.
