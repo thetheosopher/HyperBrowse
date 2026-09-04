@@ -3,10 +3,8 @@
 #include <shlobj.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cwchar>
 #include <filesystem>
-#include <future>
 #include <system_error>
 
 #include "util/Diagnostics.h"
@@ -26,6 +24,9 @@ namespace hyperbrowse::services
 
 namespace
 {
+    constexpr std::size_t kWorkerCount = 2;
+    constexpr std::size_t kMaxPendingTaskCount = 8;
+
     struct EnumerationSharedStateView
     {
         std::shared_ptr<hyperbrowse::services::FolderTreeEnumerationSharedState> state;
@@ -156,6 +157,11 @@ namespace
     {
         try
         {
+            if (ShouldStop(stateView))
+            {
+                return;
+            }
+
             SHELLFLAGSTATE shellState{};
             SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
             const bool showHiddenFolders = shellState.fShowAllObjects != FALSE;
@@ -222,6 +228,11 @@ namespace
     {
         try
         {
+            if (ShouldStop(stateView))
+            {
+                return;
+            }
+
             SHELLFLAGSTATE shellState{};
             SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
             const bool showHiddenFolders = shellState.fShowAllObjects != FALSE;
@@ -265,6 +276,7 @@ namespace hyperbrowse::services
 {
     FolderTreeEnumerationService::FolderTreeEnumerationService()
         : sharedState_(std::make_shared<FolderTreeEnumerationSharedState>())
+        , executor_(kWorkerCount, kMaxPendingTaskCount)
     {
     }
 
@@ -272,24 +284,26 @@ namespace hyperbrowse::services
     {
         sharedState_->shutdown.store(true, std::memory_order_release);
         CancelAll();
-        WaitForWorkers();
     }
 
     std::uint64_t FolderTreeEnumerationService::EnumerateChildDirectoriesAsync(HWND targetWindow, std::wstring folderPath)
     {
-        ReapCompletedWorkers();
-
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
         const std::uint64_t generation = sharedState_->generation.load(std::memory_order_acquire);
         EnumerationSharedStateView stateView{sharedState_, targetWindow, requestId, generation};
         util::LogInfo(L"Starting async folder-tree enumeration for " + folderPath);
+        const std::wstring requestedFolderPath = folderPath;
 
-        workers_.push_back(std::async(std::launch::async, [stateView, folderPath = std::move(folderPath)]() mutable
+        const bool accepted = executor_.Post([stateView, folderPath = std::move(folderPath)]() mutable
         {
             util::Stopwatch stopwatch;
             EnumerateChildDirectories(stateView, folderPath);
             util::RecordTiming(L"folder.tree.enumeration", stopwatch.ElapsedMilliseconds());
-        }));
+        });
+        if (!accepted)
+        {
+            PostFailure(stateView, requestedFolderPath, L"Folder tree enumeration could not be queued.");
+        }
 
         return requestId;
     }
@@ -306,20 +320,23 @@ namespace hyperbrowse::services
         HWND targetWindow,
         std::vector<std::wstring> folderPaths)
     {
-        ReapCompletedWorkers();
-
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
         const std::uint64_t generation = sharedState_->generation.load(std::memory_order_acquire);
         EnumerationSharedStateView stateView{sharedState_, targetWindow, requestId, generation};
         util::LogInfo(L"Starting async folder-tree child-presence query for "
                       + std::to_wstring(folderPaths.size()) + L" folders");
+        const std::wstring requestedFolderPath = folderPaths.empty() ? std::wstring{} : folderPaths.front();
 
-        workers_.push_back(std::async(std::launch::async, [stateView, folderPaths = std::move(folderPaths)]() mutable
+        const bool accepted = executor_.Post([stateView, folderPaths = std::move(folderPaths)]() mutable
         {
             util::Stopwatch stopwatch;
             QueryChildDirectoryPresence(stateView, folderPaths);
             util::RecordTiming(L"folder.tree.child.presence", stopwatch.ElapsedMilliseconds());
-        }));
+        });
+        if (!accepted)
+        {
+            PostFailure(stateView, requestedFolderPath, L"Folder tree child-presence query could not be queued.");
+        }
 
         return requestId;
     }
@@ -327,26 +344,5 @@ namespace hyperbrowse::services
     void FolderTreeEnumerationService::CancelAll()
     {
         sharedState_->generation.fetch_add(1, std::memory_order_acq_rel);
-        ReapCompletedWorkers();
-    }
-
-    void FolderTreeEnumerationService::ReapCompletedWorkers()
-    {
-        workers_.erase(std::remove_if(workers_.begin(), workers_.end(), [](std::future<void>& worker)
-        {
-            return !worker.valid() || worker.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
-        }), workers_.end());
-    }
-
-    void FolderTreeEnumerationService::WaitForWorkers()
-    {
-        for (std::future<void>& worker : workers_)
-        {
-            if (worker.valid())
-            {
-                worker.wait();
-            }
-        }
-        workers_.clear();
     }
 }

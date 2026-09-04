@@ -37,6 +37,7 @@ The highest-severity July findings are resolved in the current branch:
 - Folder-watch rename state now survives notification-buffer boundaries. The deterministic parser has coverage for split, same-buffer, orphan, reset, and malformed records.
 - The persistent cache now maintains an authoritative in-memory index, appends access and mutation records to `index.journal.tsv`, replays valid journal records, and atomically compacts `index.tsv`. Cache stores and invalidations are processed off the UI thread.
 - Thumbnail scheduling now has a foreground lane, stale-work filtering, CPU-preferred visible work, early folder batches, coalesced presentation, and diagnostics for queue and persistence timings.
+- Folder enumeration, folder-tree queries, batch conversion, and file operations now use bounded member-owned executors instead of request-per-task `std::async`; stale folder work checks cancellation before filesystem access, and shutdown suppresses late service completion posts.
 - A committed Windows workflow builds Debug and Release, runs CTest, applies nonzero startup budgets, and validates release artifacts. The current workflow is a meaningful gate, but it is not yet a full compiler/configuration/dependency matrix.
 
 These changes lower the immediate reliability risk substantially. The remaining priorities are listed in the revised roadmap rather than treated as unresolved July defects.
@@ -53,11 +54,11 @@ The July behavior was replaced by an authoritative in-memory index and append-on
 
 **Remaining recommendation:** measure the mutex and directory-scan cost at large cache sizes, then consider sharded storage and narrower filesystem-lock scope only if benchmarks show a user-visible regression.
 
-🟠 **Four services still create one OS thread per request.**
+🟢 **Resolved in 2026-09-03: service execution is bounded.**
 
-Folder enumeration, folder-tree enumeration, file operations, and batch conversion use `std::async(std::launch::async)` ([src/services/FolderEnumerationService.cpp](../src/services/FolderEnumerationService.cpp#L244), [src/services/FolderTreeEnumerationService.cpp](../src/services/FolderTreeEnumerationService.cpp#L179), [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L498), [src/services/BatchConvertService.cpp](../src/services/BatchConvertService.cpp#L353)). Rapid navigation normally cancels old enumeration through request IDs, but blocked network/removable-volume calls can leave multiple threads alive.
+Folder enumeration, folder-tree enumeration, file operations, and batch conversion now use member-owned `util::BackgroundExecutor` pools with bounded worker and pending-task counts. Request generations and cancellation checks remain intact; stale folder tasks exit before filesystem access, and service shutdown suppresses late completion/progress posts.
 
-**Recommendation:** route folder enumeration, folder-tree queries, and batch conversion through bounded executors. Give shell file operations a serialized or explicitly bounded executor while preserving request epochs and cancellation.
+**Remaining recommendation:** add burst, queue-rejection, and destruction coverage, expose executor queue/active-work diagnostics, and tune capacities using slow local, removable, and network fixtures. File-operation shutdown still needs its own bounded close policy because the serialized shell task can block inside `IFileOperation::PerformOperations`.
 
 ### 2B. Persistent data layer
 
@@ -170,7 +171,7 @@ Monetization instrumentation is not appropriate for the current local-first MIT 
 
 The broad smoke executable now contains focused scenarios for enumeration, decode, metadata, selection, file operations, viewer behavior, cache persistence, cache corruption, journal replay, folder-watch parsing, scheduler cancellation, and UI settings. CTest registers four entry points: `HyperBrowseSmoke`, `HyperBrowseViewerFitSmoke`, `HyperBrowseAppTextSizeSmoke`, and `HyperBrowseSettingsSmoke`. The important gaps are:
 
-- no bounded executor implementation for the remaining per-request service futures;
+- no service-level burst, queue-rejection, or destruction tests for the new bounded executors;
 - no close-during-file-operation or blocked-shell-operation test;
 - no CI fallback matrix with nvJPEG disabled, sanitizers, or fuzz targets;
 - no dedicated cache corruption/recovery counters in diagnostics;
@@ -178,8 +179,8 @@ The broad smoke executable now contains focused scenarios for enumeration, decod
 
 ## Highest-Leverage Remaining Work
 
-1. **Bound background service execution.** Replace request-per-thread `std::async` in folder enumeration, folder-tree queries, batch conversion, and file operations with bounded execution while retaining cancellation and request epochs.
-2. **Define file-operation shutdown.** Make close during shell work explicit and test cancellation, owner-window lifetime, progress completion, and bounded user-visible shutdown behavior.
+1. **Define file-operation shutdown.** Make close during shell work explicit and test cancellation, owner-window lifetime, progress completion, and bounded user-visible shutdown behavior.
+2. **Validate bounded service execution.** Add burst, queue-rejection, and destruction tests plus executor diagnostics for the completed migration.
 3. **Complete the quality matrix.** Add the nvJPEG-off fallback build, sanitizer/fuzz coverage for cache and RAW-helper boundaries, and a documented benchmark fixture/variance policy.
 4. **Finish current-state documentation.** Align the architecture, UI behavior, and D2D migration specs with the implementation before adding more cross-cutting UI behavior.
 5. **Then invest in product depth.** Prioritize saved filters, synchronized 3/4-up compare, and color-managed display ahead of lower-value format expansion.

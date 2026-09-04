@@ -4,13 +4,17 @@
 
 #include <atomic>
 #include <cstdint>
-#include <future>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "util/BackgroundExecutor.h"
+
 namespace hyperbrowse::services
 {
+    struct FileOperationSharedState;
+
     enum class FileOperationType : int
     {
         Copy = 0,
@@ -69,7 +73,7 @@ namespace hyperbrowse::services
         static constexpr UINT kMessageId = WM_APP + 48;
         static constexpr UINT kProgressMessageId = WM_APP + 51;
 
-        FileOperationService() = default;
+        FileOperationService();
         ~FileOperationService();
 
         void Cancel() noexcept;
@@ -83,11 +87,8 @@ namespace hyperbrowse::services
                             std::vector<std::wstring> targetLeafNames = {});
 
     private:
-        void ReapCompletedWorkers();
-        void WaitForWorkers();
-
-        std::vector<std::future<void>> workers_;
+        std::shared_ptr<FileOperationSharedState> sharedState_;
+        util::BackgroundExecutor executor_;
         std::atomic_uint64_t nextRequestId_{0};
-        std::atomic_bool cancellationRequested_{false};
     };
 }

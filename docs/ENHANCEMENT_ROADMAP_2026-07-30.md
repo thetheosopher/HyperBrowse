@@ -17,7 +17,7 @@ Codebase: HyperBrowse
 | QW5 Correct architecture/UI/backlog docs | DX | In progress in this refresh | P1 | S | `docs/`, `specs/` |
 | QW6 Add worker exception containment | Reliability | Complete in 2.0.0 | Archived | S | `src/services/ThumbnailScheduler.cpp` |
 | MP1 Redesign persistent cache index/I/O | Performance | Complete in 2.1.0 | Archived | M | `src/cache/`, `src/services/` |
-| MP2 Bound background service execution | Performance/Reliability | Open | P0 | M | `src/services/`, `src/util/` |
+| MP2 Bound background service execution | Performance/Reliability | Partial: all four services migrated; stress coverage pending | P0 | M | `src/services/`, `src/util/` |
 | MP3 Define cancellable file-operation shutdown | Reliability/UX | Partial: cancellation exists, bounded close does not | P0 | M | `FileOperationService`, `MainWindow` |
 | MP4 Establish CI quality/performance matrix | Reliability | Partial: one Windows gate exists | P1 | M | CI, tests, tools |
 | MP5 Split focused test targets and fixtures | DX/Reliability | Partial: broad executable with four CTest entry points | P1 | M | `tests/` |
@@ -38,10 +38,10 @@ inspection controls, decoder diagnostics, and stronger large-folder scheduling.
 
 Work should now proceed in this order:
 
-1. **P0 - Bound background execution.** Replace request-per-task
-   `std::async(std::launch::async)` in folder enumeration, folder-tree queries,
-   batch conversion, and file operations with bounded executors. Preserve
-   request epochs, cancellation checks, and shell-owner lifetime.
+1. **P0 - Validate bounded background execution.** The four service migrations
+   are now implemented with bounded executors. Add burst, cancellation, queue
+   rejection, and service-destruction coverage while preserving request epochs,
+   cancellation checks, and shell-owner lifetime.
 2. **P0 - Define close during file operations.** Specify whether close waits,
    cancels, or presents a bounded shutdown state. Test slow local, removable,
    network, and shell-prompt paths without allowing completion messages to
@@ -142,14 +142,15 @@ not requests to repeat the work.
 
 ### MP2: Bounded background service execution
 
-- **Status:** Open and highest-priority engineering work.
+- **Status:** Partial. All four request-per-task service paths now use bounded executors; stress coverage and queue diagnostics remain.
 - **Category:** Performance, Reliability
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** Medium
 - **Area:** `FolderEnumerationService`, `FolderTreeEnumerationService`, `BatchConvertService`, `FileOperationService`, `util/BackgroundExecutor.h`
-- **Recommendation:** replace per-request `std::async(std::launch::async)` in folder enumeration, folder-tree queries, batch conversion, and file operations with bounded category-specific executors. Preserve request epochs, cancellation checks, and shell-owner lifetime. `util::BackgroundExecutor` exists, but these services have not yet migrated.
-- **Success metrics:** rapid folder changes never create unbounded threads; stale queued work is dropped before filesystem access.
+- **Delivered:** folder enumeration, folder-tree queries, batch conversion, and file operations now use member-owned `util::BackgroundExecutor` instances with bounded worker and pending-task counts. Existing request generations and cancellation checks remain in place; stale folder work exits before filesystem access, and shell operations retain COM STA setup and owner-window assignment. Completion/progress posts are suppressed after service shutdown.
+- **Remaining:** add burst and destruction tests, expose queue rejection/active-work diagnostics, and measure whether the selected capacities are appropriate for slow local, removable, and network paths.
+- **Success metrics:** rapid folder changes never create unbounded threads; stale queued work exits before filesystem access; service destruction joins in-flight work without late completion posts.
 
 ### MP3: Cancellable file-operation shutdown
 
@@ -233,7 +234,7 @@ not requests to repeat the work.
 ## Debt Retirement Candidates
 
 1. Replace stale “current state” sections in specs 02 and 15 with an implemented-state architecture record.
-2. Retire per-request `std::async` once MP2 lands.
+2. Add service-level burst, queue-rejection, and destruction coverage for MP2; keep the executor capacities and cancellation behavior observable.
 3. Split the monolithic test source as touched, without pausing product work for a wholesale test-framework migration.
 4. Add cache-corruption and watcher-fallback diagnostic counters so recovery is visible in field reports.
 5. Keep GDI fallback rendering only where it is exercised and documented; do not remove it solely for aesthetic consistency.
@@ -251,7 +252,7 @@ not requests to repeat the work.
 
 ### Workstream 1: Bounded background execution
 
-> Replace request-per-task `std::async(std::launch::async)` in folder enumeration, folder-tree queries, batch conversion, and file operations with bounded executors. Preserve request epochs, cancellation checks, shell-owner lifetime, and completion-message safety. Add queue-depth and cancellation diagnostics plus rapid-navigation coverage.
+> Validate the bounded-executor migration in folder enumeration, folder-tree queries, batch conversion, and file operations. Preserve request epochs, cancellation checks, shell-owner lifetime, and completion-message safety. Add queue-depth and cancellation diagnostics plus rapid-navigation coverage.
 
 ### Workstream 2: File-operation shutdown contract
 

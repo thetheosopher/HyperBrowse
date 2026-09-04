@@ -4,12 +4,12 @@
 
 #include <atomic>
 #include <cstdint>
-#include <future>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "browser/BrowserModel.h"
+#include "util/BackgroundExecutor.h"
 
 namespace hyperbrowse::services
 {
@@ -58,11 +58,8 @@ namespace hyperbrowse::services
             std::atomic_bool shutdown{false};
         };
 
-        void ReapCompletedWorkers();
-        void WaitForWorkers();
-
         std::shared_ptr<SharedState> sharedState_;
-        std::vector<std::future<void>> workers_;
+        util::BackgroundExecutor executor_;
         std::atomic_uint64_t nextRequestId_{0};
     };
 }

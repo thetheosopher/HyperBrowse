@@ -7,7 +7,6 @@
 #include <wrl/client.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cwctype>
 #include <filesystem>
 #include <string>
@@ -17,6 +16,12 @@
 
 namespace hyperbrowse::services
 {
+    struct FileOperationSharedState
+    {
+        std::atomic_uint64_t activeRequestId{0};
+        std::atomic_bool shutdown{false};
+    };
+
     std::wstring FileOperationTypeToLabel(FileOperationType type);
 }
 
@@ -46,9 +51,11 @@ namespace
         bool shouldUninitialize_{};
     };
 
-    void PostUpdate(HWND targetWindow, std::unique_ptr<hyperbrowse::services::FileOperationUpdate> update)
+    void PostUpdate(HWND targetWindow,
+                    std::unique_ptr<hyperbrowse::services::FileOperationUpdate> update,
+                    const std::atomic_bool* shutdown = nullptr)
     {
-        if (!targetWindow)
+        if (!targetWindow || (shutdown && shutdown->load(std::memory_order_acquire)))
         {
             return;
         }
@@ -142,9 +149,11 @@ namespace
     class FileOperationProgressSink final : public IFileOperationProgressSink
     {
     public:
-        void SetCancellationToken(const std::atomic_bool* cancellationRequested) noexcept
+        void SetCancellationState(std::shared_ptr<const hyperbrowse::services::FileOperationSharedState> sharedState,
+                                  std::uint64_t requestId) noexcept
         {
-            cancellationRequested_ = cancellationRequested;
+            sharedState_ = std::move(sharedState);
+            requestId_ = requestId;
         }
 
         void SetProgressTarget(HWND targetWindow, std::uint64_t requestId) noexcept
@@ -304,7 +313,10 @@ namespace
                 return E_ABORT;
             }
 
-            if (progressTargetWindow_ && workTotal > 0)
+            if (progressTargetWindow_
+                && workTotal > 0
+                && sharedState_
+                && !sharedState_->shutdown.load(std::memory_order_acquire))
             {
                 auto* progress = new hyperbrowse::services::FileOperationProgress();
                 progress->requestId = progressRequestId_;
@@ -339,7 +351,9 @@ namespace
     private:
         bool IsCancellationRequested() const noexcept
         {
-            return cancellationRequested_ && cancellationRequested_->load(std::memory_order_acquire);
+            return sharedState_
+                && (sharedState_->shutdown.load(std::memory_order_acquire)
+                    || sharedState_->activeRequestId.load(std::memory_order_acquire) != requestId_);
         }
 
         void RecordResult(IShellItem* sourceItem,
@@ -378,7 +392,8 @@ namespace
         std::vector<std::wstring> pendingDeleteSourcePaths_;
         std::size_t nextPendingDeleteSourcePathIndex_{};
         std::size_t failedCount_{};
-        const std::atomic_bool* cancellationRequested_{};
+        std::shared_ptr<const hyperbrowse::services::FileOperationSharedState> sharedState_;
+        std::uint64_t requestId_{};
     };
 
     std::wstring BuildCompletionMessage(hyperbrowse::services::FileOperationType type,
@@ -517,14 +532,21 @@ namespace hyperbrowse::services
         }
     }
 
+    FileOperationService::FileOperationService()
+        : sharedState_(std::make_shared<FileOperationSharedState>())
+        , executor_(1, 1)
+    {
+    }
+
     FileOperationService::~FileOperationService()
     {
-        WaitForWorkers();
+        sharedState_->shutdown.store(true, std::memory_order_release);
+        Cancel();
     }
 
     void FileOperationService::Cancel() noexcept
     {
-        cancellationRequested_.store(true, std::memory_order_release);
+        sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
     }
 
     std::uint64_t FileOperationService::Start(HWND targetWindow,
@@ -535,24 +557,26 @@ namespace hyperbrowse::services
                                               FileConflictPolicy conflictPolicy,
                                               std::vector<std::wstring> targetLeafNames)
     {
-        ReapCompletedWorkers();
-        cancellationRequested_.store(false, std::memory_order_release);
+        Cancel();
 
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        sharedState_->activeRequestId.store(requestId, std::memory_order_release);
         if (targetLeafNames.size() != sourcePaths.size())
         {
             targetLeafNames.clear();
         }
 
-        workers_.push_back(std::async(std::launch::async,
-            [targetWindow,
+        const std::size_t requestedItemCount = sourcePaths.size();
+        const std::wstring requestedDestinationFolder = destinationFolder;
+        const bool accepted = executor_.Post(
+            [sharedState = sharedState_,
+             targetWindow,
              ownerWindow,
              type,
              sourcePaths = std::move(sourcePaths),
              destinationFolder = std::move(destinationFolder),
              conflictPolicy,
              targetLeafNames = std::move(targetLeafNames),
-             cancellationRequested = &cancellationRequested_,
              requestId]() mutable
         {
             auto update = std::make_unique<FileOperationUpdate>();
@@ -564,189 +588,198 @@ namespace hyperbrowse::services
 
             try
             {
-            if (sourcePaths.empty())
-            {
-                update->message = L"No files were selected for the requested file operation.";
-                PostUpdate(targetWindow, std::move(update));
-                return;
-            }
-
-            if (cancellationRequested->load(std::memory_order_acquire))
-            {
-                update->aborted = true;
-                update->message = L"The file operation was cancelled.";
-                PostUpdate(targetWindow, std::move(update));
-                return;
-            }
-
-            ComScope comScope(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-
-            ComPtr<IFileOperation> operation;
-            HRESULT result = CoCreateInstance(CLSID_FileOperation,
-                                              nullptr,
-                                              CLSCTX_INPROC_SERVER,
-                                              IID_PPV_ARGS(operation.GetAddressOf()));
-            if (FAILED(result) || !operation)
-            {
-                update->failedCount = sourcePaths.size();
-                update->message = L"Failed to initialize the Windows file operation service.";
-                PostUpdate(targetWindow, std::move(update));
-                return;
-            }
-
-            operation->SetOwnerWindow(ownerWindow);
-            operation->SetOperationFlags(BuildOperationFlags(type, conflictPolicy));
-
-            ComPtr<IShellItem> destinationItem;
-            if (type == FileOperationType::Copy || type == FileOperationType::Move)
-            {
-                result = SHCreateItemFromParsingName(destinationFolder.c_str(), nullptr, IID_PPV_ARGS(destinationItem.GetAddressOf()));
-                if (FAILED(result) || !destinationItem)
+                const auto isCancelled = [&]()
                 {
-                    update->failedCount = sourcePaths.size();
-                    update->message = L"Failed to open the destination folder for the requested file operation.";
-                    PostUpdate(targetWindow, std::move(update));
+                    return sharedState->shutdown.load(std::memory_order_acquire)
+                        || sharedState->activeRequestId.load(std::memory_order_acquire) != requestId;
+                };
+
+                if (sourcePaths.empty())
+                {
+                    update->message = L"No files were selected for the requested file operation.";
+                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                     return;
                 }
-            }
 
-            auto* sink = new FileOperationProgressSink();
-            sink->SetCancellationToken(cancellationRequested);
-            sink->SetProgressTarget(targetWindow, requestId);
-            DWORD sinkCookie = 0;
-            result = operation->Advise(sink, &sinkCookie);
-            if (FAILED(result))
-            {
-                sink->Release();
-                update->failedCount = sourcePaths.size();
-                update->message = L"Failed to register the Windows file operation progress sink.";
-                PostUpdate(targetWindow, std::move(update));
-                return;
-            }
-
-            std::size_t queueFailures = 0;
-            std::size_t queuedCount = 0;
-            for (std::size_t index = 0; index < sourcePaths.size(); ++index)
-            {
-                const std::wstring& sourcePath = sourcePaths[index];
-                ComPtr<IShellItem> sourceItem;
-                result = SHCreateItemFromParsingName(sourcePath.c_str(), nullptr, IID_PPV_ARGS(sourceItem.GetAddressOf()));
-                if (FAILED(result) || !sourceItem)
+                if (isCancelled())
                 {
-                    ++queueFailures;
-                    continue;
+                    update->aborted = true;
+                    update->message = L"The file operation was cancelled.";
+                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
+                    return;
                 }
 
-                const wchar_t* targetLeafName = nullptr;
-                if ((type == FileOperationType::Copy || type == FileOperationType::Move || type == FileOperationType::Rename)
-                    && index < targetLeafNames.size()
-                    && !targetLeafNames[index].empty())
+                ComScope comScope(COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+                ComPtr<IFileOperation> operation;
+                HRESULT result = CoCreateInstance(CLSID_FileOperation,
+                                                  nullptr,
+                                                  CLSCTX_INPROC_SERVER,
+                                                  IID_PPV_ARGS(operation.GetAddressOf()));
+                if (FAILED(result) || !operation)
                 {
-                    targetLeafName = targetLeafNames[index].c_str();
+                    update->failedCount = sourcePaths.size();
+                    update->message = L"Failed to initialize the Windows file operation service.";
+                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
+                    return;
                 }
 
-                switch (type)
+                operation->SetOwnerWindow(ownerWindow);
+                operation->SetOperationFlags(BuildOperationFlags(type, conflictPolicy));
+
+                ComPtr<IShellItem> destinationItem;
+                if (type == FileOperationType::Copy || type == FileOperationType::Move)
                 {
-                case FileOperationType::Copy:
-                    result = operation->CopyItem(sourceItem.Get(), destinationItem.Get(), targetLeafName, nullptr);
-                    break;
-                case FileOperationType::Move:
-                    result = operation->MoveItem(sourceItem.Get(), destinationItem.Get(), targetLeafName, nullptr);
-                    break;
-                case FileOperationType::Rename:
-                    result = targetLeafName
-                        ? operation->RenameItem(sourceItem.Get(), targetLeafName, nullptr)
-                        : E_INVALIDARG;
-                    break;
-                case FileOperationType::DeleteRecycleBin:
-                case FileOperationType::DeletePermanent:
-                    result = operation->DeleteItem(sourceItem.Get(), nullptr);
-                    break;
-                default:
-                    result = E_NOTIMPL;
-                    break;
+                    result = SHCreateItemFromParsingName(destinationFolder.c_str(), nullptr, IID_PPV_ARGS(destinationItem.GetAddressOf()));
+                    if (FAILED(result) || !destinationItem)
+                    {
+                        update->failedCount = sourcePaths.size();
+                        update->message = L"Failed to open the destination folder for the requested file operation.";
+                        PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
+                        return;
+                    }
                 }
 
+                auto* sink = new FileOperationProgressSink();
+                sink->SetCancellationState(sharedState, requestId);
+                sink->SetProgressTarget(targetWindow, requestId);
+                DWORD sinkCookie = 0;
+                result = operation->Advise(sink, &sinkCookie);
                 if (FAILED(result))
                 {
-                    ++queueFailures;
-                    continue;
+                    sink->Release();
+                    update->failedCount = sourcePaths.size();
+                    update->message = L"Failed to register the Windows file operation progress sink.";
+                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
+                    return;
                 }
 
-                ++queuedCount;
-            }
+                std::size_t queueFailures = 0;
+                std::size_t queuedCount = 0;
+                for (std::size_t index = 0; index < sourcePaths.size(); ++index)
+                {
+                    const std::wstring& sourcePath = sourcePaths[index];
+                    ComPtr<IShellItem> sourceItem;
+                    result = SHCreateItemFromParsingName(sourcePath.c_str(), nullptr, IID_PPV_ARGS(sourceItem.GetAddressOf()));
+                    if (FAILED(result) || !sourceItem)
+                    {
+                        ++queueFailures;
+                        continue;
+                    }
 
-            if (queuedCount == 0)
-            {
+                    const wchar_t* targetLeafName = nullptr;
+                    if ((type == FileOperationType::Copy || type == FileOperationType::Move || type == FileOperationType::Rename)
+                        && index < targetLeafNames.size()
+                        && !targetLeafNames[index].empty())
+                    {
+                        targetLeafName = targetLeafNames[index].c_str();
+                    }
+
+                    switch (type)
+                    {
+                    case FileOperationType::Copy:
+                        result = operation->CopyItem(sourceItem.Get(), destinationItem.Get(), targetLeafName, nullptr);
+                        break;
+                    case FileOperationType::Move:
+                        result = operation->MoveItem(sourceItem.Get(), destinationItem.Get(), targetLeafName, nullptr);
+                        break;
+                    case FileOperationType::Rename:
+                        result = targetLeafName
+                            ? operation->RenameItem(sourceItem.Get(), targetLeafName, nullptr)
+                            : E_INVALIDARG;
+                        break;
+                    case FileOperationType::DeleteRecycleBin:
+                    case FileOperationType::DeletePermanent:
+                        result = operation->DeleteItem(sourceItem.Get(), nullptr);
+                        break;
+                    default:
+                        result = E_NOTIMPL;
+                        break;
+                    }
+
+                    if (FAILED(result))
+                    {
+                        ++queueFailures;
+                        continue;
+                    }
+
+                    ++queuedCount;
+                }
+
+                if (isCancelled())
+                {
+                    operation->Unadvise(sinkCookie);
+                    sink->Release();
+                    update->aborted = true;
+                    update->message = L"The file operation was cancelled.";
+                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
+                    return;
+                }
+
+                if (queuedCount == 0)
+                {
+                    operation->Unadvise(sinkCookie);
+                    sink->Release();
+                    update->failedCount = queueFailures;
+                    update->message = L"No files could be queued for the requested file operation.";
+                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
+                    return;
+                }
+
+                result = operation->PerformOperations();
+                BOOL aborted = FALSE;
+                operation->GetAnyOperationsAborted(&aborted);
                 operation->Unadvise(sinkCookie);
+
+                update->aborted = aborted != FALSE || isCancelled();
+                update->failedCount = queueFailures + sink->FailedCount();
+                update->succeededSourcePaths = sink->SucceededSourcePaths();
+                update->createdPaths = sink->CreatedPaths();
                 sink->Release();
-                update->failedCount = queueFailures;
-                update->message = L"No files could be queued for the requested file operation.";
-                PostUpdate(targetWindow, std::move(update));
-                return;
-            }
 
-            result = operation->PerformOperations();
-            BOOL aborted = FALSE;
-            operation->GetAnyOperationsAborted(&aborted);
-            operation->Unadvise(sinkCookie);
+                if (FAILED(result) && update->succeededSourcePaths.empty())
+                {
+                    update->failedCount = (std::max)(update->failedCount, sourcePaths.size());
+                    update->message = L"The Windows file operation did not complete successfully.";
+                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
+                    return;
+                }
 
-            update->aborted = aborted != FALSE
-                || cancellationRequested->load(std::memory_order_acquire);
-            update->failedCount = queueFailures + sink->FailedCount();
-            update->succeededSourcePaths = sink->SucceededSourcePaths();
-            update->createdPaths = sink->CreatedPaths();
-            sink->Release();
-
-            if (FAILED(result) && update->succeededSourcePaths.empty())
-            {
-                update->failedCount = (std::max)(update->failedCount, sourcePaths.size());
-                update->message = L"The Windows file operation did not complete successfully.";
-                PostUpdate(targetWindow, std::move(update));
-                return;
-            }
-
-            update->message = BuildCompletionMessage(type,
-                                                     update->requestedCount,
-                                                     update->succeededSourcePaths.size(),
-                                                     update->failedCount,
-                                                     update->aborted);
-            PostUpdate(targetWindow, std::move(update));
+                update->message = BuildCompletionMessage(type,
+                                                         update->requestedCount,
+                                                         update->succeededSourcePaths.size(),
+                                                         update->failedCount,
+                                                         update->aborted);
+                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
             }
             catch (const std::exception&)
             {
                 update->failedCount = update->requestedCount;
                 update->message = L"The file operation failed unexpectedly.";
-                PostUpdate(targetWindow, std::move(update));
+                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
             }
             catch (...)
             {
                 update->failedCount = update->requestedCount;
                 update->message = L"The file operation failed unexpectedly.";
-                PostUpdate(targetWindow, std::move(update));
+                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
             }
-        }));
+        });
+
+        if (!accepted)
+        {
+            auto update = std::make_unique<FileOperationUpdate>();
+            update->requestId = requestId;
+            update->type = type;
+            update->requestedCount = requestedItemCount;
+            update->failedCount = requestedItemCount;
+            update->destinationFolder = requestedDestinationFolder;
+            update->finished = true;
+            update->aborted = true;
+            update->message = L"The file operation could not be queued.";
+            PostUpdate(targetWindow, std::move(update), &sharedState_->shutdown);
+        }
 
         return requestId;
-    }
-
-    void FileOperationService::ReapCompletedWorkers()
-    {
-        workers_.erase(std::remove_if(workers_.begin(), workers_.end(), [](std::future<void>& worker)
-        {
-            return !worker.valid() || worker.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
-        }), workers_.end());
-    }
-
-    void FileOperationService::WaitForWorkers()
-    {
-        for (std::future<void>& worker : workers_)
-        {
-            if (worker.valid())
-            {
-                worker.wait();
-            }
-        }
-        workers_.clear();
     }
 }

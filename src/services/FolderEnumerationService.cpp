@@ -1,8 +1,6 @@
 #include "services/FolderEnumerationService.h"
 
-#include <chrono>
 #include <filesystem>
-#include <future>
 #include <system_error>
 
 #include "util/Diagnostics.h"
@@ -25,6 +23,8 @@ namespace
     constexpr std::size_t kInitialBatchSize = 16;
     constexpr std::size_t kInitialBatchItemLimit = kInitialBatchSize * 2;
     constexpr std::size_t kBatchSize = 64;
+    constexpr std::size_t kWorkerCount = 2;
+    constexpr std::size_t kMaxPendingTaskCount = 2;
 
     struct EnumerationSharedStateView
     {
@@ -169,6 +169,11 @@ namespace
     {
         try
         {
+            if (ShouldStop(stateView))
+            {
+                return;
+            }
+
             const fs::path basePath(folderPath);
             std::error_code existsError;
             if (!fs::exists(basePath, existsError) || existsError)
@@ -254,6 +259,7 @@ namespace hyperbrowse::services
 {
     FolderEnumerationService::FolderEnumerationService()
         : sharedState_(std::make_shared<FolderEnumerationSharedState>())
+        , executor_(kWorkerCount, kMaxPendingTaskCount)
     {
     }
 
@@ -261,7 +267,6 @@ namespace hyperbrowse::services
     {
         sharedState_->shutdown.store(true, std::memory_order_release);
         Cancel();
-        WaitForWorkers();
     }
 
     std::uint64_t FolderEnumerationService::EnumerateFolderAsync(HWND targetWindow,
@@ -269,23 +274,26 @@ namespace hyperbrowse::services
                                                                  bool recursive,
                                                                  bool includeSubfolders)
     {
-        ReapCompletedWorkers();
-
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
         sharedState_->activeRequestId.store(requestId, std::memory_order_release);
 
         EnumerationSharedStateView stateView{sharedState_, targetWindow, requestId};
         util::LogInfo(L"Starting async folder enumeration for " + folderPath);
+        const std::wstring requestedFolderPath = folderPath;
 
-        workers_.push_back(std::async(std::launch::async, [stateView,
-                                                           folderPath = std::move(folderPath),
-                                                           recursive,
-                                                           includeSubfolders]() mutable
+        const bool accepted = executor_.Post([stateView,
+                                              folderPath = std::move(folderPath),
+                                              recursive,
+                                              includeSubfolders]() mutable
         {
             util::Stopwatch stopwatch;
             EnumerateFolder(stateView, folderPath, recursive, includeSubfolders);
             util::RecordTiming(L"folder.enumeration", stopwatch.ElapsedMilliseconds());
-        }));
+        });
+        if (!accepted)
+        {
+            PostFailure(stateView, requestedFolderPath, L"Folder enumeration could not be queued.");
+        }
 
         return requestId;
     }
@@ -293,26 +301,5 @@ namespace hyperbrowse::services
     void FolderEnumerationService::Cancel()
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
-        ReapCompletedWorkers();
-    }
-
-    void FolderEnumerationService::ReapCompletedWorkers()
-    {
-        workers_.erase(std::remove_if(workers_.begin(), workers_.end(), [](std::future<void>& worker)
-        {
-            return !worker.valid() || worker.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
-        }), workers_.end());
-    }
-
-    void FolderEnumerationService::WaitForWorkers()
-    {
-        for (std::future<void>& worker : workers_)
-        {
-            if (worker.valid())
-            {
-                worker.wait();
-            }
-        }
-        workers_.clear();
     }
 }

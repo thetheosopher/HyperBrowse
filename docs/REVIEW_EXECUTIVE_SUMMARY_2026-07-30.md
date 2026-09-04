@@ -15,13 +15,14 @@ The current branch is release 2.1.0. Since the original review, the branch has r
 - Persistent thumbnail payloads are validated for dimensions, exact BGRA byte counts, platform limits, and file length before allocation; invalid entries are removed without escaping worker exceptions.
 - Folder-watch rename state survives split `ReadDirectoryChangesW` completions, with deterministic full-reload fallback and parser tests.
 - Persistent-cache hits no longer rewrite the complete TSV index. An in-memory index, append-only journal, replay, and atomic compaction are now implemented, with persistence work off the UI thread.
+- Folder enumeration, folder-tree queries, batch conversion, and file operations now run through bounded member-owned executors instead of request-per-task `std::async`, with request cancellation and shutdown-aware completion posting preserved.
 - The startup gate is wired into `.github/workflows/ci.yml` with explicit 2.5 s / 2.5 s / 5 s budgets, CTest runs, artifact upload, and release-package validation.
 
 ## Top Three Remaining Risks
 
-1. **Background services still use request-per-thread futures.** Folder enumeration, folder-tree queries, batch conversion, and file operations still launch `std::async(std::launch::async)` work. Rapid navigation or repeated operations can leave multiple blocked filesystem or shell threads alive.
+1. **Closing during shell file work is still not bounded.** Cancellation reaches the progress sink and teardown requests cancellation, but `FileOperationService` still joins its serialized worker synchronously while `IFileOperation::PerformOperations` can wait on slow storage, network paths, elevation, or shell UI.
 
-2. **Closing during shell file work is still not bounded.** Cancellation reaches the progress sink and teardown requests cancellation, but `FileOperationService` still joins its worker synchronously while `IFileOperation::PerformOperations` can wait on slow storage, network paths, elevation, or shell UI.
+2. **The bounded-service migration still needs focused validation.** Burst, queue-rejection, and destruction tests are not yet present, and executor queue/active-work diagnostics are not exposed. The selected capacities should also be measured against slow local, removable, and network paths.
 
 3. **The quality and measurement matrix is incomplete.** One Windows workflow now gates startup and packaging, but there is no nvJPEG-off fallback job, sanitizer/fuzz target, persisted percentile rollup, deterministic benchmark fixture policy, or dedicated invalid-cache/watcher diagnostic counters. The persistent cache also retains a broad filesystem mutex that should be measured at large scale.
 
@@ -29,7 +30,7 @@ The earlier live-refresh and malformed-cache correctness issues are no longer in
 
 ## Highest-Leverage Next Action
 
-Start with bounded execution for the remaining background services, then define and test close-during-file-operation behavior. Those are now the highest-leverage reliability/performance items because the July cache, watcher, and startup-gate actions are complete. After that, finish the CI fallback/diagnostics matrix, align the current-state specs, and take on saved filters plus professional compare/color management.
+Define and test close-during-file-operation behavior, then add focused stress coverage and diagnostics for the completed bounded-service migration. Those are now the highest-leverage reliability/performance items because the July cache, watcher, and startup-gate actions are complete. After that, finish the CI fallback/diagnostics matrix, align the current-state specs, and take on saved filters plus professional compare/color management.
 
 ## Top Three Product Opportunities
 

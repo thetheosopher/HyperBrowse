@@ -4,9 +4,7 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
-#include <chrono>
 #include <filesystem>
-#include <future>
 #include <vector>
 
 #include "cache/ThumbnailCache.h"
@@ -44,9 +42,11 @@ namespace
         bool shouldUninitialize_{};
     };
 
-    void PostUpdate(HWND targetWindow, std::unique_ptr<hyperbrowse::services::BatchConvertUpdate> update)
+    void PostUpdate(HWND targetWindow,
+                    std::unique_ptr<hyperbrowse::services::BatchConvertUpdate> update,
+                    const std::atomic_bool* shutdown = nullptr)
     {
-        if (!targetWindow)
+        if (!targetWindow || (shutdown && shutdown->load(std::memory_order_acquire)))
         {
             return;
         }
@@ -340,6 +340,7 @@ namespace hyperbrowse::services
 
     BatchConvertService::BatchConvertService()
         : sharedState_(std::make_shared<SharedState>())
+        , executor_(1, 1)
     {
     }
 
@@ -347,7 +348,6 @@ namespace hyperbrowse::services
     {
         sharedState_->shutdown.store(true, std::memory_order_release);
         Cancel();
-        WaitForWorkers();
     }
 
     std::uint64_t BatchConvertService::Start(HWND targetWindow,
@@ -356,11 +356,12 @@ namespace hyperbrowse::services
                                              BatchConvertFormat format)
     {
         Cancel();
-        ReapCompletedWorkers();
 
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
         sharedState_->activeRequestId.store(requestId, std::memory_order_release);
-        workers_.push_back(std::async(std::launch::async,
+        const std::size_t requestedItemCount = items.size();
+        const std::wstring requestedOutputFolder = outputFolder;
+        const bool accepted = executor_.Post(
             [sharedState = sharedState_,
              targetWindow,
              items = std::move(items),
@@ -387,7 +388,7 @@ namespace hyperbrowse::services
                 update->outputFolder = outputFolder;
                 update->cancelled = true;
                 update->finished = true;
-                PostUpdate(targetWindow, std::move(update));
+                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
             };
 
             std::error_code directoryError;
@@ -402,7 +403,7 @@ namespace hyperbrowse::services
                 update->outputFolder = outputFolder;
                 update->finished = true;
                 update->message = L"Failed to create the output folder for batch conversion.";
-                PostUpdate(targetWindow, std::move(update));
+                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                 return;
             }
 
@@ -465,7 +466,7 @@ namespace hyperbrowse::services
                 progress->currentFileName = item.fileName;
                 progress->message = errorMessage;
                 progress->finished = completedCount == items.size();
-                PostUpdate(targetWindow, std::move(progress));
+                PostUpdate(targetWindow, std::move(progress), &sharedState->shutdown);
             }
             }
             catch (const std::exception&)
@@ -479,7 +480,7 @@ namespace hyperbrowse::services
                 update->outputFolder = outputFolder;
                 update->finished = true;
                 update->message = L"Batch conversion failed unexpectedly.";
-                PostUpdate(targetWindow, std::move(update));
+                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
             }
             catch (...)
             {
@@ -492,35 +493,27 @@ namespace hyperbrowse::services
                 update->outputFolder = outputFolder;
                 update->finished = true;
                 update->message = L"Batch conversion failed unexpectedly.";
-                PostUpdate(targetWindow, std::move(update));
+                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
             }
-        }));
+        });
+        if (!accepted)
+        {
+            auto update = std::make_unique<BatchConvertUpdate>();
+            update->requestId = requestId;
+            update->completedCount = requestedItemCount;
+            update->totalCount = requestedItemCount;
+            update->failedCount = requestedItemCount;
+            update->format = format;
+            update->outputFolder = requestedOutputFolder;
+            update->finished = true;
+            update->message = L"Batch conversion could not be queued.";
+            PostUpdate(targetWindow, std::move(update), &sharedState_->shutdown);
+        }
         return requestId;
     }
 
     void BatchConvertService::Cancel()
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
-        ReapCompletedWorkers();
-    }
-
-    void BatchConvertService::ReapCompletedWorkers()
-    {
-        workers_.erase(std::remove_if(workers_.begin(), workers_.end(), [](std::future<void>& worker)
-        {
-            return !worker.valid() || worker.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
-        }), workers_.end());
-    }
-
-    void BatchConvertService::WaitForWorkers()
-    {
-        for (std::future<void>& worker : workers_)
-        {
-            if (worker.valid())
-            {
-                worker.wait();
-            }
-        }
-        workers_.clear();
     }
 }

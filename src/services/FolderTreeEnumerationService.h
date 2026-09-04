@@ -4,10 +4,11 @@
 
 #include <atomic>
 #include <cstdint>
-#include <future>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "util/BackgroundExecutor.h"
 
 namespace hyperbrowse::services
 {
@@ -51,11 +52,8 @@ namespace hyperbrowse::services
         void CancelAll();
 
     private:
-        void ReapCompletedWorkers();
-        void WaitForWorkers();
-
         std::shared_ptr<FolderTreeEnumerationSharedState> sharedState_;
-        std::vector<std::future<void>> workers_;
+        util::BackgroundExecutor executor_;
         std::atomic_uint64_t nextRequestId_{0};
     };
 }
