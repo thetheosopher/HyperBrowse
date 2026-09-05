@@ -10,9 +10,10 @@ testable state transitions, not an arbitrary line-count target.
 currently contains several independent state machines: folder navigation and
 enumeration, file-operation reconciliation, viewer synchronization, menus,
 settings, details and Quick Actions presentation, drag/drop, rendering, and
-shutdown. Dialog, file-operation policy, folder-enumeration coordination, and
-folder-tree coordination extractions have reduced the current translation unit
-to 24,865 lines. The folder-tree slice places node ownership, child-presence
+shutdown. Dialog, file-operation policy, folder-enumeration coordination,
+folder-tree coordination, and folder-watch policy extractions have reduced the
+current translation unit to 24,698 lines. The folder-tree slice places node
+ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
 history navigation, watcher lifecycle, stale watcher-result filtering, and
@@ -82,6 +83,10 @@ off the UI thread.
   folder history, watcher lifecycle, stale-result rejection, and pending
   startup/reload presentation state. Keep browser/model/viewer effects in
   MainWindow behind explicit callbacks.
+- Create a `FolderWatchChangeCoordinator` for watcher-event reconciliation,
+  incremental model updates, reload escalation, and selection/cache
+  preservation. Keep tree, reload, browser refresh, and presentation effects
+  in MainWindow behind explicit callbacks.
 - Preserve early batches, presentation coalescing, watcher shutdown ordering,
   incremental updates, full-reload escalation, and focus/selection behavior.
 
@@ -144,7 +149,7 @@ create/destroy.
 ## First slice
 
 The first implementation slice extracted `FolderHistory` only. Filesystem
-ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; the policy received those operations through callbacks. Later slices extracted shell drag/drop boundaries, the file-operation journal, named completion stages, folder-tree coordination, and folder-load coordination. Startup-specific selection/viewer restoration now lives in the folder-load coordinator's pending-presentation state, while model-facing watch-event policy remains in MainWindow.
+ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; the policy received those operations through callbacks. Later slices extracted shell drag/drop boundaries, the file-operation journal, named completion stages, folder-tree coordination, folder-load coordination, and folder-watch coordination. Startup-specific selection/viewer restoration now lives in the folder-load coordinator's pending-presentation state, while tree and presentation effects for watch events remain explicit MainWindow callbacks.
 
 ## Progress
 
@@ -175,7 +180,11 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `src/ui/FolderTreeController.*`.
 - [x] Extract folder-load history navigation, watcher lifecycle, stale watcher
   filtering, deferred watcher effects, and enumeration callback routing into
-  `src/ui/FolderLoadCoordinator.*`. `MainWindow.cpp` now measures 24,865 lines;
+  `src/ui/FolderLoadCoordinator.*`. `MainWindow.cpp` now measures 24,698 lines;
   pending startup selection, pending viewer launch, reload selection
   restoration, and post-enumeration viewer settlement are coordinator-owned;
   browser/model/viewer effects remain explicit callbacks.
+- [x] Extract folder-watch event reconciliation, incremental browser-model
+  updates, reload escalation, thumbnail invalidation, and selection
+  preservation into `src/ui/FolderWatchChangeCoordinator.*`. MainWindow keeps
+  the tree, reload, browser refresh, and presentation effects as callbacks.

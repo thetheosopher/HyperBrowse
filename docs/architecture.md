@@ -94,6 +94,12 @@ controller:
 	presentation callbacks. MainWindow supplies model, browser-pane, viewer, and
 	watch-event policy callbacks; the coordinator does not own browser or viewer
 	state.
+- `ui/FolderWatchChangeCoordinator.*` owns the synchronous policy for applying
+	folder-watch updates to `BrowserModel` and `BrowserPane`, including
+	incremental upserts/removals, recursive reload escalation, cache
+	invalidation, and selection preservation. MainWindow supplies tree, reload,
+	refresh, and presentation callbacks; the coordinator does not own HWNDs or
+	folder-watch service lifetime.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

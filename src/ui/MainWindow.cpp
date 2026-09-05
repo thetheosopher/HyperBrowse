@@ -45,6 +45,7 @@
 #include "ui/CommandIds.h"
 #include "ui/ExternalDropTarget.h"
 #include "ui/FileOperationJournal.h"
+#include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
@@ -9271,6 +9272,7 @@ namespace hyperbrowse::ui
         , batchConvertService_(std::make_unique<services::BatchConvertService>())
         , fileOperationService_(std::make_unique<services::FileOperationService>())
         , folderLoadCoordinator_(std::make_unique<FolderLoadCoordinator>())
+        , folderWatchChangeCoordinator_(std::make_unique<FolderWatchChangeCoordinator>())
         , folderTreeController_(std::make_unique<FolderTreeController>())
         , userMetadataStore_(std::make_unique<services::UserMetadataStore>())
         , diagnosticsWindow_(std::make_unique<DiagnosticsWindow>(instance))
@@ -10250,6 +10252,83 @@ namespace hyperbrowse::ui
                 ApplyFolderWatchChanges(update);
             };
             folderLoadCoordinator_->Configure(hwnd_, std::move(handlers));
+        }
+
+        if (folderWatchChangeCoordinator_)
+        {
+            FolderWatchChangeCoordinator::Handlers handlers;
+            handlers.onClearTreePresence = [this]()
+            {
+                if (folderTreeController_)
+                {
+                    folderTreeController_->ClearChildPresenceCache();
+                }
+            };
+            handlers.onInvalidateTreePresence = [this](std::wstring_view path)
+            {
+                InvalidateFolderTreeChildPresence(path);
+            };
+            handlers.onHasTreeItem = [this](std::wstring_view path)
+            {
+                return FindFolderTreeItemByPath(std::wstring(path)) != nullptr;
+            };
+            handlers.onRefreshTree = [this]()
+            {
+                RefreshFolderTree();
+            };
+            handlers.onInsertTreeFolder = [this](std::wstring_view path)
+            {
+                InsertFolderTreeFolderIfParentLoaded(std::wstring(path));
+            };
+            handlers.onReloadFolder = [this](std::wstring folderPath)
+            {
+                if (!browserPaneController_)
+                {
+                    return;
+                }
+
+                const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
+                const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
+                LoadFolderAsync(std::move(folderPath));
+                if (folderLoadCoordinator_)
+                {
+                    folderLoadCoordinator_->SetPendingFolderReloadSelection(
+                        selectedPaths,
+                        focusedPath);
+                }
+            };
+            handlers.onQueueWatchReload = [this](std::wstring folderPath)
+            {
+                if (folderLoadCoordinator_)
+                {
+                    folderLoadCoordinator_->QueueWatchReload(std::move(folderPath));
+                }
+            };
+            handlers.onMarkWatchTreeRefresh = [this]()
+            {
+                if (folderLoadCoordinator_)
+                {
+                    folderLoadCoordinator_->MarkWatchTreeRefresh();
+                }
+            };
+            handlers.onRefreshBrowser = [this]()
+            {
+                RefreshBrowserPane();
+            };
+            handlers.onRestoreSelection = [this](const std::vector<std::wstring>& selectionPaths,
+                                                 const std::wstring& focusedPath)
+            {
+                if (browserPaneController_)
+                {
+                    browserPaneController_->RestoreSelectionByFilePaths(selectionPaths, focusedPath);
+                }
+            };
+            handlers.onUpdatePresentation = [this]()
+            {
+                UpdateStatusText();
+                UpdateWindowTitle();
+            };
+            folderWatchChangeCoordinator_->Configure(std::move(handlers));
         }
 
         if (folderTreeController_)
@@ -18882,264 +18961,18 @@ namespace hyperbrowse::ui
 
     void MainWindow::ApplyFolderWatchChanges(const services::FolderWatchUpdate& update)
     {
-        if (!browserModel_ || !browserPaneController_)
+        if (!browserModel_ || !browserPaneController_ || !folderWatchChangeCoordinator_)
         {
             return;
         }
 
-        if (update.requiresFullReload)
-        {
-            if (folderTreeController_)
-            {
-                folderTreeController_->ClearChildPresenceCache();
-            }
-        }
-        for (const services::FolderWatchEvent& event : update.events)
-        {
-            InvalidateFolderTreeChildPresence(event.path);
-            InvalidateFolderTreeChildPresence(event.oldPath);
-        }
-
-        const auto reloadFolderPreservingSelection = [&](std::wstring folderPath)
-        {
-            const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
-            const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
-            LoadFolderAsync(std::move(folderPath));
-            if (folderLoadCoordinator_)
-            {
-                folderLoadCoordinator_->SetPendingFolderReloadSelection(
-                    selectedPaths,
-                    focusedPath);
-            }
-        };
-
-        if (fileOperationActive_)
-        {
-            // Watch notifications raised while our own file operation is running are
-            // normally just echoes of that operation, and ApplyCompletedFileOperation
-            // applies those changes incrementally from the operation result. Deferring
-            // a full folder reload for them would discard the selection and re-enumerate
-            // the folder for nothing, so only escalate when the burst is too large (or
-            // too ambiguous) to reconstruct from the operation result.
-            if (update.requiresFullReload || update.events.size() >= kIncrementalFolderWatchEventLimit)
-            {
-                if (folderLoadCoordinator_)
-                {
-                    folderLoadCoordinator_->QueueWatchReload(
-                        update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath);
-                }
-            }
-
-            const auto treeRefreshNeededForPath = [&](const std::wstring& path)
-            {
-                return !path.empty() && FindFolderTreeItemByPath(path);
-            };
-            const auto isExistingDirectory = [](const std::wstring& path)
-            {
-                if (path.empty())
-                {
-                    return false;
-                }
-
-                std::error_code error;
-                return fs::is_directory(fs::path(path), error) && !error;
-            };
-
-            const bool treeRefreshNeeded = update.requiresFullReload
-                || std::any_of(update.events.begin(), update.events.end(), [&](const services::FolderWatchEvent& event)
-                {
-                    switch (event.kind)
-                    {
-                    case services::FolderWatchEventKind::Added:
-                        return isExistingDirectory(event.path);
-                    case services::FolderWatchEventKind::Removed:
-                        return treeRefreshNeededForPath(event.path);
-                    case services::FolderWatchEventKind::Renamed:
-                        return treeRefreshNeededForPath(event.oldPath)
-                            || isExistingDirectory(event.path);
-                    case services::FolderWatchEventKind::Modified:
-                    default:
-                        return false;
-                    }
-                });
-            if (treeRefreshNeeded && folderLoadCoordinator_)
-            {
-                folderLoadCoordinator_->MarkWatchTreeRefresh();
-            }
-            return;
-        }
-
-        if (update.requiresFullReload)
-        {
-            RefreshFolderTree();
-            reloadFolderPreservingSelection(update.folderPath.empty() ? browserModel_->FolderPath() : update.folderPath);
-            return;
-        }
-
-        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
-        const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
-        std::vector<std::wstring> invalidatedPaths;
-        std::vector<std::wstring> foldersToInsertIntoTree;
-        bool changed = false;
-        bool refreshFolderTree = false;
-        bool preferAsyncReload = update.events.size() >= kIncrementalFolderWatchEventLimit;
-
-        auto isExistingDirectory = [](const std::wstring& path)
-        {
-            if (path.empty())
-            {
-                return false;
-            }
-
-            std::error_code error;
-            return fs::is_directory(fs::path(path), error) && !error;
-        };
-
-        auto upsertFromPath = [&](const std::wstring& path)
-        {
-            std::error_code error;
-            const fs::path watchedPath(path);
-            if (fs::is_regular_file(watchedPath, error) && !error)
-            {
-                if (browser::IsSupportedImageExtension(watchedPath.extension().wstring()))
-                {
-                    changed = browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(watchedPath)) || changed;
-                    invalidatedPaths.push_back(path);
-                }
-                return;
-            }
-
-            if (!fs::is_directory(watchedPath, error) || error)
-            {
-                return;
-            }
-
-            if (showSubfoldersInBrowser_
-                && FolderPathsEqual(watchedPath.parent_path().wstring(), browserModel_->FolderPath()))
-            {
-                changed = browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(watchedPath)) || changed;
-            }
-
-            if (recursiveBrowsingEnabled_)
-            {
-                preferAsyncReload = true;
-            }
-        };
-
-        for (const services::FolderWatchEvent& event : update.events)
-        {
-            if (event.kind == services::FolderWatchEventKind::Added && isExistingDirectory(event.path))
-            {
-                foldersToInsertIntoTree.push_back(event.path);
-                if (recursiveBrowsingEnabled_)
-                {
-                    preferAsyncReload = true;
-                }
-            }
-
-            if (event.kind == services::FolderWatchEventKind::Removed
-                && FindFolderTreeItemByPath(event.path))
-            {
-                refreshFolderTree = true;
-            }
-
-            if (event.kind == services::FolderWatchEventKind::Renamed)
-            {
-                if (!event.oldPath.empty() && FindFolderTreeItemByPath(event.oldPath))
-                {
-                    refreshFolderTree = true;
-                }
-
-                if (isExistingDirectory(event.path))
-                {
-                    foldersToInsertIntoTree.push_back(event.path);
-                    if (recursiveBrowsingEnabled_)
-                    {
-                        preferAsyncReload = true;
-                    }
-                }
-            }
-
-            switch (event.kind)
-            {
-            case services::FolderWatchEventKind::Added:
-            case services::FolderWatchEventKind::Modified:
-                upsertFromPath(event.path);
-                break;
-            case services::FolderWatchEventKind::Removed:
-                changed = browserModel_->RemoveItemByPath(event.path) || changed;
-                changed = browserModel_->RemoveItemsByPathPrefix(event.path) || changed;
-                invalidatedPaths.push_back(event.path);
-                break;
-            case services::FolderWatchEventKind::Renamed:
-            {
-                const bool renamed = browserModel_->ReplacePathPrefix(event.oldPath, event.path);
-                changed = renamed || changed;
-                invalidatedPaths.push_back(event.oldPath);
-                invalidatedPaths.push_back(event.path);
-                if (!renamed)
-                {
-                    changed = browserModel_->RemoveItemByPath(event.oldPath) || changed;
-                    changed = browserModel_->RemoveItemsByPathPrefix(event.oldPath) || changed;
-                    upsertFromPath(event.path);
-                }
-                break;
-            }
-            default:
-                break;
-            }
-        }
-
-        if (preferAsyncReload)
-        {
-            if (refreshFolderTree)
-            {
-                RefreshFolderTree();
-            }
-            else
-            {
-                for (const std::wstring& folderPath : foldersToInsertIntoTree)
-                {
-                    InsertFolderTreeFolderIfParentLoaded(folderPath);
-                }
-            }
-
-            reloadFolderPreservingSelection(browserModel_->FolderPath());
-            return;
-        }
-
-        if (!changed && invalidatedPaths.empty())
-        {
-            if (refreshFolderTree)
-            {
-                RefreshFolderTree();
-            }
-            else
-            {
-                for (const std::wstring& folderPath : foldersToInsertIntoTree)
-                {
-                    InsertFolderTreeFolderIfParentLoaded(folderPath);
-                }
-            }
-            return;
-        }
-
-        browserPaneController_->InvalidateMediaCacheForPaths(invalidatedPaths);
-        RefreshBrowserPane();
-        browserPaneController_->RestoreSelectionByFilePaths(selectedPaths, focusedPath);
-        if (refreshFolderTree)
-        {
-            RefreshFolderTree();
-        }
-        else
-        {
-            for (const std::wstring& folderPath : foldersToInsertIntoTree)
-            {
-                InsertFolderTreeFolderIfParentLoaded(folderPath);
-            }
-        }
-        UpdateStatusText();
-        UpdateWindowTitle();
+        folderWatchChangeCoordinator_->Apply(
+            *browserModel_,
+            *browserPaneController_,
+            update,
+            fileOperationActive_,
+            recursiveBrowsingEnabled_,
+            showSubfoldersInBrowser_);
     }
 
     void MainWindow::UpdateMenuState()

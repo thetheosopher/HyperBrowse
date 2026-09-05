@@ -74,6 +74,7 @@ namespace hyperbrowse::ui
     class DiagnosticsWindow;
     class ExternalDropTarget;
     class FolderEnumerationCoordinator;
+    class FolderWatchChangeCoordinator;
     class ToolbarIconLibrary;
 
     class MainWindow
@@ -587,6 +588,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<services::BatchConvertService> batchConvertService_;
         std::unique_ptr<services::FileOperationService> fileOperationService_;
         std::unique_ptr<FolderLoadCoordinator> folderLoadCoordinator_;
+        std::unique_ptr<FolderWatchChangeCoordinator> folderWatchChangeCoordinator_;
         std::unique_ptr<FolderTreeController> folderTreeController_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
