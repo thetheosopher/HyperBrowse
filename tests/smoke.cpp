@@ -43,6 +43,7 @@
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "ui/CommandIds.h"
+#include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderHistory.h"
 #include "ui/MainWindow.h"
@@ -201,6 +202,55 @@ namespace
          Expect(!journal.CanRedo() && journal.UndoEntry() && journal.UndoEntry()->type == 0,
              "A new file operation did not clear redo history");
         }
+
+    void RunFileCommandControllerScenario()
+    {
+        using hyperbrowse::services::BatchConvertFormat;
+        using hyperbrowse::ui::FileCommandController;
+        using namespace hyperbrowse::ui::command_ids;
+
+        FileCommandController controller;
+        int copyCallCount = 0;
+        bool deletePermanent = false;
+        int rotationDelta = 0;
+        bool batchSelectionScope = false;
+        BatchConvertFormat batchFormat = BatchConvertFormat::Jpeg;
+
+        FileCommandController::Handlers handlers;
+        handlers.onCopySelection = [&copyCallCount]
+        {
+            ++copyCallCount;
+        };
+        handlers.onDeleteSelection = [&deletePermanent](bool permanent)
+        {
+            deletePermanent = permanent;
+        };
+        handlers.onRotateJpeg = [&rotationDelta](int delta)
+        {
+            rotationDelta = delta;
+        };
+        handlers.onBatchConvert = [&batchSelectionScope, &batchFormat](bool selectionScope, BatchConvertFormat format)
+        {
+            batchSelectionScope = selectionScope;
+            batchFormat = format;
+        };
+        controller.Configure(std::move(handlers));
+
+        Expect(controller.Handle(ID_FILE_COPY_SELECTION),
+               "File command controller did not handle selection copy");
+        Expect(controller.Handle(ID_FILE_COPY_SELECTION_BROWSE) && copyCallCount == 2,
+               "File command controller did not preserve copy command aliases");
+        Expect(controller.Handle(ID_FILE_DELETE_SELECTION_PERMANENT) && deletePermanent,
+               "File command controller did not forward permanent-delete state");
+        Expect(controller.Handle(ID_FILE_ROTATE_JPEG_LEFT) && rotationDelta == -1,
+               "File command controller did not forward JPEG rotation direction");
+        Expect(controller.Handle(ID_FILE_BATCH_CONVERT_SELECTION_PNG)
+                   && batchSelectionScope
+                   && batchFormat == BatchConvertFormat::Png,
+               "File command controller did not forward batch-convert scope and format");
+        Expect(!controller.Handle(ID_VIEW_THUMBNAILS),
+               "File command controller claimed a view command outside its ownership");
+    }
 
     struct EnumerationResult
     {
@@ -4486,6 +4536,7 @@ int main(int argc, char* argv[])
             RunPrefetchSizingScenario();
             RunFolderHistoryScenario();
             RunFileOperationJournalScenario();
+            RunFileCommandControllerScenario();
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
             RunBackgroundExecutorCapacityScenario();

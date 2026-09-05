@@ -44,6 +44,7 @@
 #include "ui/DiagnosticsWindow.h"
 #include "ui/CommandIds.h"
 #include "ui/ExternalDropTarget.h"
+#include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
@@ -9290,6 +9291,129 @@ namespace hyperbrowse::ui
         messageHandlers.onViewerDroppedFile = std::bind_front(&MainWindow::OnViewerDroppedFileMessage, this);
         messageHandlers.onViewerClosed = std::bind_front(&MainWindow::OnViewerClosedMessage, this);
         asyncMessageRouter_.Configure(std::move(messageHandlers));
+
+        FileCommandController::Handlers fileCommandHandlers;
+        fileCommandHandlers.onOpenFolder = std::bind_front(&MainWindow::OpenFolder, this);
+        fileCommandHandlers.onNavigateBackFolder = std::bind_front(&MainWindow::NavigateBackToLastOpenedFolder, this);
+        fileCommandHandlers.onNavigateForwardFolder = std::bind_front(&MainWindow::NavigateForwardToLastOpenedFolder, this);
+        fileCommandHandlers.onToggleCurrentFolderFavorite = std::bind_front(&MainWindow::ToggleCurrentFolderFavoriteDestination, this);
+        fileCommandHandlers.onClearFavoriteDestinations = [this]
+        {
+            if (ConfirmFavoriteDestinationClear(hwnd_, favoriteDestinationFolders_.size()))
+            {
+                ClearFavoriteDestinations();
+            }
+        };
+        fileCommandHandlers.onClearRecentFolders = std::bind_front(&MainWindow::ClearRecentFolders, this);
+        fileCommandHandlers.onClearRecentDestinations = std::bind_front(&MainWindow::ClearRecentDestinations, this);
+        fileCommandHandlers.onExit = [this]
+        {
+            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+        };
+        fileCommandHandlers.onEscape = [this]
+        {
+            if (closeMainWindowOnEscape_)
+            {
+                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+            }
+        };
+        fileCommandHandlers.onMinimize = [this]
+        {
+            ShowWindow(hwnd_, SW_MINIMIZE);
+        };
+        fileCommandHandlers.onToggleCloseMainWindowOnEscape = [this]
+        {
+            closeMainWindowOnEscape_ = !closeMainWindowOnEscape_;
+            ModifyMenuW(fileMenu_,
+                        ID_FILE_ESCAPE,
+                        MF_BYCOMMAND | MF_STRING,
+                        ID_FILE_ESCAPE,
+                        closeMainWindowOnEscape_ ? L"&Close\tEsc" : L"&Ignore\tEsc");
+            RefreshPersistentMenuOwnerDraw();
+            UpdateMenuState();
+        };
+        fileCommandHandlers.onRefreshTree = [this]
+        {
+            if (folderTreeController_)
+            {
+                folderTreeController_->ClearChildPresenceCache();
+            }
+            RefreshFolderTree();
+        };
+        fileCommandHandlers.onOpenSelected = [this]
+        {
+            OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1,
+                             ShouldDefaultViewerToSecondaryMonitor());
+        };
+        fileCommandHandlers.onCompareSelected = std::bind_front(&MainWindow::StartCompareSelected, this);
+        fileCommandHandlers.onViewOnSecondaryMonitor = [this]
+        {
+            OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1, true);
+        };
+        fileCommandHandlers.onImageInformation = [this]
+        {
+            ShowImageInformation();
+        };
+        fileCommandHandlers.onQuickSendMove = [this]
+        {
+            StartQuickSendForSelection(services::FileOperationType::Move);
+        };
+        fileCommandHandlers.onQuickSendCopy = [this]
+        {
+            StartQuickSendForSelection(services::FileOperationType::Copy);
+        };
+        fileCommandHandlers.onCopySelection = std::bind_front(&MainWindow::StartCopySelection, this);
+        fileCommandHandlers.onRenameSelected = std::bind_front(&MainWindow::StartRenameSelectedImage, this);
+        fileCommandHandlers.onBatchRenameSelection = std::bind_front(&MainWindow::StartBatchRenameSelection, this);
+        fileCommandHandlers.onMoveSelection = std::bind_front(&MainWindow::StartMoveSelection, this);
+        fileCommandHandlers.onMoveSelectionToNewChildFolder = std::bind_front(&MainWindow::StartMoveSelectionToNewChildFolder, this);
+        fileCommandHandlers.onTogglePairedRawJpeg = [this]
+        {
+            rawJpegPairedOperationsEnabled_ = !rawJpegPairedOperationsEnabled_;
+            ApplyRawJpegPairingSettings();
+            if (viewerWindow_ && viewerWindow_->IsOpen())
+            {
+                SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
+            }
+            UpdateStatusText();
+            UpdateMenuState();
+        };
+        fileCommandHandlers.onDeleteSelection = std::bind_front(&MainWindow::StartDeleteSelection, this);
+        fileCommandHandlers.onRevealInExplorer = std::bind_front(&MainWindow::RevealSelectedInExplorer, this);
+        fileCommandHandlers.onOpenContainingFolder = std::bind_front(&MainWindow::OpenSelectedContainingFolder, this);
+        fileCommandHandlers.onCopyPath = std::bind_front(&MainWindow::CopySelectedPathsToClipboard, this);
+        fileCommandHandlers.onCopyFiles = std::bind_front(&MainWindow::CopySelectionFilesToClipboard, this, false);
+        fileCommandHandlers.onCut = std::bind_front(&MainWindow::CopySelectionFilesToClipboard, this, true);
+        fileCommandHandlers.onCopyImagePixels = [this]
+        {
+            CopySelectedImagePixelsToClipboard();
+        };
+        fileCommandHandlers.onPasteFiles = std::bind_front(&MainWindow::PasteClipboardFilesIntoCurrentFolder, this);
+        fileCommandHandlers.onUndo = std::bind_front(&MainWindow::PerformUndo, this);
+        fileCommandHandlers.onRedo = std::bind_front(&MainWindow::PerformRedo, this);
+        fileCommandHandlers.onDuplicateSelection = std::bind_front(&MainWindow::StartDuplicateSelection, this);
+        fileCommandHandlers.onSelectAll = [this]
+        {
+            if (browserPaneController_)
+            {
+                browserPaneController_->SelectAll();
+            }
+        };
+        fileCommandHandlers.onProperties = std::bind_front(&MainWindow::ShowSelectedFileProperties, this);
+        fileCommandHandlers.onEditTags = std::bind_front(&MainWindow::EditSelectionTags, this);
+        fileCommandHandlers.onRotateJpeg = std::bind_front(&MainWindow::AdjustSelectedJpegOrientation, this);
+        fileCommandHandlers.onBatchConvert = std::bind_front(&MainWindow::StartBatchConvert, this);
+        fileCommandHandlers.onCancelBatchConvert = [this]
+        {
+            if (batchConvertService_)
+            {
+                batchConvertService_->Cancel();
+                batchConvertActive_ = false;
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+        };
+        fileCommandController_.Configure(std::move(fileCommandHandlers));
     }
 
     MainWindow::~MainWindow()
@@ -21505,192 +21629,13 @@ namespace hyperbrowse::ui
             return true;
         }
 
+        if (fileCommandController_.Handle(commandId))
+        {
+            return true;
+        }
+
         switch (commandId)
         {
-        case ID_FILE_OPEN_FOLDER:
-            OpenFolder();
-            return true;
-        case ID_VIEW_NAVIGATE_BACK_FOLDER:
-            NavigateBackToLastOpenedFolder();
-            return true;
-        case ID_VIEW_NAVIGATE_FORWARD_FOLDER:
-            NavigateForwardToLastOpenedFolder();
-            return true;
-        case ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION:
-            ToggleCurrentFolderFavoriteDestination();
-            return true;
-        case ID_FILE_CLEAR_FAVORITE_DESTINATIONS:
-            if (ConfirmFavoriteDestinationClear(hwnd_, favoriteDestinationFolders_.size()))
-            {
-                ClearFavoriteDestinations();
-            }
-            return true;
-        case ID_FILE_CLEAR_RECENT_FOLDERS:
-            ClearRecentFolders();
-            return true;
-        case ID_FILE_CLEAR_RECENT_DESTINATIONS:
-            ClearRecentDestinations();
-            return true;
-        case ID_FILE_EXIT:
-            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
-            return true;
-        case ID_FILE_ESCAPE:
-            if (closeMainWindowOnEscape_)
-            {
-                PostMessageW(hwnd_, WM_CLOSE, 0, 0);
-            }
-            return true;
-        case ID_FILE_MINIMIZE:
-            ShowWindow(hwnd_, SW_MINIMIZE);
-            return true;
-        case ID_EDIT_CLOSE_MAIN_WINDOW_ON_ESCAPE:
-            closeMainWindowOnEscape_ = !closeMainWindowOnEscape_;
-            ModifyMenuW(fileMenu_,
-                        ID_FILE_ESCAPE,
-                        MF_BYCOMMAND | MF_STRING,
-                        ID_FILE_ESCAPE,
-                        closeMainWindowOnEscape_ ? L"&Close\tEsc" : L"&Ignore\tEsc");
-            RefreshPersistentMenuOwnerDraw();
-            UpdateMenuState();
-            return true;
-        case ID_FILE_REFRESH_TREE:
-            if (folderTreeController_)
-            {
-                folderTreeController_->ClearChildPresenceCache();
-            }
-            RefreshFolderTree();
-            return true;
-        case ID_FILE_OPEN_SELECTED:
-            OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1,
-                             ShouldDefaultViewerToSecondaryMonitor());
-            return true;
-        case ID_FILE_COMPARE_SELECTED:
-            StartCompareSelected();
-            return true;
-        case ID_FILE_VIEW_ON_SECONDARY_MONITOR:
-            OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1, true);
-            return true;
-        case ID_FILE_IMAGE_INFORMATION:
-            ShowImageInformation();
-            return true;
-        case ID_FILE_QUICK_SEND_MOVE:
-            StartQuickSendForSelection(services::FileOperationType::Move);
-            return true;
-        case ID_FILE_QUICK_SEND_COPY:
-            StartQuickSendForSelection(services::FileOperationType::Copy);
-            return true;
-        case ID_FILE_COPY_SELECTION:
-            StartCopySelection();
-            return true;
-        case ID_FILE_COPY_SELECTION_BROWSE:
-            StartCopySelection();
-            return true;
-        case ID_FILE_RENAME_SELECTED:
-            StartRenameSelectedImage();
-            return true;
-        case ID_FILE_BATCH_RENAME_SELECTION:
-            StartBatchRenameSelection();
-            return true;
-        case ID_FILE_MOVE_SELECTION:
-            StartMoveSelection();
-            return true;
-        case ID_FILE_MOVE_SELECTION_BROWSE:
-            StartMoveSelection();
-            return true;
-        case ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER:
-            StartMoveSelectionToNewChildFolder();
-            return true;
-        case ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS:
-            rawJpegPairedOperationsEnabled_ = !rawJpegPairedOperationsEnabled_;
-            ApplyRawJpegPairingSettings();
-            if (viewerWindow_ && viewerWindow_->IsOpen())
-            {
-                SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
-            }
-            UpdateStatusText();
-            UpdateMenuState();
-            return true;
-        case ID_FILE_DELETE_SELECTION:
-            StartDeleteSelection(false);
-            return true;
-        case ID_FILE_DELETE_SELECTION_PERMANENT:
-            StartDeleteSelection(true);
-            return true;
-        case ID_FILE_REVEAL_IN_EXPLORER:
-            RevealSelectedInExplorer();
-            return true;
-        case ID_FILE_OPEN_CONTAINING_FOLDER:
-            OpenSelectedContainingFolder();
-            return true;
-        case ID_FILE_COPY_PATH:
-            CopySelectedPathsToClipboard();
-            return true;
-        case ID_FILE_COPY_FILES_TO_CLIPBOARD:
-            CopySelectionFilesToClipboard();
-            return true;
-        case ID_EDIT_CUT:
-            CopySelectionFilesToClipboard(true);
-            return true;
-        case ID_FILE_COPY_IMAGE_PIXELS:
-            CopySelectedImagePixelsToClipboard();
-            return true;
-        case ID_FILE_PASTE_FILES:
-            PasteClipboardFilesIntoCurrentFolder();
-            return true;
-        case ID_EDIT_UNDO:
-            PerformUndo();
-            return true;
-        case ID_EDIT_REDO:
-            PerformRedo();
-            return true;
-        case ID_FILE_DUPLICATE_SELECTION:
-            StartDuplicateSelection();
-            return true;
-        case ID_FILE_SELECT_ALL:
-            if (browserPaneController_)
-            {
-                browserPaneController_->SelectAll();
-            }
-            return true;
-        case ID_FILE_PROPERTIES:
-            ShowSelectedFileProperties();
-            return true;
-        case ID_FILE_EDIT_TAGS:
-            EditSelectionTags();
-            return true;
-        case ID_FILE_ROTATE_JPEG_LEFT:
-            AdjustSelectedJpegOrientation(-1);
-            return true;
-        case ID_FILE_ROTATE_JPEG_RIGHT:
-            AdjustSelectedJpegOrientation(+1);
-            return true;
-        case ID_FILE_BATCH_CONVERT_SELECTION_JPEG:
-            StartBatchConvert(true, services::BatchConvertFormat::Jpeg);
-            return true;
-        case ID_FILE_BATCH_CONVERT_SELECTION_PNG:
-            StartBatchConvert(true, services::BatchConvertFormat::Png);
-            return true;
-        case ID_FILE_BATCH_CONVERT_SELECTION_TIFF:
-            StartBatchConvert(true, services::BatchConvertFormat::Tiff);
-            return true;
-        case ID_FILE_BATCH_CONVERT_FOLDER_JPEG:
-            StartBatchConvert(false, services::BatchConvertFormat::Jpeg);
-            return true;
-        case ID_FILE_BATCH_CONVERT_FOLDER_PNG:
-            StartBatchConvert(false, services::BatchConvertFormat::Png);
-            return true;
-        case ID_FILE_BATCH_CONVERT_FOLDER_TIFF:
-            StartBatchConvert(false, services::BatchConvertFormat::Tiff);
-            return true;
-        case ID_FILE_BATCH_CONVERT_CANCEL:
-            if (batchConvertService_)
-            {
-                batchConvertService_->Cancel();
-                batchConvertActive_ = false;
-                UpdateStatusText();
-                UpdateMenuState();
-            }
-            return true;
         case ID_VIEW_THUMBNAILS:
             SetBrowserMode(BrowserMode::Thumbnails);
             return true;

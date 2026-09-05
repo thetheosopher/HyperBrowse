@@ -25,6 +25,7 @@
 #include "ui/FileOperationReconciler.h"
 #include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
+#include "ui/FileCommandController.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickSend.h"
 #include "ui/WindowAsyncMessageRouter.h"
@@ -584,6 +585,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<FolderWatchChangeCoordinator> folderWatchChangeCoordinator_;
         std::unique_ptr<FolderTreeController> folderTreeController_;
         WindowAsyncMessageRouter asyncMessageRouter_;
+        FileCommandController fileCommandController_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;

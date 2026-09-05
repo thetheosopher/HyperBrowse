@@ -108,6 +108,10 @@ controller:
 - `ui/MenuMessageHandling.*` owns the pure `WM_MENUCHAR` owner-draw mnemonic
 	selection policy and the shared `MenuDrawItemData` record. MainWindow retains
 	menu construction, measurement, painting, and command policy.
+- `ui/FileCommandController.*` owns the file and selection command-ID mapping
+	for folder navigation, clipboard actions, file operations, batch conversion,
+	and undo/redo. MainWindow supplies explicit callbacks and retains window,
+	model, service, and presentation state.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

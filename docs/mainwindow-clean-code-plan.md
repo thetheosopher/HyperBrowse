@@ -12,8 +12,8 @@ enumeration, file-operation reconciliation, viewer synchronization, menus,
 settings, details and Quick Actions presentation, drag/drop, rendering, and
 shutdown. Dialog, file-operation policy, folder-enumeration coordination,
 folder-tree coordination, folder-watch policy, async message routing, and menu
-message policy extractions have reduced the current translation unit to 24,645
-lines. The folder-tree slice places node
+message policy, and file-command dispatch extractions have reduced the current
+translation unit to 24,564 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -196,5 +196,9 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   callback implementations and private maintenance messages.
 - [x] Extract owner-draw menu mnemonic selection from `HandleMessage` into
   `src/ui/MenuMessageHandling.*`, keeping the shared menu item data record
-  available to MainWindow's existing measurement and painting paths. The
-  current `MainWindow.cpp` size is 24,645 lines.
+  available to MainWindow's existing measurement and painting paths.
+- [x] Extract file and selection command dispatch from `HandleCommand` into
+  `src/ui/FileCommandController.*`. MainWindow retains state, shell effects,
+  and operation callbacks while the controller owns the command-ID mapping.
+  Deterministic smoke coverage verifies aliases and forwarded command
+  parameters. The current `MainWindow.cpp` size is 24,564 lines.
