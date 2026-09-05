@@ -46,7 +46,11 @@
 #include "ui/DialogTheme.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/CommandIds.h"
+#include "ui/ExternalDropTarget.h"
+#include "ui/FileOperationJournal.h"
+#include "ui/FolderHistory.h"
 #include "ui/ShortcutCatalog.h"
+#include "ui/ShellDragSource.h"
 #include "ui/ToolbarIconLibrary.h"
 #include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
@@ -162,8 +166,6 @@ namespace
         Purge = 2,
     };
     constexpr unsigned int kPersistentThumbnailCacheMaintenanceSuccessFlag = 4;
-    constexpr std::size_t kOpenedFolderHistoryLimit = 256;
-    constexpr std::size_t kInvalidHistoryIndex = static_cast<std::size_t>(-1);
     constexpr UINT_PTR kMemoryPressureTimerId = 9101;
     constexpr UINT kMemoryPressureIntervalMs = 1500;
     constexpr GUID kConsoleDisplayStateGuid{
@@ -10004,107 +10006,6 @@ namespace
         return SUCCEEDED(result);
     }
 
-    class ShellFileDragSource final : public IDropSource
-    {
-    public:
-        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID interfaceId, void** object) override
-        {
-            if (!object)
-            {
-                return E_POINTER;
-            }
-
-            *object = nullptr;
-            if (interfaceId == IID_IUnknown || interfaceId == IID_IDropSource)
-            {
-                *object = static_cast<IDropSource*>(this);
-                AddRef();
-                return S_OK;
-            }
-
-            return E_NOINTERFACE;
-        }
-
-        ULONG STDMETHODCALLTYPE AddRef() override
-        {
-            return ++referenceCount_;
-        }
-
-        ULONG STDMETHODCALLTYPE Release() override
-        {
-            const ULONG remainingReferences = --referenceCount_;
-            if (remainingReferences == 0)
-            {
-                delete this;
-            }
-            return remainingReferences;
-        }
-
-        HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escapePressed, DWORD keyState) override
-        {
-            if (escapePressed)
-            {
-                return DRAGDROP_S_CANCEL;
-            }
-
-            return (keyState & MK_LBUTTON) == 0 ? DRAGDROP_S_DROP : S_OK;
-        }
-
-        HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD effect) override
-        {
-            (void)effect;
-            return DRAGDROP_S_USEDEFAULTCURSORS;
-        }
-
-    private:
-        ULONG referenceCount_{1};
-    };
-
-    bool CreateShellFileDataObject(const std::vector<std::wstring>& paths,
-                                   Microsoft::WRL::ComPtr<IDataObject>* dataObject)
-    {
-        if (!dataObject || paths.empty())
-        {
-            return false;
-        }
-
-        std::vector<PIDLIST_ABSOLUTE> itemPidls;
-        std::vector<PCIDLIST_ABSOLUTE> absolutePidls;
-        itemPidls.reserve(paths.size());
-        absolutePidls.reserve(paths.size());
-        for (const std::wstring& path : paths)
-        {
-            if (PIDLIST_ABSOLUTE itemPidl = ILCreateFromPathW(path.c_str()))
-            {
-                itemPidls.push_back(itemPidl);
-                absolutePidls.push_back(itemPidl);
-            }
-        }
-
-        if (itemPidls.empty())
-        {
-            return false;
-        }
-
-        Microsoft::WRL::ComPtr<IShellItemArray> shellItemArray;
-    HRESULT result = SHCreateShellItemArrayFromIDLists(static_cast<UINT>(absolutePidls.size()),
-                               absolutePidls.data(),
-                               shellItemArray.GetAddressOf());
-        if (SUCCEEDED(result) && shellItemArray)
-        {
-            result = shellItemArray->BindToHandler(nullptr,
-                                                    BHID_DataObject,
-                                                    IID_PPV_ARGS(dataObject->GetAddressOf()));
-        }
-
-        for (PIDLIST_ABSOLUTE itemPidl : itemPidls)
-        {
-            ILFree(itemPidl);
-        }
-
-        return SUCCEEDED(result) && *dataObject;
-    }
-
     struct ShellTreeItemInfo
     {
         std::wstring displayName;
@@ -10799,124 +10700,6 @@ namespace hyperbrowse::ui
         cache::DiskThumbnailCache::Statistics statistics;
     };
 
-    // OLE drop target that gives real drag-over feedback (copy/move cursor and folder
-    // highlight) for external file drags onto the main window. It reuses the window's
-    // quick-access row / tree hit-testing so a drop lands where the cursor is.
-    class HyperBrowseExternalDropTarget final : public IDropTarget
-    {
-    public:
-        explicit HyperBrowseExternalDropTarget(MainWindow* window)
-            : window_(window)
-        {
-        }
-
-        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override
-        {
-            if (!object)
-            {
-                return E_POINTER;
-            }
-            *object = nullptr;
-            if (riid == IID_IUnknown || riid == IID_IDropTarget)
-            {
-                *object = static_cast<IDropTarget*>(this);
-                AddRef();
-                return S_OK;
-            }
-            return E_NOINTERFACE;
-        }
-
-        ULONG STDMETHODCALLTYPE AddRef() override { return ++refCount_; }
-        ULONG STDMETHODCALLTYPE Release() override
-        {
-            const ULONG remaining = --refCount_;
-            if (remaining == 0)
-            {
-                delete this;
-            }
-            return remaining;
-        }
-
-        HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* dataObject, DWORD keyState, POINTL point, DWORD* effect) override
-        {
-            lastDataObject_ = dataObject;
-            return DragOver(keyState, point, effect);
-        }
-
-        HRESULT STDMETHODCALLTYPE DragOver(DWORD keyState, POINTL point, DWORD* effect) override
-        {
-            if (!effect)
-            {
-                return E_POINTER;
-            }
-
-            MainWindow* window = window_;
-            if (!window || !window->hwnd_)
-            {
-                *effect = DROPEFFECT_NONE;
-                return S_OK;
-            }
-
-            POINT clientPoint{point.x, point.y};
-            ScreenToClient(window->hwnd_, &clientPoint);
-
-            HTREEITEM treeItem = nullptr;
-            const std::vector<std::wstring> sourcePaths = window->ShellPathsFromDataObject(lastDataObject_);
-            const std::wstring destination = window->ResolveExternalDropTarget(clientPoint, &treeItem);
-            const DWORD allowed = window->DropEffectForKeyState(keyState, destination, sourcePaths);
-            *effect = allowed;
-
-            if (window->externalDropTreeHoverItem_ != treeItem && window->treePane_)
-            {
-                TreeView_SelectDropTarget(window->treePane_, treeItem);
-                window->externalDropTreeHoverItem_ = treeItem;
-            }
-            return S_OK;
-        }
-
-        HRESULT STDMETHODCALLTYPE DragLeave() override
-        {
-            if (window_)
-            {
-                window_->ClearExternalDropVisuals();
-            }
-            lastDataObject_ = nullptr;
-            return S_OK;
-        }
-
-        HRESULT STDMETHODCALLTYPE Drop(IDataObject* dataObject, DWORD keyState, POINTL point, DWORD* effect) override
-        {
-            if (!effect)
-            {
-                return E_POINTER;
-            }
-
-            MainWindow* window = window_;
-            if (window && window->hwnd_)
-            {
-                POINT clientPoint{point.x, point.y};
-                ScreenToClient(window->hwnd_, &clientPoint);
-                HTREEITEM treeItem = nullptr;
-                const std::vector<std::wstring> sourcePaths = window->ShellPathsFromDataObject(dataObject);
-                const std::wstring destination = window->ResolveExternalDropTarget(clientPoint, &treeItem);
-                const DWORD chosen = window->DropEffectForKeyState(keyState, destination, sourcePaths);
-                window->HandleExternalDrop(dataObject, chosen, clientPoint);
-                *effect = chosen;
-            }
-            else
-            {
-                *effect = DROPEFFECT_NONE;
-            }
-            lastDataObject_ = nullptr;
-            return S_OK;
-        }
-
-    private:
-        MainWindow* window_{};
-        IDataObject* lastDataObject_{};
-        ULONG refCount_{1};
-    };
-
     MainWindow::MainWindow(HINSTANCE instance)
         : instance_(instance)
         , browserModel_(std::make_unique<browser::BrowserModel>())
@@ -11098,7 +10881,20 @@ namespace hyperbrowse::ui
 
         ApplyAppTextSize();
 
-        externalDropTarget_ = new (std::nothrow) HyperBrowseExternalDropTarget(this);
+        externalDropTarget_ = new (std::nothrow) ExternalDropTarget(
+            hwnd_,
+            [this](IDataObject* dataObject, DWORD keyState, POINT clientPoint)
+            {
+                return UpdateExternalDropFeedback(dataObject, keyState, clientPoint);
+            },
+            [this](IDataObject* dataObject, DWORD keyState, POINT clientPoint)
+            {
+                return HandleExternalDrop(dataObject, keyState, clientPoint);
+            },
+            [this]()
+            {
+                ClearExternalDropVisuals();
+            });
         if (externalDropTarget_ && SUCCEEDED(RegisterDragDrop(hwnd_, externalDropTarget_)))
         {
             // OLE drop target now owns feedback for file drags; the legacy
@@ -13105,7 +12901,7 @@ namespace hyperbrowse::ui
         }
 
         Microsoft::WRL::ComPtr<IDropSource> dropSource;
-        dropSource.Attach(new ShellFileDragSource());
+        dropSource = CreateShellFileDragSource();
 
         DWORD performedEffect = DROPEFFECT_NONE;
         const HRESULT dragResult = DoDragDrop(dataObject.Get(),
@@ -14291,124 +14087,51 @@ namespace hyperbrowse::ui
 
     void MainWindow::RecordOpenedFolderHistory(std::wstring folderPath)
     {
-        folderPath = NormalizeFolderPath(std::move(folderPath));
-        if (folderPath.empty())
-        {
-            return;
-        }
-
-        if (pendingFolderHistoryNavigation_ != FolderHistoryNavigationDirection::None)
-        {
-            const std::size_t targetIndex = pendingFolderHistoryTargetIndex_;
-            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::None;
-            pendingFolderHistoryTargetIndex_ = kInvalidHistoryIndex;
-
-            if (targetIndex < openedFolderHistory_.size())
-            {
-                openedFolderHistory_[targetIndex] = folderPath;
-                openedFolderHistoryIndex_ = targetIndex;
-                return;
-            }
-        }
-
-        if (openedFolderHistoryIndex_ != kInvalidHistoryIndex
-            && openedFolderHistoryIndex_ + 1 < openedFolderHistory_.size())
-        {
-            openedFolderHistory_.erase(openedFolderHistory_.begin() + static_cast<std::ptrdiff_t>(openedFolderHistoryIndex_ + 1),
-                                       openedFolderHistory_.end());
-        }
-
-        if (openedFolderHistory_.empty() || !FolderPathsEqual(openedFolderHistory_.back(), folderPath))
-        {
-            openedFolderHistory_.push_back(std::move(folderPath));
-        }
-
-        while (openedFolderHistory_.size() > kOpenedFolderHistoryLimit)
-        {
-            openedFolderHistory_.erase(openedFolderHistory_.begin());
-        }
-
-        openedFolderHistoryIndex_ = openedFolderHistory_.empty()
-            ? kInvalidHistoryIndex
-            : openedFolderHistory_.size() - 1;
+        folderHistory_.RecordOpenedFolder(NormalizeFolderPath(std::move(folderPath)));
     }
 
     bool MainWindow::NavigateBackToLastOpenedFolder()
     {
-        if (!browserModel_ || openedFolderHistory_.empty() || openedFolderHistoryIndex_ == kInvalidHistoryIndex)
-        {
-            return false;
-        }
-
-        if (openedFolderHistoryIndex_ == 0)
+        if (!browserModel_)
         {
             return false;
         }
 
         const std::wstring currentFolderPath = NormalizeFolderPath(browserModel_->FolderPath());
-        std::size_t candidateIndex = openedFolderHistoryIndex_;
-        while (candidateIndex > 0)
+        const auto navigation = folderHistory_.FindBack(
+            currentFolderPath,
+            [](std::wstring_view path) { return FindExistingFolderAncestor(fs::path(path)); },
+            [](std::wstring_view lhs, std::wstring_view rhs) { return FolderPathsEqual(lhs, rhs); });
+        if (!navigation)
         {
-            --candidateIndex;
-            const std::wstring& candidate = openedFolderHistory_[candidateIndex];
-
-            const std::wstring resolvedFolderPath = FindExistingFolderAncestor(fs::path(candidate));
-            if (resolvedFolderPath.empty())
-            {
-                continue;
-            }
-
-            if (!currentFolderPath.empty() && FolderPathsEqual(currentFolderPath, resolvedFolderPath))
-            {
-                continue;
-            }
-
-            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::Back;
-            pendingFolderHistoryTargetIndex_ = candidateIndex;
-            LoadFolderAsync(resolvedFolderPath, true);
-            return true;
+            return false;
         }
 
-        return false;
+        folderHistory_.BeginNavigation(navigation->direction, navigation->targetIndex);
+        LoadFolderAsync(navigation->folderPath, true);
+        return true;
     }
 
     bool MainWindow::NavigateForwardToLastOpenedFolder()
     {
-        if (!browserModel_ || openedFolderHistory_.empty() || openedFolderHistoryIndex_ == kInvalidHistoryIndex)
-        {
-            return false;
-        }
-
-        if (openedFolderHistoryIndex_ + 1 >= openedFolderHistory_.size())
+        if (!browserModel_)
         {
             return false;
         }
 
         const std::wstring currentFolderPath = NormalizeFolderPath(browserModel_->FolderPath());
-        std::size_t candidateIndex = openedFolderHistoryIndex_;
-        while (candidateIndex + 1 < openedFolderHistory_.size())
+        const auto navigation = folderHistory_.FindForward(
+            currentFolderPath,
+            [](std::wstring_view path) { return FindExistingFolderAncestor(fs::path(path)); },
+            [](std::wstring_view lhs, std::wstring_view rhs) { return FolderPathsEqual(lhs, rhs); });
+        if (!navigation)
         {
-            ++candidateIndex;
-            const std::wstring& candidate = openedFolderHistory_[candidateIndex];
-
-            const std::wstring resolvedFolderPath = FindExistingFolderAncestor(fs::path(candidate));
-            if (resolvedFolderPath.empty())
-            {
-                continue;
-            }
-
-            if (!currentFolderPath.empty() && FolderPathsEqual(currentFolderPath, resolvedFolderPath))
-            {
-                continue;
-            }
-
-            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::Forward;
-            pendingFolderHistoryTargetIndex_ = candidateIndex;
-            LoadFolderAsync(resolvedFolderPath, true);
-            return true;
+            return false;
         }
 
-        return false;
+        folderHistory_.BeginNavigation(navigation->direction, navigation->targetIndex);
+        LoadFolderAsync(navigation->folderPath, true);
+        return true;
     }
 
     void MainWindow::RecordRecentDestination(std::wstring folderPath)
@@ -20246,7 +19969,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        UndoableOperation operation;
+        FileOperationJournalEntry operation;
         operation.type = static_cast<int>(type);
         operation.sourcePaths = update.succeededSourcePaths;
         operation.createdPaths = update.createdPaths;
@@ -20278,27 +20001,19 @@ namespace hyperbrowse::ui
             }
         }
 
-        undoStack_.push_back(std::move(operation));
-        constexpr std::size_t kMaxUndoDepth = 32;
-        while (undoStack_.size() > kMaxUndoDepth)
-        {
-            undoStack_.pop_front();
-        }
-        // A new operation invalidates the redo history.
-        redoStack_.clear();
+        fileOperationJournal_.Record(std::move(operation));
         UpdateUndoRedoMenuState();
     }
 
     void MainWindow::PerformUndo()
     {
-        if (undoStack_.empty() || fileOperationActive_)
+        const FileOperationJournalEntry* operation = fileOperationJournal_.UndoEntry();
+        if (!operation || fileOperationActive_)
         {
             return;
         }
 
-        const UndoableOperation& operation = undoStack_.back();
-
-        const auto type = static_cast<services::FileOperationType>(operation.type);
+        const auto type = static_cast<services::FileOperationType>(operation->type);
         std::vector<std::wstring> undoSources;
         std::wstring undoDestination;
         std::vector<std::wstring> undoLeafNames;
@@ -20307,13 +20022,13 @@ namespace hyperbrowse::ui
         if (type == services::FileOperationType::Copy)
         {
             // Undo a copy = delete the created copies (recycle bin for safety).
-            if (operation.createdPaths.empty())
+            if (operation->createdPaths.empty())
             {
                 return;
             }
-            undoSources = operation.createdPaths;
+            undoSources = operation->createdPaths;
             applyingUndoRedo_ = true;
-            pendingUndoRedoOperation_ = UndoRedoOperation::Undo;
+            fileOperationJournal_.Begin(UndoRedoOperation::Undo);
             started = StartFileOperation(services::FileOperationType::DeleteRecycleBin,
                                          undoSources,
                                          {},
@@ -20325,15 +20040,15 @@ namespace hyperbrowse::ui
             // Undo a move = move the created files back to the original folder.
             // createdPaths[i] is the post-move location; move each back beside the
             // original source's parent folder.
-            if (operation.createdPaths.empty())
+            if (operation->createdPaths.empty())
             {
                 return;
             }
-            const std::wstring originalFolder = fs::path(operation.sourcePaths.front()).parent_path().wstring();
+            const std::wstring originalFolder = fs::path(operation->sourcePaths.front()).parent_path().wstring();
             applyingUndoRedo_ = true;
-            pendingUndoRedoOperation_ = UndoRedoOperation::Undo;
+            fileOperationJournal_.Begin(UndoRedoOperation::Undo);
             started = StartFileOperation(services::FileOperationType::Move,
-                                         operation.createdPaths,
+                                         operation->createdPaths,
                                          originalFolder,
                                          services::FileConflictPolicy::PromptShell,
                                          {});
@@ -20342,15 +20057,15 @@ namespace hyperbrowse::ui
         {
             // Undo a rename = rename back to the original leaf name.
             std::vector<std::wstring> originalLeafNames;
-            originalLeafNames.reserve(operation.sourcePaths.size());
-            for (const std::wstring& sourcePath : operation.sourcePaths)
+            originalLeafNames.reserve(operation->sourcePaths.size());
+            for (const std::wstring& sourcePath : operation->sourcePaths)
             {
                 originalLeafNames.push_back(fs::path(sourcePath).filename().wstring());
             }
             applyingUndoRedo_ = true;
-            pendingUndoRedoOperation_ = UndoRedoOperation::Undo;
+            fileOperationJournal_.Begin(UndoRedoOperation::Undo);
             started = StartFileOperation(services::FileOperationType::Rename,
-                                         operation.createdPaths,
+                                         operation->createdPaths,
                                          {},
                                          services::FileConflictPolicy::PromptShell,
                                          originalLeafNames);
@@ -20359,50 +20074,49 @@ namespace hyperbrowse::ui
         if (!started)
         {
             applyingUndoRedo_ = false;
-            pendingUndoRedoOperation_ = UndoRedoOperation::None;
+            fileOperationJournal_.CancelPending();
         }
         UpdateUndoRedoMenuState();
     }
 
     void MainWindow::PerformRedo()
     {
-        if (redoStack_.empty() || fileOperationActive_)
+        const FileOperationJournalEntry* operation = fileOperationJournal_.RedoEntry();
+        if (!operation || fileOperationActive_)
         {
             return;
         }
 
-        const UndoableOperation& operation = redoStack_.back();
-
-        const auto type = static_cast<services::FileOperationType>(operation.type);
+        const auto type = static_cast<services::FileOperationType>(operation->type);
         applyingUndoRedo_ = true;
-        pendingUndoRedoOperation_ = UndoRedoOperation::Redo;
+        fileOperationJournal_.Begin(UndoRedoOperation::Redo);
         bool started = false;
         if (type == services::FileOperationType::Copy)
         {
             started = StartFileOperation(services::FileOperationType::Copy,
-                                         operation.sourcePaths,
-                                         operation.destinationFolder,
+                                         operation->sourcePaths,
+                                         operation->destinationFolder,
                                          services::FileConflictPolicy::PromptShell,
                                          {});
         }
         else if (type == services::FileOperationType::Move)
         {
             started = StartFileOperation(services::FileOperationType::Move,
-                                         operation.sourcePaths,
-                                         operation.destinationFolder,
+                                         operation->sourcePaths,
+                                         operation->destinationFolder,
                                          services::FileConflictPolicy::PromptShell,
                                          {});
         }
         else // Rename: redo renames back to the new leaf names.
         {
             std::vector<std::wstring> newLeafNames;
-            newLeafNames.reserve(operation.createdPaths.size());
-            for (const std::wstring& createdPath : operation.createdPaths)
+            newLeafNames.reserve(operation->createdPaths.size());
+            for (const std::wstring& createdPath : operation->createdPaths)
             {
                 newLeafNames.push_back(fs::path(createdPath).filename().wstring());
             }
             started = StartFileOperation(services::FileOperationType::Rename,
-                                         operation.sourcePaths,
+                                         operation->sourcePaths,
                                          {},
                                          services::FileConflictPolicy::PromptShell,
                                          newLeafNames);
@@ -20411,7 +20125,7 @@ namespace hyperbrowse::ui
         if (!started)
         {
             applyingUndoRedo_ = false;
-            pendingUndoRedoOperation_ = UndoRedoOperation::None;
+            fileOperationJournal_.CancelPending();
         }
         UpdateUndoRedoMenuState();
     }
@@ -20423,8 +20137,8 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const bool canUndo = !undoStack_.empty() && !fileOperationActive_;
-        const bool canRedo = !redoStack_.empty() && !fileOperationActive_;
+        const bool canUndo = fileOperationJournal_.CanUndo() && !fileOperationActive_;
+        const bool canRedo = fileOperationJournal_.CanRedo() && !fileOperationActive_;
         EnableMenuItem(menu_, ID_EDIT_UNDO, MF_BYCOMMAND | (canUndo ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_EDIT_REDO, MF_BYCOMMAND | (canRedo ? MF_ENABLED : MF_GRAYED));
     }
@@ -20432,7 +20146,7 @@ namespace hyperbrowse::ui
     void MainWindow::ApplyCompletedFileOperation(const services::FileOperationUpdate& update)
     {
         util::ScopedTimer applyTimer(L"MainWindow::ApplyCompletedFileOperation");
-        const UndoRedoOperation completedUndoRedoOperation = pendingUndoRedoOperation_;
+        const UndoRedoOperation completedUndoRedoOperation = fileOperationJournal_.PendingOperation();
         fileOperationActive_ = false;
         activeFileOperationLabel_.clear();
         applyingUndoRedo_ = false;
@@ -21041,21 +20755,7 @@ namespace hyperbrowse::ui
                 && !update.aborted
                 && update.failedCount == 0
                 && update.succeededSourcePaths.size() == update.requestedCount;
-            if (undoRedoSucceeded)
-            {
-                if (completedUndoRedoOperation == UndoRedoOperation::Undo && !undoStack_.empty())
-                {
-                    redoStack_.push_back(std::move(undoStack_.back()));
-                    undoStack_.pop_back();
-                }
-                else if (completedUndoRedoOperation == UndoRedoOperation::Redo && !redoStack_.empty())
-                {
-                    undoStack_.push_back(std::move(redoStack_.back()));
-                    redoStack_.pop_back();
-                }
-            }
-
-            pendingUndoRedoOperation_ = UndoRedoOperation::None;
+            fileOperationJournal_.Complete(completedUndoRedoOperation, undoRedoSucceeded);
             applyingUndoRedo_ = false;
         }
 
@@ -21431,13 +21131,9 @@ namespace hyperbrowse::ui
             ? browserPaneController_->IsCompactThumbnailLayoutEnabled()
             : compactThumbnailLayout_;
         const bool historyNavigationSettled = !folderEnumerationActive_
-            && pendingFolderHistoryNavigation_ == FolderHistoryNavigationDirection::None;
-        const bool canNavigateBack = hasFolder && historyNavigationSettled
-            && openedFolderHistoryIndex_ != kInvalidHistoryIndex
-            && openedFolderHistoryIndex_ > 0;
-        const bool canNavigateForward = hasFolder && historyNavigationSettled
-            && openedFolderHistoryIndex_ != kInvalidHistoryIndex
-            && openedFolderHistoryIndex_ + 1 < openedFolderHistory_.size();
+            && !folderHistory_.HasPendingNavigation();
+        const bool canNavigateBack = hasFolder && historyNavigationSettled && folderHistory_.CanNavigateBack();
+        const bool canNavigateForward = hasFolder && historyNavigationSettled && folderHistory_.CanNavigateForward();
         const bool thumbnailSteppingEnabled = hasFolder && browserMode_ == BrowserMode::Thumbnails
             && !folderEnumerationActive_;
 
@@ -21677,16 +21373,14 @@ namespace hyperbrowse::ui
             {
             case ID_VIEW_NAVIGATE_BACK_FOLDER:
                 item.enabled = browserModel_
-                    && openedFolderHistoryIndex_ != kInvalidHistoryIndex
-                    && openedFolderHistoryIndex_ > 0
-                    && pendingFolderHistoryNavigation_ == FolderHistoryNavigationDirection::None
+                    && folderHistory_.CanNavigateBack()
+                    && !folderHistory_.HasPendingNavigation()
                     && !folderEnumerationActive_;
                 break;
             case ID_VIEW_NAVIGATE_FORWARD_FOLDER:
                 item.enabled = browserModel_
-                    && openedFolderHistoryIndex_ != kInvalidHistoryIndex
-                    && openedFolderHistoryIndex_ + 1 < openedFolderHistory_.size()
-                    && pendingFolderHistoryNavigation_ == FolderHistoryNavigationDirection::None
+                    && folderHistory_.CanNavigateForward()
+                    && !folderHistory_.HasPendingNavigation()
                     && !folderEnumerationActive_;
                 break;
             case ID_VIEW_RECURSIVE:
@@ -23073,8 +22767,7 @@ namespace hyperbrowse::ui
 
         if (!historyNavigation)
         {
-            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::None;
-            pendingFolderHistoryTargetIndex_ = kInvalidHistoryIndex;
+            folderHistory_.CancelPendingNavigation();
         }
 
         folderPath = NormalizeFolderPath(std::move(folderPath));
@@ -23202,8 +22895,7 @@ namespace hyperbrowse::ui
         case services::FolderEnumerationUpdateKind::Failed:
             browserModel_->Fail(update->message);
             folderEnumerationActive_ = false;
-            pendingFolderHistoryNavigation_ = FolderHistoryNavigationDirection::None;
-            pendingFolderHistoryTargetIndex_ = kInvalidHistoryIndex;
+            folderHistory_.CancelPendingNavigation();
             util::LogError(update->message);
             break;
         default:
@@ -26518,7 +26210,22 @@ namespace hyperbrowse::ui
         }
     }
 
-    void MainWindow::HandleExternalDrop(IDataObject* dataObject, DWORD effect, POINT clientPoint)
+    DWORD MainWindow::UpdateExternalDropFeedback(IDataObject* dataObject, DWORD keyState, POINT clientPoint)
+    {
+        HTREEITEM treeItem = nullptr;
+        const std::vector<std::wstring> sourcePaths = ShellPathsFromDataObject(dataObject);
+        const std::wstring destination = ResolveExternalDropTarget(clientPoint, &treeItem);
+        const DWORD allowed = DropEffectForKeyState(keyState, destination, sourcePaths);
+
+        if (externalDropTreeHoverItem_ != treeItem && treePane_)
+        {
+            TreeView_SelectDropTarget(treePane_, treeItem);
+            externalDropTreeHoverItem_ = treeItem;
+        }
+        return allowed;
+    }
+
+    DWORD MainWindow::HandleExternalDrop(IDataObject* dataObject, DWORD keyState, POINT clientPoint)
     {
         std::vector<std::wstring> sourcePaths = ShellPathsFromDataObject(dataObject);
         HTREEITEM treeItem = nullptr;
@@ -26527,7 +26234,13 @@ namespace hyperbrowse::ui
 
         if (sourcePaths.empty() || destinationFolder.empty() || fileOperationActive_)
         {
-            return;
+            return DROPEFFECT_NONE;
+        }
+
+        const DWORD effect = DropEffectForKeyState(keyState, destinationFolder, sourcePaths);
+        if (effect == DROPEFFECT_NONE)
+        {
+            return DROPEFFECT_NONE;
         }
 
         if (!IsExistingDirectory(destinationFolder))
@@ -26536,7 +26249,7 @@ namespace hyperbrowse::ui
                         L"The drop destination folder is no longer available.",
                         L"Drop Files",
                         MB_OK | MB_ICONINFORMATION);
-            return;
+            return DROPEFFECT_NONE;
         }
 
         const services::FileOperationType type = (effect & DROPEFFECT_MOVE) != 0
@@ -26547,6 +26260,7 @@ namespace hyperbrowse::ui
                            std::move(destinationFolder),
                            services::FileConflictPolicy::PromptShell,
                            {});
+                return effect;
     }
 
     LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)

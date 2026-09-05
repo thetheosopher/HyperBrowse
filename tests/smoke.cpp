@@ -43,6 +43,8 @@
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "ui/CommandIds.h"
+#include "ui/FileOperationJournal.h"
+#include "ui/FolderHistory.h"
 #include "ui/MainWindow.h"
 #include "ui/QuickSend.h"
 #include "ui/ShortcutCatalog.h"
@@ -112,6 +114,93 @@ namespace
         Expect(hyperbrowse::util::ResolvePrefetchDepth(ResourceProfile::Balanced, 99) == 16,
                "Prefetch depth did not clamp above the supported range");
     }
+
+    void RunFolderHistoryScenario()
+    {
+        using hyperbrowse::ui::FolderHistory;
+        using hyperbrowse::ui::FolderHistoryNavigationDirection;
+
+        FolderHistory history(4);
+        history.RecordOpenedFolder(L"C:\\one");
+        history.RecordOpenedFolder(L"C:\\two");
+        history.RecordOpenedFolder(L"C:\\missing");
+        history.RecordOpenedFolder(L"C:\\four");
+
+        const auto resolveExistingFolder = [](std::wstring_view path)
+        {
+            return path == L"C:\\missing" ? std::wstring(L"C:\\recovered") : std::wstring(path);
+        };
+        const auto compareFolderPaths = [](std::wstring_view lhs, std::wstring_view rhs)
+        {
+            return _wcsicmp(std::wstring(lhs).c_str(), std::wstring(rhs).c_str()) == 0;
+        };
+
+        const auto back = history.FindBack(L"C:\\four", resolveExistingFolder, compareFolderPaths);
+        Expect(back.has_value(), "Folder history did not find a previous folder");
+        Expect(back->direction == FolderHistoryNavigationDirection::Back
+                   && back->targetIndex == 2
+                   && back->folderPath == L"C:\\recovered",
+               "Folder history did not resolve a missing folder to its existing ancestor");
+
+        history.BeginNavigation(back->direction, back->targetIndex);
+        history.RecordOpenedFolder(L"C:\\recovered");
+        const auto forward = history.FindForward(L"C:\\RECOVERED", resolveExistingFolder, compareFolderPaths);
+        Expect(forward.has_value() && forward->folderPath == L"C:\\four",
+               "Folder history did not preserve forward navigation after ancestor replacement");
+
+        history.BeginNavigation(forward->direction, forward->targetIndex);
+        history.RecordOpenedFolder(L"C:\\four");
+        history.RecordOpenedFolder(L"C:\\five");
+        history.RecordOpenedFolder(L"C:\\five");
+        const auto branchedBack = history.FindBack(L"C:\\five", resolveExistingFolder, compareFolderPaths);
+        Expect(branchedBack.has_value() && branchedBack->folderPath == L"C:\\four",
+               "Folder history did not truncate the forward branch or suppress duplicates");
+    }
+
+        void RunFileOperationJournalScenario()
+        {
+         using hyperbrowse::ui::FileOperationJournal;
+         using hyperbrowse::ui::FileOperationJournalEntry;
+         using hyperbrowse::ui::UndoRedoOperation;
+
+         FileOperationJournal journal(2);
+         FileOperationJournalEntry first;
+         first.type = 1;
+         first.sourcePaths = {L"C:\\source\\one.jpg"};
+         first.createdPaths = {L"C:\\destination\\one.jpg"};
+         journal.Record(first);
+
+         FileOperationJournalEntry second;
+         second.type = 4;
+         second.sourcePaths = {L"C:\\source\\old.jpg"};
+         second.createdPaths = {L"C:\\source\\new.jpg"};
+         journal.Record(second);
+
+         Expect(journal.CanUndo() && !journal.CanRedo(),
+             "File-operation journal did not record a reversible operation");
+         Expect(journal.UndoEntry() && journal.UndoEntry()->type == 4,
+             "File-operation journal did not expose the newest undo entry");
+
+         journal.Begin(UndoRedoOperation::Undo);
+         journal.Complete(UndoRedoOperation::Undo, true);
+         Expect(journal.CanUndo() && journal.CanRedo(),
+             "Successful undo did not move the entry to redo history");
+         Expect(journal.RedoEntry() && journal.RedoEntry()->type == 4,
+             "File-operation journal stored the wrong redo entry");
+
+         journal.Begin(UndoRedoOperation::Redo);
+         journal.Complete(UndoRedoOperation::Redo, false);
+         Expect(journal.CanUndo() && journal.CanRedo(),
+             "Failed redo changed journal history");
+         Expect(journal.PendingOperation() == UndoRedoOperation::None,
+             "File-operation journal retained a failed pending operation");
+
+         FileOperationJournalEntry third;
+         third.type = 0;
+         journal.Record(std::move(third));
+         Expect(!journal.CanRedo() && journal.UndoEntry() && journal.UndoEntry()->type == 0,
+             "A new file operation did not clear redo history");
+        }
 
     struct EnumerationResult
     {
@@ -4395,6 +4484,8 @@ int main(int argc, char* argv[])
         else
         {
             RunPrefetchSizingScenario();
+            RunFolderHistoryScenario();
+            RunFileOperationJournalScenario();
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
             RunBackgroundExecutorCapacityScenario();

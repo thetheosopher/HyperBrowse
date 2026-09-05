@@ -21,6 +21,8 @@
 #include "render/D2DRenderer.h"
 #include "util/ResourceSizing.h"
 #include "util/UiTextSize.h"
+#include "ui/FileOperationJournal.h"
+#include "ui/FolderHistory.h"
 #include "ui/QuickSend.h"
 
 namespace hyperbrowse::browser
@@ -70,8 +72,8 @@ namespace hyperbrowse::util
 namespace hyperbrowse::ui
 {
     class DiagnosticsWindow;
+    class ExternalDropTarget;
     class ToolbarIconLibrary;
-    class HyperBrowseExternalDropTarget;
 
     class MainWindow
     {
@@ -149,13 +151,6 @@ namespace hyperbrowse::ui
             LeftSplitter,
             DetailsSplitter,
             QuickAccessInternal
-        };
-
-        enum class FolderHistoryNavigationDirection
-        {
-            None,
-            Back,
-            Forward,
         };
 
         struct ThemePalette
@@ -427,8 +422,9 @@ namespace hyperbrowse::ui
         LRESULT OnDropFiles(HDROP dropHandle);
         std::vector<std::wstring> ShellPathsFromDataObject(IDataObject* dataObject) const;
         DWORD DropEffectForKeyState(DWORD keyState, const std::wstring& destinationFolder, const std::vector<std::wstring>& sourcePaths) const;
+        DWORD UpdateExternalDropFeedback(IDataObject* dataObject, DWORD keyState, POINT clientPoint);
         std::wstring ResolveExternalDropTarget(POINT clientPoint, HTREEITEM* treeItemOut) const;
-        void HandleExternalDrop(IDataObject* dataObject, DWORD effect, POINT clientPoint);
+        DWORD HandleExternalDrop(IDataObject* dataObject, DWORD keyState, POINT clientPoint);
         void ClearExternalDropVisuals();
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
@@ -546,30 +542,14 @@ namespace hyperbrowse::ui
         HMODULE detailsPanelRichEditModule_{};
         HIMAGELIST treeImageList_{};
         HIMAGELIST treeDragImageList_{};
-        IDropTarget* externalDropTarget_{};
+        ExternalDropTarget* externalDropTarget_{};
         HTREEITEM externalDropTreeHoverItem_{};
         ITaskbarList3* taskbarList_{};
         bool taskbarProgressActive_{};
         bool trayIconAdded_{};
         UINT trayIconMessageId_{};
 
-        struct UndoableOperation
-        {
-            int type{}; // services::FileOperationType as int
-            std::vector<std::wstring> sourcePaths;
-            std::vector<std::wstring> createdPaths;
-            std::wstring destinationFolder;
-            std::wstring description;
-        };
-        enum class UndoRedoOperation
-        {
-            None,
-            Undo,
-            Redo,
-        };
-        std::deque<UndoableOperation> undoStack_;
-        std::deque<UndoableOperation> redoStack_;
-        UndoRedoOperation pendingUndoRedoOperation_{UndoRedoOperation::None};
+        FileOperationJournal fileOperationJournal_;
         bool applyingUndoRedo_{};
         HMENU menu_{};
         HMENU fileMenu_{};
@@ -630,10 +610,7 @@ namespace hyperbrowse::ui
         bool viewerOpenedBeforeFolderEnumerationCompleted_{};
         std::vector<std::wstring> pendingFolderReloadSelectionPaths_;
         std::wstring pendingFolderReloadFocusedPath_;
-        std::vector<std::wstring> openedFolderHistory_;
-        std::size_t openedFolderHistoryIndex_{static_cast<std::size_t>(-1)};
-        FolderHistoryNavigationDirection pendingFolderHistoryNavigation_{FolderHistoryNavigationDirection::None};
-        std::size_t pendingFolderHistoryTargetIndex_{static_cast<std::size_t>(-1)};
+        FolderHistory folderHistory_;
         std::vector<std::wstring> recentFolders_;
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
@@ -795,6 +772,5 @@ namespace hyperbrowse::ui
         HPOWERNOTIFY consoleDisplayNotify_{};
         HPOWERNOTIFY monitorPowerNotify_{};
 
-        friend class HyperBrowseExternalDropTarget;
     };
 }

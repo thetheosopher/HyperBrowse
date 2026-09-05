@@ -126,8 +126,12 @@ add_library(HyperBrowseCore STATIC
     src/services/UserMetadataStore.cpp
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
+    src/ui/ExternalDropTarget.cpp
+    src/ui/FileOperationJournal.cpp
+    src/ui/FolderHistory.cpp
     src/ui/MainWindow.cpp
     src/ui/QuickSend.cpp
+    src/ui/ShellDragSource.cpp
     src/ui/ToolbarIconLibrary.cpp
     src/util/Diagnostics.cpp
     src/util/Log.cpp

@@ -62,6 +62,27 @@ Workers return results through the existing window-message or callback contracts
 
 `FileOperationService` performs native shell operations asynchronously and reports completion/progress to `MainWindow`. Browser and viewer workflows share operation types, so operation origin must be tracked separately from the operation type. Completion logic must also account for folder-watch echoes, optimistic viewer state, selection/focus restoration, and shell-dialog foreground activation.
 
+## Main-window policy collaborators
+
+Several state and shell boundaries are intentionally kept outside the HWND
+controller:
+
+- `ui/FolderHistory.*` owns normalized folder-history branching, back/forward
+	traversal, duplicate suppression, and pending navigation state.
+- `ui/FileOperationJournal.*` owns bounded Copy/Move/Rename undo/redo history
+	and completion transitions. `MainWindow` still plans and starts the inverse
+	shell operation and applies its asynchronous result.
+- `ui/ShellDragSource.*` owns shell `IDataObject` and `IDropSource` creation
+	for outbound selection drags.
+- `ui/ExternalDropTarget.*` owns the OLE `IDropTarget` COM lifetime and
+	screen-to-client conversion. It calls synchronous callbacks supplied by
+	`MainWindow` for drag feedback, drop handling, and visual cleanup; it does
+	not retain the window as a raw host pointer.
+
+These helpers are registered as explicit `HyperBrowseCore` translation units,
+and pure policy behavior is covered by deterministic smoke scenarios. OLE
+registration is revoked before the callback-owning drop target is released.
+
 ## Rendering
 
 The current rendering split is intentional:
