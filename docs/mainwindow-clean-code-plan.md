@@ -12,15 +12,17 @@ enumeration, file-operation reconciliation, viewer synchronization, menus,
 settings, details and Quick Actions presentation, drag/drop, rendering, and
 shutdown. Dialog, file-operation policy, folder-enumeration coordination, and
 folder-tree coordination extractions have reduced the current translation unit
-to 24,945 lines. The folder-tree slice removed 857 lines from MainWindow and
-places node ownership, child-presence caching, lazy enumeration, request
-settlement, and selection restoration in `FolderTreeController`.
+to 24,865 lines. The folder-tree slice places node ownership, child-presence
+caching, lazy enumeration, request settlement, and selection restoration in
+`FolderTreeController`. The folder-load slice places enumeration presentation,
+history navigation, watcher lifecycle, stale watcher-result filtering, and
+deferred watcher effects in `FolderLoadCoordinator`.
 
 ## Guardrails
 
 - Preserve user-visible behavior while each slice is extracted.
 - Keep blocking filesystem, decode, metadata, shell, and persistent-cache work
-  off the UI thread.
+off the UI thread.
 - Preserve cancellation, stale-result rejection, HWND lifetime guarantees,
   viewer image continuity, focus/activation behavior, and shutdown ordering.
 - Preserve public `MainWindow` methods and message/command IDs by default.
@@ -77,8 +79,9 @@ settlement, and selection restoration in `FolderTreeController`.
   coloring, selection-to-browser loading, rename/file operations, context
   menus, drag/drop, and tooltips.
 - Create a `FolderLoadCoordinator` for folder enumeration presentation,
-  startup restoration, folder history, watcher lifecycle, and stale-result
-  rejection.
+  folder history, watcher lifecycle, stale-result rejection, and pending
+  startup/reload presentation state. Keep browser/model/viewer effects in
+  MainWindow behind explicit callbacks.
 - Preserve early batches, presentation coalescing, watcher shutdown ordering,
   incremental updates, full-reload escalation, and focus/selection behavior.
 
@@ -141,12 +144,7 @@ create/destroy.
 ## First slice
 
 The first implementation slice extracted `FolderHistory` only. Filesystem
-ancestor resolution and `LoadFolderAsync` remain in `MainWindow`; the policy
-receives those operations through callbacks. This reduced state ownership in
-`MainWindow` while keeping HWND and service lifetimes unchanged. Later slices
-also extracted shell drag/drop boundaries, the file-operation journal, and
-named completion stages; the remaining coordinator work is intentionally still
-tracked below.
+ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; the policy received those operations through callbacks. Later slices extracted shell drag/drop boundaries, the file-operation journal, named completion stages, folder-tree coordination, and folder-load coordination. Startup-specific selection/viewer restoration now lives in the folder-load coordinator's pending-presentation state, while model-facing watch-event policy remains in MainWindow.
 
 ## Progress
 
@@ -172,4 +170,12 @@ tracked below.
   `src/ui/FolderEnumerationCoordinator.*`. This slice reduced `MainWindow.cpp`
   from 23,488 to 23,463 lines while keeping browser refresh, history, watcher,
   and viewer synchronization callbacks in `MainWindow`.
-- [ ] Extract folder-tree and remaining folder-navigation coordinators.
+- [x] Extract folder-tree node ownership, child-presence caching, lazy loading,
+  stale-result settlement, and selection restoration into
+  `src/ui/FolderTreeController.*`.
+- [x] Extract folder-load history navigation, watcher lifecycle, stale watcher
+  filtering, deferred watcher effects, and enumeration callback routing into
+  `src/ui/FolderLoadCoordinator.*`. `MainWindow.cpp` now measures 24,865 lines;
+  pending startup selection, pending viewer launch, reload selection
+  restoration, and post-enumeration viewer settlement are coordinator-owned;
+  browser/model/viewer effects remain explicit callbacks.

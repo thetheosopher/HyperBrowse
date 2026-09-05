@@ -4,10 +4,10 @@ This document describes the current implementation. The planning documents in `s
 
 ## Executables and library
 
-- `HyperBrowseCore` is the static library shared by the application and smoke tests.
-- `HyperBrowse.exe` owns application startup, the Win32 message loop, and the main user-facing windows.
-- `HyperBrowseRawHelper.exe` is the optional out-of-process RAW decode helper.
-- `HyperBrowseTests.exe` runs the smoke and integration checks registered by `tests/CMakeLists.txt`.
+`HyperBrowseCore` is the static library shared by the application and smoke tests.
+`HyperBrowse.exe` owns application startup, the Win32 message loop, and the main user-facing windows.
+`HyperBrowseRawHelper.exe` is the optional out-of-process RAW decode helper.
+`HyperBrowseTests.exe` runs the smoke and integration checks registered by `tests/CMakeLists.txt`.
 
 The core library is organized by responsibility:
 
@@ -87,6 +87,13 @@ controller:
 	50 ms presentation coalescing, and completion/failure settlement. It calls
 	`MainWindow` handlers for model mutation, browser refresh, history/watcher
 	updates, and viewer synchronization without owning those UI policies.
+- `ui/FolderLoadCoordinator.*` owns folder-load history navigation,
+	enumeration and watcher service lifetimes, stale watcher-result filtering,
+	deferred watcher reload/tree effects, pending startup/reload presentation
+	state, post-enumeration viewer settlement, and routing of enumeration
+	presentation callbacks. MainWindow supplies model, browser-pane, viewer, and
+	watch-event policy callbacks; the coordinator does not own browser or viewer
+	state.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

@@ -23,7 +23,7 @@
 #include "util/UiTextSize.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FileOperationReconciler.h"
-#include "ui/FolderHistory.h"
+#include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
 #include "ui/QuickSend.h"
 
@@ -368,8 +368,6 @@ namespace hyperbrowse::ui
         bool IsPathInCurrentScope(std::wstring_view path) const;
         void ApplyFolderWatchChanges(const services::FolderWatchUpdate& update);
         bool FlushFolderEnumerationPresentation(bool clearStartupPathsIfNotFound);
-        LRESULT OnFolderEnumerationMessage(LPARAM lParam);
-        LRESULT OnFolderWatchMessage(LPARAM lParam);
         LRESULT OnFolderTreeNotify(LPARAM lParam);
         void RelayFolderTreeTooltipEvent(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK FolderTreeTooltipSubclassProc(HWND hwnd,
@@ -422,9 +420,6 @@ namespace hyperbrowse::ui
         LRESULT OnViewerClosedMessage();
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
         LRESULT OnPersistentThumbnailCacheMaintenanceMessage(WPARAM wParam);
-        void TryOpenPendingStartupViewerPath(bool clearIfNotFound);
-        void TryRestorePendingStartupSelectionPath(bool clearIfNotFound);
-        void TryRestorePendingFolderReloadSelection(bool clearIfNotFound);
 
         void SetBrowserMode(BrowserMode mode);
         void StepThumbnailSize(int direction);
@@ -445,7 +440,6 @@ namespace hyperbrowse::ui
         void RecordRecentFolder(std::wstring folderPath);
         void RecordRecentDestination(std::wstring folderPath);
         void SyncQuickSendModel();
-        void RecordOpenedFolderHistory(std::wstring folderPath);
         bool NavigateBackToLastOpenedFolder();
         bool NavigateForwardToLastOpenedFolder();
         void RefreshQuickAccessMenus();
@@ -582,12 +576,6 @@ namespace hyperbrowse::ui
         std::wstring startupLaunchPathOverride_;
         std::wstring startupFolderPath_;
         std::wstring startupSelectedImagePath_;
-        std::wstring pendingStartupSelectionPath_;
-        std::wstring pendingStartupViewerPath_;
-        bool viewerOpenedBeforeFolderEnumerationCompleted_{};
-        std::vector<std::wstring> pendingFolderReloadSelectionPaths_;
-        std::wstring pendingFolderReloadFocusedPath_;
-        FolderHistory folderHistory_;
         std::vector<std::wstring> recentFolders_;
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
@@ -598,9 +586,8 @@ namespace hyperbrowse::ui
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
         std::unique_ptr<services::BatchConvertService> batchConvertService_;
         std::unique_ptr<services::FileOperationService> fileOperationService_;
-        std::unique_ptr<FolderEnumerationCoordinator> folderEnumerationCoordinator_;
+        std::unique_ptr<FolderLoadCoordinator> folderLoadCoordinator_;
         std::unique_ptr<FolderTreeController> folderTreeController_;
-        std::unique_ptr<services::FolderWatchService> folderWatchService_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
@@ -658,7 +645,6 @@ namespace hyperbrowse::ui
         std::array<std::uint32_t, 64> detailsPanelHistogramGreen_{};
         std::array<std::uint32_t, 64> detailsPanelHistogramBlue_{};
         std::uint32_t detailsPanelHistogramPeak_{};
-        std::uint64_t activeFolderWatchRequestId_{};
         std::uint64_t activeBatchConvertRequestId_{};
         std::uint64_t activeFileOperationRequestId_{};
         HWND foregroundWindowAtFileOperationStart_{};
@@ -716,8 +702,6 @@ namespace hyperbrowse::ui
         PendingViewerQuickSend pendingViewerQuickSend_;
         bool quickSendPopupActive_{};
         std::size_t quickSendPopupInitialDownCount_{};
-        std::wstring pendingFolderWatchReloadPath_;
-        bool pendingFolderWatchTreeRefresh_{};
         std::wstring activeFileOperationLabel_;
         std::wstring activeTreeFolderMoveSourcePath_;
         std::wstring activeTreeFolderMoveDestinationFolder_;
