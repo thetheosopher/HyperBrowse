@@ -12,8 +12,9 @@ enumeration, file-operation reconciliation, viewer synchronization, menus,
 settings, details and Quick Actions presentation, drag/drop, rendering, and
 shutdown. Dialog, file-operation policy, folder-enumeration coordination,
 folder-tree coordination, folder-watch policy, async message routing, menu
-message policy, file-command dispatch, view-command dispatch, and command-bar
-policy extractions have reduced the current translation unit to 23,179 lines. The folder-tree slice places node
+message policy, file-command dispatch, view-command dispatch, command-bar
+policy, dynamic menu construction, and histogram policy extractions have
+reduced the current translation unit to 23,131 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -224,3 +225,8 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   persistent owner-draw storage, and the state snapshot passed to the builder.
   Deterministic smoke coverage verifies labels, command ranges, placeholders,
   and enabled states. The current `MainWindow.cpp` size is 23,179 lines.
+- [x] Extract cached-thumbnail RGB histogram calculation into
+  `src/ui/DetailsPanelHistogram.*`. MainWindow retains thumbnail scheduling,
+  cancellation, panel state, and rendering. Deterministic smoke coverage
+  verifies channel bins, peak detection, visibility, and invalid-input reset.
+  The current `MainWindow.cpp` size is 23,131 lines.

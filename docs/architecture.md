@@ -130,6 +130,10 @@ controller:
 	population, including folder labels, command ranges, and enabled-state
 	policy. MainWindow retains HMENU lifetimes, persistent owner-draw storage,
 	and the state snapshot supplied to the builder.
+- `ui/DetailsPanelHistogram.*` owns RGB histogram extraction from cached
+	thumbnail bitmaps and returns fixed-size bin data with peak/visibility state.
+	MainWindow retains thumbnail scheduling, cancellation, panel state, and
+	painting.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

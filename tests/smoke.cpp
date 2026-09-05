@@ -44,6 +44,7 @@
 #include "services/ThumbnailScheduler.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
+#include "ui/DetailsPanelHistogram.h"
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderHistory.h"
@@ -521,6 +522,43 @@ namespace
                    && menuText(menus.copySelectionToMenu, 2) == L"(No favorite or recent destinations)"
                    && (menuState(menus.copySelectionToMenu, 2) & MF_GRAYED) != 0,
                "Quick-access builder did not render disabled empty destination state");
+    }
+
+    void RunDetailsPanelHistogramScenario()
+    {
+        using hyperbrowse::ui::DetailsPanelHistogram;
+
+        BITMAPINFO bitmapInfo{};
+        bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
+        bitmapInfo.bmiHeader.biWidth = 4;
+        bitmapInfo.bmiHeader.biHeight = -1;
+        bitmapInfo.bmiHeader.biPlanes = 1;
+        bitmapInfo.bmiHeader.biBitCount = 32;
+        bitmapInfo.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        HBITMAP bitmap = CreateDIBSection(nullptr, &bitmapInfo, DIB_RGB_COLORS, &bits, nullptr, 0);
+        Expect(bitmap && bits, "Details-panel histogram scenario could not create a test bitmap");
+
+        auto* pixels = static_cast<RGBQUAD*>(bits);
+        pixels[0] = RGBQUAD{0, 0, 255, 0};
+        pixels[1] = RGBQUAD{0, 128, 0, 0};
+        pixels[2] = RGBQUAD{255, 0, 0, 0};
+        pixels[3] = RGBQUAD{255, 255, 255, 0};
+
+        DetailsPanelHistogram::Result result;
+        const bool computed = DetailsPanelHistogram::Compute(bitmap, &result);
+        DeleteObject(bitmap);
+
+        Expect(computed && result.visible && result.peak == 2
+                   && result.red[63] == 2
+                   && result.green[32] == 1
+                   && result.green[63] == 1
+                   && result.blue[63] == 2,
+               "Details-panel histogram did not preserve RGB bins and peak visibility");
+
+        DetailsPanelHistogram::Result emptyResult;
+        Expect(!DetailsPanelHistogram::Compute(nullptr, &emptyResult) && !emptyResult.visible && emptyResult.peak == 0,
+               "Details-panel histogram did not reset invalid input to an empty result");
     }
 
     struct EnumerationResult
@@ -4791,6 +4829,7 @@ int main(int argc, char* argv[])
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
         const bool quickAccessOnly = argc > 1 && std::string_view(argv[1]) == "--quick-access";
+        const bool detailsPanelHistogramOnly = argc > 1 && std::string_view(argv[1]) == "--details-histogram";
         if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
@@ -4807,6 +4846,10 @@ int main(int argc, char* argv[])
         {
             RunQuickAccessMenuBuilderScenario();
         }
+        else if (detailsPanelHistogramOnly)
+        {
+            RunDetailsPanelHistogramScenario();
+        }
         else
         {
             RunPrefetchSizingScenario();
@@ -4816,6 +4859,7 @@ int main(int argc, char* argv[])
             RunViewCommandControllerScenario();
             RunCommandBarControllerScenario();
             RunQuickAccessMenuBuilderScenario();
+            RunDetailsPanelHistogramScenario();
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
             RunBackgroundExecutorCapacityScenario();

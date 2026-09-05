@@ -46,6 +46,7 @@
 #include "ui/ExternalDropTarget.h"
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarPainter.h"
+#include "ui/DetailsPanelHistogram.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
@@ -12524,66 +12525,17 @@ namespace hyperbrowse::ui
         detailsPanelHistogramGreen_.fill(0);
         detailsPanelHistogramBlue_.fill(0);
 
-        BITMAP bitmap{};
-        if (!thumbnail.Bitmap() || GetObjectW(thumbnail.Bitmap(), sizeof(bitmap), &bitmap) == 0)
+        DetailsPanelHistogram::Result result;
+        if (!DetailsPanelHistogram::Compute(thumbnail.Bitmap(), &result))
         {
             return;
         }
 
-        const int bitmapWidth = bitmap.bmWidth;
-        const int bitmapHeight = std::abs(bitmap.bmHeight);
-        if (bitmapWidth <= 0 || bitmapHeight <= 0)
-        {
-            return;
-        }
-
-        BITMAPINFO bitmapInfo{};
-        bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
-        bitmapInfo.bmiHeader.biWidth = bitmapWidth;
-        bitmapInfo.bmiHeader.biHeight = -bitmapHeight;
-        bitmapInfo.bmiHeader.biPlanes = 1;
-        bitmapInfo.bmiHeader.biBitCount = 32;
-        bitmapInfo.bmiHeader.biCompression = BI_RGB;
-
-        std::vector<RGBQUAD> pixels(static_cast<std::size_t>(bitmapWidth) * static_cast<std::size_t>(bitmapHeight));
-        HDC screenDc = GetDC(nullptr);
-        if (!screenDc)
-        {
-            return;
-        }
-
-        const int copiedScanLines = GetDIBits(screenDc,
-                                              thumbnail.Bitmap(),
-                                              0,
-                                              static_cast<UINT>(bitmapHeight),
-                                              pixels.data(),
-                                              &bitmapInfo,
-                                              DIB_RGB_COLORS);
-        ReleaseDC(nullptr, screenDc);
-        if (copiedScanLines == 0)
-        {
-            return;
-        }
-
-        for (const RGBQUAD& pixel : pixels)
-        {
-            const std::size_t redIndex = std::min<std::size_t>(kDetailsPanelHistogramBins - 1, (pixel.rgbRed * kDetailsPanelHistogramBins) / 256);
-            const std::size_t greenIndex = std::min<std::size_t>(kDetailsPanelHistogramBins - 1, (pixel.rgbGreen * kDetailsPanelHistogramBins) / 256);
-            const std::size_t blueIndex = std::min<std::size_t>(kDetailsPanelHistogramBins - 1, (pixel.rgbBlue * kDetailsPanelHistogramBins) / 256);
-
-            detailsPanelHistogramRed_[redIndex] += 1;
-            detailsPanelHistogramGreen_[greenIndex] += 1;
-            detailsPanelHistogramBlue_[blueIndex] += 1;
-        }
-
-        for (std::size_t index = 0; index < kDetailsPanelHistogramBins; ++index)
-        {
-            detailsPanelHistogramPeak_ = std::max(detailsPanelHistogramPeak_, detailsPanelHistogramRed_[index]);
-            detailsPanelHistogramPeak_ = std::max(detailsPanelHistogramPeak_, detailsPanelHistogramGreen_[index]);
-            detailsPanelHistogramPeak_ = std::max(detailsPanelHistogramPeak_, detailsPanelHistogramBlue_[index]);
-        }
-
-        detailsPanelHistogramVisible_ = detailsPanelHistogramPeak_ > 0;
+        detailsPanelHistogramRed_ = result.red;
+        detailsPanelHistogramGreen_ = result.green;
+        detailsPanelHistogramBlue_ = result.blue;
+        detailsPanelHistogramPeak_ = result.peak;
+        detailsPanelHistogramVisible_ = result.visible;
     }
 
     void MainWindow::UpdateDetailsPanel()
