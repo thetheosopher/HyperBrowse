@@ -12485,109 +12485,39 @@ namespace hyperbrowse::ui
 
     bool MainWindow::HandleCommandBarKeyboardInput(UINT message, WPARAM wParam, LPARAM lParam)
     {
-        const int mnemonicIndex = MainMenuMnemonicIndexFromVirtualKey(static_cast<WORD>(wParam));
-        const bool shiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-        const bool isRepeat = (lParam & 0x40000000) != 0;
-
-        if (message == WM_SYSCHAR)
-        {
-            return mnemonicIndex >= 0 || (commandBarKeyboardActive_ && wParam != L' ');
-        }
-
-        if (message == WM_SYSKEYDOWN)
-        {
-            if (wParam == VK_F10 && !shiftPressed)
-            {
-                if (!isRepeat)
-                {
-                    if (commandBarKeyboardActive_)
-                    {
-                        DeactivateCommandBarKeyboardMode(true);
-                    }
-                    else
-                    {
-                        ActivateCommandBarKeyboardMode(commandBarHotIndex_ >= 0 ? commandBarHotIndex_ : 0);
-                    }
-                }
-                return true;
-            }
-
-            if (wParam == VK_MENU)
-            {
-                if (!isRepeat)
-                {
-                    if (commandBarKeyboardActive_)
-                    {
-                        DeactivateCommandBarKeyboardMode(true);
-                    }
-                    else
-                    {
-                        ActivateCommandBarKeyboardMode(commandBarHotIndex_ >= 0 ? commandBarHotIndex_ : 0);
-                    }
-                }
-                return true;
-            }
-
-            if (mnemonicIndex >= 0)
-            {
-                ActivateCommandBarKeyboardMode(mnemonicIndex);
-                OpenCommandBarMenu(mnemonicIndex);
-                return true;
-            }
-        }
-
-        if (message != WM_KEYDOWN && message != WM_SYSKEYDOWN)
+        const CommandBarController::KeyboardInputState state{
+            commandBarKeyboardActive_,
+            commandBarHotIndex_,
+            (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+            (lParam & 0x40000000) != 0,
+        };
+        const CommandBarController::KeyboardInputResult result =
+            commandBarController_.HandleKeyboardInput(message, wParam, state);
+        if (!result.handled)
         {
             return false;
         }
 
-        if (!commandBarKeyboardActive_)
+        switch (result.action)
         {
-            return false;
-        }
-
-        switch (wParam)
-        {
-        case VK_LEFT:
-            ActivateCommandBarKeyboardMode((commandBarHotIndex_ + static_cast<int>(commandBarMenuButtons_.size()) - 1)
-                                           % static_cast<int>(commandBarMenuButtons_.size()));
-            return true;
-        case VK_RIGHT:
-            ActivateCommandBarKeyboardMode((commandBarHotIndex_ + 1)
-                                           % static_cast<int>(commandBarMenuButtons_.size()));
-            return true;
-        case VK_HOME:
-            ActivateCommandBarKeyboardMode(0);
-            return true;
-        case VK_END:
-            ActivateCommandBarKeyboardMode(static_cast<int>(commandBarMenuButtons_.size()) - 1);
-            return true;
-        case VK_DOWN:
-        case VK_RETURN:
-            OpenCommandBarMenu(commandBarHotIndex_ >= 0 ? commandBarHotIndex_ : 0);
-            return true;
-        case VK_SPACE:
-            if (message == WM_KEYDOWN)
-            {
-                OpenCommandBarMenu(commandBarHotIndex_ >= 0 ? commandBarHotIndex_ : 0);
-                return true;
-            }
-            return false;
-        case VK_ESCAPE:
+        case CommandBarController::KeyboardAction::Activate:
+            ActivateCommandBarKeyboardMode(result.index);
+            break;
+        case CommandBarController::KeyboardAction::ActivateAndOpenMenu:
+            ActivateCommandBarKeyboardMode(result.index);
+            OpenCommandBarMenu(result.index);
+            break;
+        case CommandBarController::KeyboardAction::OpenMenu:
+            OpenCommandBarMenu(result.index);
+            break;
+        case CommandBarController::KeyboardAction::Deactivate:
             DeactivateCommandBarKeyboardMode(true);
-            return true;
-        default:
+            break;
+        case CommandBarController::KeyboardAction::None:
             break;
         }
 
-        if (mnemonicIndex >= 0)
-        {
-            ActivateCommandBarKeyboardMode(mnemonicIndex);
-            OpenCommandBarMenu(mnemonicIndex);
-            return true;
-        }
-
-        return false;
+        return true;
     }
 
     void MainWindow::OpenCommandBarMenu(int index)

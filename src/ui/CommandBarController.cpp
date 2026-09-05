@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "ui/CommandIds.h"
+#include "ui/ShortcutCatalog.h"
 
 namespace hyperbrowse::ui
 {
@@ -209,6 +210,118 @@ namespace hyperbrowse::ui
                 break;
             }
         }
+    }
+
+    CommandBarController::KeyboardInputResult CommandBarController::HandleKeyboardInput(
+        UINT message,
+        WPARAM wParam,
+        const KeyboardInputState& state) const
+    {
+        KeyboardInputResult result;
+        const int mnemonicIndex = MainMenuMnemonicIndexFromVirtualKey(static_cast<WORD>(wParam));
+
+        if (message == WM_SYSCHAR)
+        {
+            result.handled = mnemonicIndex >= 0 || (state.active && wParam != L' ');
+            return result;
+        }
+
+        if (message == WM_SYSKEYDOWN)
+        {
+            if (wParam == VK_F10 && !state.shiftPressed)
+            {
+                result.handled = true;
+                if (!state.isRepeat)
+                {
+                    result.action = state.active ? KeyboardAction::Deactivate : KeyboardAction::Activate;
+                    result.index = state.hotIndex >= 0 ? state.hotIndex : 0;
+                }
+                return result;
+            }
+
+            if (wParam == VK_MENU)
+            {
+                result.handled = true;
+                if (!state.isRepeat)
+                {
+                    result.action = state.active ? KeyboardAction::Deactivate : KeyboardAction::Activate;
+                    result.index = state.hotIndex >= 0 ? state.hotIndex : 0;
+                }
+                return result;
+            }
+
+            if (mnemonicIndex >= 0)
+            {
+                result.action = KeyboardAction::ActivateAndOpenMenu;
+                result.index = mnemonicIndex;
+                result.handled = true;
+                return result;
+            }
+        }
+
+        if (message != WM_KEYDOWN && message != WM_SYSKEYDOWN)
+        {
+            return result;
+        }
+
+        if (!state.active)
+        {
+            return result;
+        }
+
+        const int menuCount = static_cast<int>(menuButtons_.size());
+        switch (wParam)
+        {
+        case VK_LEFT:
+            result.action = KeyboardAction::Activate;
+            result.index = (state.hotIndex + menuCount - 1) % menuCount;
+            result.handled = true;
+            return result;
+        case VK_RIGHT:
+            result.action = KeyboardAction::Activate;
+            result.index = (state.hotIndex + 1) % menuCount;
+            result.handled = true;
+            return result;
+        case VK_HOME:
+            result.action = KeyboardAction::Activate;
+            result.index = 0;
+            result.handled = true;
+            return result;
+        case VK_END:
+            result.action = KeyboardAction::Activate;
+            result.index = menuCount - 1;
+            result.handled = true;
+            return result;
+        case VK_DOWN:
+        case VK_RETURN:
+            result.action = KeyboardAction::OpenMenu;
+            result.index = state.hotIndex >= 0 ? state.hotIndex : 0;
+            result.handled = true;
+            return result;
+        case VK_SPACE:
+            if (message == WM_KEYDOWN)
+            {
+                result.action = KeyboardAction::OpenMenu;
+                result.index = state.hotIndex >= 0 ? state.hotIndex : 0;
+                result.handled = true;
+            }
+            return result;
+        case VK_ESCAPE:
+            result.action = KeyboardAction::Deactivate;
+            result.handled = true;
+            return result;
+        default:
+            break;
+        }
+
+        if (mnemonicIndex >= 0)
+        {
+            result.action = KeyboardAction::ActivateAndOpenMenu;
+            result.index = mnemonicIndex;
+            result.handled = true;
+        }
+
+        return result;
     }
 
     int CommandBarController::MenuHitTest(int x, int y) const

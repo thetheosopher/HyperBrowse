@@ -62,6 +62,30 @@ namespace hyperbrowse::ui
             bool selectionActionsEnabled{};
         };
 
+        enum class KeyboardAction
+        {
+            None,
+            Activate,
+            ActivateAndOpenMenu,
+            OpenMenu,
+            Deactivate,
+        };
+
+        struct KeyboardInputState
+        {
+            bool active{};
+            int hotIndex{-1};
+            bool shiftPressed{};
+            bool isRepeat{};
+        };
+
+        struct KeyboardInputResult
+        {
+            KeyboardAction action{KeyboardAction::None};
+            int index{-1};
+            bool handled{};
+        };
+
         using TextWidthHandler = std::function<int(HFONT, std::wstring_view)>;
 
         CommandBarController() = default;
@@ -72,6 +96,9 @@ namespace hyperbrowse::ui
         void SetMenuButton(std::size_t index, std::wstring label, wchar_t mnemonic, HMENU menu);
         void Layout(int clientWidth, int itemTop, HFONT menuFont, const TextWidthHandler& measureTextWidth);
         void UpdateItemStates(const ToolbarState& state);
+        KeyboardInputResult HandleKeyboardInput(UINT message,
+                             WPARAM wParam,
+                             const KeyboardInputState& state) const;
 
         int MenuHitTest(int x, int y) const;
         int ToolbarHitTest(int x, int y) const;

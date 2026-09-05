@@ -381,6 +381,37 @@ namespace
                    && findItem(ID_FILE_COMPARE_SELECTED)->enabled
                    && !findItem(ID_FILE_COPY_SELECTION)->enabled,
                "Command-bar controller did not apply enabled state");
+
+        const CommandBarController::KeyboardInputState inactiveState{};
+        const auto f10Result = controller.HandleKeyboardInput(WM_SYSKEYDOWN, VK_F10, inactiveState);
+        Expect(f10Result.handled
+                   && f10Result.action == CommandBarController::KeyboardAction::Activate
+                   && f10Result.index == 0,
+               "Command-bar controller did not activate keyboard mode with F10");
+
+        const CommandBarController::KeyboardInputState activeState{true, 0, false, false};
+        const auto rightResult = controller.HandleKeyboardInput(WM_KEYDOWN, VK_RIGHT, activeState);
+        Expect(rightResult.handled
+                   && rightResult.action == CommandBarController::KeyboardAction::Activate
+                   && rightResult.index == 1,
+               "Command-bar controller did not navigate menu buttons with Right");
+
+        const auto mnemonicResult = controller.HandleKeyboardInput(WM_SYSKEYDOWN, L'V', activeState);
+        Expect(mnemonicResult.handled
+                   && mnemonicResult.action == CommandBarController::KeyboardAction::ActivateAndOpenMenu
+                   && mnemonicResult.index == 2,
+               "Command-bar controller did not route menu mnemonics");
+
+        const auto openResult = controller.HandleKeyboardInput(WM_KEYDOWN, VK_DOWN, activeState);
+        Expect(openResult.handled
+                   && openResult.action == CommandBarController::KeyboardAction::OpenMenu
+                   && openResult.index == 0,
+               "Command-bar controller did not open the active menu");
+
+        const auto escapeResult = controller.HandleKeyboardInput(WM_KEYDOWN, VK_ESCAPE, activeState);
+        Expect(escapeResult.handled
+                   && escapeResult.action == CommandBarController::KeyboardAction::Deactivate,
+               "Command-bar controller did not deactivate keyboard mode with Escape");
     }
 
     struct EnumerationResult
