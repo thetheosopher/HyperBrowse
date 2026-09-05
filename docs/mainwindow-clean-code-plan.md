@@ -8,11 +8,13 @@ testable state transitions, not an arbitrary line-count target.
 
 `MainWindow.cpp` was approximately 27,000 lines at the start of this pass and
 currently contains several independent state machines: folder navigation and
-enumeration, folder-tree coordination, file-operation reconciliation, viewer
-synchronization, menus, settings, details and Quick Actions presentation,
-drag/drop, rendering, and shutdown. Dialog, file-operation policy, and
-folder-enumeration coordination extractions have reduced the current
-translation unit to 23,463 lines.
+enumeration, file-operation reconciliation, viewer synchronization, menus,
+settings, details and Quick Actions presentation, drag/drop, rendering, and
+shutdown. Dialog, file-operation policy, folder-enumeration coordination, and
+folder-tree coordination extractions have reduced the current translation unit
+to 24,945 lines. The folder-tree slice removed 857 lines from MainWindow and
+places node ownership, child-presence caching, lazy enumeration, request
+settlement, and selection restoration in `FolderTreeController`.
 
 ## Guardrails
 
@@ -70,7 +72,10 @@ translation unit to 23,463 lines.
 ### 3. Isolate folder navigation and tree coordination
 
 - Create a `FolderTreeController` for tree nodes, child-presence caching,
-  pending enumeration IDs, selection restoration, tooltips, and tree drag/drop.
+  pending enumeration IDs, selection restoration, and lazy tree loading.
+- Keep MainWindow-owned tree policy in MainWindow: custom draw/favorite
+  coloring, selection-to-browser loading, rename/file operations, context
+  menus, drag/drop, and tooltips.
 - Create a `FolderLoadCoordinator` for folder enumeration presentation,
   startup restoration, folder history, watcher lifecycle, and stale-result
   rejection.

@@ -24,6 +24,7 @@
 #include "ui/FileOperationJournal.h"
 #include "ui/FileOperationReconciler.h"
 #include "ui/FolderHistory.h"
+#include "ui/FolderTreeController.h"
 #include "ui/QuickSend.h"
 
 namespace hyperbrowse::browser
@@ -35,7 +36,6 @@ namespace hyperbrowse::browser
 
 namespace hyperbrowse::services
 {
-    struct FolderTreeChild;
     struct FolderWatchUpdate;
     enum class BatchConvertFormat : int;
     enum class FileConflictPolicy : int;
@@ -45,7 +45,6 @@ namespace hyperbrowse::services
     class BatchConvertService;
     class FileOperationService;
     class FolderEnumerationService;
-    class FolderTreeEnumerationService;
     class FolderWatchService;
     class ThumbnailScheduler;
     class UserMetadataStore;
@@ -97,23 +96,7 @@ namespace hyperbrowse::ui
 
     private:
         struct FileOperationCompletionContext;
-        struct FolderTreeNodeData
-        {
-            std::wstring path;
-            bool childrenKnown{};
-            bool hasChildren{};
-            bool childrenLoaded{};
-            bool childrenLoading{};
-            std::uint64_t childEnumerationRequestId{};
-            bool childPresenceLoading{};
-            std::uint64_t childPresenceRequestId{};
-        };
-
-        struct FolderTreeChildPresenceCacheEntry
-        {
-            bool hasChildren{};
-            std::uint64_t checkedTickCount{};
-        };
+        using FolderTreeNodeData = FolderTreeController::NodeData;
 
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
         static constexpr UINT kDeferredMenuStateMessage = WM_APP + 73;
@@ -234,28 +217,8 @@ namespace hyperbrowse::ui
         bool CreateAccelerators();
         bool CreateMenuBar();
         bool CreateChildWindows();
-        void InitializeFolderTree();
-        void PopulateSpecialFolderRoots();
-        void PopulateDriveRoots();
         void RefreshFolderTree();
-        HTREEITEM InsertFolderTreeItem(HTREEITEM parentItem,
-                           const std::wstring& folderPath,
-                           bool childrenKnown = false,
-                                       bool hasChildren = false,
-                                       bool requestPresence = true);
-            void AddFolderTreePlaceholder(HTREEITEM parentItem);
-        void RequestFolderTreeChildPresence(const std::vector<HTREEITEM>& items);
-        bool TryGetCachedFolderTreeChildPresence(std::wstring_view folderPath, bool* hasChildren) const;
-        void CacheFolderTreeChildPresence(std::wstring_view folderPath, bool hasChildren);
         void InvalidateFolderTreeChildPresence(std::wstring_view folderPath);
-        void UpdateFolderTreeChildrenIndicator(HTREEITEM item);
-        void RequestFolderTreeChildren(HTREEITEM item);
-        void ApplyFolderTreeChildren(HTREEITEM item, std::vector<services::FolderTreeChild> childFolders);
-        void ShowSelectedFolderInTree();
-        void SelectFolderInTree(const std::wstring& folderPath);
-        void ContinueSelectingFolderInTree();
-        void RestoreFolderTreeItemVerticalPosition(HTREEITEM item, const std::wstring& selectedPath);
-        HTREEITEM FindChildFolderTreeItem(HTREEITEM parentItem, const std::wstring& folderPath) const;
         HTREEITEM FindFolderTreeItemByPath(const std::wstring& folderPath) const;
         void InsertFolderTreeFolderIfParentLoaded(const std::wstring& folderPath);
         FolderTreeNodeData* GetFolderTreeNodeData(HTREEITEM item) const;
@@ -406,7 +369,6 @@ namespace hyperbrowse::ui
         void ApplyFolderWatchChanges(const services::FolderWatchUpdate& update);
         bool FlushFolderEnumerationPresentation(bool clearStartupPathsIfNotFound);
         LRESULT OnFolderEnumerationMessage(LPARAM lParam);
-        LRESULT OnFolderTreeEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderWatchMessage(LPARAM lParam);
         LRESULT OnFolderTreeNotify(LPARAM lParam);
         void RelayFolderTreeTooltipEvent(UINT message, WPARAM wParam, LPARAM lParam);
@@ -632,14 +594,12 @@ namespace hyperbrowse::ui
         std::wstring lastQuickSendDestination_;
         QuickSendModel quickSendModel_;
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems_;
-        std::vector<std::unique_ptr<FolderTreeNodeData>> folderTreeNodes_;
-        std::unordered_map<std::wstring, FolderTreeChildPresenceCacheEntry> folderTreeChildPresenceCache_;
         std::unique_ptr<browser::BrowserModel> browserModel_;
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
         std::unique_ptr<services::BatchConvertService> batchConvertService_;
         std::unique_ptr<services::FileOperationService> fileOperationService_;
         std::unique_ptr<FolderEnumerationCoordinator> folderEnumerationCoordinator_;
-        std::unique_ptr<services::FolderTreeEnumerationService> folderTreeEnumerationService_;
+        std::unique_ptr<FolderTreeController> folderTreeController_;
         std::unique_ptr<services::FolderWatchService> folderWatchService_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
@@ -649,12 +609,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<util::BackgroundExecutor> cacheMaintenanceExecutor_;
         std::shared_ptr<struct PersistentThumbnailCacheMaintenanceState> cacheMaintenanceState_;
         mutable HWND shortcutReferenceWindow_{};
-        std::unordered_map<std::uint64_t, HTREEITEM> pendingFolderTreeEnumerationItems_;
-        std::unordered_map<std::uint64_t, std::vector<HTREEITEM>> pendingFolderTreeChildPresenceItems_;
-        std::wstring pendingTreeSelectionPath_;
         std::wstring pendingTreeMouseSelectionPath_;
-        std::wstring pendingTreeSelectionRestorePath_;
-        int pendingTreeSelectionRestoreY_{};
         HTREEITEM treeDragSourceItem_{};
         HTREEITEM treeDragHoverItem_{};
         std::wstring treeDragSourcePath_;

@@ -91,6 +91,12 @@ controller:
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own
 	HWNDs, services, asynchronous state, or browser/viewer mutation.
+- `ui/FolderTreeController.*` owns the folder tree's node data, shell-root
+	population, child-presence cache, lazy child enumeration, stale request
+	settlement, and asynchronous selection restoration. MainWindow retains the
+	tree presentation and workflow policy that connects selection, rename,
+	context menus, drag/drop, tooltips, and favorite coloring to the rest of the
+	application.
 - `MainWindow::ApplyCompletedFileOperation` remains the completion orchestrator
 	for context capture, model/viewer mutation, watcher coordination, and focus
 	restoration. The extracted reconciler preserves the existing operation-origin,

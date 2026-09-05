@@ -130,6 +130,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/FileOperationJournal.cpp
     src/ui/FileOperationReconciler.cpp
     src/ui/FolderEnumerationCoordinator.cpp
+    src/ui/FolderTreeController.cpp
     src/ui/FolderHistory.cpp
     src/ui/MainWindow.cpp
     src/ui/MainWindowDialogs.cpp
