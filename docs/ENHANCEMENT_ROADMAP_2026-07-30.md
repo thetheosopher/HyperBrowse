@@ -1,7 +1,7 @@
 # HyperBrowse Enhancement Roadmap
 
 Original review: 2026-07-30
-Status refresh: 2026-09-03
+Status refresh: 2026-09-04
 Reviewer: GitHub Copilot
 Perspectives: Software Optimization Engineering + Product Management
 Codebase: HyperBrowse
@@ -142,25 +142,26 @@ not requests to repeat the work.
 
 ### MP2: Bounded background service execution
 
-- **Status:** Partial. All four request-per-task service paths now use bounded executors; executor capacity/destruction smoke coverage and service queue-rejection counters are landed, while service-level burst coverage and capacity tuning remain.
+- **Status:** Partial. All four request-per-task service paths now use bounded executors; executor capacity/destruction smoke coverage, service queue-rejection counters, service active-task snapshots, and folder-tree generation-supersession coverage are landed, while broader burst coverage and capacity tuning remain.
 - **Category:** Performance, Reliability
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** Medium
 - **Area:** `FolderEnumerationService`, `FolderTreeEnumerationService`, `BatchConvertService`, `FileOperationService`, `util/BackgroundExecutor.h`
 - **Delivered:** folder enumeration, folder-tree queries, batch conversion, and file operations now use member-owned `util::BackgroundExecutor` instances with bounded worker and pending-task counts. Existing request generations and cancellation checks remain in place; stale folder work exits before filesystem access, and shell operations retain COM STA setup and owner-window assignment. Completion/progress posts are suppressed after service shutdown.
-- **Remaining:** add service-level burst tests, expose active-work snapshots, and measure whether the selected capacities are appropriate for slow local, removable, and network paths.
+- **Remaining:** extend service-level burst/destruction coverage, export active-work snapshots through diagnostics, and measure whether the selected capacities are appropriate for slow local, removable, and network paths.
 - **Success metrics:** rapid folder changes never create unbounded threads; stale queued work exits before filesystem access; service destruction joins in-flight work without late completion posts.
 
 ### MP3: Cancellable file-operation shutdown
 
-- **Status:** Partial. Cancellation, progress reporting, explicit close-pending cancellation, and pre-destruction post suppression are implemented; the shell operation can still make shutdown wait without a bounded timeout.
+- **Status:** Partial. Cancellation, progress reporting, explicit close-pending cancellation, pre-destruction post suppression, and a bounded user-visible wait state are implemented; the shell operation can still make shutdown wait without a forceful timeout.
 - **Category:** Reliability, UX
 - **Perspective:** Both
 - **Effort:** M
 - **Impact:** High
 - **Area:** [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L477-L479), [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L627-L673), `src/ui/MainWindow.cpp`
 - **Current behavior:** closing during an active file operation requests cancellation, keeps the main window alive until the completion update, and shows a cancelling status. `FileOperationService::Shutdown()` is also called from `WM_DESTROY` before the HWND can be invalidated, preventing late completion/progress posts from targeting a destroyed window.
+- After five seconds without completion, the status changes to `Waiting for Windows to finish file operation` and records `file_operation.shutdown.wait_notice`; the UI remains responsive and the shell owner remains valid.
 - **Remaining:** define the user-visible policy for a shell operation that ignores cancellation or remains blocked in Windows, and add a test for destruction during a slow or blocked shell operation. Do not detach a worker that can still post to a destroyed HWND.
 - **Success metrics:** closing during a slow copy/delete either cancels promptly or presents an explicit bounded wait state; no orphan shell UI or post-destroy completion.
 

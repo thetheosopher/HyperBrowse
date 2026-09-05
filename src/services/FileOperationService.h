@@ -86,6 +86,10 @@ namespace hyperbrowse::services
                             std::wstring destinationFolder = {},
                             FileConflictPolicy conflictPolicy = FileConflictPolicy::PromptShell,
                             std::vector<std::wstring> targetLeafNames = {});
+        std::size_t ActiveTaskCount() const noexcept
+        {
+            return executor_.ActiveTaskCount();
+        }
 
     private:
         std::shared_ptr<FileOperationSharedState> sharedState_;

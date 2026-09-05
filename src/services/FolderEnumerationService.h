@@ -46,6 +46,10 @@ namespace hyperbrowse::services
                            bool recursive,
                            bool includeSubfolders = false);
         void Cancel();
+        std::size_t ActiveTaskCount() const noexcept
+        {
+            return executor_.ActiveTaskCount();
+        }
 
     private:
         std::shared_ptr<FolderEnumerationSharedState> sharedState_;

@@ -50,6 +50,10 @@ namespace hyperbrowse::services
         std::uint64_t QueryChildDirectoryPresenceAsync(HWND targetWindow,
                                    std::vector<std::wstring> folderPaths);
         void CancelAll();
+        std::size_t ActiveTaskCount() const noexcept
+        {
+            return executor_.ActiveTaskCount();
+        }
 
     private:
         std::shared_ptr<FolderTreeEnumerationSharedState> sharedState_;

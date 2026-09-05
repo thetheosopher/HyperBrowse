@@ -113,6 +113,8 @@ namespace hyperbrowse::ui
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
         static constexpr UINT kDeferredMenuStateMessage = WM_APP + 73;
         static constexpr UINT_PTR kDisplaySurfaceRecoveryTimerId = 9103;
+        static constexpr UINT_PTR kFileOperationShutdownTimerId = 9104;
+        static constexpr UINT kFileOperationShutdownIntervalMs = 1000;
         static constexpr UINT kDisplaySurfaceRecoveryIntervalMs = 400;
         static constexpr int kDisplaySurfaceRecoveryRetryLimit = 8;
         static constexpr int kActionStripHeight = 44;
@@ -719,6 +721,8 @@ namespace hyperbrowse::ui
         bool fileOperationActive_{};
         bool cacheMaintenanceActive_{};
         bool closePending_{};
+        ULONGLONG closePendingSinceTick_{};
+        bool closeWaitNoticeShown_{};
         bool folderEnumerationActive_{};
         bool folderEnumerationFirstBatchPresented_{};
         bool folderEnumerationPresentationPending_{};

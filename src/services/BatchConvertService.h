@@ -50,6 +50,10 @@ namespace hyperbrowse::services
                             std::wstring outputFolder,
                             BatchConvertFormat format);
         void Cancel();
+        std::size_t ActiveTaskCount() const noexcept
+        {
+            return executor_.ActiveTaskCount();
+        }
 
     private:
         struct SharedState

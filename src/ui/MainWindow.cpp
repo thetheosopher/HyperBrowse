@@ -240,6 +240,7 @@ namespace
     constexpr std::size_t kDeferredLargeFolderPresentationItemLimit = 2048;
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
     constexpr UINT_PTR kFolderEnumerationPresentationTimerId = 9102;
+    constexpr ULONGLONG kFileOperationShutdownNoticeDelayMs = 5000;
     constexpr UINT kFolderEnumerationPresentationIntervalMs = 50;
     HWND FindPopupMenuWindow(HMENU menu)
     {
@@ -21002,6 +21003,15 @@ namespace hyperbrowse::ui
         // advanced past.
         if (closePending_)
         {
+            if (closeWaitNoticeShown_)
+            {
+                closeWaitNoticeShown_ = false;
+            }
+            if (hwnd_)
+            {
+                KillTimer(hwnd_, kFileOperationShutdownTimerId);
+            }
+            closePendingSinceTick_ = 0;
             pendingViewerDeletes_.clear();
             PostMessageW(hwnd_, WM_CLOSE, 0, 0);
         }
@@ -26431,7 +26441,16 @@ namespace hyperbrowse::ui
         case WM_CLOSE:
             if (fileOperationActive_ || batchConvertActive_)
             {
-                closePending_ = true;
+                if (!closePending_)
+                {
+                    closePending_ = true;
+                    closePendingSinceTick_ = GetTickCount64();
+                    closeWaitNoticeShown_ = false;
+                    SetTimer(hwnd_,
+                             kFileOperationShutdownTimerId,
+                             kFileOperationShutdownIntervalMs,
+                             nullptr);
+                }
                 if (fileOperationActive_ && fileOperationService_)
                 {
                     fileOperationService_->Cancel();
@@ -26441,7 +26460,8 @@ namespace hyperbrowse::ui
                     batchConvertService_->Cancel();
                 }
                 activeFileOperationLabel_ = fileOperationActive_
-                    ? L"Cancelling file operation"
+                    ? (closeWaitNoticeShown_ ? L"Waiting for Windows to finish file operation"
+                                             : L"Cancelling file operation")
                     : L"Cancelling batch conversion";
                 UpdateStatusText();
                 UpdateMenuState();
@@ -26825,6 +26845,27 @@ namespace hyperbrowse::ui
             return MAKELRESULT(0, MNC_IGNORE);
         }
         case WM_TIMER:
+            if (wParam == kFileOperationShutdownTimerId && closePending_)
+            {
+                const ULONGLONG elapsed = closePendingSinceTick_ == 0
+                    ? 0
+                    : GetTickCount64() - closePendingSinceTick_;
+                if (elapsed >= kFileOperationShutdownNoticeDelayMs && !closeWaitNoticeShown_)
+                {
+                    closeWaitNoticeShown_ = true;
+                    util::IncrementCounter(L"file_operation.shutdown.wait_notice");
+                    if (fileOperationActive_)
+                    {
+                        activeFileOperationLabel_ = L"Waiting for Windows to finish file operation";
+                    }
+                    else if (batchConvertActive_)
+                    {
+                        activeFileOperationLabel_ = L"Waiting for conversion to finish";
+                    }
+                    UpdateStatusText();
+                }
+                return 0;
+            }
             if (wParam == kFolderEnumerationPresentationTimerId
                 && folderEnumerationPresentationTimerId_ != 0)
             {
@@ -27204,6 +27245,7 @@ namespace hyperbrowse::ui
                 KillTimer(hwnd_, folderEnumerationPresentationTimerId_);
                 folderEnumerationPresentationTimerId_ = 0;
             }
+            KillTimer(hwnd_, kFileOperationShutdownTimerId);
             if (memoryPressureTimerId_ != 0)
             {
                 KillTimer(hwnd_, kMemoryPressureTimerId);

@@ -1454,6 +1454,41 @@ namespace
          }
          Expect(SetFileAttributesW(hiddenFolder.c_str(), FILE_ATTRIBUTE_NORMAL) != FALSE,
              "Folder-tree enumeration test could not restore the hidden directory attributes");
+
+         {
+             TempFolder supersededRoot(L"HyperBrowseFolderTreeSuperseded");
+             TempFolder latestRoot(L"HyperBrowseFolderTreeLatest");
+             fs::create_directories(latestRoot.Root() / L"final-child");
+             hyperbrowse::services::FolderTreeEnumerationService supersessionService;
+             std::vector<std::wstring> supersededPaths;
+             supersededPaths.reserve(100000);
+             for (int index = 0; index < 100000; ++index)
+             {
+                 supersededPaths.push_back(
+                     (supersededRoot.Root() / (L"missing_" + std::to_wstring(index))).wstring());
+             }
+
+             ResetFolderTreeEnumerationResult(state);
+             state->folderTreeEnumerationResult.expectedRequestId = supersessionService.QueryChildDirectoryPresenceAsync(
+                 hwnd,
+                 std::move(supersededPaths));
+             Expect(PumpMessagesUntil([&]() { return supersessionService.ActiveTaskCount() > 0; }, 5000),
+                 "Folder-tree supersession task did not start");
+             supersessionService.CancelAll();
+             ResetFolderTreeEnumerationResult(state);
+             state->folderTreeEnumerationResult.expectedRequestId = supersessionService.EnumerateChildDirectoriesAsync(
+                 hwnd,
+                 latestRoot.Root().wstring());
+             Expect(PumpMessagesUntil([&]()
+             {
+                 return state->folderTreeEnumerationResult.completed || state->folderTreeEnumerationResult.failed;
+             }, 5000), "Folder-tree supersession scenario timed out or failed");
+             Expect(!state->folderTreeEnumerationResult.failed,
+                 "Folder-tree supersession scenario reported a failure");
+             Expect(state->folderTreeEnumerationResult.childFolders.size() == 1
+                        && fs::path(state->folderTreeEnumerationResult.childFolders.front().path).filename().wstring() == L"final-child",
+                 "Folder-tree supersession scenario surfaced stale child folders");
+         }
         }
 
     void RunFolderWatchStartStopScenario(HWND hwnd)

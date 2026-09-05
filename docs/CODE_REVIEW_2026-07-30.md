@@ -39,6 +39,7 @@ The highest-severity July findings are resolved in the current branch:
 - Thumbnail scheduling now has a foreground lane, stale-work filtering, CPU-preferred visible work, early folder batches, coalesced presentation, and diagnostics for queue and persistence timings.
 - Folder enumeration, folder-tree queries, batch conversion, and file operations now use bounded member-owned executors instead of request-per-task `std::async`; stale folder work checks cancellation before filesystem access, and shutdown suppresses late service completion posts.
 - Bounded-executor smoke coverage now verifies pending/active/rejected counts, queue limits, exception recovery, and destruction ordering. Service queue rejections are recorded in diagnostics, and file-operation shutdown is explicitly armed during `WM_DESTROY` before the main HWND can become invalid.
+- Close during file operations now has an explicit non-blocking wait state: after five seconds of cooperative cancellation, the main status reports that Windows is still finishing the operation and diagnostics records `file_operation.shutdown.wait_notice`; the shell worker remains owned and joined rather than detached.
 - A committed Windows workflow builds Debug and Release, runs CTest, applies nonzero startup budgets, and validates release artifacts. The current workflow is a meaningful gate, but it is not yet a full compiler/configuration/dependency matrix.
 
 These changes lower the immediate reliability risk substantially. The remaining priorities are listed in the revised roadmap rather than treated as unresolved July defects.
@@ -59,7 +60,7 @@ The July behavior was replaced by an authoritative in-memory index and append-on
 
 Folder enumeration, folder-tree enumeration, file operations, and batch conversion now use member-owned `util::BackgroundExecutor` pools with bounded worker and pending-task counts. Request generations and cancellation checks remain intact; stale folder tasks exit before filesystem access, and service shutdown suppresses late completion/progress posts.
 
-**Remaining recommendation:** add burst, queue-rejection, and destruction coverage, expose executor queue/active-work diagnostics, and tune capacities using slow local, removable, and network fixtures. File-operation shutdown still needs its own bounded close policy because the serialized shell task can block inside `IFileOperation::PerformOperations`.
+**Remaining recommendation:** extend service burst/destruction coverage, export executor queue/active-work snapshots through diagnostics, and tune capacities using slow local, removable, and network fixtures. The serialized shell task can still block inside `IFileOperation::PerformOperations`, so blocked-operation destruction coverage remains important even though close now has an explicit wait state.
 
 ### 2B. Persistent data layer
 
@@ -81,9 +82,9 @@ Compaction writes a replacement snapshot and replaces the prior index only after
 
 🟡 **Application shutdown can still wait for shell file operations.**
 
-Cancellation now reaches the progress sink, and `MainWindow` requests cancellation during teardown. The service still joins the worker synchronously, and `IFileOperation::PerformOperations` may remain blocked on a long copy, unavailable network destination, elevation UI, or shell conflict prompt. There is no bounded close policy or test for destruction during a blocked shell operation.
+Cancellation now reaches the progress sink, `MainWindow` requests cancellation during teardown, and close requests enter an explicit non-blocking wait state after five seconds. The service still joins the worker synchronously, and `IFileOperation::PerformOperations` may remain blocked on a long copy, unavailable network destination, elevation UI, or shell conflict prompt. There is still no forced timeout or test for destruction during a blocked shell operation.
 
-**Recommendation:** define close-during-operation behavior explicitly. Keep the owner valid until completion, make cancellation state observable, and provide a bounded shutdown state or documented wait rather than silently appearing closed while a synchronous join continues.
+**Recommendation:** keep the shell owner valid until completion, retain the bounded status/diagnostic wait state, and add a test for destruction during a blocked shell operation. Do not forcefully terminate or detach the worker while it can still be inside shell code.
 
 ### 2D. Memory and resource management
 
@@ -181,7 +182,7 @@ The broad smoke executable now contains focused scenarios for enumeration, decod
 ## Highest-Leverage Remaining Work
 
 1. **Define file-operation shutdown.** The close-pending/cancellation policy and pre-destruction post suppression are now explicit; next add a bounded user-visible policy and test cancellation while Windows shell work is blocked.
-2. **Validate bounded service execution.** Add service-level burst/destruction tests and active-work snapshots; executor queue limits, rejection counts, and generic destruction coverage are now in place.
+2. **Validate bounded service execution.** Extend service-level burst/destruction tests and export the active-work snapshots; executor queue limits, rejection counts, generic destruction coverage, and folder-tree generation-supersession coverage are now in place.
 3. **Complete the quality matrix.** Add the nvJPEG-off fallback build, sanitizer/fuzz coverage for cache and RAW-helper boundaries, and a documented benchmark fixture/variance policy.
 4. **Finish current-state documentation.** Align the architecture, UI behavior, and D2D migration specs with the implementation before adding more cross-cutting UI behavior.
 5. **Then invest in product depth.** Prioritize saved filters, synchronized 3/4-up compare, and color-managed display ahead of lower-value format expansion.
