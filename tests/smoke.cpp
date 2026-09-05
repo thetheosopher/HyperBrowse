@@ -1970,6 +1970,83 @@ namespace
                "File rename operation did not report the created path");
     }
 
+    void RunFileOperationShutdownScenario()
+    {
+        TempFolder root(L"HyperBrowseFileOperationShutdown");
+        const fs::path sourcePath = root.Root() / L"source.bin";
+        const fs::path destinationFolder = root.Root() / L"destination";
+        const fs::path destinationPath = destinationFolder / sourcePath.filename();
+        root.WriteFile(L"source.bin", 1024);
+        fs::create_directories(destinationFolder);
+
+        std::mutex performMutex;
+        std::condition_variable performCondition;
+        bool performEntered = false;
+        bool releasePerform = false;
+        bool destructionCompleted = false;
+
+        auto service = std::make_unique<hyperbrowse::services::FileOperationService>([&]() -> HRESULT
+        {
+            std::unique_lock lock(performMutex);
+            performEntered = true;
+            performCondition.notify_all();
+            performCondition.wait(lock, [&]() { return releasePerform; });
+            return E_ABORT;
+        });
+        service->Start(nullptr,
+                       nullptr,
+                       hyperbrowse::services::FileOperationType::Copy,
+                       {sourcePath.wstring()},
+                       destinationFolder.wstring(),
+                       hyperbrowse::services::FileConflictPolicy::PromptShell);
+
+        bool reachedPerform = false;
+        {
+            std::unique_lock lock(performMutex);
+            reachedPerform = performCondition.wait_for(lock,
+                                                       std::chrono::seconds(5),
+                                                       [&]() { return performEntered; });
+            if (!reachedPerform)
+            {
+                releasePerform = true;
+            }
+        }
+        performCondition.notify_all();
+        Expect(reachedPerform, "File operation shutdown scenario did not enter the blocked shell operation");
+
+        service->Cancel();
+        std::thread destructionThread([service = std::move(service), &performMutex, &performCondition, &destructionCompleted]() mutable
+        {
+            service.reset();
+            {
+                std::scoped_lock lock(performMutex);
+                destructionCompleted = true;
+            }
+            performCondition.notify_all();
+        });
+
+        bool returnedBeforeRelease = false;
+        {
+            std::unique_lock lock(performMutex);
+            returnedBeforeRelease = performCondition.wait_for(lock,
+                                                               std::chrono::milliseconds(250),
+                                                               [&]() { return destructionCompleted; });
+        }
+        Expect(!returnedBeforeRelease,
+               "File operation service destruction returned while shell work was still blocked");
+
+        {
+            std::scoped_lock lock(performMutex);
+            releasePerform = true;
+        }
+        performCondition.notify_all();
+        destructionThread.join();
+
+        Expect(destructionCompleted, "File operation service destruction did not complete after shell work was released");
+        Expect(!fs::exists(destinationPath),
+               "Cancelled file operation created a destination after shutdown began");
+    }
+
         void RunFileConflictPlanningScenario()
         {
          TempFolder root(L"HyperBrowseFileConflictPlanning");
@@ -4281,6 +4358,7 @@ int main(int argc, char* argv[])
             RunJpegOrientationAdjustmentScenario();
             RunBatchConvertCancellationScenario(hwnd);
             RunFileRenameOperationScenario(hwnd, &state);
+            RunFileOperationShutdownScenario();
             RunFileConflictPlanningScenario();
             RunThumbnailSchedulerWorkerAllocationScenario();
             RunThumbnailSchedulerScenario(hwnd, &state);

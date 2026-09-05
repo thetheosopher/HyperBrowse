@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -72,8 +73,9 @@ namespace hyperbrowse::services
     public:
         static constexpr UINT kMessageId = WM_APP + 48;
         static constexpr UINT kProgressMessageId = WM_APP + 51;
+        using PerformOperationsCallback = std::function<HRESULT()>;
 
-        FileOperationService();
+        explicit FileOperationService(PerformOperationsCallback performOperationsCallback = {});
         ~FileOperationService();
 
         void Cancel() noexcept;
@@ -94,6 +96,7 @@ namespace hyperbrowse::services
     private:
         std::shared_ptr<FileOperationSharedState> sharedState_;
         util::BackgroundExecutor executor_;
+        PerformOperationsCallback performOperationsCallback_;
         std::atomic_uint64_t nextRequestId_{0};
     };
 }

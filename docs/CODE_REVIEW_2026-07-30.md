@@ -60,7 +60,7 @@ The July behavior was replaced by an authoritative in-memory index and append-on
 
 Folder enumeration, folder-tree enumeration, file operations, and batch conversion now use member-owned `util::BackgroundExecutor` pools with bounded worker and pending-task counts. Request generations and cancellation checks remain intact; stale folder tasks exit before filesystem access, and service shutdown suppresses late completion/progress posts.
 
-**Remaining recommendation:** extend service burst/destruction coverage, export executor queue/active-work snapshots through diagnostics, and tune capacities using slow local, removable, and network fixtures. The serialized shell task can still block inside `IFileOperation::PerformOperations`, so blocked-operation destruction coverage remains important even though close now has an explicit wait state.
+**Remaining recommendation:** extend service burst/destruction coverage, export executor queue/active-work snapshots through diagnostics, and tune capacities using slow local, removable, and network fixtures. The serialized shell task can still block inside `IFileOperation::PerformOperations`; deterministic smoke coverage now verifies that service destruction waits for that work to return, while real shell/UI close coverage remains a follow-up.
 
 ### 2B. Persistent data layer
 
@@ -82,7 +82,7 @@ Compaction writes a replacement snapshot and replaces the prior index only after
 
 🟡 **Application shutdown can still wait for shell file operations.**
 
-Cancellation now reaches the progress sink, `MainWindow` requests cancellation during teardown, and close requests enter an explicit non-blocking wait state after five seconds. The service still joins the worker synchronously, and `IFileOperation::PerformOperations` may remain blocked on a long copy, unavailable network destination, elevation UI, or shell conflict prompt. There is still no forced timeout or test for destruction during a blocked shell operation.
+Cancellation now reaches the progress sink, `MainWindow` requests cancellation during teardown, and close requests enter an explicit non-blocking wait state after five seconds. The service still joins the worker synchronously, and `IFileOperation::PerformOperations` may remain blocked on a long copy, unavailable network destination, elevation UI, or shell conflict prompt. The smoke suite now deterministically verifies destruction during blocked operation work; there is still no full `MainWindow` close test against a real blocked shell operation.
 
 **Recommendation:** keep the shell owner valid until completion, retain the bounded status/diagnostic wait state, and add a test for destruction during a blocked shell operation. Do not forcefully terminate or detach the worker while it can still be inside shell code.
 
@@ -173,15 +173,15 @@ Monetization instrumentation is not appropriate for the current local-first MIT 
 
 The broad smoke executable now contains focused scenarios for enumeration, decode, metadata, selection, file operations, viewer behavior, cache persistence, cache corruption, journal replay, folder-watch parsing, scheduler cancellation, and UI settings. CTest registers four entry points: `HyperBrowseSmoke`, `HyperBrowseViewerFitSmoke`, `HyperBrowseAppTextSizeSmoke`, and `HyperBrowseSettingsSmoke`. The important gaps are:
 
-- no service-level burst or blocked-shell-operation destruction tests for the new bounded executors;
-- no close-during-file-operation or blocked-shell-operation test;
+- no service-level burst test for the new bounded executors;
+- no full `MainWindow` close-during-file-operation test against a real blocked shell operation;
 - no CI fallback matrix with nvJPEG disabled, sanitizers, or fuzz targets;
 - no dedicated cache corruption/recovery counters in diagnostics;
 - no focused test binaries for cache, watcher, and service domains; most scenarios remain in `tests/smoke.cpp`.
 
 ## Highest-Leverage Remaining Work
 
-1. **Define file-operation shutdown.** The close-pending/cancellation policy and pre-destruction post suppression are now explicit; next add a bounded user-visible policy and test cancellation while Windows shell work is blocked.
+1. **Define file-operation shutdown.** The close-pending/cancellation policy and pre-destruction post suppression are now explicit, and the service-level blocked-operation destruction invariant is covered; next add a bounded user-visible policy and, where a deterministic shell fixture is available, full `MainWindow` close coverage.
 2. **Validate bounded service execution.** Extend service-level burst/destruction tests and export the active-work snapshots; executor queue limits, rejection counts, generic destruction coverage, and folder-tree generation-supersession coverage are now in place.
 3. **Complete the quality matrix.** Add the nvJPEG-off fallback build, sanitizer/fuzz coverage for cache and RAW-helper boundaries, and a documented benchmark fixture/variance policy.
 4. **Finish current-state documentation.** Align the architecture, UI behavior, and D2D migration specs with the implementation before adding more cross-cutting UI behavior.

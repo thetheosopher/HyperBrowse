@@ -534,9 +534,10 @@ namespace hyperbrowse::services
         }
     }
 
-    FileOperationService::FileOperationService()
+    FileOperationService::FileOperationService(PerformOperationsCallback performOperationsCallback)
         : sharedState_(std::make_shared<FileOperationSharedState>())
         , executor_(1, 1)
+        , performOperationsCallback_(std::move(performOperationsCallback))
     {
     }
 
@@ -584,6 +585,7 @@ namespace hyperbrowse::services
              destinationFolder = std::move(destinationFolder),
              conflictPolicy,
              targetLeafNames = std::move(targetLeafNames),
+             performOperationsCallback = performOperationsCallback_,
              requestId]() mutable
         {
             auto update = std::make_unique<FileOperationUpdate>();
@@ -733,7 +735,9 @@ namespace hyperbrowse::services
                     return;
                 }
 
-                result = operation->PerformOperations();
+                result = performOperationsCallback
+                    ? performOperationsCallback()
+                    : operation->PerformOperations();
                 BOOL aborted = FALSE;
                 operation->GetAnyOperationsAborted(&aborted);
                 operation->Unadvise(sinkCookie);
