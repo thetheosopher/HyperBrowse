@@ -100,6 +100,14 @@ controller:
 	invalidation, and selection preservation. MainWindow supplies tree, reload,
 	refresh, and presentation callbacks; the coordinator does not own HWNDs or
 	folder-watch service lifetime.
+- `ui/WindowAsyncMessageRouter.*` owns the message-ID table for asynchronous
+	folder, browser-pane, service, and viewer notifications. It invokes explicit
+	callbacks configured by MainWindow and returns no result for messages outside
+	that table; MainWindow retains private maintenance messages and all callback
+	policy.
+- `ui/MenuMessageHandling.*` owns the pure `WM_MENUCHAR` owner-draw mnemonic
+	selection policy and the shared `MenuDrawItemData` record. MainWindow retains
+	menu construction, measurement, painting, and command policy.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

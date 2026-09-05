@@ -136,9 +136,11 @@ add_library(HyperBrowseCore STATIC
     src/ui/FolderHistory.cpp
     src/ui/MainWindow.cpp
     src/ui/MainWindowDialogs.cpp
+    src/ui/MenuMessageHandling.cpp
     src/ui/QuickSend.cpp
     src/ui/ShellDragSource.cpp
     src/ui/ToolbarIconLibrary.cpp
+    src/ui/WindowAsyncMessageRouter.cpp
     src/util/Diagnostics.cpp
     src/util/Log.cpp
     src/viewer/ViewerWindow.cpp

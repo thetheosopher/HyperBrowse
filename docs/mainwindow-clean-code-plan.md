@@ -11,8 +11,9 @@ currently contains several independent state machines: folder navigation and
 enumeration, file-operation reconciliation, viewer synchronization, menus,
 settings, details and Quick Actions presentation, drag/drop, rendering, and
 shutdown. Dialog, file-operation policy, folder-enumeration coordination,
-folder-tree coordination, and folder-watch policy extractions have reduced the
-current translation unit to 24,698 lines. The folder-tree slice places node
+folder-tree coordination, folder-watch policy, async message routing, and menu
+message policy extractions have reduced the current translation unit to 24,645
+lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -119,6 +120,8 @@ off the UI thread.
 ### 6. Make message routing explicit
 
 - Reduce `WindowProc` and `HandleMessage` to HWND association and forwarding.
+- Keep asynchronous service, browser-pane, and viewer message dispatch in
+  `WindowAsyncMessageRouter` with explicit MainWindow callbacks.
 - Keep `HandleCommand` as a stable boundary while moving command groups to
   owning controllers.
 - Centralize message/timer ownership and heap-payload cleanup.
@@ -180,11 +183,18 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `src/ui/FolderTreeController.*`.
 - [x] Extract folder-load history navigation, watcher lifecycle, stale watcher
   filtering, deferred watcher effects, and enumeration callback routing into
-  `src/ui/FolderLoadCoordinator.*`. `MainWindow.cpp` now measures 24,698 lines;
-  pending startup selection, pending viewer launch, reload selection
-  restoration, and post-enumeration viewer settlement are coordinator-owned;
-  browser/model/viewer effects remain explicit callbacks.
+  `src/ui/FolderLoadCoordinator.*`. That slice brought `MainWindow.cpp` to
+  24,698 lines; pending startup selection, pending viewer launch, reload
+  selection restoration, and post-enumeration viewer settlement are
+  coordinator-owned; browser/model/viewer effects remain explicit callbacks.
 - [x] Extract folder-watch event reconciliation, incremental browser-model
   updates, reload escalation, thumbnail invalidation, and selection
   preservation into `src/ui/FolderWatchChangeCoordinator.*`. MainWindow keeps
   the tree, reload, browser refresh, and presentation effects as callbacks.
+- [x] Extract asynchronous folder, browser-pane, service, and viewer message
+  dispatch into `src/ui/WindowAsyncMessageRouter.*`. MainWindow retains the
+  callback implementations and private maintenance messages.
+- [x] Extract owner-draw menu mnemonic selection from `HandleMessage` into
+  `src/ui/MenuMessageHandling.*`, keeping the shared menu item data record
+  available to MainWindow's existing measurement and painting paths. The
+  current `MainWindow.cpp` size is 24,645 lines.

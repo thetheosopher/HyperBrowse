@@ -25,7 +25,9 @@
 #include "ui/FileOperationReconciler.h"
 #include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
+#include "ui/MenuMessageHandling.h"
 #include "ui/QuickSend.h"
+#include "ui/WindowAsyncMessageRouter.h"
 
 namespace hyperbrowse::browser
 {
@@ -195,15 +197,6 @@ namespace hyperbrowse::ui
             RECT copyRect{};
             RECT moveRect{};
             RECT removeRect{};
-        };
-
-        struct MenuDrawItemData
-        {
-            std::wstring text;
-            wchar_t mnemonic{};
-            int mnemonicDisplayIndex{-1};
-            bool separator{};
-            bool hasSubmenu{};
         };
 
         struct CommandBarMenuButton
@@ -590,6 +583,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<FolderLoadCoordinator> folderLoadCoordinator_;
         std::unique_ptr<FolderWatchChangeCoordinator> folderWatchChangeCoordinator_;
         std::unique_ptr<FolderTreeController> folderTreeController_;
+        WindowAsyncMessageRouter asyncMessageRouter_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;

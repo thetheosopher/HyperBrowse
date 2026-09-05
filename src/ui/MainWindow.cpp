@@ -47,9 +47,11 @@
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
+#include "ui/MenuMessageHandling.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
 #include "ui/ToolbarIconLibrary.h"
+#include "ui/WindowAsyncMessageRouter.h"
 #include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
@@ -1489,32 +1491,6 @@ namespace
         }
 
         return -1;
-    }
-
-    wchar_t FindMenuMnemonic(std::wstring_view text)
-    {
-        for (std::size_t index = 0; index < text.size(); ++index)
-        {
-            if (text[index] != L'&')
-            {
-                continue;
-            }
-
-            if (index + 1 >= text.size())
-            {
-                break;
-            }
-
-            if (text[index + 1] == L'&')
-            {
-                ++index;
-                continue;
-            }
-
-            return static_cast<wchar_t>(towupper(text[index + 1]));
-        }
-
-        return L'\0';
     }
 
     int MeasureTextBlockHeight(HFONT font,
@@ -9279,6 +9255,41 @@ namespace hyperbrowse::ui
         , viewerWindow_(std::make_unique<viewer::ViewerWindow>(instance))
         , slideshowTransitionStyle_(viewer::TransitionStyle::Crossfade)
     {
+        WindowAsyncMessageRouter::Handlers messageHandlers;
+        messageHandlers.onFolderEnumeration = [this](LPARAM lParam)
+        {
+            if (folderLoadCoordinator_)
+            {
+                folderLoadCoordinator_->HandleEnumerationMessage(lParam);
+            }
+            return static_cast<LRESULT>(0);
+        };
+        messageHandlers.onFolderTreeEnumeration = [this](LPARAM lParam)
+        {
+            return folderTreeController_ ? folderTreeController_->HandleEnumerationMessage(lParam) : 0;
+        };
+        messageHandlers.onFolderWatch = [this](LPARAM lParam)
+        {
+            return folderLoadCoordinator_ ? folderLoadCoordinator_->HandleWatchMessage(lParam) : 0;
+        };
+        messageHandlers.onBrowserPaneState = std::bind_front(&MainWindow::OnBrowserPaneStateMessage, this);
+        messageHandlers.onBrowserPaneOpenItem = std::bind_front(&MainWindow::OnBrowserPaneOpenItemMessage, this);
+        messageHandlers.onBrowserPaneContextMenu = std::bind_front(&MainWindow::OnBrowserPaneContextMenuMessage, this);
+        messageHandlers.onBrowserPaneQuickSendDrag = std::bind_front(&MainWindow::OnBrowserPaneQuickSendDragMessage, this);
+        messageHandlers.onBatchConvert = std::bind_front(&MainWindow::OnBatchConvertMessage, this);
+        messageHandlers.onFileOperation = std::bind_front(&MainWindow::OnFileOperationMessage, this);
+        messageHandlers.onFileOperationProgress = std::bind_front(&MainWindow::OnFileOperationProgressMessage, this);
+        messageHandlers.onDetailsPanelThumbnail = std::bind_front(&MainWindow::OnDetailsPanelThumbnailMessage, this);
+        messageHandlers.onViewerZoom = std::bind_front(&MainWindow::OnViewerZoomMessage, this);
+        messageHandlers.onViewerActivity = std::bind_front(&MainWindow::OnViewerActivityMessage, this);
+        messageHandlers.onViewerCurrentItemChanged = std::bind_front(&MainWindow::OnViewerCurrentItemChangedMessage, this);
+        messageHandlers.onViewerDeleteRequested = std::bind_front(&MainWindow::OnViewerDeleteRequested, this);
+        messageHandlers.onViewerQuickSendRequest = std::bind_front(&MainWindow::OnViewerQuickSendRequest, this);
+        messageHandlers.onViewerStartFolderSlideshow = std::bind_front(&MainWindow::OnViewerStartFolderSlideshowMessage, this);
+        messageHandlers.onViewerContextMenuCommand = std::bind_front(&MainWindow::OnViewerContextMenuCommand, this);
+        messageHandlers.onViewerDroppedFile = std::bind_front(&MainWindow::OnViewerDroppedFileMessage, this);
+        messageHandlers.onViewerClosed = std::bind_front(&MainWindow::OnViewerClosedMessage, this);
+        asyncMessageRouter_.Configure(std::move(messageHandlers));
     }
 
     MainWindow::~MainWindow()
@@ -24109,50 +24120,6 @@ namespace hyperbrowse::ui
             }
             break;
         }
-        case FolderLoadCoordinator::kEnumerationMessageId:
-            if (folderLoadCoordinator_)
-            {
-                folderLoadCoordinator_->HandleEnumerationMessage(lParam);
-            }
-            return 0;
-        case FolderTreeController::kEnumerationMessageId:
-            return folderTreeController_ ? folderTreeController_->HandleEnumerationMessage(lParam) : 0;
-        case FolderLoadCoordinator::kWatchMessageId:
-            return folderLoadCoordinator_ ? folderLoadCoordinator_->HandleWatchMessage(lParam) : 0;
-        case browser::BrowserPane::kStateChangedMessage:
-            return OnBrowserPaneStateMessage(wParam, lParam);
-        case browser::BrowserPane::kOpenItemMessage:
-            return OnBrowserPaneOpenItemMessage(wParam, lParam);
-        case browser::BrowserPane::kContextMenuMessage:
-            return OnBrowserPaneContextMenuMessage(wParam, lParam);
-        case browser::BrowserPane::kQuickSendDragMessage:
-            return OnBrowserPaneQuickSendDragMessage(wParam, lParam);
-        case services::BatchConvertService::kMessageId:
-            return OnBatchConvertMessage(lParam);
-        case services::FileOperationService::kMessageId:
-            return OnFileOperationMessage(lParam);
-        case services::FileOperationService::kProgressMessageId:
-            return OnFileOperationProgressMessage(lParam);
-        case services::ThumbnailScheduler::kMessageId:
-            return OnDetailsPanelThumbnailMessage(lParam);
-        case viewer::ViewerWindow::kZoomChangedMessage:
-            return OnViewerZoomMessage(lParam);
-        case viewer::ViewerWindow::kActivityChangedMessage:
-            return OnViewerActivityMessage(lParam);
-        case viewer::ViewerWindow::kCurrentItemChangedMessage:
-            return OnViewerCurrentItemChangedMessage(wParam);
-        case viewer::ViewerWindow::kDeleteRequestedMessage:
-            return OnViewerDeleteRequested(wParam);
-        case viewer::ViewerWindow::kQuickSendRequestedMessage:
-            return OnViewerQuickSendRequest(wParam, lParam);
-        case viewer::ViewerWindow::kStartFolderSlideshowMessage:
-            return OnViewerStartFolderSlideshowMessage(wParam);
-        case viewer::ViewerWindow::kContextMenuCommandMessage:
-            return OnViewerContextMenuCommand(wParam);
-        case viewer::ViewerWindow::kDroppedFileMessage:
-            return OnViewerDroppedFileMessage(lParam);
-        case viewer::ViewerWindow::kClosedMessage:
-            return OnViewerClosedMessage();
         case kMemoryPressureSampledMessage:
             return OnMemoryPressureSampleMessage(lParam);
         case kPersistentThumbnailCacheMaintenanceMessage:
@@ -24191,57 +24158,7 @@ namespace hyperbrowse::ui
             break;
         }
         case WM_MENUCHAR:
-        {
-            const HMENU menu = reinterpret_cast<HMENU>(lParam);
-            if (!menu)
-            {
-                return MAKELRESULT(0, MNC_IGNORE);
-            }
-
-            const wchar_t pressed = static_cast<wchar_t>(towupper(static_cast<wchar_t>(LOWORD(wParam))));
-            int matchedIndex = -1;
-            bool duplicateMatch = false;
-            const int itemCount = GetMenuItemCount(menu);
-            for (int itemIndex = 0; itemIndex < itemCount; ++itemIndex)
-            {
-                MENUITEMINFOW itemInfo{};
-                itemInfo.cbSize = sizeof(itemInfo);
-                itemInfo.fMask = MIIM_FTYPE | MIIM_DATA;
-                if (!GetMenuItemInfoW(menu, itemIndex, TRUE, &itemInfo) || (itemInfo.fType & MFT_SEPARATOR) != 0)
-                {
-                    continue;
-                }
-
-                const auto* drawData = reinterpret_cast<const MenuDrawItemData*>(itemInfo.dwItemData);
-                if (!drawData)
-                {
-                    continue;
-                }
-
-                const wchar_t mnemonic = drawData->mnemonic != L'\0'
-                    ? drawData->mnemonic
-                    : FindMenuMnemonic(drawData->text);
-                if (towupper(mnemonic) != pressed)
-                {
-                    continue;
-                }
-
-                if (matchedIndex >= 0)
-                {
-                    duplicateMatch = true;
-                    break;
-                }
-
-                matchedIndex = itemIndex;
-            }
-
-            if (matchedIndex >= 0)
-            {
-                return MAKELRESULT(matchedIndex, duplicateMatch ? MNC_SELECT : MNC_EXECUTE);
-            }
-
-            return MAKELRESULT(0, MNC_IGNORE);
-        }
+            return HandleMenuCharMessage(wParam, lParam);
         case WM_TIMER:
             if (wParam == kFileOperationShutdownTimerId && closePending_)
             {
@@ -24665,6 +24582,10 @@ namespace hyperbrowse::ui
             PostQuitMessage(0);
             return 0;
         default:
+            if (const std::optional<LRESULT> result = asyncMessageRouter_.Handle(message, wParam, lParam))
+            {
+                return *result;
+            }
             break;
         }
 
