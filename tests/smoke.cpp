@@ -42,6 +42,7 @@
 #include "services/ImageMetadataService.h"
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
+#include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
@@ -49,6 +50,7 @@
 #include "ui/MainWindow.h"
 #include "ui/QuickSend.h"
 #include "ui/ShortcutCatalog.h"
+#include "ui/ViewCommandController.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
 #include "util/ResourceSizing.h"
@@ -215,6 +217,8 @@ namespace
         int rotationDelta = 0;
         bool batchSelectionScope = false;
         BatchConvertFormat batchFormat = BatchConvertFormat::Jpeg;
+        std::size_t recentFolderIndex = 0;
+        std::size_t favoriteIndex = 0;
 
         FileCommandController::Handlers handlers;
         handlers.onCopySelection = [&copyCallCount]
@@ -234,6 +238,14 @@ namespace
             batchSelectionScope = selectionScope;
             batchFormat = format;
         };
+        handlers.onCopySelectionToFavorite = [&favoriteIndex](std::size_t index)
+        {
+            favoriteIndex = index;
+        };
+        handlers.onOpenRecentFolder = [&recentFolderIndex](std::size_t index)
+        {
+            recentFolderIndex = index;
+        };
         controller.Configure(std::move(handlers));
 
         Expect(controller.Handle(ID_FILE_COPY_SELECTION),
@@ -248,8 +260,127 @@ namespace
                    && batchSelectionScope
                    && batchFormat == BatchConvertFormat::Png,
                "File command controller did not forward batch-convert scope and format");
+        Expect(controller.Handle(ID_FILE_COPY_SELECTION_FAVORITE_BASE + 2) && favoriteIndex == 2,
+               "File command controller did not decode favorite destination index");
+         Expect(controller.Handle(ID_FILE_OPEN_RECENT_FOLDER_BASE + 3) && recentFolderIndex == 3,
+             "File command controller did not decode recent-folder index");
         Expect(!controller.Handle(ID_VIEW_THUMBNAILS),
                "File command controller claimed a view command outside its ownership");
+    }
+
+    void RunViewCommandControllerScenario()
+    {
+        using hyperbrowse::ui::ViewCommandController;
+        using namespace hyperbrowse::ui::command_ids;
+
+        ViewCommandController controller;
+        UINT appTextSizeCommand = 0;
+        UINT thumbnailSizeCommand = 0;
+        UINT sortCommand = 0;
+        UINT performanceProfileCommand = 0;
+        int detailsCallCount = 0;
+
+        ViewCommandController::Handlers handlers;
+        handlers.onAppTextSize = [&appTextSizeCommand](UINT commandId)
+        {
+            appTextSizeCommand = commandId;
+        };
+        handlers.onThumbnailSizePreset = [&thumbnailSizeCommand](UINT commandId)
+        {
+            thumbnailSizeCommand = commandId;
+        };
+        handlers.onSortMode = [&sortCommand](UINT commandId)
+        {
+            sortCommand = commandId;
+        };
+        handlers.onPerformanceProfile = [&performanceProfileCommand](UINT commandId)
+        {
+            performanceProfileCommand = commandId;
+        };
+        handlers.onDetails = [&detailsCallCount]
+        {
+            ++detailsCallCount;
+        };
+        controller.Configure(std::move(handlers));
+
+        Expect(controller.Handle(ID_VIEW_APP_TEXT_SIZE_LARGE)
+                   && appTextSizeCommand == ID_VIEW_APP_TEXT_SIZE_LARGE,
+               "View command controller did not route app text-size commands");
+        Expect(controller.Handle(ID_VIEW_THUMBNAIL_SIZE_320)
+                   && thumbnailSizeCommand == ID_VIEW_THUMBNAIL_SIZE_320,
+               "View command controller did not route thumbnail-size commands");
+        Expect(controller.Handle(ID_VIEW_SORT_TAGS) && sortCommand == ID_VIEW_SORT_TAGS,
+               "View command controller did not route sort commands");
+        Expect(controller.Handle(ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE)
+                   && performanceProfileCommand == ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE,
+               "View command controller did not route performance-profile commands");
+        Expect(controller.Handle(ID_VIEW_DETAILS) && detailsCallCount == 1,
+               "View command controller did not route fixed view commands");
+        Expect(!controller.Handle(ID_FILE_OPEN_FOLDER),
+               "View command controller claimed a file command outside its ownership");
+    }
+
+    void RunCommandBarControllerScenario()
+    {
+        using hyperbrowse::ui::CommandBarController;
+        using namespace hyperbrowse::ui::command_ids;
+
+        CommandBarController controller;
+        controller.InitializeItems();
+        controller.SetMenuButton(0, L"File", L'F', reinterpret_cast<HMENU>(static_cast<INT_PTR>(1)));
+        controller.SetMenuButton(1, L"Edit", L'E', reinterpret_cast<HMENU>(static_cast<INT_PTR>(2)));
+        controller.SetMenuButton(2, L"View", L'V', reinterpret_cast<HMENU>(static_cast<INT_PTR>(3)));
+        controller.SetMenuButton(3, L"Help", L'H', reinterpret_cast<HMENU>(static_cast<INT_PTR>(4)));
+        controller.Layout(900,
+                          6,
+                          nullptr,
+                          [](HFONT, std::wstring_view text)
+                          {
+                              return static_cast<int>(text.size() * 8);
+                          });
+
+        const auto& menuButtons = controller.MenuButtons();
+        Expect(controller.Items().size() == 17, "Command-bar controller did not initialize toolbar items");
+        Expect(controller.MenuHitTest(menuButtons[0].rect.left + 1, menuButtons[0].rect.top + 1) == 0,
+               "Command-bar controller did not hit-test the first menu button");
+
+        const auto thumbnailItem = std::find_if(controller.Items().begin(),
+                                                controller.Items().end(),
+                                                [](const CommandBarController::ToolbarItem& item)
+                                                {
+                                                    return item.commandId == ID_VIEW_THUMBNAILS;
+                                                });
+        Expect(thumbnailItem != controller.Items().end(),
+               "Command-bar controller did not initialize the thumbnail toolbar item");
+        Expect(controller.ToolbarHitTest(thumbnailItem->rect.left + 1, thumbnailItem->rect.top + 1)
+                   == static_cast<int>(std::distance(controller.Items().begin(), thumbnailItem)),
+               "Command-bar controller did not hit-test a toolbar item");
+
+        CommandBarController::ToolbarState state;
+        state.canNavigateBack = true;
+        state.canNavigateForward = true;
+        state.recursiveChecked = true;
+        state.thumbnailsChecked = true;
+        state.thumbnailSizeEnabled = false;
+        state.compareEnabled = true;
+        state.selectionActionsEnabled = false;
+        controller.UpdateItemStates(state);
+
+        const auto findItem = [&controller](UINT commandId)
+        {
+            return std::find_if(controller.Items().begin(),
+                                controller.Items().end(),
+                                [commandId](const CommandBarController::ToolbarItem& item)
+                                {
+                                    return item.commandId == commandId;
+                                });
+        };
+        Expect(findItem(ID_VIEW_RECURSIVE)->checked && findItem(ID_VIEW_THUMBNAILS)->checked,
+               "Command-bar controller did not apply toggle state");
+        Expect(!findItem(ID_ACTION_THUMBNAIL_SIZE_MENU)->enabled
+                   && findItem(ID_FILE_COMPARE_SELECTED)->enabled
+                   && !findItem(ID_FILE_COPY_SELECTION)->enabled,
+               "Command-bar controller did not apply enabled state");
     }
 
     struct EnumerationResult
@@ -4537,6 +4668,8 @@ int main(int argc, char* argv[])
             RunFolderHistoryScenario();
             RunFileOperationJournalScenario();
             RunFileCommandControllerScenario();
+            RunViewCommandControllerScenario();
+            RunCommandBarControllerScenario();
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
             RunBackgroundExecutorCapacityScenario();

@@ -9244,6 +9244,8 @@ namespace hyperbrowse::ui
 
     MainWindow::MainWindow(HINSTANCE instance)
         : instance_(instance)
+        , commandBarMenuButtons_(commandBarController_.MenuButtons())
+        , toolbarItems_(commandBarController_.Items())
         , browserModel_(std::make_unique<browser::BrowserModel>())
         , browserPaneController_(std::make_unique<browser::BrowserPane>(instance))
         , batchConvertService_(std::make_unique<services::BatchConvertService>())
@@ -9293,6 +9295,51 @@ namespace hyperbrowse::ui
         asyncMessageRouter_.Configure(std::move(messageHandlers));
 
         FileCommandController::Handlers fileCommandHandlers;
+        fileCommandHandlers.onOpenRecentFolder = [this](std::size_t index)
+        {
+            if (index < recentFolders_.size())
+            {
+                const std::wstring folderPath = recentFolders_[index];
+                if (!IsExistingDirectory(folderPath))
+                {
+                    MessageBoxW(hwnd_, L"The selected recent folder is no longer available.", L"Open Recent Folder", MB_OK | MB_ICONINFORMATION);
+                }
+                else
+                {
+                    LoadFolderAsync(folderPath);
+                }
+            }
+        };
+        fileCommandHandlers.onCopySelectionToFavorite = [this](std::size_t index)
+        {
+            if (index < favoriteDestinationFolders_.size())
+            {
+                StartSelectionFileOperationToDestination(services::FileOperationType::Copy, favoriteDestinationFolders_[index]);
+            }
+        };
+        fileCommandHandlers.onCopySelectionToRecent = [this](std::size_t index)
+        {
+            const std::vector<std::wstring> recentDestinationPaths = RecentDestinationShortcutPaths();
+            if (index < recentDestinationPaths.size())
+            {
+                StartSelectionFileOperationToDestination(services::FileOperationType::Copy, recentDestinationPaths[index]);
+            }
+        };
+        fileCommandHandlers.onMoveSelectionToFavorite = [this](std::size_t index)
+        {
+            if (index < favoriteDestinationFolders_.size())
+            {
+                StartSelectionFileOperationToDestination(services::FileOperationType::Move, favoriteDestinationFolders_[index]);
+            }
+        };
+        fileCommandHandlers.onMoveSelectionToRecent = [this](std::size_t index)
+        {
+            const std::vector<std::wstring> recentDestinationPaths = RecentDestinationShortcutPaths();
+            if (index < recentDestinationPaths.size())
+            {
+                StartSelectionFileOperationToDestination(services::FileOperationType::Move, recentDestinationPaths[index]);
+            }
+        };
         fileCommandHandlers.onOpenFolder = std::bind_front(&MainWindow::OpenFolder, this);
         fileCommandHandlers.onNavigateBackFolder = std::bind_front(&MainWindow::NavigateBackToLastOpenedFolder, this);
         fileCommandHandlers.onNavigateForwardFolder = std::bind_front(&MainWindow::NavigateForwardToLastOpenedFolder, this);
@@ -9414,6 +9461,226 @@ namespace hyperbrowse::ui
             }
         };
         fileCommandController_.Configure(std::move(fileCommandHandlers));
+
+        ViewCommandController::Handlers viewCommandHandlers;
+        viewCommandHandlers.onViewerMouseWheelBehavior = [this](UINT commandId)
+        {
+            viewerMouseWheelBehavior_ = ViewerMouseWheelBehaviorFromCommandId(commandId);
+            ApplyViewerMouseWheelSetting();
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onAppTextSize = [this](UINT commandId)
+        {
+            appTextSize_ = AppTextSizeFromCommandId(commandId);
+            ApplyAppTextSize();
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onViewerOverlayTextSize = [this](UINT commandId)
+        {
+            if (viewerWindow_)
+            {
+                viewerWindow_->SetOverlayTextSize(ViewerOverlayTextSizeFromCommandId(commandId));
+                UpdateMenuState();
+            }
+        };
+        viewCommandHandlers.onRating = [this](UINT commandId)
+        {
+            SetSelectionRating(RatingFromCommandId(commandId));
+        };
+        viewCommandHandlers.onThumbnails = [this]
+        {
+            SetBrowserMode(BrowserMode::Thumbnails);
+        };
+        viewCommandHandlers.onDetails = [this]
+        {
+            SetBrowserMode(BrowserMode::Details);
+        };
+        viewCommandHandlers.onSortMenu = [this]
+        {
+            for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
+            {
+                if (toolbarItems_[static_cast<std::size_t>(i)].commandId == ID_ACTION_SORT_MENU)
+                {
+                    ShowDropdownForItem(i);
+                    break;
+                }
+            }
+        };
+        viewCommandHandlers.onThumbnailSizeMenu = [this]
+        {
+            for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
+            {
+                if (toolbarItems_[static_cast<std::size_t>(i)].commandId == ID_ACTION_THUMBNAIL_SIZE_MENU)
+                {
+                    ShowDropdownForItem(i);
+                    break;
+                }
+            }
+        };
+        viewCommandHandlers.onThemeMenu = []
+        {
+            // Theme is now toggled via menu; no dropdown button.
+        };
+        viewCommandHandlers.onRecursive = std::bind_front(&MainWindow::ToggleRecursiveBrowsing, this);
+        viewCommandHandlers.onShowSubfolders = std::bind_front(&MainWindow::ToggleShowSubfoldersInBrowser, this);
+        viewCommandHandlers.onSettings = std::bind_front(&MainWindow::ShowConsolidatedSettingsDialog, this);
+        viewCommandHandlers.onAssociations = std::bind_front(&MainWindow::ShowFileAssociationsDialog, this);
+        viewCommandHandlers.onNvJpeg = [this]
+        {
+            if (HasNvJpegCapability())
+            {
+                nvJpegEnabled_ = !nvJpegEnabled_;
+                decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+        };
+        viewCommandHandlers.onLibRaw = [this]
+        {
+            if (decode::IsLibRawBuildEnabled())
+            {
+                libRawOutOfProcessEnabled_ = !libRawOutOfProcessEnabled_;
+                decode::SetLibRawOutOfProcessEnabled(libRawOutOfProcessEnabled_);
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+        };
+        viewCommandHandlers.onPersistentThumbnailCache = [this]
+        {
+            persistentThumbnailCacheEnabled_ = !persistentThumbnailCacheEnabled_;
+            ApplyPersistentThumbnailCacheSetting();
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onPersistentThumbnailCacheManager = std::bind_front(&MainWindow::ShowPersistentThumbnailCacheDialog, this);
+        viewCommandHandlers.onSingleInstance = [this]
+        {
+            app::Application::SetSingleInstanceEnabled(!app::Application::IsSingleInstanceEnabled());
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onPreferJpeg = [this]
+        {
+            pairedRawJpegViewerPreference_ = browser::RawJpegDisplayPreference::Jpeg;
+            if (viewerWindow_ && viewerWindow_->IsOpen())
+            {
+                SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
+            }
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onPreferRaw = [this]
+        {
+            pairedRawJpegViewerPreference_ = browser::RawJpegDisplayPreference::Raw;
+            if (viewerWindow_ && viewerWindow_->IsOpen())
+            {
+                SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
+            }
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onDefaultViewerSecondaryMonitor = [this]
+        {
+            defaultViewerToSecondaryMonitor_ = !defaultViewerToSecondaryMonitor_;
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onUseSlideshowTransition = [this]
+        {
+            useSlideshowTransition_ = !useSlideshowTransition_;
+            ApplyViewerTransitionSettings();
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onThumbnailSizePreset = [this](UINT commandId)
+        {
+            thumbnailSizePreset_ = ThumbnailSizePresetFromCommandId(commandId);
+            ApplyThumbnailDisplaySettings();
+            UpdateStatusText();
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onThumbnailSizeIncrease = std::bind_front(&MainWindow::StepThumbnailSize, this, 1);
+        viewCommandHandlers.onThumbnailSizeDecrease = std::bind_front(&MainWindow::StepThumbnailSize, this, -1);
+        viewCommandHandlers.onThumbnailDetails = [this]
+        {
+            thumbnailDetailsVisible_ = !thumbnailDetailsVisible_;
+            ApplyThumbnailDisplaySettings();
+            UpdateStatusText();
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onThumbnailLayoutCompact = [this]
+        {
+            compactThumbnailLayout_ = !compactThumbnailLayout_;
+            ApplyThumbnailDisplaySettings();
+            UpdateStatusText();
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onDetailsStrip = std::bind_front(&MainWindow::ToggleDetailsPanelVisibility, this);
+        viewCommandHandlers.onSortMode = [this](UINT commandId)
+        {
+            if (browserPaneController_)
+            {
+                sortMode_ = SortModeFromCommandId(commandId);
+                browserPaneController_->SetSortMode(sortMode_);
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+        };
+        viewCommandHandlers.onSortDirection = [this]
+        {
+            if (browserPaneController_)
+            {
+                sortAscending_ = !browserPaneController_->IsSortAscending();
+                browserPaneController_->SetSortAscending(sortAscending_);
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+        };
+        viewCommandHandlers.onThemeLight = [this]
+        {
+            SetThemeMode(ThemeMode::Light);
+        };
+        viewCommandHandlers.onThemeDark = [this]
+        {
+            SetThemeMode(ThemeMode::Dark);
+        };
+        viewCommandHandlers.onViewerDetailOverlays = [this]
+        {
+            if (viewerWindow_)
+            {
+                viewerWindow_->SetInfoOverlaysVisible(!viewerWindow_->AreInfoOverlaysVisible());
+                UpdateMenuState();
+            }
+        };
+        viewCommandHandlers.onViewerFullMetadata = [this]
+        {
+            if (viewerWindow_)
+            {
+                viewerWindow_->SetFullMetadataVisible(!viewerWindow_->IsFullMetadataVisible());
+                UpdateMenuState();
+            }
+        };
+        viewCommandHandlers.onPressureStateStatus = [this]
+        {
+            showPressureStateInStatusBar_ = !showPressureStateInStatusBar_;
+            UpdateStatusText();
+            UpdateMenuState();
+        };
+        viewCommandHandlers.onSlideshowSelection = std::bind_front(&MainWindow::StartSlideshow, this, true);
+        viewCommandHandlers.onSlideshowFolder = std::bind_front(&MainWindow::StartSlideshow, this, false);
+        viewCommandHandlers.onUserGuide = std::bind_front(&MainWindow::ShowUserGuide, this);
+        viewCommandHandlers.onKeyboardShortcuts = std::bind_front(&MainWindow::ShowShortcutReference, this);
+        viewCommandHandlers.onAbout = std::bind_front(&MainWindow::ShowAboutDialog, this);
+        viewCommandHandlers.onPerformanceSettings = std::bind_front(&MainWindow::ShowPerformanceSettingsDialog, this);
+        viewCommandHandlers.onPerformanceProfile = [this](UINT commandId)
+        {
+            const util::ResourceProfile requestedProfile = ResourceProfileFromCommandId(commandId);
+            if (resourceProfile_ != requestedProfile)
+            {
+                resourceProfile_ = requestedProfile;
+                ApplyResourceProfileSetting();
+                UpdateDetailsPanel();
+                UpdateStatusText();
+                UpdateMenuState();
+            }
+        };
+        viewCommandHandlers.onDiagnosticsSnapshot = std::bind_front(&MainWindow::ShowDiagnosticsSnapshot, this);
+        viewCommandHandlers.onDiagnosticsReset = std::bind_front(&MainWindow::ResetDiagnosticsState, this);
+        viewCommandController_.Configure(std::move(viewCommandHandlers));
     }
 
     MainWindow::~MainWindow()
@@ -10015,18 +10282,10 @@ namespace hyperbrowse::ui
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"&Help");
 
         RefreshPersistentMenuOwnerDraw();
-        commandBarMenuButtons_[0].label = L"File";
-        commandBarMenuButtons_[0].mnemonic = L'F';
-        commandBarMenuButtons_[0].menu = fileMenu_;
-        commandBarMenuButtons_[1].label = L"Edit";
-        commandBarMenuButtons_[1].mnemonic = L'E';
-        commandBarMenuButtons_[1].menu = editMenu_;
-        commandBarMenuButtons_[2].label = L"View";
-        commandBarMenuButtons_[2].mnemonic = L'V';
-        commandBarMenuButtons_[2].menu = viewMenu_;
-        commandBarMenuButtons_[3].label = L"Help";
-        commandBarMenuButtons_[3].mnemonic = L'H';
-        commandBarMenuButtons_[3].menu = helpMenu_;
+        commandBarController_.SetMenuButton(0, L"File", L'F', fileMenu_);
+        commandBarController_.SetMenuButton(1, L"Edit", L'E', editMenu_);
+        commandBarController_.SetMenuButton(2, L"View", L'V', viewMenu_);
+        commandBarController_.SetMenuButton(3, L"Help", L'H', helpMenu_);
 
         SetMenu(hwnd_, nullptr);
         DrawMenuBar(hwnd_);
@@ -12167,16 +12426,7 @@ namespace hyperbrowse::ui
 
     int MainWindow::CommandBarMenuHitTest(int x, int y) const
     {
-        const POINT point{x, y};
-        for (int index = 0; index < static_cast<int>(commandBarMenuButtons_.size()); ++index)
-        {
-            if (PtInRect(&commandBarMenuButtons_[static_cast<std::size_t>(index)].rect, point) != FALSE)
-            {
-                return index;
-            }
-        }
-
-        return -1;
+        return commandBarController_.MenuHitTest(x, y);
     }
 
     void MainWindow::ActivateCommandBarKeyboardMode(int index)
@@ -19382,53 +19632,25 @@ namespace hyperbrowse::ui
     {
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
         const bool hasCompareSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 2;
-        const bool selectionActionsEnabled = hasSelection && !fileOperationActive_;
-        const bool sizeEnabled = browserMode_ == BrowserMode::Thumbnails;
         const bool folderEnumerationActive = folderLoadCoordinator_
             && folderLoadCoordinator_->IsEnumerationActive();
-
-        for (auto& item : toolbarItems_)
-        {
-            switch (item.commandId)
-            {
-            case ID_VIEW_NAVIGATE_BACK_FOLDER:
-                item.enabled = browserModel_
-                    && folderLoadCoordinator_
-                    && folderLoadCoordinator_->CanNavigateBack()
-                    && !folderLoadCoordinator_->HasPendingNavigation()
-                    && !folderEnumerationActive;
-                break;
-            case ID_VIEW_NAVIGATE_FORWARD_FOLDER:
-                item.enabled = browserModel_
-                    && folderLoadCoordinator_
-                    && folderLoadCoordinator_->CanNavigateForward()
-                    && !folderLoadCoordinator_->HasPendingNavigation()
-                    && !folderEnumerationActive;
-                break;
-            case ID_VIEW_RECURSIVE:
-                item.checked = recursiveBrowsingEnabled_;
-                break;
-            case ID_VIEW_THUMBNAILS:
-                item.checked = browserMode_ == BrowserMode::Thumbnails;
-                break;
-            case ID_VIEW_DETAILS:
-                item.checked = browserMode_ == BrowserMode::Details;
-                break;
-            case ID_ACTION_THUMBNAIL_SIZE_MENU:
-                item.enabled = sizeEnabled;
-                break;
-            case ID_FILE_COMPARE_SELECTED:
-                item.enabled = hasCompareSelection;
-                break;
-            case ID_FILE_COPY_SELECTION:
-            case ID_FILE_MOVE_SELECTION:
-            case ID_FILE_DELETE_SELECTION:
-                item.enabled = selectionActionsEnabled;
-                break;
-            default:
-                break;
-            }
-        }
+        CommandBarController::ToolbarState state;
+        state.canNavigateBack = browserModel_
+            && folderLoadCoordinator_
+            && folderLoadCoordinator_->CanNavigateBack();
+        state.canNavigateForward = browserModel_
+            && folderLoadCoordinator_
+            && folderLoadCoordinator_->CanNavigateForward();
+        state.folderEnumerationActive = folderEnumerationActive;
+        state.pendingNavigation = folderLoadCoordinator_
+            && folderLoadCoordinator_->HasPendingNavigation();
+        state.recursiveChecked = recursiveBrowsingEnabled_;
+        state.thumbnailsChecked = browserMode_ == BrowserMode::Thumbnails;
+        state.detailsChecked = browserMode_ == BrowserMode::Details;
+        state.thumbnailSizeEnabled = browserMode_ == BrowserMode::Thumbnails;
+        state.compareEnabled = hasCompareSelection;
+        state.selectionActionsEnabled = hasSelection && !fileOperationActive_;
+        commandBarController_.UpdateItemStates(state);
 
         InvalidateToolbarStrip();
     }
@@ -21537,338 +21759,18 @@ namespace hyperbrowse::ui
 
     bool MainWindow::HandleCommand(UINT commandId)
     {
-        if (IsCommandInRange(commandId, ID_FILE_OPEN_RECENT_FOLDER_BASE, ID_FILE_OPEN_RECENT_FOLDER_LAST))
-        {
-            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_OPEN_RECENT_FOLDER_BASE);
-            if (index < recentFolders_.size())
-            {
-                const std::wstring folderPath = recentFolders_[index];
-                if (!IsExistingDirectory(folderPath))
-                {
-                    MessageBoxW(hwnd_, L"The selected recent folder is no longer available.", L"Open Recent Folder", MB_OK | MB_ICONINFORMATION);
-                }
-                else
-                {
-                    LoadFolderAsync(folderPath);
-                }
-            }
-            return true;
-        }
-
-        if (IsCommandInRange(commandId, ID_FILE_COPY_SELECTION_FAVORITE_BASE, ID_FILE_COPY_SELECTION_FAVORITE_LAST))
-        {
-            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_COPY_SELECTION_FAVORITE_BASE);
-            if (index < favoriteDestinationFolders_.size())
-            {
-                StartSelectionFileOperationToDestination(services::FileOperationType::Copy, favoriteDestinationFolders_[index]);
-            }
-            return true;
-        }
-
-        if (IsCommandInRange(commandId, ID_FILE_COPY_SELECTION_RECENT_BASE, ID_FILE_COPY_SELECTION_RECENT_LAST))
-        {
-            const std::vector<std::wstring> recentDestinationPaths = RecentDestinationShortcutPaths();
-            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_COPY_SELECTION_RECENT_BASE);
-            if (index < recentDestinationPaths.size())
-            {
-                StartSelectionFileOperationToDestination(services::FileOperationType::Copy, recentDestinationPaths[index]);
-            }
-            return true;
-        }
-
-        if (IsCommandInRange(commandId, ID_FILE_MOVE_SELECTION_FAVORITE_BASE, ID_FILE_MOVE_SELECTION_FAVORITE_LAST))
-        {
-            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_MOVE_SELECTION_FAVORITE_BASE);
-            if (index < favoriteDestinationFolders_.size())
-            {
-                StartSelectionFileOperationToDestination(services::FileOperationType::Move, favoriteDestinationFolders_[index]);
-            }
-            return true;
-        }
-
-        if (IsCommandInRange(commandId, ID_FILE_MOVE_SELECTION_RECENT_BASE, ID_FILE_MOVE_SELECTION_RECENT_LAST))
-        {
-            const std::vector<std::wstring> recentDestinationPaths = RecentDestinationShortcutPaths();
-            const std::size_t index = static_cast<std::size_t>(commandId - ID_FILE_MOVE_SELECTION_RECENT_BASE);
-            if (index < recentDestinationPaths.size())
-            {
-                StartSelectionFileOperationToDestination(services::FileOperationType::Move, recentDestinationPaths[index]);
-            }
-            return true;
-        }
-
-        if (IsViewerMouseWheelBehaviorCommand(commandId))
-        {
-            viewerMouseWheelBehavior_ = ViewerMouseWheelBehaviorFromCommandId(commandId);
-            ApplyViewerMouseWheelSetting();
-            UpdateMenuState();
-            return true;
-        }
-
-        if (IsAppTextSizeCommand(commandId))
-        {
-            appTextSize_ = AppTextSizeFromCommandId(commandId);
-            ApplyAppTextSize();
-            UpdateMenuState();
-            return true;
-        }
-
-        if (IsViewerOverlayTextSizeCommand(commandId))
-        {
-            if (viewerWindow_)
-            {
-                viewerWindow_->SetOverlayTextSize(ViewerOverlayTextSizeFromCommandId(commandId));
-                UpdateMenuState();
-            }
-            return true;
-        }
-
-        if (IsRatingCommand(commandId))
-        {
-            SetSelectionRating(RatingFromCommandId(commandId));
-            return true;
-        }
-
         if (fileCommandController_.Handle(commandId))
         {
             return true;
         }
 
-        switch (commandId)
+        if (viewCommandController_.Handle(commandId))
         {
-        case ID_VIEW_THUMBNAILS:
-            SetBrowserMode(BrowserMode::Thumbnails);
             return true;
-        case ID_VIEW_DETAILS:
-            SetBrowserMode(BrowserMode::Details);
-            return true;
-        case ID_ACTION_SORT_MENU:
-        {
-            for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
-            {
-                if (toolbarItems_[static_cast<std::size_t>(i)].commandId == ID_ACTION_SORT_MENU)
-                {
-                    ShowDropdownForItem(i);
-                    break;
-                }
-            }
-            return true;
-        }
-        case ID_ACTION_THUMBNAIL_SIZE_MENU:
-        {
-            for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
-            {
-                if (toolbarItems_[static_cast<std::size_t>(i)].commandId == ID_ACTION_THUMBNAIL_SIZE_MENU)
-                {
-                    ShowDropdownForItem(i);
-                    break;
-                }
-            }
-            return true;
-        }
-        case ID_ACTION_THEME_MENU:
-            // Theme is now toggled via menu; no dropdown button
-            return true;
-        case ID_VIEW_RECURSIVE:
-            ToggleRecursiveBrowsing();
-            return true;
-        case ID_VIEW_SHOW_SUBFOLDERS:
-            ToggleShowSubfoldersInBrowser();
-            return true;
-        case ID_VIEW_SETTINGS:
-            ShowConsolidatedSettingsDialog();
-            return true;
-        case ID_FILE_ASSOCIATIONS:
-            ShowFileAssociationsDialog();
-            return true;
-        case ID_VIEW_NVJPEG_ACCELERATION:
-            if (HasNvJpegCapability())
-            {
-                nvJpegEnabled_ = !nvJpegEnabled_;
-                decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);
-                UpdateStatusText();
-                UpdateMenuState();
-            }
-            return true;
-        case ID_VIEW_LIBRAW_OUT_OF_PROCESS:
-            if (decode::IsLibRawBuildEnabled())
-            {
-                libRawOutOfProcessEnabled_ = !libRawOutOfProcessEnabled_;
-                decode::SetLibRawOutOfProcessEnabled(libRawOutOfProcessEnabled_);
-                UpdateStatusText();
-                UpdateMenuState();
-            }
-            return true;
-        case ID_VIEW_PERSISTENT_THUMBNAIL_CACHE:
-            persistentThumbnailCacheEnabled_ = !persistentThumbnailCacheEnabled_;
-            ApplyPersistentThumbnailCacheSetting();
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER:
-            ShowPersistentThumbnailCacheDialog();
-            return true;
-        case ID_VIEW_SINGLE_INSTANCE:
-            app::Application::SetSingleInstanceEnabled(!app::Application::IsSingleInstanceEnabled());
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG:
-            pairedRawJpegViewerPreference_ = browser::RawJpegDisplayPreference::Jpeg;
-            if (viewerWindow_ && viewerWindow_->IsOpen())
-            {
-                SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
-            }
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW:
-            pairedRawJpegViewerPreference_ = browser::RawJpegDisplayPreference::Raw;
-            if (viewerWindow_ && viewerWindow_->IsOpen())
-            {
-                SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
-            }
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR:
-            defaultViewerToSecondaryMonitor_ = !defaultViewerToSecondaryMonitor_;
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_USE_SLIDESHOW_TRANSITION:
-            useSlideshowTransition_ = !useSlideshowTransition_;
-            ApplyViewerTransitionSettings();
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_THUMBNAIL_SIZE_96:
-        case ID_VIEW_THUMBNAIL_SIZE_128:
-        case ID_VIEW_THUMBNAIL_SIZE_160:
-        case ID_VIEW_THUMBNAIL_SIZE_192:
-        case ID_VIEW_THUMBNAIL_SIZE_256:
-        case ID_VIEW_THUMBNAIL_SIZE_320:
-        case ID_VIEW_THUMBNAIL_SIZE_360:
-        case ID_VIEW_THUMBNAIL_SIZE_420:
-        case ID_VIEW_THUMBNAIL_SIZE_480:
-        case ID_VIEW_THUMBNAIL_SIZE_560:
-        case ID_VIEW_THUMBNAIL_SIZE_640:
-            thumbnailSizePreset_ = ThumbnailSizePresetFromCommandId(commandId);
-            ApplyThumbnailDisplaySettings();
-            UpdateStatusText();
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_THUMBNAIL_SIZE_INCREASE:
-            StepThumbnailSize(1);
-            return true;
-        case ID_VIEW_THUMBNAIL_SIZE_DECREASE:
-            StepThumbnailSize(-1);
-            return true;
-        case ID_VIEW_THUMBNAIL_DETAILS:
-            thumbnailDetailsVisible_ = !thumbnailDetailsVisible_;
-            ApplyThumbnailDisplaySettings();
-            UpdateStatusText();
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_THUMBNAIL_LAYOUT_COMPACT:
-            compactThumbnailLayout_ = !compactThumbnailLayout_;
-            ApplyThumbnailDisplaySettings();
-            UpdateStatusText();
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_DETAILS_STRIP:
-            ToggleDetailsPanelVisibility();
-            return true;
-        case ID_VIEW_SORT_FILENAME:
-        case ID_VIEW_SORT_MODIFIED:
-        case ID_VIEW_SORT_SIZE:
-        case ID_VIEW_SORT_DIMENSIONS:
-        case ID_VIEW_SORT_TYPE:
-        case ID_VIEW_SORT_DATETAKEN:
-        case ID_VIEW_SORT_RATING:
-        case ID_VIEW_SORT_TAGS:
-        case ID_VIEW_SORT_RANDOM:
-            if (browserPaneController_)
-            {
-                sortMode_ = SortModeFromCommandId(commandId);
-                browserPaneController_->SetSortMode(sortMode_);
-                UpdateStatusText();
-                UpdateMenuState();
-            }
-            return true;
-        case ID_VIEW_SORT_DIRECTION:
-            if (browserPaneController_)
-            {
-                sortAscending_ = !browserPaneController_->IsSortAscending();
-                browserPaneController_->SetSortAscending(sortAscending_);
-                UpdateStatusText();
-                UpdateMenuState();
-            }
-            return true;
-        case ID_VIEW_THEME_LIGHT:
-            SetThemeMode(ThemeMode::Light);
-            return true;
-        case ID_VIEW_THEME_DARK:
-            SetThemeMode(ThemeMode::Dark);
-            return true;
-        case ID_VIEW_VIEWER_DETAIL_OVERLAYS:
-            if (viewerWindow_)
-            {
-                viewerWindow_->SetInfoOverlaysVisible(!viewerWindow_->AreInfoOverlaysVisible());
-                UpdateMenuState();
-            }
-            return true;
-        case ID_VIEW_VIEWER_FULL_METADATA:
-            if (viewerWindow_)
-            {
-                viewerWindow_->SetFullMetadataVisible(!viewerWindow_->IsFullMetadataVisible());
-                UpdateMenuState();
-            }
-            return true;
-        case ID_VIEW_PRESSURE_STATE_STATUS:
-            showPressureStateInStatusBar_ = !showPressureStateInStatusBar_;
-            UpdateStatusText();
-            UpdateMenuState();
-            return true;
-        case ID_VIEW_SLIDESHOW_SELECTION:
-            StartSlideshow(true);
-            return true;
-        case ID_VIEW_SLIDESHOW_FOLDER:
-            StartSlideshow(false);
-            return true;
-        case ID_HELP_USER_GUIDE:
-            ShowUserGuide();
-            return true;
-        case ID_HELP_KEYBOARD_SHORTCUTS:
-            ShowShortcutReference();
-            return true;
-        case ID_HELP_ABOUT:
-            ShowAboutDialog();
-            return true;
-        case ID_HELP_PERFORMANCE_SETTINGS:
-            ShowPerformanceSettingsDialog();
-            return true;
-        case ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE:
-        case ID_HELP_PERFORMANCE_PROFILE_BALANCED:
-        case ID_HELP_PERFORMANCE_PROFILE_PERFORMANCE:
-        case ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE:
-        {
-            const util::ResourceProfile requestedProfile = ResourceProfileFromCommandId(commandId);
-            if (resourceProfile_ != requestedProfile)
-            {
-                resourceProfile_ = requestedProfile;
-                ApplyResourceProfileSetting();
-                UpdateDetailsPanel();
-                UpdateStatusText();
-                UpdateMenuState();
-            }
-            return true;
-        }
-        case ID_HELP_DIAGNOSTICS_SNAPSHOT:
-            ShowDiagnosticsSnapshot();
-            return true;
-        case ID_HELP_DIAGNOSTICS_RESET:
-            ResetDiagnosticsState();
-            return true;
-        default:
-            break;
         }
 
         return false;
+
     }
 
     void MainWindow::SetBrowserMode(BrowserMode mode)
@@ -22026,64 +21928,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::InitToolbarItems()
     {
-        toolbarItems_.clear();
-
-        auto addIcon = [this](UINT cmdId, std::string iconName, std::wstring tip,
-                              ToolbarItemKind kind = ToolbarItemKind::IconButton,
-                              ToolbarAlignment align = ToolbarAlignment::Left)
-        {
-            ToolbarItem item;
-            item.commandId = cmdId;
-            item.iconName = std::move(iconName);
-            item.tooltip = std::move(tip);
-            item.kind = kind;
-            item.alignment = align;
-            toolbarItems_.push_back(std::move(item));
-        };
-
-        auto addSeparator = [this](ToolbarAlignment align = ToolbarAlignment::Left)
-        {
-            ToolbarItem sep;
-            sep.kind = ToolbarItemKind::Separator;
-            sep.alignment = align;
-            toolbarItems_.push_back(std::move(sep));
-        };
-
-        // Left group 1: Navigation
-        addIcon(ID_VIEW_NAVIGATE_BACK_FOLDER, "back", L"Back to Previous Folder (Backspace)");
-        addIcon(ID_VIEW_NAVIGATE_FORWARD_FOLDER, "forward", L"Forward to Next Folder (Alt+Right)");
-        addIcon(ID_FILE_OPEN_FOLDER, "open-folder", L"Open Folder (Ctrl+O)");
-        addIcon(ID_VIEW_RECURSIVE, "recursive", L"Recursive Browsing (Ctrl+R)", ToolbarItemKind::IconToggle);
-
-        addSeparator();
-
-        // Left group 2: View mode
-        addIcon(ID_VIEW_THUMBNAILS, "view-grid", L"Thumbnail Mode (Ctrl+1)", ToolbarItemKind::IconToggle);
-        addIcon(ID_VIEW_DETAILS, "view-list", L"Details Mode (Ctrl+2)", ToolbarItemKind::IconToggle);
-
-        addSeparator();
-
-        // Left group 3: Display controls (dropdowns)
-        addIcon(ID_ACTION_SORT_MENU, "sort", L"Sort By", ToolbarItemKind::IconDropdown);
-        addIcon(ID_ACTION_THUMBNAIL_SIZE_MENU, "thumbnail-size", L"Thumbnail Size", ToolbarItemKind::IconDropdown);
-
-        addSeparator();
-
-        // Filter placeholder (will be positioned in LayoutToolbar)
-        {
-            ToolbarItem filterItem;
-            filterItem.kind = ToolbarItemKind::FilterEdit;
-            filterItem.alignment = ToolbarAlignment::Left;
-            toolbarItems_.push_back(std::move(filterItem));
-        }
-
-        addSeparator(ToolbarAlignment::Right);
-
-        // Right group: Selection actions
-        addIcon(ID_FILE_COMPARE_SELECTED, "compare", L"Compare Selected", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
-        addIcon(ID_FILE_COPY_SELECTION, "copy", L"Copy Selection", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
-        addIcon(ID_FILE_MOVE_SELECTION, "move", L"Move Selection", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
-        addIcon(ID_FILE_DELETE_SELECTION, "delete", L"Delete (Del)", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
+        commandBarController_.InitializeItems();
     }
 
     void MainWindow::LayoutToolbar()
@@ -22092,89 +21937,31 @@ namespace hyperbrowse::ui
         GetClientRect(hwnd_, &client);
         const int clientWidth = client.right - client.left;
         const int itemTop = kActionStripPaddingY;
-
-        // Lay out left-aligned items first, then right-aligned items, then fill filter gap.
-        int leftCursor = kActionStripPaddingX;
-        int rightCursor = clientWidth - kActionStripPaddingX;
-        int filterItemIndex = -1;
-
         const HFONT menuFont = detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        for (auto& button : commandBarMenuButtons_)
+        commandBarController_.Layout(
+            clientWidth,
+            itemTop,
+            menuFont,
+            [](HFONT font, std::wstring_view text)
+            {
+                return MeasureTextWidth(font, text);
+            });
+
+        const auto filterItem = std::find_if(toolbarItems_.begin(), toolbarItems_.end(), [](const ToolbarItem& item)
         {
-            if (button.label.empty() || !button.menu)
-            {
-                button.rect = RECT{};
-                continue;
-            }
-
-            const int textWidth = MeasureTextWidth(menuFont, button.label);
-            const int buttonWidth = std::max(kCommandBarMenuButtonMinWidth,
-                                             textWidth + (kCommandBarMenuButtonPadding * 2) + kCommandBarMenuChevronWidth + 8);
-            button.rect = RECT{leftCursor, itemTop, leftCursor + buttonWidth, itemTop + kToolbarItemSize};
-            leftCursor += buttonWidth + kCommandBarMenuButtonGap;
-        }
-
-        leftCursor += 8;
-
-        // Left pass
-        for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
+            return item.kind == ToolbarItemKind::FilterEdit;
+        });
+        if (filterItem != toolbarItems_.end() && filterEdit_)
         {
-            auto& item = toolbarItems_[static_cast<std::size_t>(i)];
-            if (item.alignment != ToolbarAlignment::Left)
-            {
-                continue;
-            }
-
-            if (item.kind == ToolbarItemKind::Separator)
-            {
-                item.rect = RECT{leftCursor + kToolbarSeparatorGap, itemTop,
-                                 leftCursor + kToolbarSeparatorGap + 1, itemTop + kToolbarItemSize};
-                leftCursor += kToolbarSeparatorWidth;
-                continue;
-            }
-
-            if (item.kind == ToolbarItemKind::FilterEdit)
-            {
-                filterItemIndex = i;
-                continue;
-            }
-
-            item.rect = RECT{leftCursor, itemTop, leftCursor + kToolbarItemSize, itemTop + kToolbarItemSize};
-            leftCursor += kToolbarItemSize + 2;
-        }
-
-        // Right pass (iterate in reverse so rightmost items stay rightmost)
-        for (int i = static_cast<int>(toolbarItems_.size()) - 1; i >= 0; --i)
-        {
-            auto& item = toolbarItems_[static_cast<std::size_t>(i)];
-            if (item.alignment != ToolbarAlignment::Right)
-            {
-                continue;
-            }
-
-            if (item.kind == ToolbarItemKind::Separator)
-            {
-                rightCursor -= kToolbarSeparatorWidth;
-                item.rect = RECT{rightCursor + kToolbarSeparatorGap, itemTop,
-                                 rightCursor + kToolbarSeparatorGap + 1, itemTop + kToolbarItemSize};
-                continue;
-            }
-
-            rightCursor -= kToolbarItemSize;
-            item.rect = RECT{rightCursor, itemTop, rightCursor + kToolbarItemSize, itemTop + kToolbarItemSize};
-            rightCursor -= 2;
-        }
-
-        // Place filter edit control in the gap
-        if (filterItemIndex >= 0 && filterEdit_)
-        {
-            const int filterLeft = leftCursor + 6;
-            const int filterRight = rightCursor - 6;
-            const int filterWidth = std::max(0, filterRight - filterLeft);
+            const RECT& filterRect = filterItem->rect;
             const int filterTop = itemTop + std::max(0, (kToolbarItemSize - kToolbarFilterEditHeight) / 2);
-            toolbarItems_[static_cast<std::size_t>(filterItemIndex)].rect =
-                RECT{filterLeft, itemTop, filterLeft + filterWidth, itemTop + kToolbarItemSize};
-            MoveWindow(filterEdit_, filterLeft + 10, filterTop, std::max(0, filterWidth - 20), kToolbarFilterEditHeight, TRUE);
+            const int filterWidth = std::max(0, static_cast<int>(filterRect.right - filterRect.left) - 20);
+            MoveWindow(filterEdit_,
+                       static_cast<int>(filterRect.left) + 10,
+                       filterTop,
+                       filterWidth,
+                       kToolbarFilterEditHeight,
+                       TRUE);
         }
 
         // Update tooltip rects
@@ -22813,21 +22600,7 @@ namespace hyperbrowse::ui
 
     int MainWindow::ToolbarHitTest(int x, int y) const
     {
-        POINT pt{x, y};
-        for (int i = 0; i < static_cast<int>(toolbarItems_.size()); ++i)
-        {
-            const auto& item = toolbarItems_[static_cast<std::size_t>(i)];
-            if (item.kind == ToolbarItemKind::Separator || item.kind == ToolbarItemKind::FilterEdit)
-            {
-                continue;
-            }
-
-            if (PtInRect(&item.rect, pt))
-            {
-                return i;
-            }
-        }
-        return -1;
+        return commandBarController_.ToolbarHitTest(x, y);
     }
 
     void MainWindow::ToolbarHandleClick(int itemIndex)

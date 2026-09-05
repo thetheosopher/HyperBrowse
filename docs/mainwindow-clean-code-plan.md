@@ -11,9 +11,9 @@ currently contains several independent state machines: folder navigation and
 enumeration, file-operation reconciliation, viewer synchronization, menus,
 settings, details and Quick Actions presentation, drag/drop, rendering, and
 shutdown. Dialog, file-operation policy, folder-enumeration coordination,
-folder-tree coordination, folder-watch policy, async message routing, and menu
-message policy, and file-command dispatch extractions have reduced the current
-translation unit to 24,564 lines. The folder-tree slice places node
+folder-tree coordination, folder-watch policy, async message routing, menu
+message policy, file-command dispatch, view-command dispatch, and command-bar
+policy extractions have reduced the current translation unit to 24,337 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -201,4 +201,15 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `src/ui/FileCommandController.*`. MainWindow retains state, shell effects,
   and operation callbacks while the controller owns the command-ID mapping.
   Deterministic smoke coverage verifies aliases and forwarded command
-  parameters. The current `MainWindow.cpp` size is 24,564 lines.
+  parameters.
+- [x] Extract view, settings, help, diagnostics, and viewer-display command
+  dispatch from `HandleCommand` into `src/ui/ViewCommandController.*`.
+  MainWindow retains mutable settings and presentation effects while the
+  controller owns the command-ID mapping. Deterministic smoke coverage
+  verifies parameterized command families and ownership boundaries. The
+- [x] Extract command-bar item definitions, menu and toolbar layout, hit
+  testing, and toolbar enabled/checked-state policy into
+  `src/ui/CommandBarController.*`. MainWindow retains HWND movement,
+  tooltip registration, painting, focus, and command effects. Deterministic
+  smoke coverage verifies item initialization, layout hit testing, and state
+  transitions. The current `MainWindow.cpp` size is 24,337 lines.

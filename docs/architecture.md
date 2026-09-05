@@ -112,6 +112,13 @@ controller:
 	for folder navigation, clipboard actions, file operations, batch conversion,
 	and undo/redo. MainWindow supplies explicit callbacks and retains window,
 	model, service, and presentation state.
+- `ui/ViewCommandController.*` owns the view, settings, help, diagnostics, and
+  viewer-display command-ID mapping. MainWindow supplies explicit callbacks
+  and retains mutable settings, presentation state, and window effects.
+- `ui/CommandBarController.*` owns command-bar item definitions, menu and
+  toolbar layout, hit testing, and toolbar enabled/checked-state policy.
+  MainWindow retains HWND movement, tooltip registration, painting, focus,
+  and command effects.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

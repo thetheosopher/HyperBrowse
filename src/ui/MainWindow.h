@@ -26,8 +26,10 @@
 #include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
 #include "ui/FileCommandController.h"
+#include "ui/CommandBarController.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickSend.h"
+#include "ui/ViewCommandController.h"
 #include "ui/WindowAsyncMessageRouter.h"
 
 namespace hyperbrowse::browser
@@ -159,32 +161,10 @@ namespace hyperbrowse::ui
             COLORREF accentText;
         };
 
-        enum class ToolbarItemKind
-        {
-            IconButton,
-            IconToggle,
-            IconDropdown,
-            Separator,
-            FilterEdit,
-        };
-
-        enum class ToolbarAlignment
-        {
-            Left,
-            Right,
-        };
-
-        struct ToolbarItem
-        {
-            UINT commandId{};
-            std::string iconName;
-            std::wstring tooltip;
-            ToolbarItemKind kind{ToolbarItemKind::IconButton};
-            ToolbarAlignment alignment{ToolbarAlignment::Left};
-            bool enabled{true};
-            bool checked{};
-            RECT rect{};
-        };
+        using ToolbarItemKind = CommandBarController::ToolbarItemKind;
+        using ToolbarAlignment = CommandBarController::ToolbarAlignment;
+        using ToolbarItem = CommandBarController::ToolbarItem;
+        using CommandBarMenuButton = CommandBarController::CommandBarMenuButton;
 
         struct QuickAccessDestinationRow
         {
@@ -198,14 +178,6 @@ namespace hyperbrowse::ui
             RECT copyRect{};
             RECT moveRect{};
             RECT removeRect{};
-        };
-
-        struct CommandBarMenuButton
-        {
-            std::wstring label;
-            wchar_t mnemonic{};
-            HMENU menu{};
-            RECT rect{};
         };
 
         bool RegisterWindowClass() const;
@@ -517,6 +489,7 @@ namespace hyperbrowse::ui
 
         FileOperationJournal fileOperationJournal_;
         bool applyingUndoRedo_{};
+        CommandBarController commandBarController_;
         HMENU menu_{};
         HMENU fileMenu_{};
         HMENU editMenu_{};
@@ -528,7 +501,7 @@ namespace hyperbrowse::ui
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
         int detailsPanelWidth_{340};
-        std::array<CommandBarMenuButton, 4> commandBarMenuButtons_{};
+        std::array<CommandBarMenuButton, 4>& commandBarMenuButtons_;
         int commandBarHotIndex_{-1};
         int commandBarPressedIndex_{-1};
         int commandBarMenuNavigationIndex_{-1};
@@ -540,7 +513,7 @@ namespace hyperbrowse::ui
         int toolbarHotIndex_{-1};
         int toolbarPressedIndex_{-1};
         bool toolbarMouseTracking_{};
-        std::vector<ToolbarItem> toolbarItems_;
+        std::vector<ToolbarItem>& toolbarItems_;
         std::unique_ptr<ToolbarIconLibrary> toolbarIconLibrary_;
         BrowserMode browserMode_{BrowserMode::Thumbnails};
         RightPaneTab activeRightPaneTab_{RightPaneTab::FileDetails};
@@ -586,6 +559,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<FolderTreeController> folderTreeController_;
         WindowAsyncMessageRouter asyncMessageRouter_;
         FileCommandController fileCommandController_;
+        ViewCommandController viewCommandController_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;

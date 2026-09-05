@@ -29,6 +29,36 @@ namespace hyperbrowse::ui
 
     bool FileCommandController::Handle(UINT commandId) const
     {
+        if (commandId >= ID_FILE_OPEN_RECENT_FOLDER_BASE && commandId <= ID_FILE_OPEN_RECENT_FOLDER_LAST)
+        {
+            return Invoke(handlers_.onOpenRecentFolder,
+                          static_cast<std::size_t>(commandId - ID_FILE_OPEN_RECENT_FOLDER_BASE));
+        }
+
+        if (commandId >= ID_FILE_COPY_SELECTION_FAVORITE_BASE && commandId <= ID_FILE_COPY_SELECTION_FAVORITE_LAST)
+        {
+            return Invoke(handlers_.onCopySelectionToFavorite,
+                          static_cast<std::size_t>(commandId - ID_FILE_COPY_SELECTION_FAVORITE_BASE));
+        }
+
+        if (commandId >= ID_FILE_COPY_SELECTION_RECENT_BASE && commandId <= ID_FILE_COPY_SELECTION_RECENT_LAST)
+        {
+            return Invoke(handlers_.onCopySelectionToRecent,
+                          static_cast<std::size_t>(commandId - ID_FILE_COPY_SELECTION_RECENT_BASE));
+        }
+
+        if (commandId >= ID_FILE_MOVE_SELECTION_FAVORITE_BASE && commandId <= ID_FILE_MOVE_SELECTION_FAVORITE_LAST)
+        {
+            return Invoke(handlers_.onMoveSelectionToFavorite,
+                          static_cast<std::size_t>(commandId - ID_FILE_MOVE_SELECTION_FAVORITE_BASE));
+        }
+
+        if (commandId >= ID_FILE_MOVE_SELECTION_RECENT_BASE && commandId <= ID_FILE_MOVE_SELECTION_RECENT_LAST)
+        {
+            return Invoke(handlers_.onMoveSelectionToRecent,
+                          static_cast<std::size_t>(commandId - ID_FILE_MOVE_SELECTION_RECENT_BASE));
+        }
+
         switch (commandId)
         {
         case ID_FILE_OPEN_FOLDER:

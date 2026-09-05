@@ -126,6 +126,7 @@ add_library(HyperBrowseCore STATIC
     src/services/UserMetadataStore.cpp
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
+    src/ui/CommandBarController.cpp
     src/ui/ExternalDropTarget.cpp
     src/ui/FileCommandController.cpp
     src/ui/FileOperationJournal.cpp
@@ -141,6 +142,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/QuickSend.cpp
     src/ui/ShellDragSource.cpp
     src/ui/ToolbarIconLibrary.cpp
+    src/ui/ViewCommandController.cpp
     src/ui/WindowAsyncMessageRouter.cpp
     src/util/Diagnostics.cpp
     src/util/Log.cpp

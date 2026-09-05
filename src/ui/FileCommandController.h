@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <functional>
 
 namespace hyperbrowse::services
@@ -17,10 +18,16 @@ namespace hyperbrowse::ui
         using CommandHandler = std::function<void()>;
         using BoolHandler = std::function<void(bool)>;
         using IntHandler = std::function<void(int)>;
+        using IndexHandler = std::function<void(std::size_t)>;
         using BatchConvertHandler = std::function<void(bool, services::BatchConvertFormat)>;
 
         struct Handlers
         {
+            IndexHandler onOpenRecentFolder;
+            IndexHandler onCopySelectionToFavorite;
+            IndexHandler onCopySelectionToRecent;
+            IndexHandler onMoveSelectionToFavorite;
+            IndexHandler onMoveSelectionToRecent;
             CommandHandler onOpenFolder;
             CommandHandler onNavigateBackFolder;
             CommandHandler onNavigateForwardFolder;
