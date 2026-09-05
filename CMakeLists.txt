@@ -129,6 +129,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/ExternalDropTarget.cpp
     src/ui/FileOperationJournal.cpp
     src/ui/FileOperationReconciler.cpp
+    src/ui/FolderEnumerationCoordinator.cpp
     src/ui/FolderHistory.cpp
     src/ui/MainWindow.cpp
     src/ui/MainWindowDialogs.cpp

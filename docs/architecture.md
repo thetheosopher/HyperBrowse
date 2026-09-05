@@ -82,6 +82,11 @@ controller:
 	batch-rename preview dialogs. `MainWindow` supplies the owner HWND, theme,
 	text-size, and operation-specific inputs, then consumes only the returned
 	values.
+- `ui/FolderEnumerationCoordinator.*` owns folder-enumeration request
+	lifecycle, cancellation, stale-result filtering, first-batch presentation,
+	50 ms presentation coalescing, and completion/failure settlement. It calls
+	`MainWindow` handlers for model mutation, browser refresh, history/watcher
+	updates, and viewer synchronization without owning those UI policies.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

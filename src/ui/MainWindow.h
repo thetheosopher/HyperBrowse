@@ -74,6 +74,7 @@ namespace hyperbrowse::ui
 {
     class DiagnosticsWindow;
     class ExternalDropTarget;
+    class FolderEnumerationCoordinator;
     class ToolbarIconLibrary;
 
     class MainWindow
@@ -403,8 +404,7 @@ namespace hyperbrowse::ui
         void ApplyCompletedFileOperation(const services::FileOperationUpdate& update);
         bool IsPathInCurrentScope(std::wstring_view path) const;
         void ApplyFolderWatchChanges(const services::FolderWatchUpdate& update);
-        void ScheduleFolderEnumerationPresentation();
-        void FlushFolderEnumerationPresentation(bool clearStartupPathsIfNotFound);
+        bool FlushFolderEnumerationPresentation(bool clearStartupPathsIfNotFound);
         LRESULT OnFolderEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderTreeEnumerationMessage(LPARAM lParam);
         LRESULT OnFolderWatchMessage(LPARAM lParam);
@@ -638,7 +638,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
         std::unique_ptr<services::BatchConvertService> batchConvertService_;
         std::unique_ptr<services::FileOperationService> fileOperationService_;
-        std::unique_ptr<services::FolderEnumerationService> folderEnumerationService_;
+        std::unique_ptr<FolderEnumerationCoordinator> folderEnumerationCoordinator_;
         std::unique_ptr<services::FolderTreeEnumerationService> folderTreeEnumerationService_;
         std::unique_ptr<services::FolderWatchService> folderWatchService_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
@@ -703,7 +703,6 @@ namespace hyperbrowse::ui
         std::array<std::uint32_t, 64> detailsPanelHistogramGreen_{};
         std::array<std::uint32_t, 64> detailsPanelHistogramBlue_{};
         std::uint32_t detailsPanelHistogramPeak_{};
-        std::uint64_t activeEnumerationRequestId_{};
         std::uint64_t activeFolderWatchRequestId_{};
         std::uint64_t activeBatchConvertRequestId_{};
         std::uint64_t activeFileOperationRequestId_{};
@@ -715,10 +714,6 @@ namespace hyperbrowse::ui
         bool closePending_{};
         ULONGLONG closePendingSinceTick_{};
         bool closeWaitNoticeShown_{};
-        bool folderEnumerationActive_{};
-        bool folderEnumerationFirstBatchPresented_{};
-        bool folderEnumerationPresentationPending_{};
-        UINT_PTR folderEnumerationPresentationTimerId_{};
         std::size_t batchConvertCompleted_{};
         std::size_t batchConvertTotal_{};
         std::size_t batchConvertFailed_{};

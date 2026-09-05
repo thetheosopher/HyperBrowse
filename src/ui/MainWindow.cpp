@@ -48,6 +48,7 @@
 #include "ui/CommandIds.h"
 #include "ui/ExternalDropTarget.h"
 #include "ui/FileOperationJournal.h"
+#include "ui/FolderEnumerationCoordinator.h"
 #include "ui/MainWindowDialogs.h"
 #include "ui/FolderHistory.h"
 #include "ui/ShortcutCatalog.h"
@@ -235,9 +236,7 @@ namespace
     constexpr std::uint64_t kFolderTreeChildPresenceCacheTtlMs = 3000;
     constexpr std::size_t kDeferredLargeFolderPresentationItemLimit = 2048;
     constexpr std::size_t kIncrementalFileOperationPathLimit = 64;
-    constexpr UINT_PTR kFolderEnumerationPresentationTimerId = 9102;
     constexpr ULONGLONG kFileOperationShutdownNoticeDelayMs = 5000;
-    constexpr UINT kFolderEnumerationPresentationIntervalMs = 50;
     HWND FindPopupMenuWindow(HMENU menu)
     {
         struct SearchContext
@@ -9405,7 +9404,7 @@ namespace hyperbrowse::ui
         , browserPaneController_(std::make_unique<browser::BrowserPane>(instance))
         , batchConvertService_(std::make_unique<services::BatchConvertService>())
         , fileOperationService_(std::make_unique<services::FileOperationService>())
-        , folderEnumerationService_(std::make_unique<services::FolderEnumerationService>())
+        , folderEnumerationCoordinator_(std::make_unique<FolderEnumerationCoordinator>())
         , folderTreeEnumerationService_(std::make_unique<services::FolderTreeEnumerationService>())
         , folderWatchService_(std::make_unique<services::FolderWatchService>())
         , userMetadataStore_(std::make_unique<services::UserMetadataStore>())
@@ -9435,9 +9434,9 @@ namespace hyperbrowse::ui
             externalDropTarget_ = nullptr;
         }
 
-        if (folderEnumerationService_)
+        if (folderEnumerationCoordinator_)
         {
-            folderEnumerationService_->Cancel();
+            folderEnumerationCoordinator_->Cancel();
         }
 
         if (folderTreeEnumerationService_)
@@ -11936,11 +11935,13 @@ namespace hyperbrowse::ui
 
         const bool folderTreeEnumerationActive = !pendingFolderTreeEnumerationItems_.empty()
             || !pendingFolderTreeChildPresenceItems_.empty();
-        if (folderEnumerationActive_ || folderTreeEnumerationActive)
+        const bool folderEnumerationActive = folderEnumerationCoordinator_
+            && folderEnumerationCoordinator_->IsActive();
+        if (folderEnumerationActive || folderTreeEnumerationActive)
         {
-            const wchar_t* activityText = folderEnumerationActive_ && folderTreeEnumerationActive
+            const wchar_t* activityText = folderEnumerationActive && folderTreeEnumerationActive
                 ? L"Scanning folders...  |  "
-                : (folderEnumerationActive_ ? L"Scanning folder...  |  " : L"Probing folders...  |  ");
+                : (folderEnumerationActive ? L"Scanning folder...  |  " : L"Probing folders...  |  ");
             statusPrimaryText_ = activityText + statusPrimaryText_;
         }
 
@@ -19726,12 +19727,14 @@ namespace hyperbrowse::ui
         const bool compactThumbnailLayout = browserPaneController_
             ? browserPaneController_->IsCompactThumbnailLayoutEnabled()
             : compactThumbnailLayout_;
-        const bool historyNavigationSettled = !folderEnumerationActive_
+        const bool folderEnumerationActive = folderEnumerationCoordinator_
+            && folderEnumerationCoordinator_->IsActive();
+        const bool historyNavigationSettled = !folderEnumerationActive
             && !folderHistory_.HasPendingNavigation();
         const bool canNavigateBack = hasFolder && historyNavigationSettled && folderHistory_.CanNavigateBack();
         const bool canNavigateForward = hasFolder && historyNavigationSettled && folderHistory_.CanNavigateForward();
         const bool thumbnailSteppingEnabled = hasFolder && browserMode_ == BrowserMode::Thumbnails
-            && !folderEnumerationActive_;
+            && !folderEnumerationActive;
 
         EnableMenuItem(menu_, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COMPARE_SELECTED, MF_BYCOMMAND | (hasCompareSelection ? MF_ENABLED : MF_GRAYED));
@@ -19962,6 +19965,8 @@ namespace hyperbrowse::ui
         const bool hasCompareSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 2;
         const bool selectionActionsEnabled = hasSelection && !fileOperationActive_;
         const bool sizeEnabled = browserMode_ == BrowserMode::Thumbnails;
+        const bool folderEnumerationActive = folderEnumerationCoordinator_
+            && folderEnumerationCoordinator_->IsActive();
 
         for (auto& item : toolbarItems_)
         {
@@ -19971,13 +19976,13 @@ namespace hyperbrowse::ui
                 item.enabled = browserModel_
                     && folderHistory_.CanNavigateBack()
                     && !folderHistory_.HasPendingNavigation()
-                    && !folderEnumerationActive_;
+                    && !folderEnumerationActive;
                 break;
             case ID_VIEW_NAVIGATE_FORWARD_FOLDER:
                 item.enabled = browserModel_
                     && folderHistory_.CanNavigateForward()
                     && !folderHistory_.HasPendingNavigation()
-                    && !folderEnumerationActive_;
+                    && !folderEnumerationActive;
                 break;
             case ID_VIEW_RECURSIVE:
                 item.checked = recursiveBrowsingEnabled_;
@@ -21352,7 +21357,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::LoadFolderAsync(std::wstring folderPath, bool historyNavigation)
     {
-        if (folderPath.empty() || !browserModel_ || !folderEnumerationService_)
+        if (folderPath.empty() || !browserModel_ || !folderEnumerationCoordinator_)
         {
             return;
         }
@@ -21369,13 +21374,6 @@ namespace hyperbrowse::ui
         folderPath = NormalizeFolderPath(std::move(folderPath));
 
         util::LogInfo(L"Queueing folder enumeration for " + folderPath);
-        if (folderEnumerationPresentationTimerId_ != 0)
-        {
-            KillTimer(hwnd_, folderEnumerationPresentationTimerId_);
-            folderEnumerationPresentationTimerId_ = 0;
-        }
-        folderEnumerationPresentationPending_ = false;
-        folderEnumerationFirstBatchPresented_ = false;
         if (folderWatchService_)
         {
             folderWatchService_->Stop();
@@ -21396,51 +21394,25 @@ namespace hyperbrowse::ui
         UpdateStatusText();
         UpdateWindowTitle();
         UpdateWindow(browserPane_);
-        activeEnumerationRequestId_ = folderEnumerationService_->EnumerateFolderAsync(
+        folderEnumerationCoordinator_->Start(
             hwnd_,
             std::move(folderPath),
             recursiveBrowsingEnabled_,
             showSubfoldersInBrowser_);
-        folderEnumerationActive_ = true;
         UpdateStatusText();
         ShowSelectedFolderInTree();
     }
 
-    void MainWindow::ScheduleFolderEnumerationPresentation()
+    bool MainWindow::FlushFolderEnumerationPresentation(bool clearStartupPathsIfNotFound)
     {
-        folderEnumerationPresentationPending_ = true;
-        if (folderEnumerationPresentationTimerId_ == 0)
-        {
-            folderEnumerationPresentationTimerId_ = SetTimer(
-                hwnd_,
-                kFolderEnumerationPresentationTimerId,
-                kFolderEnumerationPresentationIntervalMs,
-                nullptr);
-        }
-    }
-
-    void MainWindow::FlushFolderEnumerationPresentation(bool clearStartupPathsIfNotFound)
-    {
-        if (folderEnumerationPresentationTimerId_ != 0)
-        {
-            KillTimer(hwnd_, folderEnumerationPresentationTimerId_);
-            folderEnumerationPresentationTimerId_ = 0;
-        }
-
-        if (!folderEnumerationPresentationPending_ && !clearStartupPathsIfNotFound)
-        {
-            return;
-        }
-
-        folderEnumerationPresentationPending_ = false;
         if (!clearStartupPathsIfNotFound
-            && folderEnumerationActive_
+            && folderEnumerationCoordinator_
+            && folderEnumerationCoordinator_->IsActive()
             && browserModel_
             && browserModel_->IsRecursive()
             && browserModel_->Items().size() > kDeferredLargeFolderPresentationItemLimit)
         {
-            ScheduleFolderEnumerationPresentation();
-            return;
+            return false;
         }
 
         util::ScopedTimer timer(L"MainWindow::FlushFolderEnumerationPresentation");
@@ -21450,64 +21422,65 @@ namespace hyperbrowse::ui
         TryOpenPendingStartupViewerPath(clearStartupPathsIfNotFound);
         UpdateStatusText();
         UpdateWindowTitle();
+        return true;
     }
 
     LRESULT MainWindow::OnFolderEnumerationMessage(LPARAM lParam)
     {
-        std::unique_ptr<services::FolderEnumerationUpdate> update(
-            reinterpret_cast<services::FolderEnumerationUpdate*>(lParam));
-        if (!update || !browserModel_ || update->requestId != activeEnumerationRequestId_)
+        if (!folderEnumerationCoordinator_ || !browserModel_)
         {
             return 0;
         }
 
-        switch (update->kind)
+        FolderEnumerationCoordinator::Handlers handlers;
+        handlers.onBatch = [this](std::vector<browser::BrowserItem> items,
+                                  std::uint64_t totalCount,
+                                  std::uint64_t totalBytes)
         {
-        case services::FolderEnumerationUpdateKind::Batch:
-            browserModel_->AppendItems(std::move(update->items), update->totalCount, update->totalBytes);
-            if (!folderEnumerationFirstBatchPresented_)
-            {
-                folderEnumerationFirstBatchPresented_ = true;
-                folderEnumerationPresentationPending_ = true;
-                FlushFolderEnumerationPresentation(false);
-                return 0;
-            }
-            ScheduleFolderEnumerationPresentation();
-            return 0;
-        case services::FolderEnumerationUpdateKind::Completed:
+            browserModel_->AppendItems(std::move(items), totalCount, totalBytes);
+        };
+        handlers.onCompleted = [this](std::wstring folderPath,
+                                      std::uint64_t totalCount,
+                                      std::uint64_t)
+        {
             browserModel_->Complete();
-            folderEnumerationActive_ = false;
-            util::LogInfo(L"Completed folder enumeration for " + update->folderPath);
-            RecordOpenedFolderHistory(update->folderPath);
-            if (update->totalCount > 0)
+            util::LogInfo(L"Completed folder enumeration for " + folderPath);
+            RecordOpenedFolderHistory(folderPath);
+            if (totalCount > 0)
             {
-                RecordRecentFolder(update->folderPath);
+                RecordRecentFolder(folderPath);
             }
             if (folderWatchService_)
             {
-                activeFolderWatchRequestId_ = folderWatchService_->StartWatching(hwnd_, update->folderPath, browserModel_->IsRecursive());
+                activeFolderWatchRequestId_ = folderWatchService_->StartWatching(
+                    hwnd_,
+                    folderPath,
+                    browserModel_->IsRecursive());
             }
-            break;
-        case services::FolderEnumerationUpdateKind::Failed:
-            browserModel_->Fail(update->message);
-            folderEnumerationActive_ = false;
-            folderHistory_.CancelPendingNavigation();
-            util::LogError(update->message);
-            break;
-        default:
-            break;
-        }
 
-        FlushFolderEnumerationPresentation(true);
-        if (update->kind == services::FolderEnumerationUpdateKind::Completed
-            && viewerOpenedBeforeFolderEnumerationCompleted_)
+        };
+        handlers.onFailed = [this](std::wstring, std::wstring message)
         {
-            if (viewerWindow_ && viewerWindow_->IsOpen())
+            browserModel_->Fail(message);
+            folderHistory_.CancelPendingNavigation();
+            util::LogError(message);
+        };
+        handlers.onPresentation = [this](bool clearStartupPathsIfNotFound)
+        {
+            return FlushFolderEnumerationPresentation(clearStartupPathsIfNotFound);
+        };
+        handlers.onSettled = [this](bool completed)
+        {
+            if (completed && viewerOpenedBeforeFolderEnumerationCompleted_)
             {
-                SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
+                if (viewerWindow_ && viewerWindow_->IsOpen())
+                {
+                    SyncViewerToBrowserModel(viewerWindow_->CurrentFilePath());
+                }
+                viewerOpenedBeforeFolderEnumerationCompleted_ = false;
             }
-            viewerOpenedBeforeFolderEnumerationCompleted_ = false;
-        }
+        };
+        folderEnumerationCoordinator_->HandleMessage(lParam, handlers);
         return 0;
     }
 
@@ -25131,7 +25104,7 @@ namespace hyperbrowse::ui
                 SetCursor(LoadCursorW(nullptr, IDC_HAND));
                 return TRUE;
             }
-            if (folderEnumerationActive_
+            if ((folderEnumerationCoordinator_ && folderEnumerationCoordinator_->IsActive())
                 || !pendingFolderTreeEnumerationItems_.empty()
                 || !pendingFolderTreeChildPresenceItems_.empty())
             {
@@ -25291,10 +25264,14 @@ namespace hyperbrowse::ui
                 }
                 return 0;
             }
-            if (wParam == kFolderEnumerationPresentationTimerId
-                && folderEnumerationPresentationTimerId_ != 0)
+            if (wParam == FolderEnumerationCoordinator::kPresentationTimerId
+                && folderEnumerationCoordinator_)
             {
-                FlushFolderEnumerationPresentation(false);
+                folderEnumerationCoordinator_->HandlePresentationTimer(
+                    [this](bool clearStartupPathsIfNotFound)
+                    {
+                        return FlushFolderEnumerationPresentation(clearStartupPathsIfNotFound);
+                    });
                 return 0;
             }
             if (wParam == kMemoryPressureTimerId && memoryPressureTimerId_ != 0)
@@ -25665,11 +25642,6 @@ namespace hyperbrowse::ui
                 UnregisterPowerSettingNotification(monitorPowerNotify_);
                 monitorPowerNotify_ = nullptr;
             }
-            if (folderEnumerationPresentationTimerId_ != 0)
-            {
-                KillTimer(hwnd_, folderEnumerationPresentationTimerId_);
-                folderEnumerationPresentationTimerId_ = 0;
-            }
             KillTimer(hwnd_, kFileOperationShutdownTimerId);
             if (memoryPressureTimerId_ != 0)
             {
@@ -25677,9 +25649,9 @@ namespace hyperbrowse::ui
                 memoryPressureTimerId_ = 0;
             }
             memoryPressureExecutor_.reset();
-            if (folderEnumerationService_)
+            if (folderEnumerationCoordinator_)
             {
-                folderEnumerationService_->Cancel();
+                folderEnumerationCoordinator_->Cancel();
             }
             if (folderTreeEnumerationService_)
             {

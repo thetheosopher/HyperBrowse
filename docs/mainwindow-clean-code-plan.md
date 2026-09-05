@@ -10,8 +10,9 @@ testable state transitions, not an arbitrary line-count target.
 currently contains several independent state machines: folder navigation and
 enumeration, folder-tree coordination, file-operation reconciliation, viewer
 synchronization, menus, settings, details and Quick Actions presentation,
-drag/drop, rendering, and shutdown. The dialog and file-operation policy
-extractions have reduced the current translation unit to 23,488 lines.
+drag/drop, rendering, and shutdown. Dialog, file-operation policy, and
+folder-enumeration coordination extractions have reduced the current
+translation unit to 23,463 lines.
 
 ## Guardrails
 
@@ -161,4 +162,9 @@ tracked below.
   implementations into `src/ui/MainWindowDialogs.*`. The dialog slice reduced
   `MainWindow.cpp` from 27,035 to 23,488 lines; the new translation unit owns
   the 1,303 lines of modal dialog state and preview behavior.
-- [ ] Extract folder-navigation coordinators.
+- [x] Extract folder-enumeration request, cancellation, stale-result, first-batch,
+  presentation-coalescing, timer, and settled-callback coordination into
+  `src/ui/FolderEnumerationCoordinator.*`. This slice reduced `MainWindow.cpp`
+  from 23,488 to 23,463 lines while keeping browser refresh, history, watcher,
+  and viewer synchronization callbacks in `MainWindow`.
+- [ ] Extract folder-tree and remaining folder-navigation coordinators.
