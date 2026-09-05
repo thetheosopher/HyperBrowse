@@ -23,6 +23,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - WIC baseline decode path, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
+- Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
 - Quick Actions with saved destinations, persistent key assignments, F7 move, and F8 copy for the currently displayed image or selected browser files.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
@@ -44,7 +45,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 | Viewer | Separate viewer window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
-| Performance pipeline | Prioritized thumbnail scheduling, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, viewer prefetch, folder watch refresh, and optional GPU-assisted JPEG decode |
+| Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, folder watch refresh, and optional GPU-assisted JPEG decode |
 | Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
 
 ### Viewer Quick Actions
@@ -207,7 +208,7 @@ ctest --preset release-tests
 
 The smoke coverage includes folder enumeration, folder tree enumeration, thumbnail scheduling and caching, WIC decode behavior, LibRaw decode behavior, metadata caching, file operations, batch convert cancellation, browser selection behavior, viewer interaction, and persisted UI state.
 
-The consolidated Settings dialog is available from View > Settings or with Ctrl+Shift+T. Its Slideshow, Viewer, Appearance, Performance, and Behavior tabs stage changes until Apply or OK; Cancel and closing the dialog discard uncommitted changes.
+The consolidated Settings dialog is available from View > Settings or with Ctrl+Shift+T. Its Slideshow, Viewer, Appearance, Performance, and Behavior tabs stage changes until Apply or OK; Cancel and closing the dialog discard uncommitted changes. Performance includes the resource profile, adaptive or explicit cache caps, and Auto or explicit 1-16 item prefetch depth.
 
 The Direct2D/DirectWrite Settings surface is the default. Set `HYPERBROWSE_SETTINGS_UI=legacy` before launching HyperBrowse to use the classic native dialog. HyperBrowse also falls back to the classic dialog automatically if the Direct2D surface cannot be created.
 

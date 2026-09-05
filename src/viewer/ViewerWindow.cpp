@@ -1365,6 +1365,24 @@ namespace hyperbrowse::viewer
         }
     }
 
+    void ViewerWindow::SetPrefetchDepthOverride(int depth) noexcept
+    {
+        const int normalizedDepth = depth == util::kAutomaticPrefetchDepth
+            ? util::kAutomaticPrefetchDepth
+            : std::clamp(depth, util::kMinimumPrefetchDepth, util::kMaximumPrefetchDepth);
+        if (prefetchDepthOverride_ == normalizedDepth)
+        {
+            return;
+        }
+
+        prefetchDepthOverride_ = normalizedDepth;
+        if (hwnd_ && currentImage_ && !pendingLoadActive_)
+        {
+            const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+            ScheduleAdjacentPrefetch(navigationGeneration);
+        }
+    }
+
     void ViewerWindow::SetDarkTheme(bool enabled)
     {
         darkTheme_ = enabled;
@@ -1838,18 +1856,7 @@ namespace hyperbrowse::viewer
 
     int ViewerWindow::BasePrefetchRadius() const noexcept
     {
-        switch (resourceProfile_)
-        {
-        case util::ResourceProfile::Conservative:
-            return 1;
-        case util::ResourceProfile::Performance:
-            return 6;
-        case util::ResourceProfile::Aggressive:
-            return 10;
-        case util::ResourceProfile::Balanced:
-        default:
-            return 3;
-        }
+        return util::ResolvePrefetchDepth(resourceProfile_, prefetchDepthOverride_);
     }
 
     int ViewerWindow::EffectivePrefetchRadius() const noexcept

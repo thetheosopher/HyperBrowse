@@ -153,6 +153,7 @@ namespace hyperbrowse::viewer
         void SetAppTextSize(util::AppTextSize size);
         void SetMemoryPressureActive(bool active);
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
+        void SetPrefetchDepthOverride(int depth) noexcept;
         void SetDarkTheme(bool enabled);
         bool ReplaceItems(std::vector<browser::BrowserItem> items, int selectedIndex);
         bool GetDeleteCurrentPaths(std::wstring* sourcePath, std::wstring* preferredFocusPath) const;
@@ -321,6 +322,7 @@ namespace hyperbrowse::viewer
         bool loading_{};
         std::wstring errorMessage_;
         util::ResourceProfile resourceProfile_{util::ResourceProfile::Balanced};
+        int prefetchDepthOverride_{util::kAutomaticPrefetchDepth};
         bool memoryPressureActive_{};
         std::shared_ptr<const cache::CachedThumbnail> currentImage_;
         CachedImageSlot currentSlot_;

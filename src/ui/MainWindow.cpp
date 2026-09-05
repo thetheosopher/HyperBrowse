@@ -111,6 +111,7 @@ namespace
     constexpr wchar_t kRegistryValueDefaultViewerToSecondaryMonitor[] = L"DefaultViewerToSecondaryMonitor";
     constexpr wchar_t kRegistryValuePersistentThumbnailCacheEnabled[] = L"PersistentThumbnailCacheEnabled";
     constexpr wchar_t kRegistryValueResourceProfile[] = L"ResourceProfile";
+    constexpr wchar_t kRegistryValuePrefetchDepthOverride[] = L"PrefetchDepthOverride";
     constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
     constexpr wchar_t kRegistryValueShowPressureStateInStatusBar[] = L"ShowPressureStateInStatusBar";
@@ -450,6 +451,8 @@ namespace
         EscapeKeyBehavior,
         WindowedFullMetadata,
         FullScreenFullMetadata,
+        PrefetchDepth,
+        PrefetchDepthAutomatic,
         Count,
     };
 
@@ -904,6 +907,7 @@ namespace
         hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
         bool darkTheme{};
         hyperbrowse::util::ResourceProfile resourceProfile{hyperbrowse::util::ResourceProfile::Balanced};
+        int prefetchDepthOverride{hyperbrowse::util::kAutomaticPrefetchDepth};
         hyperbrowse::browser::ThumbnailSizePreset thumbnailSizePreset{static_cast<hyperbrowse::browser::ThumbnailSizePreset>(192)};
         hyperbrowse::viewer::MouseWheelBehavior viewerMouseWheelBehavior{hyperbrowse::viewer::MouseWheelBehavior::Zoom};
         hyperbrowse::viewer::EscapeKeyBehavior viewerEscapeKeyBehavior{hyperbrowse::viewer::EscapeKeyBehavior::Close};
@@ -977,8 +981,8 @@ namespace
         std::array<HWND, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> nativeControls{};
         std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> tabRects{};
         std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controlRects{};
-        std::array<HWND, 4> numericEdits{};
-        std::array<HWND, 4> numericSpins{};
+        std::array<HWND, 5> numericEdits{};
+        std::array<HWND, 5> numericSpins{};
         std::vector<ExperimentalSettingsLabel> labels;
         RECT applyButtonRect{};
         RECT okButtonRect{};
@@ -5009,10 +5013,13 @@ namespace
             && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic), BM_GETCHECK, 0, 0) == BST_CHECKED;
         const bool metadataAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic)
             && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        const bool prefetchAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::PrefetchDepthAutomatic)
+            && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::PrefetchDepthAutomatic), BM_GETCHECK, 0, 0) == BST_CHECKED;
         EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPreferJpeg), rawPairingEnabled);
         EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPreferRaw), rawPairingEnabled);
         EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCache), !thumbnailAutomatic);
         EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCache), !metadataAutomatic);
+        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::PrefetchDepth), !prefetchAutomatic);
     }
 
     void UpdateConsolidatedSettingsCacheValues(
@@ -5022,7 +5029,8 @@ namespace
         const HWND profileCombo = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ResourceProfile);
         const HWND thumbnailAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic);
         const HWND metadataAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic);
-        if (!profileCombo || !thumbnailAutomatic || !metadataAutomatic)
+        const HWND prefetchAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::PrefetchDepthAutomatic);
+        if (!profileCombo || !thumbnailAutomatic || !metadataAutomatic || !prefetchAutomatic)
         {
             return;
         }
@@ -5054,6 +5062,10 @@ namespace
             ConsolidatedSettingsControl::MetadataCacheAutomatic,
             ConsolidatedSettingsControl::MetadataCache,
             hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, profile));
+        updateCacheValue(
+            ConsolidatedSettingsControl::PrefetchDepthAutomatic,
+            ConsolidatedSettingsControl::PrefetchDepth,
+            static_cast<std::size_t>(hyperbrowse::util::ResolvePrefetchDepth(profile, hyperbrowse::util::kAutomaticPrefetchDepth)));
     }
 
     void ShowConsolidatedSettingsPage(ConsolidatedSettingsDialogState& state, ConsolidatedSettingsPage page)
@@ -5137,6 +5149,19 @@ namespace
             return false;
         }
 
+        const bool prefetchAutomatic = isChecked(ConsolidatedSettingsControl::PrefetchDepthAutomatic);
+        UINT prefetchDepth = 0;
+        if (!prefetchAutomatic
+            && !TryReadDialogUInt(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::PrefetchDepth),
+                                  static_cast<UINT>(hyperbrowse::util::kMinimumPrefetchDepth),
+                                  static_cast<UINT>(hyperbrowse::util::kMaximumPrefetchDepth),
+                                  &prefetchDepth))
+        {
+            MessageBoxW(hwnd, L"Prefetch depth must be between 1 and 16, or keep Follow profile enabled.", state->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::PrefetchDepth));
+            return false;
+        }
+
         const int wheelIndex = isChecked(ConsolidatedSettingsControl::ViewerWheelNavigate) ? 1 : 0;
         const int overlaySizeIndex = comboIndex(ConsolidatedSettingsControl::OverlayTextSize);
         const int escapeKeyBehaviorIndex = comboIndex(ConsolidatedSettingsControl::EscapeKeyBehavior);
@@ -5181,6 +5206,9 @@ namespace
             ? 0
             : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(thumbnailMegabytes) * 1024ULL * 1024ULL);
         state->metadataCacheCapacityOverrideEntries = metadataAutomatic ? 0 : metadataEntries;
+        state->prefetchDepthOverride = prefetchAutomatic
+            ? hyperbrowse::util::kAutomaticPrefetchDepth
+            : static_cast<int>(prefetchDepth);
         state->showPressureStateInStatusBar = isChecked(ConsolidatedSettingsControl::PressureStatus);
         state->nvJpegEnabled = isChecked(ConsolidatedSettingsControl::NvJpeg);
         state->libRawOutOfProcessEnabled = isChecked(ConsolidatedSettingsControl::LibRawOutOfProcess);
@@ -5284,7 +5312,8 @@ namespace
                 L"Theme",
                 L"Resource profile",
                 L"Thumbnail cache cap (MB)",
-                L"Metadata cache cap (entries)"};
+                L"Metadata cache cap (entries)",
+                L"Prefetch depth (items)"};
             const std::array checkboxTexts{
                 L"Use slideshow transitions",
                 L"Treat paired RAW+JPEG files as one operation",
@@ -5452,6 +5481,10 @@ namespace
             edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCache, y);
             check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y + 30);
             y += rowHeight + rowGap + 34;
+            label(ConsolidatedSettingsPage::Performance, L"Prefetch depth (items)", y);
+            edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PrefetchDepth, y);
+            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PrefetchDepthAutomatic, L"Follow profile", y + 30);
+            y += rowHeight + rowGap + 34;
             check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PressureStatus, L"Show memory pressure state in the status bar", y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::NvJpeg, L"Use NVIDIA JPEG acceleration when available", y);
@@ -5522,6 +5555,11 @@ namespace
                            std::to_wstring(state->thumbnailCacheCapacityOverrideBytes / (1024ULL * 1024ULL)).c_str());
             SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::MetadataCache),
                            std::to_wstring(state->metadataCacheCapacityOverrideEntries).c_str());
+            const int prefetchDepth = state->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth
+                ? hyperbrowse::util::ResolvePrefetchDepth(state->resourceProfile, hyperbrowse::util::kAutomaticPrefetchDepth)
+                : state->prefetchDepthOverride;
+            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::PrefetchDepth),
+                           std::to_wstring(prefetchDepth).c_str());
             SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin), UDM_SETBUDDY,
                          reinterpret_cast<WPARAM>(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration)), 0);
             SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin), UDM_SETRANGE32,
@@ -5549,6 +5587,8 @@ namespace
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::PersistentCache, state->persistentThumbnailCacheEnabled);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic, state->thumbnailCacheCapacityOverrideBytes == 0);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::MetadataCacheAutomatic, state->metadataCacheCapacityOverrideEntries == 0);
+            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::PrefetchDepthAutomatic,
+                                         state->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::PressureStatus, state->showPressureStateInStatusBar);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::NvJpeg, state->nvJpegEnabled);
             SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::LibRawOutOfProcess, state->libRawOutOfProcessEnabled);
@@ -5800,13 +5840,16 @@ namespace
             if (HIWORD(wParam) == BN_CLICKED
                 && (LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::RawPairingEnabled)
                     || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
-                    || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::MetadataCacheAutomatic)))
+                    || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::MetadataCacheAutomatic)
+                    || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::PrefetchDepthAutomatic)))
             {
                 UpdateConsolidatedSettingsDependencies(*state);
                 const auto changedControl = LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
                     ? ConsolidatedSettingsControl::ThumbnailCacheAutomatic
                     : LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::MetadataCacheAutomatic)
                         ? ConsolidatedSettingsControl::MetadataCacheAutomatic
+                        : LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::PrefetchDepthAutomatic)
+                            ? ConsolidatedSettingsControl::PrefetchDepthAutomatic
                         : ConsolidatedSettingsControl::Count;
                 UpdateConsolidatedSettingsCacheValues(*state, changedControl);
             }
@@ -6125,6 +6168,10 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y);
             y += rowHeight + rowGap;
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Prefetch depth (items)");
+            y += rowHeight + rowGap;
+            check(ConsolidatedSettingsControl::PrefetchDepthAutomatic, L"Follow profile", y);
+            y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::PressureStatus, L"Show memory pressure state in the status bar", y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::NvJpeg, L"Use NVIDIA JPEG acceleration when available", y);
@@ -6151,11 +6198,13 @@ namespace
         const int transitionDurationY = slideshowDurationY + rowHeight + rowGap;
         const int thumbnailCacheY = contentTop + (rowHeight + rowGap) * 2;
         const int metadataCacheY = thumbnailCacheY + (rowHeight + rowGap) * 2;
-        const std::array<std::pair<HWND, RECT>, 4> edits{
+        const int prefetchDepthY = thumbnailCacheY + (rowHeight + rowGap) * 4;
+        const std::array<std::pair<HWND, RECT>, 5> edits{
             std::pair{state.numericEdits[0], RECT{valueLeft, slideshowDurationY, valueLeft + editWidth, slideshowDurationY + editHeight}},
             std::pair{state.numericEdits[1], RECT{valueLeft, transitionDurationY, valueLeft + editWidth, transitionDurationY + editHeight}},
             std::pair{state.numericEdits[2], RECT{valueLeft, thumbnailCacheY, valueLeft + editWidth, thumbnailCacheY + editHeight}},
-            std::pair{state.numericEdits[3], RECT{valueLeft, metadataCacheY, valueLeft + editWidth, metadataCacheY + editHeight}}};
+            std::pair{state.numericEdits[3], RECT{valueLeft, metadataCacheY, valueLeft + editWidth, metadataCacheY + editHeight}},
+            std::pair{state.numericEdits[4], RECT{valueLeft, prefetchDepthY, valueLeft + editWidth, prefetchDepthY + editHeight}}};
         for (const auto& [edit, bounds] : edits)
         {
             if (edit)
@@ -6164,7 +6213,7 @@ namespace
                 SetWindowPos(edit, nullptr, bounds.left, bounds.top, adjustedRight - bounds.left, bounds.bottom - bounds.top,
                              SWP_NOZORDER | SWP_NOACTIVATE);
                 const bool visible = (state.page == ConsolidatedSettingsPage::Slideshow && (edit == state.numericEdits[0] || edit == state.numericEdits[1]))
-                    || (state.page == ConsolidatedSettingsPage::Performance && (edit == state.numericEdits[2] || edit == state.numericEdits[3]));
+                    || (state.page == ConsolidatedSettingsPage::Performance && (edit == state.numericEdits[2] || edit == state.numericEdits[3] || edit == state.numericEdits[4]));
                 ShowWindow(edit, visible ? SW_SHOW : SW_HIDE);
             }
         }
@@ -6174,7 +6223,7 @@ namespace
             {
                 continue;
             }
-            const RECT& editBounds = index == 0 ? edits[0].second : edits[1].second;
+            const RECT& editBounds = edits[index].second;
             const int spinTop = editBounds.top;
             SetWindowPos(state.numericSpins[index], nullptr, editBounds.right - spinWidth, spinTop,
                          spinWidth, editBounds.bottom - spinTop, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -6236,6 +6285,7 @@ namespace
         case ConsolidatedSettingsControl::PersistentCache: return settings.persistentThumbnailCacheEnabled;
         case ConsolidatedSettingsControl::ThumbnailCacheAutomatic: return settings.thumbnailCacheCapacityOverrideBytes == 0;
         case ConsolidatedSettingsControl::MetadataCacheAutomatic: return settings.metadataCacheCapacityOverrideEntries == 0;
+        case ConsolidatedSettingsControl::PrefetchDepthAutomatic: return settings.prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth;
         case ConsolidatedSettingsControl::PressureStatus: return settings.showPressureStateInStatusBar;
         case ConsolidatedSettingsControl::NvJpeg: return settings.nvJpegEnabled;
         case ConsolidatedSettingsControl::LibRawOutOfProcess: return settings.libRawOutOfProcessEnabled;
@@ -6336,6 +6386,11 @@ namespace
                     ? hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, settings.resourceProfile)
                     : 0;
                 return;
+            case ConsolidatedSettingsControl::PrefetchDepthAutomatic:
+                settings.prefetchDepthOverride = settings.prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth
+                    ? hyperbrowse::util::ResolvePrefetchDepth(settings.resourceProfile, hyperbrowse::util::kAutomaticPrefetchDepth)
+                    : hyperbrowse::util::kAutomaticPrefetchDepth;
+                return;
             default: break;
             }
             if (value)
@@ -6379,6 +6434,7 @@ namespace
         const auto profile = static_cast<hyperbrowse::util::ResourceProfile>(profileIndex);
         const bool thumbnailAutomatic = state.settings->thumbnailCacheCapacityOverrideBytes == 0;
         const bool metadataAutomatic = state.settings->metadataCacheCapacityOverrideEntries == 0;
+        const bool prefetchAutomatic = state.settings->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth;
         if (thumbnailAutomatic && state.numericEdits[2])
         {
             const auto capacityMegabytes = hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, profile)
@@ -6396,6 +6452,15 @@ namespace
             if (state.numericSpins[3])
             {
                 SendMessageW(state.numericSpins[3], UDM_SETPOS32, 0, static_cast<LPARAM>(capacityEntries));
+            }
+        }
+        if (prefetchAutomatic && state.numericEdits[4])
+        {
+            const int depth = hyperbrowse::util::ResolvePrefetchDepth(profile, hyperbrowse::util::kAutomaticPrefetchDepth);
+            SetWindowTextW(state.numericEdits[4], std::to_wstring(depth).c_str());
+            if (state.numericSpins[4])
+            {
+                SendMessageW(state.numericSpins[4], UDM_SETPOS32, 0, static_cast<LPARAM>(depth));
             }
         }
     }
@@ -6547,10 +6612,25 @@ namespace
             SetFocus(state.numericEdits[3]);
             return false;
         }
+        const bool prefetchAutomatic = state.settings->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth;
+        UINT prefetchDepth = 0;
+        if (!prefetchAutomatic
+            && !TryReadDialogUInt(state.numericEdits[4],
+                                  static_cast<UINT>(hyperbrowse::util::kMinimumPrefetchDepth),
+                                  static_cast<UINT>(hyperbrowse::util::kMaximumPrefetchDepth),
+                                  &prefetchDepth))
+        {
+            MessageBoxW(hwnd, L"Prefetch depth must be between 1 and 16, or keep Follow profile enabled.", state.settings->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(state.numericEdits[4]);
+            return false;
+        }
         state.settings->slideshowIntervalMs = slideshowDuration;
         state.settings->slideshowTransitionDurationMs = transitionDuration;
         state.settings->thumbnailCacheCapacityOverrideBytes = thumbnailAutomatic ? 0 : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(thumbnailMegabytes) * 1024ULL * 1024ULL);
         state.settings->metadataCacheCapacityOverrideEntries = metadataAutomatic ? 0 : metadataEntries;
+        state.settings->prefetchDepthOverride = prefetchAutomatic
+            ? hyperbrowse::util::kAutomaticPrefetchDepth
+            : static_cast<int>(prefetchDepth);
         return true;
     }
 
@@ -6632,11 +6712,15 @@ namespace
             const auto metadataCacheEntries = state->settings->metadataCacheCapacityOverrideEntries == 0
                 ? hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, profile)
                 : state->settings->metadataCacheCapacityOverrideEntries;
-            const std::array<std::pair<int, std::wstring>, 4> editValues{
+            const auto prefetchDepth = state->settings->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth
+                ? hyperbrowse::util::ResolvePrefetchDepth(profile, hyperbrowse::util::kAutomaticPrefetchDepth)
+                : state->settings->prefetchDepthOverride;
+            const std::array<std::pair<int, std::wstring>, 5> editValues{
                 std::pair{ES_NUMBER, std::to_wstring(state->settings->slideshowIntervalMs)},
                 std::pair{ES_NUMBER, std::to_wstring(state->settings->slideshowTransitionDurationMs)},
                 std::pair{ES_NUMBER, std::to_wstring(thumbnailCacheMegabytes)},
-                std::pair{ES_NUMBER, std::to_wstring(metadataCacheEntries)}};
+                std::pair{ES_NUMBER, std::to_wstring(metadataCacheEntries)},
+                std::pair{ES_NUMBER, std::to_wstring(prefetchDepth)}};
             for (std::size_t index = 0; index < state->numericEdits.size(); ++index)
             {
                 state->numericEdits[index] = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", editValues[index].second.c_str(),
@@ -6737,22 +6821,29 @@ namespace
                     SendMessageW(state->numericSpins[index], UDM_SETBUDDY,
                                  reinterpret_cast<WPARAM>(state->numericEdits[index]), 0);
                     const UINT minimum = index == 0 ? kSlideshowMinimumDurationMs : index == 1 ? kSlideshowMinimumTransitionDurationMs : 1;
-                    const UINT maximum = index == 0 ? kSlideshowMaximumDurationMs : index == 1 ? kSlideshowMaximumTransitionDurationMs : 2147483647U;
+                    const UINT maximum = index == 0 ? kSlideshowMaximumDurationMs
+                        : index == 1 ? kSlideshowMaximumTransitionDurationMs
+                        : index == 4 ? static_cast<UINT>(hyperbrowse::util::kMaximumPrefetchDepth)
+                        : 2147483647U;
                     SendMessageW(state->numericSpins[index], UDM_SETRANGE32,
                                  minimum, maximum);
                     SendMessageW(state->numericSpins[index], UDM_SETPOS32, 0,
                                  index == 0 ? state->settings->slideshowIntervalMs
                                      : index == 1 ? state->settings->slideshowTransitionDurationMs
                                      : index == 2 ? static_cast<int>(thumbnailCacheMegabytes)
-                                     : static_cast<int>(metadataCacheEntries));
+                                     : index == 3 ? static_cast<int>(metadataCacheEntries)
+                                     : prefetchDepth);
                 }
             }
             const bool thumbnailCacheAutomatic = state->settings->thumbnailCacheCapacityOverrideBytes == 0;
             const bool metadataCacheAutomatic = state->settings->metadataCacheCapacityOverrideEntries == 0;
+            const bool prefetchDepthAutomatic = state->settings->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth;
             EnableWindow(state->numericEdits[2], thumbnailCacheAutomatic ? FALSE : TRUE);
             EnableWindow(state->numericSpins[2], thumbnailCacheAutomatic ? FALSE : TRUE);
             EnableWindow(state->numericEdits[3], metadataCacheAutomatic ? FALSE : TRUE);
             EnableWindow(state->numericSpins[3], metadataCacheAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericEdits[4], prefetchDepthAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericSpins[4], prefetchDepthAutomatic ? FALSE : TRUE);
             ApplyExperimentalSettingsTheme(*state);
             LayoutExperimentalSettings(*state);
             return 0;
@@ -6895,13 +6986,20 @@ namespace
                         EnableWindow(state->numericEdits[3], enabled ? TRUE : FALSE);
                         EnableWindow(state->numericSpins[3], enabled ? TRUE : FALSE);
                     }
+                    else if (control == ConsolidatedSettingsControl::PrefetchDepthAutomatic)
+                    {
+                        const bool enabled = !ExperimentalSettingsChecked(*state->settings, control);
+                        EnableWindow(state->numericEdits[4], enabled ? TRUE : FALSE);
+                        EnableWindow(state->numericSpins[4], enabled ? TRUE : FALSE);
+                    }
                     if (control == ConsolidatedSettingsControl::ThemeLight
                         || control == ConsolidatedSettingsControl::ThemeDark)
                     {
                         ApplyExperimentalSettingsTheme(*state);
                     }
                     if (control == ConsolidatedSettingsControl::ThumbnailCacheAutomatic
-                        || control == ConsolidatedSettingsControl::MetadataCacheAutomatic)
+                        || control == ConsolidatedSettingsControl::MetadataCacheAutomatic
+                        || control == ConsolidatedSettingsControl::PrefetchDepthAutomatic)
                     {
                         UpdateExperimentalSettingsCacheValues(*state);
                     }
@@ -16267,6 +16365,7 @@ namespace hyperbrowse::ui
         ApplyViewerTransitionSettings();
         viewerWindow_->SetAppTextSize(appTextSize_);
         viewerWindow_->SetResourceProfile(resourceProfile_);
+        viewerWindow_->SetPrefetchDepthOverride(prefetchDepthOverride_);
         viewerWindow_->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
         viewerWindow_->SetEscapeKeyBehavior(viewerEscapeKeyBehavior_);
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
@@ -21955,11 +22054,13 @@ namespace hyperbrowse::ui
         if (browserPaneController_)
         {
             browserPaneController_->SetResourceProfile(resourceProfile_);
+            browserPaneController_->SetPrefetchDepthOverride(prefetchDepthOverride_);
         }
 
         if (viewerWindow_)
         {
             viewerWindow_->SetResourceProfile(resourceProfile_);
+            viewerWindow_->SetPrefetchDepthOverride(prefetchDepthOverride_);
         }
 
         RecreateDetailsPanelThumbnailScheduler();
@@ -22331,6 +22432,7 @@ namespace hyperbrowse::ui
         state.appTextSize = appTextSize_;
         state.darkTheme = themeMode_ == ThemeMode::Dark;
         state.resourceProfile = resourceProfile_;
+        state.prefetchDepthOverride = prefetchDepthOverride_;
         state.thumbnailSizePreset = thumbnailSizePreset_;
         state.viewerMouseWheelBehavior = viewerMouseWheelBehavior_;
         state.viewerEscapeKeyBehavior = viewerEscapeKeyBehavior_;
@@ -22419,6 +22521,9 @@ namespace hyperbrowse::ui
             compactThumbnailLayout_ = draft.compactThumbnailLayout;
             detailsStripVisible_ = draft.detailsStripVisible;
             resourceProfile_ = draft.resourceProfile;
+            prefetchDepthOverride_ = hyperbrowse::util::ResolvePrefetchDepth(resourceProfile_, draft.prefetchDepthOverride) == draft.prefetchDepthOverride
+                ? draft.prefetchDepthOverride
+                : hyperbrowse::util::kAutomaticPrefetchDepth;
             persistentThumbnailCacheEnabled_ = draft.persistentThumbnailCacheEnabled;
             thumbnailCacheCapacityOverrideBytes_ = draft.thumbnailCacheCapacityOverrideBytes;
             metadataCacheCapacityOverrideEntries_ = draft.metadataCacheCapacityOverrideEntries;
@@ -22794,6 +22899,12 @@ namespace hyperbrowse::ui
                 TryParseResourceProfile(value, &resourceProfile_);
             }
 
+            if (TryReadDwordValue(key, kRegistryValuePrefetchDepthOverride, &value)
+                && value <= static_cast<DWORD>(hyperbrowse::util::kMaximumPrefetchDepth))
+            {
+                prefetchDepthOverride_ = static_cast<int>(value);
+            }
+
             if (TryReadDwordValue(key, kRegistryValueShowPressureStateInStatusBar, &value))
             {
                 showPressureStateInStatusBar_ = value != 0;
@@ -22937,6 +23048,10 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueDefaultViewerToSecondaryMonitor, defaultViewerToSecondaryMonitor_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, persistentThumbnailCacheEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueResourceProfile, static_cast<DWORD>(resourceProfile_));
+            WriteDwordValue(key, kRegistryValuePrefetchDepthOverride, static_cast<DWORD>(std::clamp(
+                prefetchDepthOverride_,
+                hyperbrowse::util::kAutomaticPrefetchDepth,
+                hyperbrowse::util::kMaximumPrefetchDepth)));
             WriteDwordValue(key, kRegistryValueShowPressureStateInStatusBar, showPressureStateInStatusBar_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueCloseMainWindowOnEscape, closeMainWindowOnEscape_ ? 1UL : 0UL);
             WriteQwordValue(key, kRegistryValueThumbnailCacheCapacityOverrideBytes, static_cast<std::uint64_t>(thumbnailCacheCapacityOverrideBytes_));

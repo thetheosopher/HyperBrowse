@@ -62,68 +62,32 @@ namespace
     constexpr std::wstring_view kThumbnailRatingStars = L"\x2605\x2605\x2605\x2605\x2605";
     constexpr COLORREF kThumbnailRatingGold = RGB(214, 172, 46);
 
-    int TopOfFolderThumbnailWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
+    int TopOfFolderThumbnailWarmUpMultiplier(int prefetchDepth)
     {
-        switch (profile)
-        {
-        case hyperbrowse::util::ResourceProfile::Conservative:
-            return 3;
-        case hyperbrowse::util::ResourceProfile::Performance:
-            return 7;
-        case hyperbrowse::util::ResourceProfile::Aggressive:
-            return 10;
-        case hyperbrowse::util::ResourceProfile::Balanced:
-        default:
-            return 5;
-        }
+        return std::clamp(prefetchDepth + 2,
+                          kThumbnailMinimumTopOfFolderPrefetchRows,
+                          kThumbnailMaximumTopOfFolderPrefetchRows);
     }
 
-    int LookAheadThumbnailWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
+    int LookAheadThumbnailWarmUpMultiplier(int prefetchDepth)
     {
-        switch (profile)
-        {
-        case hyperbrowse::util::ResourceProfile::Conservative:
-            return 1;
-        case hyperbrowse::util::ResourceProfile::Performance:
-            return 3;
-        case hyperbrowse::util::ResourceProfile::Aggressive:
-            return 5;
-        case hyperbrowse::util::ResourceProfile::Balanced:
-        default:
-            return 2;
-        }
+        return std::clamp(prefetchDepth,
+                          kThumbnailMinimumLookAheadPrefetchRows,
+                          kThumbnailMaximumLookAheadPrefetchRows);
     }
 
-    int TopOfFolderMetadataWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
+    int TopOfFolderMetadataWarmUpMultiplier(int prefetchDepth)
     {
-        switch (profile)
-        {
-        case hyperbrowse::util::ResourceProfile::Conservative:
-            return 4;
-        case hyperbrowse::util::ResourceProfile::Performance:
-            return 8;
-        case hyperbrowse::util::ResourceProfile::Aggressive:
-            return 12;
-        case hyperbrowse::util::ResourceProfile::Balanced:
-        default:
-            return 6;
-        }
+        return std::clamp(prefetchDepth * 2,
+                          kMetadataMinimumTopOfFolderPrefetchRows,
+                          kMetadataMaximumTopOfFolderPrefetchRows);
     }
 
-    int LookAheadMetadataWarmUpMultiplier(hyperbrowse::util::ResourceProfile profile)
+    int LookAheadMetadataWarmUpMultiplier(int prefetchDepth)
     {
-        switch (profile)
-        {
-        case hyperbrowse::util::ResourceProfile::Conservative:
-            return 2;
-        case hyperbrowse::util::ResourceProfile::Performance:
-            return 4;
-        case hyperbrowse::util::ResourceProfile::Aggressive:
-            return 6;
-        case hyperbrowse::util::ResourceProfile::Balanced:
-        default:
-            return 3;
-        }
+        return std::clamp(prefetchDepth,
+                          kMetadataMinimumLookAheadPrefetchRows,
+                          kMetadataMaximumLookAheadPrefetchRows);
     }
 
     const wchar_t* UnavailableThumbnailMessage(hyperbrowse::decode::ThumbnailDecodeFailureKind failureKind)
@@ -1099,6 +1063,33 @@ namespace hyperbrowse::browser
         {
             RefreshFromModel();
         }
+    }
+
+    void BrowserPane::SetPrefetchDepthOverride(int depth)
+    {
+        const int normalizedDepth = depth == hyperbrowse::util::kAutomaticPrefetchDepth
+            ? hyperbrowse::util::kAutomaticPrefetchDepth
+            : std::clamp(depth,
+                         hyperbrowse::util::kMinimumPrefetchDepth,
+                         hyperbrowse::util::kMaximumPrefetchDepth);
+        if (prefetchDepthOverride_ == normalizedDepth)
+        {
+            return;
+        }
+
+        prefetchDepthOverride_ = normalizedDepth;
+        ScheduleVisibleThumbnailWork();
+        ScheduleVisibleMetadataWork();
+    }
+
+    int BrowserPane::EffectivePrefetchDepth() const noexcept
+    {
+        if (thumbnailMemoryPressureActive_)
+        {
+            return hyperbrowse::util::kMinimumPrefetchDepth;
+        }
+
+        return hyperbrowse::util::ResolvePrefetchDepth(resourceProfile_, prefetchDepthOverride_);
     }
 
     void BrowserPane::SetThumbnailMemoryPressureActive(bool active)
@@ -3140,11 +3131,12 @@ namespace hyperbrowse::browser
             const int firstVisibleRow = std::max(0, scrollOffsetY_ / verticalStride);
             const int lastVisibleRow = std::max(firstVisibleRow, (scrollOffsetY_ + clientHeight) / verticalStride);
             const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
+            const int prefetchDepth = EffectivePrefetchDepth();
             const int proactivePrefetchRows = scrollOffsetY_ == 0
-                ? std::clamp(visibleRowCount * TopOfFolderMetadataWarmUpMultiplier(resourceProfile_),
+                ? std::clamp(visibleRowCount * TopOfFolderMetadataWarmUpMultiplier(prefetchDepth),
                              kMetadataMinimumTopOfFolderPrefetchRows,
                              kMetadataMaximumTopOfFolderPrefetchRows)
-                : std::clamp(visibleRowCount * LookAheadMetadataWarmUpMultiplier(resourceProfile_),
+                : std::clamp(visibleRowCount * LookAheadMetadataWarmUpMultiplier(prefetchDepth),
                              kMetadataMinimumLookAheadPrefetchRows,
                              kMetadataMaximumLookAheadPrefetchRows);
             const int requestStartRow = std::max(0, firstVisibleRow - kMetadataNearVisiblePrefetchRows);
@@ -3187,11 +3179,12 @@ namespace hyperbrowse::browser
             const int topIndex = std::max(0, ListView_GetTopIndex(detailsList_));
             const int visibleCount = std::max(1, ListView_GetCountPerPage(detailsList_));
             const int nearVisibleCount = std::max(visibleCount, kMinimumDetailsMetadataNearVisibleItems);
+            const int prefetchDepth = EffectivePrefetchDepth();
             const int proactivePrefetchCount = topIndex == 0
-                ? std::clamp(visibleCount * TopOfFolderMetadataWarmUpMultiplier(resourceProfile_),
+                ? std::clamp(visibleCount * TopOfFolderMetadataWarmUpMultiplier(prefetchDepth),
                              kMinimumDetailsMetadataTopOfFolderItems,
                              kMaximumDetailsMetadataTopOfFolderItems)
-                : std::clamp(visibleCount * LookAheadMetadataWarmUpMultiplier(resourceProfile_),
+                : std::clamp(visibleCount * LookAheadMetadataWarmUpMultiplier(prefetchDepth),
                              kMinimumDetailsMetadataLookAheadItems,
                              kMaximumDetailsMetadataLookAheadItems);
             const int firstIndex = std::max(0, topIndex - nearVisibleCount);
@@ -3266,15 +3259,18 @@ namespace hyperbrowse::browser
         const int visibleRowCount = std::max(1, (lastVisibleRow - firstVisibleRow) + 1);
         const bool activelyScrolling = thumbnailScrollbarThumbTracking_ || smoothScrollTimerId_ != 0;
         const bool loadingFolder = model_->IsEnumerating();
+        const int prefetchDepth = EffectivePrefetchDepth();
         const int proactivePrefetchRows = activelyScrolling
-            ? kThumbnailActiveScrollPrefetchRows
+            ? std::clamp(prefetchDepth,
+                         kThumbnailActiveScrollPrefetchRows,
+                         kThumbnailMaximumLookAheadPrefetchRows)
             : (loadingFolder
                 ? kThumbnailNearVisiblePrefetchRows
                 : (scrollOffsetY_ == 0
-                    ? std::clamp(visibleRowCount * TopOfFolderThumbnailWarmUpMultiplier(resourceProfile_),
+                    ? std::clamp(visibleRowCount * TopOfFolderThumbnailWarmUpMultiplier(prefetchDepth),
                                  kThumbnailMinimumTopOfFolderPrefetchRows,
                                  kThumbnailMaximumTopOfFolderPrefetchRows)
-                    : std::clamp(visibleRowCount * LookAheadThumbnailWarmUpMultiplier(resourceProfile_),
+                    : std::clamp(visibleRowCount * LookAheadThumbnailWarmUpMultiplier(prefetchDepth),
                                  kThumbnailMinimumLookAheadPrefetchRows,
                                  kThumbnailMaximumLookAheadPrefetchRows)));
         const int backwardPrefetchRows = thumbnailScrollDirection_ < 0

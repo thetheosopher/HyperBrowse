@@ -70,48 +70,49 @@ asked**.
 **Goal:** A first-class, user-visible resource profile that drives every
 cache budget, worker count, and prefetch depth from a single decision.
 
-**Implementation status:** In progress. `2026-05-16` shipped the first code
-slice: a persisted `Conservative` / `Balanced` / `Performance` profile is now
-wired into automatic thumbnail-cache sizing, metadata-cache sizing, thumbnail
-worker counts, and metadata worker counts, with a menu surface under
-**Help ▸ Performance Profile**. A follow-up slice on `2026-05-16` also wired
-the profile into viewer prefetch radius and added explicit cache-cap override
-controls through a minimal performance settings dialog. Remaining for full
-completion: live cache-budget feedback, `Custom` profile behavior beyond the
-two cache overrides, and the broader memory-pressure actions listed in `A4`.
+**Implementation status:** Core profile and lookahead controls are shipped.
+The persisted `Conservative` / `Balanced` / `Performance` / `Aggressive`
+profiles drive automatic thumbnail-cache sizing, metadata-cache sizing,
+worker counts, viewer prefetch, browser lookahead, and folder warm-up. The
+Performance settings tab also persists explicit cache-cap overrides and an
+optional prefetch-depth override from 1 through 16 items; Auto follows the
+active profile. Remaining work is live cache-budget feedback and any richer
+performance inspector surface beyond the current settings and status state.
 
-- Introduce a `ResourceProfile` enum: `Conservative`, `Balanced` (default),
-  `Performance`, `Custom`.
+- Use a `ResourceProfile` enum: `Conservative`, `Balanced` (default),
+  `Performance`, and `Aggressive`.
 - Profile selection lives in a new **Help ▸ Settings… ▸ Performance** tab
   (also a Tools menu shortcut). Persisted under `Software\HyperBrowse` as
-  `ResourceProfile` plus per-knob overrides for `Custom`.
+  `ResourceProfile` plus explicit cache-cap and prefetch-depth overrides.
 - Each profile maps to concrete multipliers fed into the existing
   `ResolveThumbnailCacheCapacityBytes`, `ResolveMetadataCacheCapacityEntries`,
   and worker-count helpers. Example mapping (subject to bench tuning):
 
   | Profile | Thumb cache cap | Metadata cap | Prefetch radius | Workers |
   | --- | --- | --- | --- | --- |
-  | Conservative | min(totalRam/16, 256 MB) | 4,096 | 1 | hc/4 |
-  | Balanced (default) | min(totalRam/8, 1 GB) | 16,384 | 3 | hc, raw=hc/4 |
-  | Performance | min(totalRam/4, 4 GB*) | 65,536 | 8 | hc, raw=hc/2 |
-  | Custom | user-set | user-set | user-set | user-set |
+  | Conservative | adaptive | adaptive | 1 | profile-sized |
+  | Balanced (default) | adaptive | adaptive | 3 | profile-sized |
+  | Performance | adaptive | adaptive | 8 | profile-sized |
+  | Aggressive | adaptive | adaptive | 12 | profile-sized |
 
   *Performance is hard-capped at `availablePhysicalBytes / 3` regardless of
   user input to keep the OS healthy.
 
+- An explicit prefetch override is persisted as `PrefetchDepthOverride`; zero
+  means Auto and values are clamped to 1 through 16.
 - Implementation surface: thread the resolved profile through
   `ThumbnailScheduler`, `ImageMetadataService`, `ViewerWindow` prefetch,
-  and the folder warm-up window (A7).
+  browser lookahead, and the folder warm-up window (A7).
 
 ### `A2` Cache Sizing UI With Live Feedback (P0)
 
 **Goal:** A compact controller users can trust, with no math.
 
-**Implementation status:** In progress. `2026-05-16` shipped the first usable
-surface: **Help ▸ Performance Settings** now exposes explicit thumbnail-cache
-and metadata-cache overrides, supports reverting each control to adaptive
-automatic sizing, persists both values under `Software\HyperBrowse`, and
-applies changes immediately by recreating the browser/details-panel services.
+**Implementation status:** In progress. The Performance settings tab exposes
+explicit thumbnail-cache and metadata-cache overrides, profile-following
+automatic sizing, and an Auto or explicit prefetch-depth control. These values
+persist under `Software\HyperBrowse` and apply immediately to the browser and
+viewer paths.
 Remaining for full completion: slider-based controls, live usage/hit-rate
 feedback, recommended ranges, and persistent-cache budget management.
 
@@ -149,7 +150,7 @@ The first persistence pass shipped; now harden it.
 **Implementation status:** In progress. `2026-05-16` shipped two code slices.
 The first wired `ResourceProfile` into viewer prefetch radius, retained
 farther-ahead prefetched images in the viewer full-image cache, and reduced
-viewer prefetch back to one image when physical memory is tight. The second
+viewer prefetch back to one item when physical memory is tight. The second
 added a background-sampled memory-pressure monitor with recovery hysteresis in
 the main shell, caps thumbnail decode concurrency to half the configured
 workers while pressure is active, and trims in-memory thumbnail caches toward
@@ -168,7 +169,7 @@ resource-heavy subsystems as needed.
 - Sample `GlobalMemoryStatusEx` on a low-frequency timer (1–2 Hz) on a
   background thread, never the UI thread.
 - When `dwMemoryLoad >= 85` or `availablePhysicalBytes < 1 GB`:
-  - Halve viewer prefetch radius.
+  - Reduce effective viewer and browser prefetch depth to one item.
   - Cap thumbnail decode concurrency to `max(1, workers/2)`.
   - Trigger eviction toward `cacheCapBytes / 2` on the thumbnail cache.
 - Recovery hysteresis: only restore when load drops below 70 % for two
@@ -208,14 +209,15 @@ complexity.
 **Implementation status:** Shipped. Browser refresh already schedules
 low-priority top-of-folder warm-up thumbnail and metadata work after
 enumeration, request epochs cancel stale warm-up batches on scroll, and the
-warm-up window now scales with `ResourceProfile` instead of using only fixed
-prefetch multipliers.
+warm-up window now scales with effective prefetch depth instead of using only
+fixed prefetch multipliers.
 
 - After enumeration completes, schedule a small batch of "top-of-folder
   warm-up" thumbnail jobs at low priority so the first scroll feels instant
   even before the user clicks the grid.
-- Window size = `ResourceProfile`-derived prefetch radius × visible row
-  estimate; cancellable on scroll.
+- Window size uses the effective prefetch depth and visible row estimate;
+  Auto follows `ResourceProfile`, an explicit override takes precedence, and
+  the work is cancellable on scroll.
 
 ### `A8` Startup Latency Budget Gate (P1)
 

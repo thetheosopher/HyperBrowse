@@ -48,6 +48,7 @@
 #include "ui/ShortcutCatalog.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
+#include "util/ResourceSizing.h"
 #include "util/SettingsRegistry.h"
 #include "util/UiTextSize.h"
 #include "viewer/ViewerWindow.h"
@@ -76,6 +77,7 @@ namespace
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
     constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
+    constexpr wchar_t kRegistryValuePrefetchDepthOverride[] = L"PrefetchDepthOverride";
 
     bool ConfigureSmokeSettingsRegistry()
     {
@@ -84,6 +86,31 @@ namespace
         return SetEnvironmentVariableW(
             hyperbrowse::util::kSettingsRegistryEnvironmentVariable,
             gSmokeRegistryPath.c_str()) != FALSE;
+    }
+
+    void Expect(bool condition, const std::string& message);
+
+    void RunPrefetchSizingScenario()
+    {
+        using hyperbrowse::util::ResourceProfile;
+        Expect(hyperbrowse::util::DefaultPrefetchDepth(ResourceProfile::Conservative) == 1,
+               "Conservative prefetch default changed unexpectedly");
+        Expect(hyperbrowse::util::DefaultPrefetchDepth(ResourceProfile::Balanced) == 3,
+               "Balanced prefetch default changed unexpectedly");
+        Expect(hyperbrowse::util::DefaultPrefetchDepth(ResourceProfile::Performance) == 8,
+               "Performance prefetch default changed unexpectedly");
+        Expect(hyperbrowse::util::DefaultPrefetchDepth(ResourceProfile::Aggressive) == 12,
+               "Aggressive prefetch default changed unexpectedly");
+        Expect(hyperbrowse::util::ResolvePrefetchDepth(ResourceProfile::Performance, hyperbrowse::util::kAutomaticPrefetchDepth) == 8,
+               "Automatic prefetch depth did not follow the resource profile");
+        Expect(hyperbrowse::util::ResolvePrefetchDepth(ResourceProfile::Balanced, 1) == 1,
+               "Explicit minimum prefetch depth was not preserved");
+        Expect(hyperbrowse::util::ResolvePrefetchDepth(ResourceProfile::Balanced, 16) == 16,
+               "Explicit maximum prefetch depth was not preserved");
+        Expect(hyperbrowse::util::ResolvePrefetchDepth(ResourceProfile::Balanced, -4) == 1,
+               "Prefetch depth did not clamp below the supported range");
+        Expect(hyperbrowse::util::ResolvePrefetchDepth(ResourceProfile::Balanced, 99) == 16,
+               "Prefetch depth did not clamp above the supported range");
     }
 
     struct EnumerationResult
@@ -3909,9 +3936,11 @@ namespace
         ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
         ScopedRegistryDwordBackup thumbnailCacheBackup(kRegistryPath, kRegistryValueThumbnailCacheCapacityOverrideBytes);
         ScopedRegistryDwordBackup metadataCacheBackup(kRegistryPath, kRegistryValueMetadataCacheCapacityOverrideEntries);
+        ScopedRegistryDwordBackup prefetchDepthBackup(kRegistryPath, kRegistryValuePrefetchDepthOverride);
         DeleteRegistryValue(kRegistryPath, kRegistryValueAppTextSize);
         DeleteRegistryValue(kRegistryPath, kRegistryValueThumbnailCacheCapacityOverrideBytes);
         DeleteRegistryValue(kRegistryPath, kRegistryValueMetadataCacheCapacityOverrideEntries);
+        SetRegistryDwordValue(kRegistryPath, kRegistryValuePrefetchDepthOverride, 7);
         wchar_t previousValue[64]{};
         const DWORD previousLength = GetEnvironmentVariableW(
             kSettingsUiEnvironment,
@@ -4011,16 +4040,19 @@ namespace
             const HWND transitionDurationEdit = GetDlgItem(dialog, 5701);
             const HWND thumbnailCacheEdit = GetDlgItem(dialog, 5702);
             const HWND metadataCacheEdit = GetDlgItem(dialog, 5703);
+            const HWND prefetchDepthEdit = GetDlgItem(dialog, 5704);
             const HWND slideDurationSpin = GetDlgItem(dialog, 5850);
             const HWND transitionDurationSpin = GetDlgItem(dialog, 5851);
             const HWND thumbnailCacheSpin = GetDlgItem(dialog, 5852);
             const HWND metadataCacheSpin = GetDlgItem(dialog, 5853);
+            const HWND prefetchDepthSpin = GetDlgItem(dialog, 5854);
             if (!slideDurationEdit || !transitionDurationEdit || !thumbnailCacheEdit || !metadataCacheEdit
-                || !slideDurationSpin || !transitionDurationSpin || !thumbnailCacheSpin || !metadataCacheSpin
+                || !prefetchDepthEdit || !slideDurationSpin || !transitionDurationSpin || !thumbnailCacheSpin || !metadataCacheSpin || !prefetchDepthSpin
                 || reinterpret_cast<HWND>(SendMessageW(slideDurationSpin, UDM_GETBUDDY, 0, 0)) != slideDurationEdit
                 || reinterpret_cast<HWND>(SendMessageW(transitionDurationSpin, UDM_GETBUDDY, 0, 0)) != transitionDurationEdit
                 || reinterpret_cast<HWND>(SendMessageW(thumbnailCacheSpin, UDM_GETBUDDY, 0, 0)) != thumbnailCacheEdit
-                || reinterpret_cast<HWND>(SendMessageW(metadataCacheSpin, UDM_GETBUDDY, 0, 0)) != metadataCacheEdit)
+                || reinterpret_cast<HWND>(SendMessageW(metadataCacheSpin, UDM_GETBUDDY, 0, 0)) != metadataCacheEdit
+                || reinterpret_cast<HWND>(SendMessageW(prefetchDepthSpin, UDM_GETBUDDY, 0, 0)) != prefetchDepthEdit)
             {
                 failAndClose("Experimental Settings numeric fields did not create native spin buddies");
                 return;
@@ -4039,6 +4071,16 @@ namespace
                 GetWindowTextW(control, buffer, static_cast<int>(std::size(buffer)));
                 return std::wstring(buffer);
             };
+            int prefetchMinimum = 0;
+            int prefetchMaximum = 0;
+            SendMessageW(prefetchDepthSpin, UDM_GETRANGE32, reinterpret_cast<WPARAM>(&prefetchMinimum), reinterpret_cast<LPARAM>(&prefetchMaximum));
+            if (prefetchMinimum != hyperbrowse::util::kMinimumPrefetchDepth
+                || prefetchMaximum != hyperbrowse::util::kMaximumPrefetchDepth
+                || readControlText(prefetchDepthEdit) != L"7")
+            {
+                failAndClose("Experimental Settings prefetch depth did not restore its explicit override and range");
+                return;
+            }
             const auto selectedProfile = static_cast<hyperbrowse::util::ResourceProfile>(
                 SendMessageW(resourceCombo, CB_GETCURSEL, 0, 0));
             const std::wstring expectedThumbnailCache = std::to_wstring(
@@ -4115,6 +4157,14 @@ namespace
                 || mainWindow.AppTextSize() != hyperbrowse::util::AppTextSize::Medium)
             {
                 failure = "Experimental Settings Enter did not apply and close the dialog";
+                done.store(true, std::memory_order_release);
+                return;
+            }
+            DWORD persistedPrefetchDepth = 0;
+            if (!TryReadRegistryDwordValue(kRegistryPath, kRegistryValuePrefetchDepthOverride, &persistedPrefetchDepth)
+                || persistedPrefetchDepth != 7)
+            {
+                failure = "Experimental Settings did not preserve the explicit prefetch depth override";
                 done.store(true, std::memory_order_release);
                 return;
             }
@@ -4344,6 +4394,7 @@ int main(int argc, char* argv[])
         }
         else
         {
+            RunPrefetchSizingScenario();
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
             RunBackgroundExecutorCapacityScenario();

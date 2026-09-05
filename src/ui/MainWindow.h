@@ -772,6 +772,7 @@ namespace hyperbrowse::ui
         bool memoryPressureSampleQueued_{};
         unsigned int memoryPressureRecoveryClearSampleCount_{};
         util::ResourceProfile resourceProfile_{util::ResourceProfile::Balanced};
+        int prefetchDepthOverride_{util::kAutomaticPrefetchDepth};
         std::size_t thumbnailCacheCapacityOverrideBytes_{};
         std::size_t metadataCacheCapacityOverrideEntries_{};
         browser::ThumbnailSizePreset thumbnailSizePreset_{static_cast<browser::ThumbnailSizePreset>(192)};

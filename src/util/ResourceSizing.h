@@ -9,6 +9,10 @@
 
 namespace hyperbrowse::util
 {
+    constexpr int kAutomaticPrefetchDepth = 0;
+    constexpr int kMinimumPrefetchDepth = 1;
+    constexpr int kMaximumPrefetchDepth = 16;
+
     enum class ResourceProfile : int
     {
         Conservative = 0,
@@ -31,6 +35,32 @@ namespace hyperbrowse::util
         default:
             return L"Balanced";
         }
+    }
+
+    inline int DefaultPrefetchDepth(ResourceProfile profile) noexcept
+    {
+        switch (profile)
+        {
+        case ResourceProfile::Conservative:
+            return 1;
+        case ResourceProfile::Performance:
+            return 8;
+        case ResourceProfile::Aggressive:
+            return 12;
+        case ResourceProfile::Balanced:
+        default:
+            return 3;
+        }
+    }
+
+    inline int ResolvePrefetchDepth(ResourceProfile profile, int overrideDepth) noexcept
+    {
+        if (overrideDepth != kAutomaticPrefetchDepth)
+        {
+            return std::clamp(overrideDepth, kMinimumPrefetchDepth, kMaximumPrefetchDepth);
+        }
+
+        return DefaultPrefetchDepth(profile);
     }
 
 

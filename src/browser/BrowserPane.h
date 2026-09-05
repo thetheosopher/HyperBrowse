@@ -136,6 +136,7 @@ namespace hyperbrowse::browser
         void SetAppTextSize(hyperbrowse::util::AppTextSize size);
         hyperbrowse::util::AppTextSize GetAppTextSize() const noexcept;
         void SetResourceProfile(hyperbrowse::util::ResourceProfile profile);
+        void SetPrefetchDepthOverride(int depth);
         void SetThumbnailMemoryPressureActive(bool active);
         void SetCacheCapacityOverrides(std::size_t thumbnailCacheCapacityBytes,
                            std::size_t metadataCacheCapacityEntries);
@@ -246,6 +247,7 @@ namespace hyperbrowse::browser
         void ScheduleVisibleThumbnailWork();
         void ScheduleVisibleMetadataWork() const;
         void ScheduleMetadataForItem(int modelIndex, const BrowserItem& item) const;
+        int EffectivePrefetchDepth() const noexcept;
         void RecreateBackgroundServices();
         void CancelThumbnailWork();
         void InvalidateThumbnailCellForModelIndex(int modelIndex) const;
@@ -310,6 +312,7 @@ namespace hyperbrowse::browser
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
         hyperbrowse::services::UserMetadataStore* userMetadataStore_{};
         hyperbrowse::util::ResourceProfile resourceProfile_{hyperbrowse::util::ResourceProfile::Balanced};
+        int prefetchDepthOverride_{hyperbrowse::util::kAutomaticPrefetchDepth};
         bool thumbnailMemoryPressureActive_{};
         std::size_t thumbnailCacheCapacityOverrideBytes_{};
         std::size_t metadataCacheCapacityOverrideEntries_{};

@@ -70,10 +70,14 @@ The application wins on user-perceived speed, not on theoretical throughput alon
 - prefetch adjacent images after current image becomes stable
 
 ## 5.2 Prefetch policy
-- preload next image
-- preload previous image
-- cancel stale prefetch when navigation jumps far away
-- throttle prefetch if memory pressure rises
+- Resolve lookahead from the active `ResourceProfile`: Conservative = 1,
+  Balanced = 3, Performance = 8, and Aggressive = 12 items.
+- Allow an explicit prefetch-depth override from 1 through 16 items; zero
+  means Auto and follows the active profile.
+- Apply the same effective depth to viewer adjacent-image prefetch, browser
+	near-visible work, and folder warm-up/lookahead scheduling.
+- Cancel stale prefetch when navigation jumps far away.
+- Reduce effective lookahead to one item while memory pressure is active.
 
 ## 5.3 Zoom/pan policy
 - prioritize low latency over animation
@@ -85,7 +89,8 @@ The application wins on user-perceived speed, not on theoretical throughput alon
 ## 6.1 Thumbnail grid
 - virtualized item model
 - only visible + near-visible cells generate live thumbnail requests
-- maintain a viewport-scaled lookahead region with a larger top-of-folder warmup window
+- maintain a profile-scaled lookahead region with a larger top-of-folder warmup window
+- active scrolling uses the configured depth while retaining a one-row minimum
 - avoid child window per item
 
 ## 6.2 Details mode
@@ -109,7 +114,8 @@ Use reusable pools where profiling justifies them for:
 Use bounded LRU-style caches for:
 - thumbnails (runtime-adaptive default budget based on available physical memory, minimum 128 MB and capped at 1 GB, LRU eviction by byte count)
 - metadata (runtime-adaptive default budget based on available physical memory, minimum 2,048 entries and capped at 65,536, LRU eviction by count)
-- viewer current/next/previous images (3-slot adjacent cache, no eviction)
+- viewer current and profile-controlled adjacent images (no eviction while they
+	remain in the active adjacent cache)
 
 Note: Segmented-LRU and memory pool strategies from the original spec are deferred. Basic LRU eviction is sufficient for current workloads.
 
