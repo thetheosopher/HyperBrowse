@@ -128,8 +128,10 @@ add_library(HyperBrowseCore STATIC
     src/ui/DiagnosticsWindow.cpp
     src/ui/ExternalDropTarget.cpp
     src/ui/FileOperationJournal.cpp
+    src/ui/FileOperationReconciler.cpp
     src/ui/FolderHistory.cpp
     src/ui/MainWindow.cpp
+    src/ui/MainWindowDialogs.cpp
     src/ui/QuickSend.cpp
     src/ui/ShellDragSource.cpp
     src/ui/ToolbarIconLibrary.cpp

@@ -78,6 +78,19 @@ controller:
 	screen-to-client conversion. It calls synchronous callbacks supplied by
 	`MainWindow` for drag feedback, drop handling, and visual cleanup; it does
 	not retain the window as a raw host pointer.
+- `ui/MainWindowDialogs.*` owns synchronous text-entry, rename-validation, and
+	batch-rename preview dialogs. `MainWindow` supplies the owner HWND, theme,
+	text-size, and operation-specific inputs, then consumes only the returned
+	values.
+- `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
+	reload policy, and delete-focus selection policy. It returns typed effects and
+	accepts explicit model/pane snapshots and a scope predicate; it does not own
+	HWNDs, services, asynchronous state, or browser/viewer mutation.
+- `MainWindow::ApplyCompletedFileOperation` remains the completion orchestrator
+	for context capture, model/viewer mutation, watcher coordination, and focus
+	restoration. The extracted reconciler preserves the existing operation-origin,
+	watcher-echo, optimistic-viewer, selection/focus, and activation rules while
+	making the policy independently compilable and testable.
 
 These helpers are registered as explicit `HyperBrowseCore` translation units,
 and pure policy behavior is covered by deterministic smoke scenarios. OLE

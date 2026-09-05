@@ -6,11 +6,12 @@ Make `MainWindow` a thin Win32 shell and coordination facade through staged,
 behavior-preserving extractions. The target is explicit ownership and
 testable state transitions, not an arbitrary line-count target.
 
-`MainWindow.cpp` is approximately 27,000 lines and currently contains several
-independent state machines: folder navigation and enumeration, folder-tree
-coordination, file-operation reconciliation, viewer synchronization, menus,
-settings, details and Quick Actions presentation, drag/drop, rendering, and
-shutdown.
+`MainWindow.cpp` was approximately 27,000 lines at the start of this pass and
+currently contains several independent state machines: folder navigation and
+enumeration, folder-tree coordination, file-operation reconciliation, viewer
+synchronization, menus, settings, details and Quick Actions presentation,
+drag/drop, rendering, and shutdown. The dialog and file-operation policy
+extractions have reduced the current translation unit to 23,488 lines.
 
 ## Guardrails
 
@@ -133,10 +134,13 @@ create/destroy.
 
 ## First slice
 
-The first implementation slice extracts `FolderHistory` only. Filesystem
+The first implementation slice extracted `FolderHistory` only. Filesystem
 ancestor resolution and `LoadFolderAsync` remain in `MainWindow`; the policy
-receives those operations through callbacks. This reduces state ownership in
-`MainWindow` while keeping HWND and service lifetimes unchanged.
+receives those operations through callbacks. This reduced state ownership in
+`MainWindow` while keeping HWND and service lifetimes unchanged. Later slices
+also extracted shell drag/drop boundaries, the file-operation journal, and
+named completion stages; the remaining coordinator work is intentionally still
+tracked below.
 
 ## Progress
 
@@ -146,5 +150,15 @@ receives those operations through callbacks. This reduces state ownership in
 - [x] Extract stateless shell drag data-object and drop-source creation.
 - [x] Extract bounded file-operation journal state and deterministic coverage.
 - [x] Extract the external OLE drop target behind a callback contract.
-- [ ] Extract dialog/helper bulk from `MainWindow.cpp`.
-- [ ] Extract file-operation and folder-navigation coordinators.
+- [x] Split file-operation completion into typed context, tree-effect, reload,
+  browser-reconciliation, and viewer-effect stages without changing the
+  `MainWindow` message contract.
+- [x] Extract `FileOperationReconciler` into its own translation unit with
+  explicit model/pane inputs and typed tree/reload/focus effects. This is the
+  first extraction in the current pass that materially reduces
+  `MainWindow.cpp` rather than only adding stages inside it.
+- [x] Extract text-input, rename-validation, and batch-rename dialog state and
+  implementations into `src/ui/MainWindowDialogs.*`. The dialog slice reduced
+  `MainWindow.cpp` from 27,035 to 23,488 lines; the new translation unit owns
+  the 1,303 lines of modal dialog state and preview behavior.
+- [ ] Extract folder-navigation coordinators.

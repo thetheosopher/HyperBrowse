@@ -22,6 +22,7 @@
 #include "util/ResourceSizing.h"
 #include "util/UiTextSize.h"
 #include "ui/FileOperationJournal.h"
+#include "ui/FileOperationReconciler.h"
 #include "ui/FolderHistory.h"
 #include "ui/QuickSend.h"
 
@@ -94,6 +95,7 @@ namespace hyperbrowse::ui
         static constexpr UINT kExternalLaunchMessage = WM_APP + 71;
 
     private:
+        struct FileOperationCompletionContext;
         struct FolderTreeNodeData
         {
             std::wstring path;
@@ -368,6 +370,19 @@ namespace hyperbrowse::ui
         void EnsureTrayIcon();
         void RemoveTrayIcon();
         void RecordUndoableOperation(const services::FileOperationUpdate& update);
+        FileOperationCompletionContext CaptureFileOperationCompletionContext();
+        void ApplyBrowserFileOperationEffects(
+            const services::FileOperationUpdate& update,
+            const FileOperationCompletionContext& completionContext,
+            const FileOperationTreeEffects& treeEffects,
+            bool reloadCurrentFolder,
+            bool viewerDeleteOperation,
+            bool viewerQuickSendOperation,
+            const std::wstring& fallbackFolderPath);
+        bool ApplyViewerFileOperationEffects(const services::FileOperationUpdate& update,
+                              const FileOperationCompletionContext& completionContext,
+                              bool viewerDeleteOperation,
+                              bool viewerQuickSendOperation);
         void PerformUndo();
         void PerformRedo();
         void UpdateUndoRedoMenuState();
@@ -727,6 +742,22 @@ namespace hyperbrowse::ui
             std::wstring destinationFolder;
             bool viewerAdvanced{};
             bool active{};
+        };
+        struct FileOperationCompletionContext
+        {
+            UndoRedoOperation completedUndoRedoOperation{UndoRedoOperation::None};
+            HWND activationRestoreWindow{};
+            HWND focusRestoreWindow{};
+            std::wstring viewerDeleteSourcePath;
+            std::vector<std::wstring> viewerDeleteSourcePaths;
+            std::wstring viewerDeletePreferredFocusPath;
+            PendingViewerQuickSend viewerQuickSend;
+            std::wstring deferredFolderWatchReloadPath;
+            bool deferredFolderWatchTreeRefresh{};
+            std::wstring treeFolderOperationPath;
+            std::wstring treeFolderRenamePath;
+            std::wstring treeFolderMoveSourcePath;
+            std::wstring treeFolderMoveDestinationFolder;
         };
         std::wstring pendingViewerDeleteSourcePath_;
         std::vector<std::wstring> pendingViewerDeleteSourcePaths_;
