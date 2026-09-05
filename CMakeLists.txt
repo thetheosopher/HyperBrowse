@@ -127,6 +127,7 @@ add_library(HyperBrowseCore STATIC
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
     src/ui/CommandBarController.cpp
+    src/ui/CommandBarPainter.cpp
     src/ui/ExternalDropTarget.cpp
     src/ui/FileCommandController.cpp
     src/ui/FileOperationJournal.cpp

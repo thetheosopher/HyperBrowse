@@ -13,7 +13,7 @@ settings, details and Quick Actions presentation, drag/drop, rendering, and
 shutdown. Dialog, file-operation policy, folder-enumeration coordination,
 folder-tree coordination, folder-watch policy, async message routing, menu
 message policy, file-command dispatch, view-command dispatch, and command-bar
-policy extractions have reduced the current translation unit to 24,267 lines. The folder-tree slice places node
+policy extractions have reduced the current translation unit to 23,810 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -209,8 +209,9 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   verifies parameterized command families and ownership boundaries. The
 - [x] Extract command-bar item definitions, menu and toolbar layout, hit
   testing, toolbar enabled/checked-state policy, and keyboard input policy into
-  `src/ui/CommandBarController.*`. MainWindow retains HWND movement,
-  tooltip registration, painting, focus, and command effects. Deterministic
-  smoke coverage verifies item initialization, layout hit testing, state
-  transitions, and keyboard navigation decisions. The current
-  `MainWindow.cpp` size is 24,267 lines.
+  `src/ui/CommandBarController.*`. Extract GDI and Direct2D command-bar
+  painting into `src/ui/CommandBarPainter.*`. MainWindow retains HWND movement,
+  tooltip registration, focus, resource ownership, and command effects.
+  Deterministic smoke coverage verifies item initialization, layout hit testing,
+  state transitions, and keyboard navigation decisions. The current
+  `MainWindow.cpp` size is 23,810 lines.

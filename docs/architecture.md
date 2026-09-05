@@ -118,7 +118,10 @@ controller:
 - `ui/CommandBarController.*` owns command-bar item definitions, menu and
 	toolbar layout, hit testing, toolbar enabled/checked-state policy, and
 	keyboard input policy. MainWindow retains HWND movement, tooltip
-	registration, painting, focus, and command effects.
+	registration, focus, resource ownership, and command effects.
+- `ui/CommandBarPainter.*` owns GDI and Direct2D command-bar painting from
+	explicit menu/item, palette, interaction-state, font, and icon-library
+	inputs. MainWindow retains the render-target and window-resource lifetimes.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

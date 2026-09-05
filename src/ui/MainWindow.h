@@ -27,6 +27,7 @@
 #include "ui/FolderTreeController.h"
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarController.h"
+#include "ui/CommandBarPainter.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickSend.h"
 #include "ui/ViewCommandController.h"
@@ -490,6 +491,7 @@ namespace hyperbrowse::ui
         FileOperationJournal fileOperationJournal_;
         bool applyingUndoRedo_{};
         CommandBarController commandBarController_;
+        CommandBarPainter commandBarPainter_;
         HMENU menu_{};
         HMENU fileMenu_{};
         HMENU editMenu_{};
