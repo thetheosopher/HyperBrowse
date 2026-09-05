@@ -122,6 +122,14 @@ controller:
 - `ui/CommandBarPainter.*` owns GDI and Direct2D command-bar painting from
 	explicit menu/item, palette, interaction-state, font, and icon-library
 	inputs. MainWindow retains the render-target and window-resource lifetimes.
+- `ui/MenuPainter.*` owns owner-draw menu metadata preparation, measurement,
+	and GDI/Direct2D item painting from explicit palette, font, text-size, and
+	theme inputs. MainWindow retains HMENU lifetimes, draw-data storage, menu
+	state, and message routing.
+- `ui/QuickAccessMenuBuilder.*` owns dynamic recent-folder and destination-menu
+	population, including folder labels, command ranges, and enabled-state
+	policy. MainWindow retains HMENU lifetimes, persistent owner-draw storage,
+	and the state snapshot supplied to the builder.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

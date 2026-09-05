@@ -28,7 +28,9 @@
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandBarPainter.h"
+#include "ui/MenuPainter.h"
 #include "ui/MenuMessageHandling.h"
+#include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickSend.h"
 #include "ui/ViewCommandController.h"
 #include "ui/WindowAsyncMessageRouter.h"
@@ -429,7 +431,6 @@ namespace hyperbrowse::ui
         bool DrawStatusStripD2D(const DRAWITEMSTRUCT& drawItem) const;
         void MeasureOwnerDrawMenuItem(MEASUREITEMSTRUCT* measureItem) const;
         void DrawOwnerDrawMenuItem(const DRAWITEMSTRUCT& drawItem) const;
-        bool DrawOwnerDrawMenuItemD2D(const DRAWITEMSTRUCT& drawItem) const;
         int CommandBarMenuHitTest(int x, int y) const;
         void ActivateCommandBarKeyboardMode(int index);
         void DeactivateCommandBarKeyboardMode(bool restoreFocus);
@@ -492,6 +493,8 @@ namespace hyperbrowse::ui
         bool applyingUndoRedo_{};
         CommandBarController commandBarController_;
         CommandBarPainter commandBarPainter_;
+        MenuPainter menuPainter_;
+        QuickAccessMenuBuilder quickAccessMenuBuilder_;
         HMENU menu_{};
         HMENU fileMenu_{};
         HMENU editMenu_{};

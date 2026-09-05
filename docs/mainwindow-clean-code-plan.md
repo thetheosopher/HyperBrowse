@@ -13,7 +13,7 @@ settings, details and Quick Actions presentation, drag/drop, rendering, and
 shutdown. Dialog, file-operation policy, folder-enumeration coordination,
 folder-tree coordination, folder-watch policy, async message routing, menu
 message policy, file-command dispatch, view-command dispatch, and command-bar
-policy extractions have reduced the current translation unit to 23,810 lines. The folder-tree slice places node
+policy extractions have reduced the current translation unit to 23,179 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -214,4 +214,13 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   tooltip registration, focus, resource ownership, and command effects.
   Deterministic smoke coverage verifies item initialization, layout hit testing,
   state transitions, and keyboard navigation decisions. The current
-  `MainWindow.cpp` size is 23,810 lines.
+  command-bar slice brought `MainWindow.cpp` to 23,810 lines.
+- [x] Extract owner-draw menu metadata preparation, measurement, and GDI/
+  Direct2D painting into `src/ui/MenuPainter.*`. MainWindow retains HMENU
+  lifetimes, draw-data storage, palette construction, menu state, and message
+  routing. The current `MainWindow.cpp` size is 23,290 lines.
+- [x] Extract dynamic recent-folder and copy/move destination menu population
+  into `src/ui/QuickAccessMenuBuilder.*`. MainWindow retains the menu handles,
+  persistent owner-draw storage, and the state snapshot passed to the builder.
+  Deterministic smoke coverage verifies labels, command ranges, placeholders,
+  and enabled states. The current `MainWindow.cpp` size is 23,179 lines.

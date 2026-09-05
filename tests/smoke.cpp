@@ -48,6 +48,7 @@
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderHistory.h"
 #include "ui/MainWindow.h"
+#include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickSend.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ViewCommandController.h"
@@ -412,6 +413,114 @@ namespace
         Expect(escapeResult.handled
                    && escapeResult.action == CommandBarController::KeyboardAction::Deactivate,
                "Command-bar controller did not deactivate keyboard mode with Escape");
+    }
+
+    void RunQuickAccessMenuBuilderScenario()
+    {
+        using hyperbrowse::ui::QuickAccessMenuBuilder;
+        using namespace hyperbrowse::ui::command_ids;
+
+        struct MenuHandles
+        {
+            HMENU fileMenu{};
+            HMENU openRecentFolderMenu{};
+            HMENU copySelectionToMenu{};
+            HMENU moveSelectionToMenu{};
+
+            ~MenuHandles()
+            {
+                DestroyMenu(fileMenu);
+                DestroyMenu(openRecentFolderMenu);
+                DestroyMenu(copySelectionToMenu);
+                DestroyMenu(moveSelectionToMenu);
+            }
+        } menus{
+            CreateMenu(),
+            CreatePopupMenu(),
+            CreatePopupMenu(),
+            CreatePopupMenu()};
+
+        Expect(menus.fileMenu && menus.openRecentFolderMenu && menus.copySelectionToMenu && menus.moveSelectionToMenu,
+               "Quick-access menu scenario could not create temporary menus");
+        AppendMenuW(menus.fileMenu,
+                    MF_STRING,
+                    ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION,
+                    L"Initial toggle label");
+
+        const std::vector<std::wstring> recentFolders{L"C:\\Photos\\Trips", L"D:\\Archive"};
+        const std::vector<std::wstring> favoriteDestinations{L"C:\\Destinations\\Keep"};
+        const std::vector<std::wstring> recentDestinations{L"D:\\Destinations\\Recent"};
+        QuickAccessMenuBuilder builder;
+        builder.Refresh(menus.fileMenu,
+                        menus.openRecentFolderMenu,
+                        menus.copySelectionToMenu,
+                        menus.moveSelectionToMenu,
+                        true,
+                        true,
+                        true,
+                        recentFolders,
+                        favoriteDestinations,
+                        recentDestinations);
+
+        const auto menuText = [](HMENU menu, UINT position)
+        {
+            wchar_t text[512]{};
+            const int length = GetMenuStringW(menu, position, text, static_cast<int>(std::size(text)), MF_BYPOSITION);
+            return std::wstring(text, static_cast<std::size_t>(std::max(length, 0)));
+        };
+        const auto menuState = [](HMENU menu, UINT position)
+        {
+            return GetMenuState(menu, position, MF_BYPOSITION);
+        };
+
+        Expect(menuText(menus.fileMenu, 0) == L"Remove Current Folder from Favorite &Destinations",
+               "Quick-access builder did not update the favorite toggle label");
+        Expect(GetMenuItemCount(menus.openRecentFolderMenu) == 4
+                   && GetMenuItemID(menus.openRecentFolderMenu, 0) == ID_FILE_OPEN_RECENT_FOLDER_BASE
+                   && menuText(menus.openRecentFolderMenu, 0) == L"Trips (C:\\Photos\\Trips)"
+                   && GetMenuItemID(menus.openRecentFolderMenu, 1) == ID_FILE_OPEN_RECENT_FOLDER_BASE + 1
+                   && menuText(menus.openRecentFolderMenu, 1) == L"Archive (D:\\Archive)"
+                   && GetMenuItemID(menus.openRecentFolderMenu, 3) == ID_FILE_CLEAR_RECENT_FOLDERS,
+               "Quick-access builder did not populate recent folders with stable commands and labels");
+        Expect(GetMenuItemCount(menus.copySelectionToMenu) == 9
+                   && GetMenuItemID(menus.copySelectionToMenu, 0) == ID_FILE_COPY_SELECTION_BROWSE
+                   && GetMenuItemID(menus.copySelectionToMenu, 3) == ID_FILE_COPY_SELECTION_FAVORITE_BASE
+                   && menuText(menus.copySelectionToMenu, 3) == L"Keep (C:\\Destinations\\Keep)"
+                   && GetMenuItemID(menus.copySelectionToMenu, 6) == ID_FILE_COPY_SELECTION_RECENT_BASE
+                   && menuText(menus.copySelectionToMenu, 6) == L"Recent (D:\\Destinations\\Recent)"
+                   && GetMenuItemID(menus.copySelectionToMenu, 8) == ID_FILE_CLEAR_RECENT_DESTINATIONS,
+               "Quick-access builder did not populate copy destinations with stable commands and labels");
+        Expect((menuState(menus.copySelectionToMenu, 0) & MF_GRAYED) == 0
+                   && (menuState(menus.copySelectionToMenu, 2) & MF_GRAYED) != 0
+                   && (menuState(menus.copySelectionToMenu, 3) & MF_GRAYED) == 0,
+               "Quick-access builder did not apply destination menu enabled states");
+        Expect(GetMenuItemCount(menus.moveSelectionToMenu) == 9
+                   && GetMenuItemID(menus.moveSelectionToMenu, 0) == ID_FILE_MOVE_SELECTION_BROWSE
+                   && GetMenuItemID(menus.moveSelectionToMenu, 3) == ID_FILE_MOVE_SELECTION_FAVORITE_BASE
+                   && GetMenuItemID(menus.moveSelectionToMenu, 6) == ID_FILE_MOVE_SELECTION_RECENT_BASE,
+               "Quick-access builder did not populate move destinations with the move command ranges");
+
+        builder.Refresh(menus.fileMenu,
+                        menus.openRecentFolderMenu,
+                        menus.copySelectionToMenu,
+                        menus.moveSelectionToMenu,
+                        false,
+                        false,
+                        false,
+                        {},
+                        {},
+                        {});
+        Expect(menuText(menus.fileMenu, 0) == L"Add Current Folder to Favorite &Destinations"
+                   && GetMenuItemCount(menus.openRecentFolderMenu) == 1
+                   && menuText(menus.openRecentFolderMenu, 0) == L"(No recent folders)"
+                   && (menuState(menus.openRecentFolderMenu, 0) & MF_GRAYED) != 0,
+               "Quick-access builder did not render the empty recent-folder state");
+        Expect(GetMenuItemCount(menus.copySelectionToMenu) == 3
+                   && GetMenuItemID(menus.copySelectionToMenu, 0) == ID_FILE_COPY_SELECTION_BROWSE
+                   && (menuState(menus.copySelectionToMenu, 0) & MF_GRAYED) != 0
+                   && menuText(menus.copySelectionToMenu, 2) == L"(No favorite or recent destinations)"
+                   && (menuState(menus.copySelectionToMenu, 2) & MF_GRAYED) != 0,
+               "Quick-access builder did not render disabled empty destination state");
     }
 
     struct EnumerationResult
@@ -4681,6 +4790,7 @@ int main(int argc, char* argv[])
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
+        const bool quickAccessOnly = argc > 1 && std::string_view(argv[1]) == "--quick-access";
         if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
@@ -4693,6 +4803,10 @@ int main(int argc, char* argv[])
         {
             RunDefaultSettingsScenario(instance);
         }
+        else if (quickAccessOnly)
+        {
+            RunQuickAccessMenuBuilderScenario();
+        }
         else
         {
             RunPrefetchSizingScenario();
@@ -4701,6 +4815,7 @@ int main(int argc, char* argv[])
             RunFileCommandControllerScenario();
             RunViewCommandControllerScenario();
             RunCommandBarControllerScenario();
+            RunQuickAccessMenuBuilderScenario();
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
             RunBackgroundExecutorCapacityScenario();
