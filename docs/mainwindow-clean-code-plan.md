@@ -371,3 +371,7 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   assembly behind named MainWindow helpers. MainWindow retains destination
   validity and interaction policy while both rendering backends pass the same
   explicit painter state.
+- [x] Consolidate duplicated details-panel chrome, histogram, and text-palette
+  assembly behind named MainWindow helpers. MainWindow retains layout,
+  interaction, and backend composition while both rendering paths consume the
+  same explicit painter state and colors.

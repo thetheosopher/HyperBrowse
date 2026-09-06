@@ -28,6 +28,9 @@
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandBarPainter.h"
+#include "ui/DetailsPanelChromePainter.h"
+#include "ui/DetailsPanelHistogramPainter.h"
+#include "ui/DetailsPanelTextPainter.h"
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/MenuPainter.h"
 #include "ui/MenuMessageHandling.h"
@@ -414,6 +417,11 @@ namespace hyperbrowse::ui
         void ResetDetailsPanelHistogram();
         void RequestDetailsPanelHistogram(const browser::BrowserItem& item, int modelIndex);
         void ApplyDetailsPanelHistogram(const cache::CachedThumbnail& thumbnail);
+        DetailsPanelChromePainter::State BuildDetailsPanelChromePainterState() const;
+        DetailsPanelChromePainter::Palette BuildDetailsPanelChromePainterPalette(const ThemePalette& palette) const;
+        DetailsPanelHistogramPainter::State BuildDetailsPanelHistogramPainterState() const;
+        DetailsPanelHistogramPainter::Palette BuildDetailsPanelHistogramPainterPalette(const ThemePalette& palette) const;
+        DetailsPanelTextPainter::Palette BuildDetailsPanelTextPainterPalette(const ThemePalette& palette) const;
         QuickAccessPainter::State BuildQuickAccessPainterState(
             const QuickAccessLayout::Metrics& metrics,
             std::vector<QuickAccessPainter::RowState>& rowStates) const;

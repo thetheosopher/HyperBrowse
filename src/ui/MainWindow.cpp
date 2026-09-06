@@ -12080,6 +12080,63 @@ namespace hyperbrowse::ui
         LayoutChildren();
     }
 
+    DetailsPanelChromePainter::State MainWindow::BuildDetailsPanelChromePainterState() const
+    {
+        return DetailsPanelChromePainter::State{
+            detailsPanelTabStripRect_,
+            detailsPanelTabRects_,
+            static_cast<int>(activeRightPaneTab_),
+            detailsPanelHotTabIndex_,
+            detailsPanelPressedTabIndex_,
+            detailsPanelCloseButtonRect_,
+            detailsPanelCloseButtonHot_,
+            detailsPanelCloseButtonPressed_};
+    }
+
+    DetailsPanelChromePainter::Palette MainWindow::BuildDetailsPanelChromePainterPalette(const ThemePalette& palette) const
+    {
+        return DetailsPanelChromePainter::Palette{
+            palette.actionFieldBackground,
+            palette.paneBackground,
+            palette.actionStripBorder,
+            palette.accent,
+            palette.accentFill,
+            palette.accentText,
+            palette.text,
+            palette.mutedText,
+            themeMode_ == ThemeMode::Dark};
+    }
+
+    DetailsPanelHistogramPainter::State MainWindow::BuildDetailsPanelHistogramPainterState() const
+    {
+        return DetailsPanelHistogramPainter::State{
+            detailsPanelHistogramRect_,
+            detailsPanelHistogramRed_,
+            detailsPanelHistogramGreen_,
+            detailsPanelHistogramBlue_,
+            detailsPanelHistogramPeak_,
+            detailsPanelHistogramVisible_,
+            detailsPanelHistogramLoading_};
+    }
+
+    DetailsPanelHistogramPainter::Palette MainWindow::BuildDetailsPanelHistogramPainterPalette(const ThemePalette& palette) const
+    {
+        return DetailsPanelHistogramPainter::Palette{
+            BlendColor(palette.actionFieldBackground,
+                       palette.paneBackground,
+                       themeMode_ == ThemeMode::Dark ? 24 : 12),
+            palette.actionStripBorder,
+            palette.mutedText};
+    }
+
+    DetailsPanelTextPainter::Palette MainWindow::BuildDetailsPanelTextPainterPalette(const ThemePalette& palette) const
+    {
+        return DetailsPanelTextPainter::Palette{
+            palette.text,
+            palette.mutedText,
+            palette.paneBackground};
+    }
+
     QuickAccessPainter::State MainWindow::BuildQuickAccessPainterState(
         const QuickAccessLayout::Metrics& metrics,
         std::vector<QuickAccessPainter::RowState>& rowStates) const
@@ -12216,25 +12273,8 @@ namespace hyperbrowse::ui
                                              panelBrush.Get(),
                                              borderBrush.Get());
 
-        const DetailsPanelChromePainter::State chromeState{
-            detailsPanelTabStripRect_,
-            detailsPanelTabRects_,
-            static_cast<int>(activeRightPaneTab_),
-            detailsPanelHotTabIndex_,
-            detailsPanelPressedTabIndex_,
-            detailsPanelCloseButtonRect_,
-            detailsPanelCloseButtonHot_,
-            detailsPanelCloseButtonPressed_};
-        const DetailsPanelChromePainter::Palette chromePalette{
-            palette.actionFieldBackground,
-            palette.paneBackground,
-            palette.actionStripBorder,
-            palette.accent,
-            palette.accentFill,
-            palette.accentText,
-            palette.text,
-            palette.mutedText,
-            themeMode_ == ThemeMode::Dark};
+        const DetailsPanelChromePainter::State chromeState = BuildDetailsPanelChromePainterState();
+        const DetailsPanelChromePainter::Palette chromePalette = BuildDetailsPanelChromePainterPalette(palette);
         DetailsPanelChromePainter::PaintD2D(renderTarget.Get(), chromeState, chromePalette, tabFormat.Get());
 
         if (activeRightPaneTab_ == RightPaneTab::FileDetails && !IsRectEmpty(&detailsPanelContentRect_))
@@ -12268,10 +12308,7 @@ namespace hyperbrowse::ui
                 title,
                 detailsPanelSummaryText_,
                 {}};
-            const DetailsPanelTextPainter::Palette textPalette{
-                palette.text,
-                palette.mutedText,
-                palette.paneBackground};
+            const DetailsPanelTextPainter::Palette textPalette = BuildDetailsPanelTextPainterPalette(palette);
             DetailsPanelTextPainter::PaintD2D(renderTarget.Get(),
                                               textState,
                                               textPalette,
@@ -12281,20 +12318,8 @@ namespace hyperbrowse::ui
             if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_)
                 && !IsRectEmpty(&detailsPanelHistogramRect_))
             {
-                const DetailsPanelHistogramPainter::State histogramState{
-                    detailsPanelHistogramRect_,
-                    detailsPanelHistogramRed_,
-                    detailsPanelHistogramGreen_,
-                    detailsPanelHistogramBlue_,
-                    detailsPanelHistogramPeak_,
-                    detailsPanelHistogramVisible_,
-                    detailsPanelHistogramLoading_};
-                const DetailsPanelHistogramPainter::Palette histogramPalette{
-                    BlendColor(palette.actionFieldBackground,
-                               palette.paneBackground,
-                               themeMode_ == ThemeMode::Dark ? 24 : 12),
-                    palette.actionStripBorder,
-                    palette.mutedText};
+                const DetailsPanelHistogramPainter::State histogramState = BuildDetailsPanelHistogramPainterState();
+                const DetailsPanelHistogramPainter::Palette histogramPalette = BuildDetailsPanelHistogramPainterPalette(palette);
                 DetailsPanelHistogramPainter::PaintD2D(renderTarget.Get(),
                                                         histogramState,
                                                         histogramPalette,
@@ -12327,10 +12352,7 @@ namespace hyperbrowse::ui
                 {},
                 {},
                 L"Quick action destinations will appear here."};
-            const DetailsPanelTextPainter::Palette textPalette{
-                palette.text,
-                palette.mutedText,
-                palette.paneBackground};
+            const DetailsPanelTextPainter::Palette textPalette = BuildDetailsPanelTextPainterPalette(palette);
             DetailsPanelTextPainter::PaintD2D(renderTarget.Get(),
                                               textState,
                                               textPalette,
@@ -12383,25 +12405,8 @@ namespace hyperbrowse::ui
                              backgroundBrush_,
                              palette.actionStripBorder);
 
-        const DetailsPanelChromePainter::State chromeState{
-            detailsPanelTabStripRect_,
-            detailsPanelTabRects_,
-            static_cast<int>(activeRightPaneTab_),
-            detailsPanelHotTabIndex_,
-            detailsPanelPressedTabIndex_,
-            detailsPanelCloseButtonRect_,
-            detailsPanelCloseButtonHot_,
-            detailsPanelCloseButtonPressed_};
-        const DetailsPanelChromePainter::Palette chromePalette{
-            palette.actionFieldBackground,
-            palette.paneBackground,
-            palette.actionStripBorder,
-            palette.accent,
-            palette.accentFill,
-            palette.accentText,
-            palette.text,
-            palette.mutedText,
-            themeMode_ == ThemeMode::Dark};
+        const DetailsPanelChromePainter::State chromeState = BuildDetailsPanelChromePainterState();
+        const DetailsPanelChromePainter::Palette chromePalette = BuildDetailsPanelChromePainterPalette(palette);
         DetailsPanelChromePainter::PaintGdi(hdc,
                                             chromeState,
                                             chromePalette,
@@ -12436,10 +12441,7 @@ namespace hyperbrowse::ui
                 title,
                 detailsPanelSummaryText_,
                 {}};
-            const DetailsPanelTextPainter::Palette textPalette{
-                palette.text,
-                palette.mutedText,
-                palette.paneBackground};
+            const DetailsPanelTextPainter::Palette textPalette = BuildDetailsPanelTextPainterPalette(palette);
             DetailsPanelTextPainter::PaintGdi(hdc,
                                               textState,
                                               textPalette,
@@ -12448,20 +12450,8 @@ namespace hyperbrowse::ui
 
             if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_) && !IsRectEmpty(&detailsPanelHistogramRect_))
             {
-                const DetailsPanelHistogramPainter::State histogramState{
-                    detailsPanelHistogramRect_,
-                    detailsPanelHistogramRed_,
-                    detailsPanelHistogramGreen_,
-                    detailsPanelHistogramBlue_,
-                    detailsPanelHistogramPeak_,
-                    detailsPanelHistogramVisible_,
-                    detailsPanelHistogramLoading_};
-                const DetailsPanelHistogramPainter::Palette histogramPalette{
-                    BlendColor(palette.actionFieldBackground,
-                               palette.paneBackground,
-                               themeMode_ == ThemeMode::Dark ? 24 : 12),
-                    palette.actionStripBorder,
-                    palette.mutedText};
+                const DetailsPanelHistogramPainter::State histogramState = BuildDetailsPanelHistogramPainterState();
+                const DetailsPanelHistogramPainter::Palette histogramPalette = BuildDetailsPanelHistogramPainterPalette(palette);
                 DetailsPanelHistogramPainter::PaintGdi(
                     hdc,
                     histogramState,
@@ -12492,10 +12482,7 @@ namespace hyperbrowse::ui
                 {},
                 {},
                 L"Quick action destinations will appear here."};
-            const DetailsPanelTextPainter::Palette textPalette{
-                palette.text,
-                palette.mutedText,
-                palette.paneBackground};
+            const DetailsPanelTextPainter::Palette textPalette = BuildDetailsPanelTextPainterPalette(palette);
             DetailsPanelTextPainter::PaintGdi(hdc,
                                               textState,
                                               textPalette,
