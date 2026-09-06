@@ -348,3 +348,7 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   scheduling, state transitions, panel composition, and backend selection;
   the painter consumes explicit histogram state, geometry, colors, and text
   resources.
+- [x] Extract details-panel tab and close-button GDI and Direct2D painting
+  into `src/ui/DetailsPanelChromePainter.*`. MainWindow retains interaction
+  state, panel composition, and invalidation while the painter consumes
+  explicit rectangles, interaction flags, palette values, and text resources.

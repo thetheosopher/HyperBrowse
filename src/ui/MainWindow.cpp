@@ -48,6 +48,7 @@
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarPainter.h"
 #include "ui/DetailsPanelHistogram.h"
+#include "ui/DetailsPanelChromePainter.h"
 #include "ui/DetailsPanelHistogramPainter.h"
 #include "ui/DetailsPanelLayout.h"
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
@@ -12199,83 +12200,26 @@ namespace hyperbrowse::ui
             hyperbrowse::render::ToD2DPoint(static_cast<float>(detailsPanelRect_.left) + 0.5f, static_cast<float>(detailsPanelRect_.bottom)),
             borderBrush.Get());
 
-        if (!IsRectEmpty(&detailsPanelTabStripRect_))
-        {
-            const COLORREF inactiveFill = BlendColor(palette.actionFieldBackground,
-                                                      palette.paneBackground,
-                                                      themeMode_ == ThemeMode::Dark ? 24 : 12);
-            const COLORREF inactiveBorder = BlendColor(palette.actionStripBorder,
-                                                       palette.paneBackground,
-                                                       themeMode_ == ThemeMode::Dark ? 32 : 16);
-            const COLORREF hoverFill = BlendColor(inactiveFill,
-                                                  palette.accentFill,
-                                                  themeMode_ == ThemeMode::Dark ? 24 : 14);
-            const COLORREF pressedFill = BlendColor(inactiveFill,
-                                                    palette.accent,
-                                                    themeMode_ == ThemeMode::Dark ? 40 : 18);
-            const COLORREF activePressedFill = BlendColor(palette.accentFill,
-                                                          palette.accent,
-                                                          themeMode_ == ThemeMode::Dark ? 22 : 12);
-            const wchar_t* labels[] = {L"File Details", L"Quick Actions"};
-
-            for (std::size_t index = 0; index < detailsPanelTabRects_.size(); ++index)
-            {
-                const RECT& tabRect = detailsPanelTabRects_[index];
-                if (IsRectEmpty(&tabRect))
-                {
-                    continue;
-                }
-
-                const bool active = static_cast<int>(index) == static_cast<int>(activeRightPaneTab_);
-                const bool hot = static_cast<int>(index) == detailsPanelHotTabIndex_;
-                const bool pressed = static_cast<int>(index) == detailsPanelPressedTabIndex_;
-                const COLORREF fillColor = active
-                    ? (pressed ? activePressedFill : palette.accentFill)
-                    : (pressed ? pressedFill : (hot ? hoverFill : inactiveFill));
-                const COLORREF borderColor = active
-                    ? palette.accent
-                    : ((hot || pressed)
-                        ? BlendColor(inactiveBorder, palette.accent, themeMode_ == ThemeMode::Dark ? 44 : 24)
-                        : inactiveBorder);
-                const COLORREF textColor = active
-                    ? palette.accentText
-                    : ((hot || pressed) ? palette.text : palette.mutedText);
-                drawRounded(tabRect, fillColor, borderColor, 7.0f);
-                const auto tabBrush = createBrush(textColor);
-                if (tabBrush)
-                {
-                    drawText(labels[index], tabFormat.Get(), tabRect, tabBrush.Get());
-                }
-            }
-        }
-
-        if (!IsRectEmpty(&detailsPanelCloseButtonRect_))
-        {
-            const bool hot = detailsPanelCloseButtonHot_;
-            const bool pressed = detailsPanelCloseButtonPressed_;
-            const COLORREF fillColor = pressed
-                ? BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 24 : 16)
-                : (hot
-                    ? BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 14 : 10)
-                    : palette.actionFieldBackground);
-            const COLORREF closeColor = hot || pressed ? palette.accentText : palette.mutedText;
-            drawRounded(detailsPanelCloseButtonRect_, fillColor, hot || pressed ? palette.accent : palette.actionStripBorder, 4.0f);
-            const auto closeBrush = createBrush(closeColor);
-            if (closeBrush)
-            {
-                const RECT& closeRect = detailsPanelCloseButtonRect_;
-                renderTarget->DrawLine(
-                    hyperbrowse::render::ToD2DPoint(static_cast<float>(closeRect.left + 5), static_cast<float>(closeRect.top + 5)),
-                    hyperbrowse::render::ToD2DPoint(static_cast<float>(closeRect.right - 5), static_cast<float>(closeRect.bottom - 5)),
-                    closeBrush.Get(),
-                    1.5f);
-                renderTarget->DrawLine(
-                    hyperbrowse::render::ToD2DPoint(static_cast<float>(closeRect.left + 5), static_cast<float>(closeRect.bottom - 5)),
-                    hyperbrowse::render::ToD2DPoint(static_cast<float>(closeRect.right - 5), static_cast<float>(closeRect.top + 5)),
-                    closeBrush.Get(),
-                    1.5f);
-            }
-        }
+        const DetailsPanelChromePainter::State chromeState{
+            detailsPanelTabStripRect_,
+            detailsPanelTabRects_,
+            static_cast<int>(activeRightPaneTab_),
+            detailsPanelHotTabIndex_,
+            detailsPanelPressedTabIndex_,
+            detailsPanelCloseButtonRect_,
+            detailsPanelCloseButtonHot_,
+            detailsPanelCloseButtonPressed_};
+        const DetailsPanelChromePainter::Palette chromePalette{
+            palette.actionFieldBackground,
+            palette.paneBackground,
+            palette.actionStripBorder,
+            palette.accent,
+            palette.accentFill,
+            palette.accentText,
+            palette.text,
+            palette.mutedText,
+            themeMode_ == ThemeMode::Dark};
+        DetailsPanelChromePainter::PaintD2D(renderTarget.Get(), chromeState, chromePalette, tabFormat.Get());
 
         if (activeRightPaneTab_ == RightPaneTab::FileDetails && !IsRectEmpty(&detailsPanelContentRect_))
         {
@@ -12512,112 +12456,29 @@ namespace hyperbrowse::ui
         SelectObject(hdc, oldPen);
         DeleteObject(borderPen);
 
-        if (!IsRectEmpty(&detailsPanelTabStripRect_))
-        {
-            const COLORREF inactiveFill = BlendColor(palette.actionFieldBackground,
-                                                     palette.paneBackground,
-                                                     themeMode_ == ThemeMode::Dark ? 24 : 12);
-            const COLORREF inactiveBorder = BlendColor(palette.actionStripBorder,
-                                                       palette.paneBackground,
-                                                       themeMode_ == ThemeMode::Dark ? 32 : 16);
-            const COLORREF hoverFill = BlendColor(inactiveFill,
-                                                  palette.accentFill,
-                                                  themeMode_ == ThemeMode::Dark ? 24 : 14);
-            const COLORREF pressedFill = BlendColor(inactiveFill,
-                                                    palette.accent,
-                                                    themeMode_ == ThemeMode::Dark ? 40 : 18);
-            const COLORREF activePressedFill = BlendColor(palette.accentFill,
-                                                          palette.accent,
-                                                          themeMode_ == ThemeMode::Dark ? 22 : 12);
-            const wchar_t* labels[] = {L"File Details", L"Quick Actions"};
-
-            for (std::size_t index = 0; index < detailsPanelTabRects_.size(); ++index)
-            {
-                const RECT& tabRect = detailsPanelTabRects_[index];
-                if (IsRectEmpty(&tabRect))
-                {
-                    continue;
-                }
-
-                const bool active = static_cast<int>(index) == static_cast<int>(activeRightPaneTab_);
-                const bool hot = static_cast<int>(index) == detailsPanelHotTabIndex_;
-                const bool pressed = static_cast<int>(index) == detailsPanelPressedTabIndex_;
-                const COLORREF fillColor = active
-                    ? (pressed ? activePressedFill : palette.accentFill)
-                    : (pressed ? pressedFill : (hot ? hoverFill : inactiveFill));
-                const COLORREF borderColor = active
-                    ? palette.accent
-                    : ((hot || pressed)
-                        ? BlendColor(inactiveBorder, palette.accent, themeMode_ == ThemeMode::Dark ? 44 : 24)
-                        : inactiveBorder);
-                const COLORREF textColor = active
-                    ? palette.accentText
-                    : ((hot || pressed) ? palette.text : palette.mutedText);
-
-                HBRUSH tabBrush = CreateSolidBrush(fillColor);
-                HPEN tabPen = CreatePen(PS_SOLID, 1, borderColor);
-                const HGDIOBJ oldBrush = SelectObject(hdc, tabBrush);
-                const HGDIOBJ oldTabPen = SelectObject(hdc, tabPen);
-                RoundRect(hdc, tabRect.left, tabRect.top, tabRect.right, tabRect.bottom, 14, 14);
-                SelectObject(hdc, oldTabPen);
-                SelectObject(hdc, oldBrush);
-                DeleteObject(tabPen);
-                DeleteObject(tabBrush);
-
-                RECT textRect = tabRect;
-                hyperbrowse::render::DrawGdiText(hdc,
-                                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                    labels[index],
-                                    -1,
-                                    textRect,
-                                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
-                                    textColor,
-                                    fillColor);
-            }
-        }
-
-        if (!IsRectEmpty(&detailsPanelCloseButtonRect_))
-        {
-            const bool hot = detailsPanelCloseButtonHot_;
-            const bool pressed = detailsPanelCloseButtonPressed_;
-            const COLORREF fillColor = pressed
-                ? BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 24 : 16)
-                : (hot
-                    ? BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 14 : 10)
-                    : palette.actionFieldBackground);
-            const COLORREF borderColor = hot || pressed ? palette.accent : palette.actionStripBorder;
-            const COLORREF textColor = hot || pressed ? palette.accentText : palette.mutedText;
-
-            HBRUSH buttonBrush = CreateSolidBrush(fillColor);
-            HPEN buttonPen = CreatePen(PS_SOLID, 1, borderColor);
-            const HGDIOBJ oldBrush = SelectObject(hdc, buttonBrush);
-            const HGDIOBJ oldButtonPen = SelectObject(hdc, buttonPen);
-            RoundRect(hdc,
-                      detailsPanelCloseButtonRect_.left,
-                      detailsPanelCloseButtonRect_.top,
-                      detailsPanelCloseButtonRect_.right,
-                      detailsPanelCloseButtonRect_.bottom,
-                      6,
-                      6);
-            SelectObject(hdc, oldButtonPen);
-            SelectObject(hdc, oldBrush);
-            DeleteObject(buttonPen);
-            DeleteObject(buttonBrush);
-
-            const int inset = 5;
-            const int left = detailsPanelCloseButtonRect_.left + inset;
-            const int top = detailsPanelCloseButtonRect_.top + inset;
-            const int right = detailsPanelCloseButtonRect_.right - inset;
-            const int bottom = detailsPanelCloseButtonRect_.bottom - inset;
-            HPEN xPen = CreatePen(PS_SOLID, 1, textColor);
-            const HGDIOBJ oldXPen = SelectObject(hdc, xPen);
-            MoveToEx(hdc, left, top, nullptr);
-            LineTo(hdc, right, bottom);
-            MoveToEx(hdc, left, bottom, nullptr);
-            LineTo(hdc, right, top);
-            SelectObject(hdc, oldXPen);
-            DeleteObject(xPen);
-        }
+        const DetailsPanelChromePainter::State chromeState{
+            detailsPanelTabStripRect_,
+            detailsPanelTabRects_,
+            static_cast<int>(activeRightPaneTab_),
+            detailsPanelHotTabIndex_,
+            detailsPanelPressedTabIndex_,
+            detailsPanelCloseButtonRect_,
+            detailsPanelCloseButtonHot_,
+            detailsPanelCloseButtonPressed_};
+        const DetailsPanelChromePainter::Palette chromePalette{
+            palette.actionFieldBackground,
+            palette.paneBackground,
+            palette.actionStripBorder,
+            palette.accent,
+            palette.accentFill,
+            palette.accentText,
+            palette.text,
+            palette.mutedText,
+            themeMode_ == ThemeMode::Dark};
+        DetailsPanelChromePainter::PaintGdi(hdc,
+                                            chromeState,
+                                            chromePalette,
+                                            detailsPanelSummaryFont_);
 
         SelectObject(hdc, detailsPanelTitleFont_ ? detailsPanelTitleFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
         if (activeRightPaneTab_ == RightPaneTab::FileDetails && !IsRectEmpty(&detailsPanelContentRect_))
