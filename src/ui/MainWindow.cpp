@@ -51,6 +51,7 @@
 #include "ui/DetailsPanelChromePainter.h"
 #include "ui/DetailsPanelHistogramPainter.h"
 #include "ui/DetailsPanelLayout.h"
+#include "ui/DetailsPanelTextPainter.h"
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/RightPaneHitTester.h"
@@ -12158,20 +12159,6 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        const auto drawText = [renderTarget](std::wstring_view text,
-                                             IDWriteTextFormat* format,
-                                             const RECT& rect,
-                                             ID2D1Brush* brush)
-        {
-            if (!text.empty() && format && brush && rect.right > rect.left && rect.bottom > rect.top)
-            {
-                renderTarget->DrawText(text.data(),
-                                       static_cast<UINT32>(text.size()),
-                                       format,
-                                       hyperbrowse::render::ToD2DRect(rect),
-                                       brush);
-            }
-        };
         renderTarget->BeginDraw();
         renderTarget->FillRectangle(hyperbrowse::render::ToD2DRect(detailsPanelRect_), panelBrush.Get());
         renderTarget->DrawLine(
@@ -12209,32 +12196,37 @@ namespace hyperbrowse::ui
                                                            innerWidth,
                                                            DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
                                                            22);
-            const auto titleBrush = createBrush(palette.text);
-            drawText(title,
-                     titleFormat.Get(),
-                     RECT{detailsPanelContentRect_.left,
-                          detailsPanelContentRect_.top,
-                          detailsPanelContentRect_.right,
-                          detailsPanelContentRect_.top + titleHeight},
-                     titleBrush.Get());
-
+            const RECT titleRect{detailsPanelContentRect_.left,
+                                 detailsPanelContentRect_.top,
+                                 detailsPanelContentRect_.right,
+                                 detailsPanelContentRect_.top + titleHeight};
             const int summaryTop = detailsPanelContentRect_.top + titleHeight + 6;
-            if (!detailsPanelSummaryText_.empty())
-            {
-                const int summaryHeight = MeasureTextBlockHeight(detailsPanelSummaryFont_,
-                                                                 detailsPanelSummaryText_,
-                                                                 innerWidth,
-                                                                 DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                                 18);
-                const auto summaryBrush = createBrush(palette.mutedText);
-                drawText(detailsPanelSummaryText_,
-                         summaryFormat.Get(),
-                         RECT{detailsPanelContentRect_.left,
-                              summaryTop,
-                              detailsPanelContentRect_.right,
-                              summaryTop + summaryHeight},
-                         summaryBrush.Get());
-            }
+            const int summaryHeight = detailsPanelSummaryText_.empty()
+                ? 0
+                : MeasureTextBlockHeight(detailsPanelSummaryFont_,
+                                         detailsPanelSummaryText_,
+                                         innerWidth,
+                                         DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                         18);
+            const DetailsPanelTextPainter::State textState{
+                titleRect,
+                RECT{detailsPanelContentRect_.left,
+                     summaryTop,
+                     detailsPanelContentRect_.right,
+                     summaryTop + summaryHeight},
+                RECT{},
+                title,
+                detailsPanelSummaryText_,
+                {}};
+            const DetailsPanelTextPainter::Palette textPalette{
+                palette.text,
+                palette.mutedText,
+                palette.paneBackground};
+            DetailsPanelTextPainter::PaintD2D(renderTarget.Get(),
+                                              textState,
+                                              textPalette,
+                                              titleFormat.Get(),
+                                              summaryFormat.Get());
 
             if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_)
                 && !IsRectEmpty(&detailsPanelHistogramRect_))
@@ -12313,7 +12305,22 @@ namespace hyperbrowse::ui
         }
         else if (activeRightPaneTab_ == RightPaneTab::QuickSend && !IsRectEmpty(&detailsPanelContentRect_))
         {
-            drawText(L"Quick action destinations will appear here.", summaryFormat.Get(), detailsPanelContentRect_, mutedBrush.Get());
+            const DetailsPanelTextPainter::State textState{
+                RECT{},
+                RECT{},
+                detailsPanelContentRect_,
+                {},
+                {},
+                L"Quick action destinations will appear here."};
+            const DetailsPanelTextPainter::Palette textPalette{
+                palette.text,
+                palette.mutedText,
+                palette.paneBackground};
+            DetailsPanelTextPainter::PaintD2D(renderTarget.Get(),
+                                              textState,
+                                              textPalette,
+                                              titleFormat.Get(),
+                                              summaryFormat.Get());
         }
 
         const HRESULT drawResult = renderTarget->EndDraw();
@@ -12404,34 +12411,30 @@ namespace hyperbrowse::ui
                                                            DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
                                                            22);
             RECT titleRect{innerLeft, detailsPanelContentRect_.top, innerRight, detailsPanelContentRect_.top + titleHeight};
-
-            hyperbrowse::render::DrawGdiText(hdc,
-                                detailsPanelTitleFont_ ? detailsPanelTitleFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                title.c_str(),
-                                -1,
-                                titleRect,
-                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                palette.text,
-                                palette.paneBackground);
-
             const int summaryTop = titleRect.bottom + 6;
-            if (!detailsPanelSummaryText_.empty())
-            {
-                const int summaryHeight = MeasureTextBlockHeight(detailsPanelSummaryFont_,
-                                                                 detailsPanelSummaryText_,
-                                                                 innerWidth,
-                                                                 DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                                 18);
-                RECT summaryRect{innerLeft, summaryTop, innerRight, summaryTop + summaryHeight};
-                hyperbrowse::render::DrawGdiText(hdc,
-                                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                    detailsPanelSummaryText_.c_str(),
-                                    -1,
-                                    summaryRect,
-                                    DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                    palette.mutedText,
-                                    palette.paneBackground);
-            }
+            const int summaryHeight = detailsPanelSummaryText_.empty()
+                ? 0
+                : MeasureTextBlockHeight(detailsPanelSummaryFont_,
+                                         detailsPanelSummaryText_,
+                                         innerWidth,
+                                         DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                         18);
+            const DetailsPanelTextPainter::State textState{
+                titleRect,
+                RECT{innerLeft, summaryTop, innerRight, summaryTop + summaryHeight},
+                RECT{},
+                title,
+                detailsPanelSummaryText_,
+                {}};
+            const DetailsPanelTextPainter::Palette textPalette{
+                palette.text,
+                palette.mutedText,
+                palette.paneBackground};
+            DetailsPanelTextPainter::PaintGdi(hdc,
+                                              textState,
+                                              textPalette,
+                                              detailsPanelTitleFont_,
+                                              detailsPanelSummaryFont_);
 
             if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_) && !IsRectEmpty(&detailsPanelHistogramRect_))
             {
@@ -12507,15 +12510,22 @@ namespace hyperbrowse::ui
         }
         else if (activeRightPaneTab_ == RightPaneTab::QuickSend && !IsRectEmpty(&detailsPanelContentRect_))
         {
-            RECT emptyStateRect = detailsPanelContentRect_;
-            render::DrawGdiText(hdc,
-                                detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                L"Quick action destinations will appear here.",
-                                -1,
-                                emptyStateRect,
-                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                palette.mutedText,
-                                palette.paneBackground);
+            const DetailsPanelTextPainter::State textState{
+                RECT{},
+                RECT{},
+                detailsPanelContentRect_,
+                {},
+                {},
+                L"Quick action destinations will appear here."};
+            const DetailsPanelTextPainter::Palette textPalette{
+                palette.text,
+                palette.mutedText,
+                palette.paneBackground};
+            DetailsPanelTextPainter::PaintGdi(hdc,
+                                              textState,
+                                              textPalette,
+                                              detailsPanelTitleFont_,
+                                              detailsPanelSummaryFont_);
         }
     }
 

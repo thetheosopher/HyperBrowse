@@ -133,6 +133,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/DetailsPanelHistogram.cpp
     src/ui/DetailsPanelChromePainter.cpp
     src/ui/DetailsPanelHistogramPainter.cpp
+    src/ui/DetailsPanelTextPainter.cpp
     src/ui/DetailsPanelLayout.cpp
     src/ui/DisplaySurfaceRecoveryPolicy.cpp
     src/ui/ImageWorkflowPersistence.cpp

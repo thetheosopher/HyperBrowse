@@ -358,3 +358,8 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   policy, interaction state, clipping geometry, and icon-library ownership
   while the painter consumes explicit row states, layout metrics, palette,
   and text resources.
+- [x] Extract details-panel title, summary, and Quick Actions empty-state text
+  painting into `src/ui/DetailsPanelTextPainter.*`. MainWindow retains text
+  measurement, content-state selection, and panel composition while the
+  painter consumes explicit rectangles, text views, palette, and font
+  resources.
