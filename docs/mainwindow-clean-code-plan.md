@@ -313,5 +313,24 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   MainWindow retains runtime ViewerWindow application, dialog editing, and
   registry-handle ownership; deterministic coverage verifies valid restoration,
   invalid-value defaults, and value mapping.
+- [x] Extract browser presentation persistence into
+  `src/ui/BrowserPresentationPersistence.*`, covering pane widths,
+  browser/theme modes, text size, thumbnail presentation, sorting, and
+  details-panel presentation. MainWindow retains layout application, browser
+  and menu synchronization, and registry-handle ownership; deterministic
+  coverage verifies valid restoration, invalid-value defaults, exact mapping,
+  and minimum-width writes.
+- [x] Extract image workflow persistence into
+  `src/ui/ImageWorkflowPersistence.*`, covering nvJPEG and LibRaw helper
+  preferences, paired RAW/JPEG behavior, and secondary-monitor viewer
+  preference. MainWindow retains decoder/service application and pairing
+  policy; deterministic coverage verifies defaults, enum validation, and
+  exact value mapping.
+- [x] Extract performance and cache persistence into
+  `src/ui/PerformanceSettingsPersistence.*`, covering persistent thumbnail
+  cache, resource profile, prefetch depth, cache capacities, pressure-status
+  display, and close-on-Escape settings. MainWindow retains scheduler/cache
+  application and dialog behavior; deterministic coverage verifies defaults,
+  enum validation, QWORD saturation, and prefetch clamping.
 - [x] Complete the Phase 7 verification gate after the focused test-source
   splits: Debug and Release builds plus all four registered smoke tests pass.

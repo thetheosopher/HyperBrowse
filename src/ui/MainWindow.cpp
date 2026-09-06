@@ -65,6 +65,9 @@
 #include "ui/ToolbarIconLibrary.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowBoundsPersistence.h"
+#include "ui/BrowserPresentationPersistence.h"
+#include "ui/ImageWorkflowPersistence.h"
+#include "ui/PerformanceSettingsPersistence.h"
 #include "ui/ViewerSettingsPersistence.h"
 #include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
@@ -109,34 +112,10 @@ namespace
 
     thread_local hyperbrowse::ui::MainWindow* g_commandBarMenuFilterWindow = nullptr;
 
-    constexpr wchar_t kRegistryValueLeftPaneWidth[] = L"LeftPaneWidth";
-    constexpr wchar_t kRegistryValueBrowserMode[] = L"BrowserMode";
-    constexpr wchar_t kRegistryValueThemeMode[] = L"ThemeMode";
-    constexpr wchar_t kRegistryValueAppTextSize[] = L"AppTextSize";
-    constexpr wchar_t kRegistryValueNvJpegEnabled[] = L"NvJpegEnabled";
-    constexpr wchar_t kRegistryValueLibRawOutOfProcessEnabled[] = L"LibRawOutOfProcessEnabled";
-    constexpr wchar_t kRegistryValueThumbnailSizePreset[] = L"ThumbnailSizePreset";
-    constexpr wchar_t kRegistryValueCompactThumbnailLayout[] = L"CompactThumbnailLayout";
-    constexpr wchar_t kRegistryValueThumbnailDetailsVisible[] = L"ThumbnailDetailsVisible";
-    constexpr wchar_t kRegistryValueShowSubfoldersInBrowser[] = L"ShowSubfoldersInBrowser";
     constexpr LONG kWindowCascadeOffset = 32;
-    constexpr wchar_t kRegistryValueSortMode[] = L"SortMode";
-    constexpr wchar_t kRegistryValueSortAscending[] = L"SortAscending";
-    constexpr wchar_t kRegistryValueDetailsStripVisible[] = L"DetailsStripVisible";
-    constexpr wchar_t kRegistryValueDetailsPanelWidth[] = L"DetailsPanelWidth";
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
     constexpr wchar_t kQuickSendStateMutexName[] = L"Local\\TheTheosopher.HyperBrowse.QuickSendState";
-    constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
-    constexpr wchar_t kRegistryValuePairedRawJpegViewerPreference[] = L"PairedRawJpegViewerPreference";
-    constexpr wchar_t kRegistryValueDefaultViewerToSecondaryMonitor[] = L"DefaultViewerToSecondaryMonitor";
-    constexpr wchar_t kRegistryValuePersistentThumbnailCacheEnabled[] = L"PersistentThumbnailCacheEnabled";
-    constexpr wchar_t kRegistryValueResourceProfile[] = L"ResourceProfile";
-    constexpr wchar_t kRegistryValuePrefetchDepthOverride[] = L"PrefetchDepthOverride";
-    constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
-    constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
-    constexpr wchar_t kRegistryValueShowPressureStateInStatusBar[] = L"ShowPressureStateInStatusBar";
-    constexpr wchar_t kRegistryValueCloseMainWindowOnEscape[] = L"CloseMainWindowOnEscape";
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -8143,53 +8122,6 @@ namespace
         }
     }
 
-    bool TryParseThumbnailSizePreset(DWORD value, hyperbrowse::browser::ThumbnailSizePreset* preset)
-    {
-        if (!preset)
-        {
-            return false;
-        }
-
-        switch (value)
-        {
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels96):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels96;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels128):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels128;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels160):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels160;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels192):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels192;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels256):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels256;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels320):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels320;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels360):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels360;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels420):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels420;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels480):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels480;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels560):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels560;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::browser::ThumbnailSizePreset::Pixels640):
-            *preset = hyperbrowse::browser::ThumbnailSizePreset::Pixels640;
-            return true;
-        default:
-            return false;
-        }
-    }
-
     hyperbrowse::browser::ThumbnailSizePreset ThumbnailSizePresetFromCommandId(UINT commandId)
     {
         switch (commandId)
@@ -8346,32 +8278,6 @@ namespace
     {
         return commandId >= ID_VIEW_APP_TEXT_SIZE_SMALL
             && commandId <= ID_VIEW_APP_TEXT_SIZE_LARGE;
-    }
-
-    bool TryParseResourceProfile(DWORD value, hyperbrowse::util::ResourceProfile* resourceProfile)
-    {
-        if (!resourceProfile)
-        {
-            return false;
-        }
-
-        switch (value)
-        {
-        case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Conservative):
-            *resourceProfile = hyperbrowse::util::ResourceProfile::Conservative;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Balanced):
-            *resourceProfile = hyperbrowse::util::ResourceProfile::Balanced;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Performance):
-            *resourceProfile = hyperbrowse::util::ResourceProfile::Performance;
-            return true;
-        case static_cast<DWORD>(hyperbrowse::util::ResourceProfile::Aggressive):
-            *resourceProfile = hyperbrowse::util::ResourceProfile::Aggressive;
-            return true;
-        default:
-            return false;
-        }
     }
 
     hyperbrowse::util::ResourceProfile ResourceProfileFromCommandId(UINT commandId)
@@ -19166,57 +19072,55 @@ namespace hyperbrowse::ui
         HKEY key{};
         if (hyperbrowse::util::OpenSettingsRegistryKey(KEY_READ, &key) == ERROR_SUCCESS)
         {
-            DWORD value = 0;
+            const BrowserPresentationState presentationState = BrowserPresentationPersistence::Load(
+                [&](std::wstring_view valueName, DWORD* persistedValue)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadDwordValue(key, registryValueName.c_str(), persistedValue);
+                },
+                BrowserPresentationState{
+                    leftPaneWidth_,
+                    static_cast<DWORD>(browserMode_),
+                    static_cast<DWORD>(themeMode_),
+                    appTextSize_,
+                    thumbnailSizePreset_,
+                    compactThumbnailLayout_,
+                    thumbnailDetailsVisible_,
+                    showSubfoldersInBrowser_,
+                    sortMode_,
+                    sortAscending_,
+                    detailsStripVisible_,
+                    detailsPanelWidth_});
+            leftPaneWidth_ = presentationState.leftPaneWidth;
+            browserMode_ = static_cast<BrowserMode>(presentationState.browserMode);
+            themeMode_ = static_cast<ThemeMode>(presentationState.themeMode);
+            appTextSize_ = presentationState.appTextSize;
+            thumbnailSizePreset_ = presentationState.thumbnailSizePreset;
+            compactThumbnailLayout_ = presentationState.compactThumbnailLayout;
+            thumbnailDetailsVisible_ = presentationState.thumbnailDetailsVisible;
+            showSubfoldersInBrowser_ = presentationState.showSubfoldersInBrowser;
+            sortMode_ = presentationState.sortMode;
+            sortAscending_ = presentationState.sortAscending;
+            detailsStripVisible_ = presentationState.detailsStripVisible;
+            detailsPanelWidth_ = presentationState.detailsPanelWidth;
 
-            if (TryReadDwordValue(key, kRegistryValueLeftPaneWidth, &value))
-            {
-                leftPaneWidth_ = static_cast<int>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueBrowserMode, &value) && value <= static_cast<DWORD>(BrowserMode::Details))
-            {
-                browserMode_ = static_cast<BrowserMode>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueThemeMode, &value) && value <= static_cast<DWORD>(ThemeMode::Dark))
-            {
-                themeMode_ = static_cast<ThemeMode>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueAppTextSize, &value))
-            {
-                appTextSize_ = util::NormalizeAppTextSize(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueNvJpegEnabled, &value))
-            {
-                nvJpegEnabled_ = value != 0;
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueLibRawOutOfProcessEnabled, &value))
-            {
-                libRawOutOfProcessEnabled_ = value != 0;
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueThumbnailSizePreset, &value))
-            {
-                TryParseThumbnailSizePreset(value, &thumbnailSizePreset_);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueCompactThumbnailLayout, &value))
-            {
-                compactThumbnailLayout_ = value != 0;
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueThumbnailDetailsVisible, &value))
-            {
-                thumbnailDetailsVisible_ = value != 0;
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueShowSubfoldersInBrowser, &value))
-            {
-                showSubfoldersInBrowser_ = value != 0;
-            }
+            const ImageWorkflowState imageWorkflowState = ImageWorkflowPersistence::Load(
+                [&](std::wstring_view valueName, DWORD* persistedValue)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadDwordValue(key, registryValueName.c_str(), persistedValue);
+                },
+                ImageWorkflowState{
+                    nvJpegEnabled_,
+                    libRawOutOfProcessEnabled_,
+                    rawJpegPairedOperationsEnabled_,
+                    pairedRawJpegViewerPreference_,
+                    defaultViewerToSecondaryMonitor_});
+            nvJpegEnabled_ = imageWorkflowState.nvJpegEnabled;
+            libRawOutOfProcessEnabled_ = imageWorkflowState.libRawOutOfProcessEnabled;
+            rawJpegPairedOperationsEnabled_ = imageWorkflowState.rawJpegPairedOperationsEnabled;
+            pairedRawJpegViewerPreference_ = imageWorkflowState.pairedRawJpegViewerPreference;
+            defaultViewerToSecondaryMonitor_ = imageWorkflowState.defaultViewerToSecondaryMonitor;
 
             const SelectedPathState selectedPathState = SelectedPathPersistence::Load(
                 [&](std::wstring_view valueName, std::wstring* value)
@@ -19275,16 +19179,6 @@ namespace hyperbrowse::ui
             quickSendModel_.SetShortcutAssignments(persistedState.shortcutAssignments);
             SortFavoriteDestinationsByShortcutInMemory();
 
-            if (TryReadDwordValue(key, kRegistryValueSortMode, &value) && value <= static_cast<DWORD>(browser::BrowserSortMode::Tags))
-            {
-                sortMode_ = static_cast<browser::BrowserSortMode>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueSortAscending, &value))
-            {
-                sortAscending_ = value != 0;
-            }
-
             ViewerSettingsState viewerSettings = ViewerSettingsPersistence::Load(
                 [&](std::wstring_view valueName, DWORD* persistedValue)
                 {
@@ -19306,68 +19200,32 @@ namespace hyperbrowse::ui
             viewerMouseWheelBehavior_ = viewerSettings.mouseWheelBehavior;
             invertKeyboardPanning_ = viewerSettings.invertKeyboardPanning;
             viewerEscapeKeyBehavior_ = viewerSettings.escapeKeyBehavior;
-            if (TryReadDwordValue(key, kRegistryValueDetailsStripVisible, &value))
-            {
-                detailsStripVisible_ = value != 0;
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueDetailsPanelWidth, &value))
-            {
-                detailsPanelWidth_ = static_cast<int>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, &value))
-            {
-                rawJpegPairedOperationsEnabled_ = value != 0;
-            }
-
-            if (TryReadDwordValue(key, kRegistryValuePairedRawJpegViewerPreference, &value)
-                && value <= static_cast<DWORD>(browser::RawJpegDisplayPreference::Raw))
-            {
-                pairedRawJpegViewerPreference_ = static_cast<browser::RawJpegDisplayPreference>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueDefaultViewerToSecondaryMonitor, &value))
-            {
-                defaultViewerToSecondaryMonitor_ = value != 0;
-            }
-
-            if (TryReadDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, &value))
-            {
-                persistentThumbnailCacheEnabled_ = value != 0;
-            }
-
-            std::uint64_t qwordValue = 0;
-            if (TryReadQwordValue(key, kRegistryValueThumbnailCacheCapacityOverrideBytes, &qwordValue))
-            {
-                thumbnailCacheCapacityOverrideBytes_ = util::SaturatingCastToSizeT(qwordValue);
-            }
-
-            if (TryReadQwordValue(key, kRegistryValueMetadataCacheCapacityOverrideEntries, &qwordValue))
-            {
-                metadataCacheCapacityOverrideEntries_ = util::SaturatingCastToSizeT(qwordValue);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueResourceProfile, &value))
-            {
-                TryParseResourceProfile(value, &resourceProfile_);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValuePrefetchDepthOverride, &value)
-                && value <= static_cast<DWORD>(hyperbrowse::util::kMaximumPrefetchDepth))
-            {
-                prefetchDepthOverride_ = static_cast<int>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueShowPressureStateInStatusBar, &value))
-            {
-                showPressureStateInStatusBar_ = value != 0;
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueCloseMainWindowOnEscape, &value))
-            {
-                closeMainWindowOnEscape_ = value != 0;
-            }
+            const PerformanceSettingsState performanceState = PerformanceSettingsPersistence::Load(
+                [&](std::wstring_view valueName, DWORD* persistedValue)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadDwordValue(key, registryValueName.c_str(), persistedValue);
+                },
+                [&](std::wstring_view valueName, std::uint64_t* persistedValue)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadQwordValue(key, registryValueName.c_str(), persistedValue);
+                },
+                PerformanceSettingsState{
+                    persistentThumbnailCacheEnabled_,
+                    resourceProfile_,
+                    prefetchDepthOverride_,
+                    thumbnailCacheCapacityOverrideBytes_,
+                    metadataCacheCapacityOverrideEntries_,
+                    showPressureStateInStatusBar_,
+                    closeMainWindowOnEscape_});
+            persistentThumbnailCacheEnabled_ = performanceState.persistentThumbnailCacheEnabled;
+            resourceProfile_ = performanceState.resourceProfile;
+            prefetchDepthOverride_ = performanceState.prefetchDepthOverride;
+            thumbnailCacheCapacityOverrideBytes_ = performanceState.thumbnailCacheCapacityOverrideBytes;
+            metadataCacheCapacityOverrideEntries_ = performanceState.metadataCacheCapacityOverrideEntries;
+            showPressureStateInStatusBar_ = performanceState.showPressureStateInStatusBar;
+            closeMainWindowOnEscape_ = performanceState.closeMainWindowOnEscape;
 
             RegCloseKey(key);
         }
@@ -19464,17 +19322,38 @@ namespace hyperbrowse::ui
                     });
             }
 
-            WriteDwordValue(key, kRegistryValueLeftPaneWidth, static_cast<DWORD>(std::max(leftPaneWidth_, kMinLeftPaneWidth)));
-            WriteDwordValue(key, kRegistryValueBrowserMode, static_cast<DWORD>(browserMode_));
-            WriteDwordValue(key, kRegistryValueThemeMode, static_cast<DWORD>(themeMode_));
-            WriteDwordValue(key, kRegistryValueAppTextSize, static_cast<DWORD>(appTextSize_));
+            BrowserPresentationPersistence::Save(
+                BrowserPresentationState{
+                    leftPaneWidth_,
+                    static_cast<DWORD>(browserMode_),
+                    static_cast<DWORD>(themeMode_),
+                    appTextSize_,
+                    thumbnailSizePreset_,
+                    compactThumbnailLayout_,
+                    thumbnailDetailsVisible_,
+                    showSubfoldersInBrowser_,
+                    browserPaneController_ ? browserPaneController_->GetSortMode() : sortMode_,
+                    browserPaneController_ ? browserPaneController_->IsSortAscending() : sortAscending_,
+                    detailsStripVisible_,
+                    detailsPanelWidth_},
+                [&](std::wstring_view valueName, DWORD value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    WriteDwordValue(key, registryValueName.c_str(), value);
+                });
             RegDeleteValueW(key, L"RecursiveBrowsing");
-            WriteDwordValue(key, kRegistryValueNvJpegEnabled, nvJpegEnabled_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValueLibRawOutOfProcessEnabled, libRawOutOfProcessEnabled_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValueThumbnailSizePreset, static_cast<DWORD>(thumbnailSizePreset_));
-            WriteDwordValue(key, kRegistryValueCompactThumbnailLayout, compactThumbnailLayout_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValueShowSubfoldersInBrowser, showSubfoldersInBrowser_ ? 1UL : 0UL);
+            ImageWorkflowPersistence::Save(
+                ImageWorkflowState{
+                    nvJpegEnabled_,
+                    libRawOutOfProcessEnabled_,
+                    rawJpegPairedOperationsEnabled_,
+                    pairedRawJpegViewerPreference_,
+                    defaultViewerToSecondaryMonitor_},
+                [&](std::wstring_view valueName, DWORD value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    WriteDwordValue(key, registryValueName.c_str(), value);
+                });
             SelectedPathPersistence::Save(
                 SelectedPathState{selectedFolderPath, selectedImagePath},
                 [&](std::wstring_view valueName, std::wstring_view value)
@@ -19489,11 +19368,6 @@ namespace hyperbrowse::ui
                 });
             WriteStringValue(key, kRegistryValueRecentFolders, QuickAccessPathList::Serialize(recentFolders_));
             WriteStringValue(key, kRegistryValueRecentDestinationFolders, QuickAccessPathList::Serialize(recentDestinationFolders_));
-            if (browserPaneController_)
-            {
-                WriteDwordValue(key, kRegistryValueSortMode, static_cast<DWORD>(browserPaneController_->GetSortMode()));
-                WriteDwordValue(key, kRegistryValueSortAscending, browserPaneController_->IsSortAscending() ? 1UL : 0UL);
-            }
             ViewerSettingsPersistence::Save(
                 ViewerSettingsState{
                     slideshowIntervalMs_,
@@ -19508,21 +19382,25 @@ namespace hyperbrowse::ui
                     const std::wstring registryValueName(valueName);
                     WriteDwordValue(key, registryValueName.c_str(), value);
                 });
-            WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValueDetailsPanelWidth, static_cast<DWORD>(std::max(detailsPanelWidth_, kDetailsPanelMinWidth)));
-            WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValuePairedRawJpegViewerPreference, static_cast<DWORD>(pairedRawJpegViewerPreference_));
-            WriteDwordValue(key, kRegistryValueDefaultViewerToSecondaryMonitor, defaultViewerToSecondaryMonitor_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValuePersistentThumbnailCacheEnabled, persistentThumbnailCacheEnabled_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValueResourceProfile, static_cast<DWORD>(resourceProfile_));
-            WriteDwordValue(key, kRegistryValuePrefetchDepthOverride, static_cast<DWORD>(std::clamp(
-                prefetchDepthOverride_,
-                hyperbrowse::util::kAutomaticPrefetchDepth,
-                hyperbrowse::util::kMaximumPrefetchDepth)));
-            WriteDwordValue(key, kRegistryValueShowPressureStateInStatusBar, showPressureStateInStatusBar_ ? 1UL : 0UL);
-            WriteDwordValue(key, kRegistryValueCloseMainWindowOnEscape, closeMainWindowOnEscape_ ? 1UL : 0UL);
-            WriteQwordValue(key, kRegistryValueThumbnailCacheCapacityOverrideBytes, static_cast<std::uint64_t>(thumbnailCacheCapacityOverrideBytes_));
-            WriteQwordValue(key, kRegistryValueMetadataCacheCapacityOverrideEntries, static_cast<std::uint64_t>(metadataCacheCapacityOverrideEntries_));
+            PerformanceSettingsPersistence::Save(
+                PerformanceSettingsState{
+                    persistentThumbnailCacheEnabled_,
+                    resourceProfile_,
+                    prefetchDepthOverride_,
+                    thumbnailCacheCapacityOverrideBytes_,
+                    metadataCacheCapacityOverrideEntries_,
+                    showPressureStateInStatusBar_,
+                    closeMainWindowOnEscape_},
+                [&](std::wstring_view valueName, DWORD value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    WriteDwordValue(key, registryValueName.c_str(), value);
+                },
+                [&](std::wstring_view valueName, std::uint64_t value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    WriteQwordValue(key, registryValueName.c_str(), value);
+                });
             RegCloseKey(key);
         }
     }

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "services/BatchConvertService.h"
+#include "ui/BrowserPresentationPersistence.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
 #include "ui/ClipboardFileTransfer.h"
@@ -25,6 +26,7 @@
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderHistory.h"
+#include "ui/ImageWorkflowPersistence.h"
 #include "ui/QuickAccessLayout.h"
 #include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickAccessPathList.h"
@@ -35,6 +37,7 @@
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowBoundsPersistence.h"
 #include "ui/WindowTimerRouter.h"
+#include "ui/PerformanceSettingsPersistence.h"
 #include "util/ResourceSizing.h"
 
 namespace hyperbrowse::tests
@@ -871,6 +874,293 @@ namespace hyperbrowse::tests
                    "Viewer settings persistence did not write the expected registry value contract");
         }
 
+        void RunBrowserPresentationPersistenceScenario()
+        {
+            using hyperbrowse::browser::BrowserSortMode;
+            using hyperbrowse::browser::ThumbnailSizePreset;
+            using hyperbrowse::ui::BrowserPresentationPersistence;
+            using hyperbrowse::ui::BrowserPresentationState;
+            using hyperbrowse::util::AppTextSize;
+
+            std::map<std::wstring, DWORD> values{
+                {L"LeftPaneWidth", 420},
+                {L"BrowserMode", 1},
+                {L"ThemeMode", 1},
+                {L"AppTextSize", static_cast<DWORD>(AppTextSize::Large)},
+                {L"ThumbnailSizePreset", static_cast<DWORD>(ThumbnailSizePreset::Pixels640)},
+                {L"CompactThumbnailLayout", 0},
+                {L"ThumbnailDetailsVisible", 0},
+                {L"ShowSubfoldersInBrowser", 1},
+                {L"SortMode", static_cast<DWORD>(BrowserSortMode::Tags)},
+                {L"SortAscending", 0},
+                {L"DetailsStripVisible", 0},
+                {L"DetailsPanelWidth", 510},
+            };
+
+            const BrowserPresentationState restored = BrowserPresentationPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(restored.leftPaneWidth == 420
+                       && restored.browserMode == 1
+                       && restored.themeMode == 1
+                       && restored.appTextSize == AppTextSize::Large
+                       && restored.thumbnailSizePreset == ThumbnailSizePreset::Pixels640
+                       && !restored.compactThumbnailLayout
+                       && !restored.thumbnailDetailsVisible
+                       && restored.showSubfoldersInBrowser
+                       && restored.sortMode == BrowserSortMode::Tags
+                       && !restored.sortAscending
+                       && !restored.detailsStripVisible
+                       && restored.detailsPanelWidth == 510,
+                   "Browser presentation persistence did not restore valid settings");
+
+            values[L"BrowserMode"] = 99;
+            values[L"ThemeMode"] = 99;
+            values[L"AppTextSize"] = 99;
+            values[L"ThumbnailSizePreset"] = 999;
+            values[L"SortMode"] = 999;
+            const BrowserPresentationState fallback = BrowserPresentationPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(fallback.browserMode == 0
+                       && fallback.themeMode == 0
+                       && fallback.appTextSize == AppTextSize::Medium
+                       && fallback.thumbnailSizePreset == ThumbnailSizePreset::Pixels192
+                       && fallback.sortMode == BrowserSortMode::FileName,
+                   "Browser presentation persistence did not apply defaults to invalid enum values");
+
+            BrowserPresentationState toSave = restored;
+            toSave.leftPaneWidth = 100;
+            toSave.detailsPanelWidth = 100;
+            values.clear();
+            BrowserPresentationPersistence::Save(
+                toSave,
+                [&values](std::wstring_view valueName, DWORD value)
+                {
+                    values[std::wstring(valueName)] = value;
+                });
+            Expect(values[L"LeftPaneWidth"] == 250
+                       && values[L"BrowserMode"] == 1
+                       && values[L"ThemeMode"] == 1
+                       && values[L"AppTextSize"] == static_cast<DWORD>(AppTextSize::Large)
+                       && values[L"ThumbnailSizePreset"] == static_cast<DWORD>(ThumbnailSizePreset::Pixels640)
+                       && values[L"CompactThumbnailLayout"] == 0
+                       && values[L"ThumbnailDetailsVisible"] == 0
+                       && values[L"ShowSubfoldersInBrowser"] == 1
+                       && values[L"SortMode"] == static_cast<DWORD>(BrowserSortMode::Tags)
+                       && values[L"SortAscending"] == 0
+                       && values[L"DetailsStripVisible"] == 0
+                       && values[L"DetailsPanelWidth"] == 250,
+                   "Browser presentation persistence did not write the expected registry value contract");
+        }
+
+        void RunImageWorkflowPersistenceScenario()
+        {
+            using hyperbrowse::browser::RawJpegDisplayPreference;
+            using hyperbrowse::ui::ImageWorkflowPersistence;
+            using hyperbrowse::ui::ImageWorkflowState;
+
+            std::map<std::wstring, DWORD> values{
+                {L"NvJpegEnabled", 1},
+                {L"LibRawOutOfProcessEnabled", 0},
+                {L"RawJpegPairedOperationsEnabled", 1},
+                {L"PairedRawJpegViewerPreference", static_cast<DWORD>(RawJpegDisplayPreference::Jpeg)},
+                {L"DefaultViewerToSecondaryMonitor", 1},
+            };
+
+            const ImageWorkflowState restored = ImageWorkflowPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(restored.nvJpegEnabled
+                       && !restored.libRawOutOfProcessEnabled
+                       && restored.rawJpegPairedOperationsEnabled
+                       && restored.pairedRawJpegViewerPreference == RawJpegDisplayPreference::Jpeg
+                       && restored.defaultViewerToSecondaryMonitor,
+                   "Image workflow persistence did not restore valid settings");
+
+            values[L"PairedRawJpegViewerPreference"] = 99;
+            const ImageWorkflowState fallback = ImageWorkflowPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(fallback.pairedRawJpegViewerPreference == RawJpegDisplayPreference::Raw,
+                   "Image workflow persistence accepted an invalid RAW/JPEG preference");
+
+            values.clear();
+            const ImageWorkflowState defaults = ImageWorkflowPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(!defaults.nvJpegEnabled
+                       && defaults.libRawOutOfProcessEnabled
+                       && !defaults.rawJpegPairedOperationsEnabled
+                       && defaults.pairedRawJpegViewerPreference == RawJpegDisplayPreference::Raw
+                       && !defaults.defaultViewerToSecondaryMonitor,
+                   "Image workflow persistence changed its missing-value defaults");
+
+            values.clear();
+            ImageWorkflowPersistence::Save(
+                restored,
+                [&values](std::wstring_view valueName, DWORD value)
+                {
+                    values[std::wstring(valueName)] = value;
+                });
+            Expect(values[L"NvJpegEnabled"] == 1
+                       && values[L"LibRawOutOfProcessEnabled"] == 0
+                       && values[L"RawJpegPairedOperationsEnabled"] == 1
+                       && values[L"PairedRawJpegViewerPreference"] == static_cast<DWORD>(RawJpegDisplayPreference::Jpeg)
+                       && values[L"DefaultViewerToSecondaryMonitor"] == 1,
+                   "Image workflow persistence did not write the expected registry value contract");
+        }
+
+        void RunPerformanceSettingsPersistenceScenario()
+        {
+            using hyperbrowse::ui::PerformanceSettingsPersistence;
+            using hyperbrowse::ui::PerformanceSettingsState;
+            using hyperbrowse::util::ResourceProfile;
+
+            std::map<std::wstring, DWORD> dwordValues{
+                {L"PersistentThumbnailCacheEnabled", 0},
+                {L"ResourceProfile", static_cast<DWORD>(ResourceProfile::Aggressive)},
+                {L"PrefetchDepthOverride", 8},
+                {L"ShowPressureStateInStatusBar", 1},
+                {L"CloseMainWindowOnEscape", 1},
+            };
+            std::map<std::wstring, std::uint64_t> qwordValues{
+                {L"ThumbnailCacheCapacityOverrideBytes", 4096},
+                {L"MetadataCacheCapacityOverrideEntries", 42},
+            };
+
+            const PerformanceSettingsState restored = PerformanceSettingsPersistence::Load(
+                [&dwordValues](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = dwordValues.find(std::wstring(valueName));
+                    if (found == dwordValues.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                },
+                [&qwordValues](std::wstring_view valueName, std::uint64_t* value)
+                {
+                    const auto found = qwordValues.find(std::wstring(valueName));
+                    if (found == qwordValues.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(!restored.persistentThumbnailCacheEnabled
+                       && restored.resourceProfile == ResourceProfile::Aggressive
+                       && restored.prefetchDepthOverride == 8
+                       && restored.thumbnailCacheCapacityOverrideBytes == 4096
+                       && restored.metadataCacheCapacityOverrideEntries == 42
+                       && restored.showPressureStateInStatusBar
+                       && restored.closeMainWindowOnEscape,
+                   "Performance settings persistence did not restore valid settings");
+
+            dwordValues[L"ResourceProfile"] = 99;
+            dwordValues[L"PrefetchDepthOverride"] = 99;
+            qwordValues[L"ThumbnailCacheCapacityOverrideBytes"] = std::numeric_limits<std::uint64_t>::max();
+            const PerformanceSettingsState fallback = PerformanceSettingsPersistence::Load(
+                [&dwordValues](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = dwordValues.find(std::wstring(valueName));
+                    if (found == dwordValues.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                },
+                [&qwordValues](std::wstring_view valueName, std::uint64_t* value)
+                {
+                    const auto found = qwordValues.find(std::wstring(valueName));
+                    if (found == qwordValues.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(fallback.resourceProfile == ResourceProfile::Balanced
+                       && fallback.prefetchDepthOverride == 0
+                       && fallback.thumbnailCacheCapacityOverrideBytes == std::numeric_limits<std::size_t>::max(),
+                   "Performance settings persistence did not preserve defaults or saturate cache capacity");
+
+            dwordValues.clear();
+            qwordValues.clear();
+            PerformanceSettingsState toSave = restored;
+            toSave.prefetchDepthOverride = 99;
+            PerformanceSettingsPersistence::Save(
+                toSave,
+                [&dwordValues](std::wstring_view valueName, DWORD value)
+                {
+                    dwordValues[std::wstring(valueName)] = value;
+                },
+                [&qwordValues](std::wstring_view valueName, std::uint64_t value)
+                {
+                    qwordValues[std::wstring(valueName)] = value;
+                });
+            Expect(dwordValues[L"PersistentThumbnailCacheEnabled"] == 0
+                       && dwordValues[L"ResourceProfile"] == static_cast<DWORD>(ResourceProfile::Aggressive)
+                       && dwordValues[L"PrefetchDepthOverride"] == 16
+                       && dwordValues[L"ShowPressureStateInStatusBar"] == 1
+                       && dwordValues[L"CloseMainWindowOnEscape"] == 1
+                       && qwordValues[L"ThumbnailCacheCapacityOverrideBytes"] == 4096
+                       && qwordValues[L"MetadataCacheCapacityOverrideEntries"] == 42,
+                   "Performance settings persistence did not write the expected value contract");
+        }
+
         void RunWindowTimerRouterScenario()
         {
             using hyperbrowse::ui::WindowTimerRouter;
@@ -1031,6 +1321,9 @@ namespace hyperbrowse::tests
         RunWindowBoundsPersistenceScenario();
         RunSelectedPathPersistenceScenario();
         RunViewerSettingsPersistenceScenario();
+        RunBrowserPresentationPersistenceScenario();
+        RunImageWorkflowPersistenceScenario();
+        RunPerformanceSettingsPersistenceScenario();
         RunWindowTimerRouterScenario();
         RunWindowAsyncMessageRouterScenario();
     }
@@ -1080,6 +1373,18 @@ namespace hyperbrowse::tests
         else if (scenario == "--viewer-settings")
         {
             RunViewerSettingsPersistenceScenario();
+        }
+        else if (scenario == "--browser-presentation")
+        {
+            RunBrowserPresentationPersistenceScenario();
+        }
+        else if (scenario == "--image-workflow")
+        {
+            RunImageWorkflowPersistenceScenario();
+        }
+        else if (scenario == "--performance-settings")
+        {
+            RunPerformanceSettingsPersistenceScenario();
         }
         else if (scenario == "--timer-router")
         {

@@ -108,6 +108,18 @@ controller:
 	for viewer mouse-wheel/Escape behavior, keyboard panning, and slideshow
 	settings. MainWindow retains runtime application to ViewerWindow, dialog
 	editing, and registry-handle ownership.
+- `ui/BrowserPresentationPersistence.*` owns the typed DWORD codec for pane
+	widths, browser/theme modes, text size, thumbnail presentation, sorting, and
+	details-panel presentation. MainWindow retains layout application, browser
+	and menu synchronization, and registry-handle ownership.
+- `ui/ImageWorkflowPersistence.*` owns the typed DWORD codec for nvJPEG and
+	LibRaw helper preferences, paired RAW/JPEG behavior, and secondary-monitor
+	viewer preference. MainWindow retains decoder/service application, pairing
+	policy, and registry-handle ownership.
+- `ui/PerformanceSettingsPersistence.*` owns the DWORD/QWORD codec for
+	persistent thumbnail cache, resource profile, prefetch depth, cache
+	capacities, pressure-status display, and close-on-Escape settings. MainWindow
+	retains scheduler/cache application, dialog behavior, and registry handles.
 - `ui/ExternalDropTarget.*` owns the OLE `IDropTarget` COM lifetime and
 	screen-to-client conversion. It calls synchronous callbacks supplied by
 	`MainWindow` for drag feedback, drop handling, and visual cleanup; it does
