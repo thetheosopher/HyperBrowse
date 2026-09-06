@@ -28,9 +28,11 @@
 #include "ui/FolderHistory.h"
 #include "ui/ImageWorkflowPersistence.h"
 #include "ui/PairedRawJpegResolver.h"
+#include "ui/QuickAccessDestinationBuilder.h"
 #include "ui/QuickAccessLayout.h"
 #include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickAccessPathList.h"
+#include "ui/QuickAccessShortcutEditPolicy.h"
 #include "ui/RightPaneHitTester.h"
 #include "ui/SelectedPathPersistence.h"
 #include "ui/ViewCommandController.h"
@@ -1361,6 +1363,86 @@ namespace hyperbrowse::tests
                        && result.rows[0].shortcutRect.left == 48,
                    "Quick Actions layout did not preserve scrolled row and control geometry");
         }
+
+        void RunQuickAccessDestinationBuilderScenario()
+        {
+            using hyperbrowse::ui::QuickAccessDestinationBuilder;
+
+            const std::vector<std::wstring> favoriteDestinations = {
+                L"C:\\Favorites\\One",
+                L"D:\\Favorites\\Two",
+            };
+            const std::vector<hyperbrowse::ui::QuickAccessLayout::Destination> destinations =
+                QuickAccessDestinationBuilder::Build(
+                    favoriteDestinations,
+                    [](std::wstring_view destinationPath)
+                    {
+                        return std::wstring(L"Metadata: ") + std::wstring(destinationPath);
+                    },
+                    [](std::wstring_view destinationPath) -> std::optional<int>
+                    {
+                        return destinationPath == L"C:\\Favorites\\One"
+                            ? std::optional<int>(2)
+                            : std::nullopt;
+                    });
+
+            Expect(destinations.size() == 2
+                       && destinations[0].destinationPath == L"C:\\Favorites\\One"
+                       && destinations[0].displayLabel == L"One (C:\\Favorites\\One)"
+                       && destinations[0].metadataLabel == L"Metadata: C:\\Favorites\\One"
+                       && destinations[0].assignedShortcut == 2
+                       && destinations[0].favorite
+                       && destinations[1].destinationPath == L"D:\\Favorites\\Two"
+                       && destinations[1].assignedShortcut == -1
+                       && destinations[1].favorite,
+                   "Quick Actions destination builder changed the layout snapshot contract");
+        }
+
+        void RunQuickAccessShortcutEditPolicyScenario()
+        {
+            using hyperbrowse::ui::QuickAccessShortcutEditPolicy;
+            using hyperbrowse::ui::QuickSendAssignmentResult;
+
+            const QuickAccessShortcutEditPolicy::Result rejected =
+                QuickAccessShortcutEditPolicy::Reconcile(
+                    QuickSendAssignmentResult::DuplicateShortcut,
+                    12,
+                    L"x");
+            Expect(rejected.assignedShortcut == 12
+                       && rejected.canonicalText == L"C"
+                       && rejected.updateText,
+                   "Quick Actions shortcut policy did not restore a rejected assignment");
+
+            const QuickAccessShortcutEditPolicy::Result normalized =
+                QuickAccessShortcutEditPolicy::Reconcile(
+                    QuickSendAssignmentResult::Accepted,
+                    33,
+                    L"x");
+            Expect(normalized.assignedShortcut == 33
+                       && normalized.canonicalText == L"X"
+                       && normalized.updateText,
+                   "Quick Actions shortcut policy did not normalize an accepted shortcut");
+
+            const QuickAccessShortcutEditPolicy::Result unchanged =
+                QuickAccessShortcutEditPolicy::Reconcile(
+                    QuickSendAssignmentResult::Accepted,
+                    38,
+                    L"!");
+            Expect(unchanged.assignedShortcut == 38
+                       && unchanged.canonicalText == L"!"
+                       && !unchanged.updateText,
+                   "Quick Actions shortcut policy rewrote an already canonical shortcut");
+
+            const QuickAccessShortcutEditPolicy::Result cleared =
+                QuickAccessShortcutEditPolicy::Reconcile(
+                    QuickSendAssignmentResult::Accepted,
+                    std::nullopt,
+                    L"");
+            Expect(cleared.assignedShortcut == -1
+                       && cleared.canonicalText.empty()
+                       && !cleared.updateText,
+                   "Quick Actions shortcut policy changed accepted clearing behavior");
+        }
     }
 
     void RunPolicyScenarios()
@@ -1375,6 +1457,8 @@ namespace hyperbrowse::tests
         RunDetailsPanelHistogramScenario();
         RunRightPaneHitTesterScenario();
         RunQuickAccessLayoutScenario();
+        RunQuickAccessDestinationBuilderScenario();
+        RunQuickAccessShortcutEditPolicyScenario();
         RunDetailsPanelLayoutScenario();
         RunDisplaySurfaceRecoveryPolicyScenario();
         RunClipboardFileTransferScenario();
@@ -1407,6 +1491,14 @@ namespace hyperbrowse::tests
         else if (scenario == "--quick-access-layout")
         {
             RunQuickAccessLayoutScenario();
+        }
+        else if (scenario == "--quick-access-destinations")
+        {
+            RunQuickAccessDestinationBuilderScenario();
+        }
+        else if (scenario == "--quick-access-shortcut")
+        {
+            RunQuickAccessShortcutEditPolicyScenario();
         }
         else if (scenario == "--details-layout")
         {

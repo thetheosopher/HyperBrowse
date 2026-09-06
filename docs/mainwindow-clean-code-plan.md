@@ -375,3 +375,11 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   assembly behind named MainWindow helpers. MainWindow retains layout,
   interaction, and backend composition while both rendering paths consume the
   same explicit painter state and colors.
+- [x] Extract Quick Actions shortcut-edit reconciliation into
+  `src/ui/QuickAccessShortcutEditPolicy.*`. MainWindow retains QuickSend model
+  mutation, persistence, HWND synchronization, and invalidation while the
+  policy owns canonical text restoration and accepted-input normalization.
+- [x] Extract Quick Actions destination snapshot assembly into
+  `src/ui/QuickAccessDestinationBuilder.*`. MainWindow retains metadata and
+  QuickSend lookup callbacks, scrollbar ownership, layout, and HWND updates
+  while the builder owns conversion to layout destinations.

@@ -60,8 +60,10 @@
 #include "ui/MainWindowDialogs.h"
 #include "ui/MainWindowDialogState.h"
 #include "ui/MenuMessageHandling.h"
+#include "ui/QuickAccessDestinationBuilder.h"
 #include "ui/QuickAccessPathList.h"
 #include "ui/QuickAccessPainter.h"
+#include "ui/QuickAccessShortcutEditPolicy.h"
 #include "ui/QuickSendPersistence.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
@@ -12783,24 +12785,20 @@ namespace hyperbrowse::ui
             return;
         }
 
-        std::vector<QuickAccessLayout::Destination> destinations;
-        destinations.reserve(quickSendModel_.FavoriteDestinations().size());
-        for (const std::wstring& favoritePath : quickSendModel_.FavoriteDestinations())
-        {
-            QuickAccessLayout::Destination destination;
-            destination.destinationPath = favoritePath;
-            destination.displayLabel = QuickAccessMenuBuilder::FormatFolderShortcutMenuLabel(favoritePath);
-            destination.metadataLabel = BuildQuickAccessDestinationMetadata(
-                favoritePath,
-                true,
-                IsQuickAccessDestinationCurrentFolder(favoritePath));
-            if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(favoritePath))
-            {
-                destination.assignedShortcut = *assignedShortcut;
-            }
-            destination.favorite = true;
-            destinations.push_back(std::move(destination));
-        }
+        std::vector<QuickAccessLayout::Destination> destinations =
+            QuickAccessDestinationBuilder::Build(
+                quickSendModel_.FavoriteDestinations(),
+                [this](std::wstring_view favoritePath)
+                {
+                    return BuildQuickAccessDestinationMetadata(
+                        favoritePath,
+                        true,
+                        IsQuickAccessDestinationCurrentFolder(favoritePath));
+                },
+                [this](std::wstring_view favoritePath)
+                {
+                    return quickSendModel_.ShortcutForDestination(favoritePath);
+                });
 
         if (destinations.empty())
         {
@@ -21255,41 +21253,17 @@ namespace hyperbrowse::ui
                                 row.destinationPath,
                                 shortcutText);
                         });
-                        if (result != QuickSendAssignmentResult::Accepted)
+                        const QuickAccessShortcutEditPolicy::Result editUpdate =
+                            QuickAccessShortcutEditPolicy::Reconcile(
+                                result,
+                                quickSendModel_.ShortcutForDestination(row.destinationPath),
+                                shortcutText);
+                        row.assignedShortcut = editUpdate.assignedShortcut;
+                        if (editUpdate.updateText)
                         {
-                            std::wstring restoredShortcut;
-                            if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(row.destinationPath))
-                            {
-                                const wchar_t shortcutCharacter = QuickSendModel::ShortcutCharacter(*assignedShortcut);
-                                if (shortcutCharacter != L'\0')
-                                {
-                                    restoredShortcut.push_back(shortcutCharacter);
-                                }
-                                row.assignedShortcut = *assignedShortcut;
-                            }
-                            else
-                            {
-                                row.assignedShortcut = -1;
-                            }
-
                             updatingQuickAccessShortcutEdits_ = true;
-                            SetWindowTextW(edit, restoredShortcut.c_str());
+                            SetWindowTextW(edit, editUpdate.canonicalText.c_str());
                             updatingQuickAccessShortcutEdits_ = false;
-                        }
-                        else if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(row.destinationPath))
-                        {
-                            row.assignedShortcut = *assignedShortcut;
-                            const wchar_t shortcutCharacter = QuickSendModel::ShortcutCharacter(*assignedShortcut);
-                            if (shortcutCharacter != L'\0' && shortcutText != std::wstring(1, shortcutCharacter))
-                            {
-                                updatingQuickAccessShortcutEdits_ = true;
-                                SetWindowTextW(edit, std::wstring(1, shortcutCharacter).c_str());
-                                updatingQuickAccessShortcutEdits_ = false;
-                            }
-                        }
-                        else
-                        {
-                            row.assignedShortcut = -1;
                         }
 
                         InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);

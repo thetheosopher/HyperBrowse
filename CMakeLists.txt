@@ -141,10 +141,12 @@ add_library(HyperBrowseCore STATIC
     src/ui/MenuPainter.cpp
     src/ui/PerformanceSettingsPersistence.cpp
     src/ui/PairedRawJpegResolver.cpp
+    src/ui/QuickAccessDestinationBuilder.cpp
     src/ui/QuickAccessMenuBuilder.cpp
     src/ui/QuickAccessPainter.cpp
     src/ui/QuickAccessPathList.cpp
     src/ui/QuickAccessLayout.cpp
+    src/ui/QuickAccessShortcutEditPolicy.cpp
     src/ui/QuickSendPersistence.cpp
     src/ui/RightPaneHitTester.cpp
     src/ui/ExternalDropTarget.cpp
