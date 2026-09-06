@@ -84,6 +84,14 @@ controller:
 	shell operation and applies its asynchronous result.
 - `ui/ShellDragSource.*` owns shell `IDataObject` and `IDropSource` creation
 	for outbound selection drags.
+- `ui/ClipboardFileTransfer.*` owns Win32 clipboard serialization for text and
+	file selections, including `CF_HDROP` and preferred copy-vs-cut effects.
+	MainWindow retains selection snapshots, user-facing errors, destination
+	validation, and the asynchronous file-operation request.
+- `ui/QuickAccessPathList.*` owns capped, normalized, duplicate-free Quick
+	Access path-list insertion and registry serialization. MainWindow retains
+	registry handles, Quick Send assignments, menu refresh, and presentation
+	effects.
 - `ui/ExternalDropTarget.*` owns the OLE `IDropTarget` COM lifetime and
 	screen-to-client conversion. It calls synchronous callbacks supplied by
 	`MainWindow` for drag feedback, drop handling, and visual cleanup; it does

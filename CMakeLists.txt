@@ -128,11 +128,13 @@ add_library(HyperBrowseCore STATIC
     src/ui/DiagnosticsWindow.cpp
     src/ui/CommandBarController.cpp
     src/ui/CommandBarPainter.cpp
+    src/ui/ClipboardFileTransfer.cpp
     src/ui/DetailsPanelHistogram.cpp
     src/ui/DetailsPanelLayout.cpp
     src/ui/DisplaySurfaceRecoveryPolicy.cpp
     src/ui/MenuPainter.cpp
     src/ui/QuickAccessMenuBuilder.cpp
+    src/ui/QuickAccessPathList.cpp
     src/ui/QuickAccessLayout.cpp
     src/ui/RightPaneHitTester.cpp
     src/ui/ExternalDropTarget.cpp

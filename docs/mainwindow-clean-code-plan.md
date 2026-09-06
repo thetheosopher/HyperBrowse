@@ -207,7 +207,7 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   dispatch from `HandleCommand` into `src/ui/ViewCommandController.*`.
   MainWindow retains mutable settings and presentation effects while the
   controller owns the command-ID mapping. Deterministic smoke coverage
-  verifies parameterized command families and ownership boundaries. The
+  verifies parameterized command families and ownership boundaries.
 - [x] Extract command-bar item definitions, menu and toolbar layout, hit
   testing, toolbar enabled/checked-state policy, and keyboard input policy into
   `src/ui/CommandBarController.*`. Extract GDI and Direct2D command-bar
@@ -273,8 +273,7 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
 - [x] Split the self-contained shortcut-catalog and BackgroundExecutor
   runtime/lifetime scenarios into `tests/smoke_runtime.cpp` while retaining
   their original invocation order and the single `HyperBrowseTests` target.
-  Debug and Release test-target builds pass; the full suites currently retain
-  unrelated viewer failures.
+  Debug and Release test-target builds and complete smoke suites pass.
 - [x] Split the deterministic BrowserModel bulk-removal and Quick Send model
   scenarios into `tests/smoke_model.cpp`, retaining the BrowserPane HWND
   scenario in `tests/smoke.cpp` and the existing invocation order.
@@ -284,3 +283,14 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
 - [x] Split deterministic RAW format allowlist and helper-protocol coverage
   into `tests/smoke_decode.cpp`, retaining fixture-backed LibRaw decoding in
   `tests/smoke.cpp`.
+- [x] Extract Win32 clipboard text and file-selection serialization into
+  `src/ui/ClipboardFileTransfer.*`. MainWindow retains selection, messaging,
+  destination, and asynchronous operation policy; deterministic smoke coverage
+  verifies CF_HDROP path round trips and copy-vs-cut effects.
+- [x] Extract capped Quick Access path-list insertion, normalization,
+  duplicate suppression, and registry serialization into
+  `src/ui/QuickAccessPathList.*`. MainWindow retains registry access, Quick
+  Send assignments, menu refresh, and presentation effects; deterministic
+  smoke coverage verifies list mutation and round-trip ordering.
+- [x] Complete the Phase 7 verification gate after the focused test-source
+  splits: Debug and Release builds plus all four registered smoke tests pass.

@@ -43,6 +43,7 @@
 #include "ui/DialogTheme.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/CommandIds.h"
+#include "ui/ClipboardFileTransfer.h"
 #include "ui/ExternalDropTarget.h"
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarPainter.h"
@@ -55,6 +56,7 @@
 #include "ui/MainWindowDialogs.h"
 #include "ui/MainWindowDialogState.h"
 #include "ui/MenuMessageHandling.h"
+#include "ui/QuickAccessPathList.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
 #include "ui/ShellPainter.h"
@@ -7792,148 +7794,6 @@ namespace
         return NormalizeFolderPath(resolvedPath.lexically_normal().wstring());
     }
 
-    bool InsertFolderPath(std::vector<std::wstring>* paths,
-                          std::wstring folderPath,
-                          std::size_t maxCount,
-                          bool moveToFront)
-    {
-        if (!paths)
-        {
-            return false;
-        }
-
-        folderPath = NormalizeFolderPath(std::move(folderPath));
-        if (folderPath.empty())
-        {
-            return false;
-        }
-
-        const auto existing = std::find_if(paths->begin(), paths->end(), [&](const std::wstring& candidate)
-        {
-            return FolderPathsEqual(candidate, folderPath);
-        });
-
-        if (existing != paths->end())
-        {
-            if (!moveToFront)
-            {
-                return false;
-            }
-
-            if (existing == paths->begin())
-            {
-                return false;
-            }
-
-            paths->erase(existing);
-        }
-
-        if (moveToFront)
-        {
-            paths->insert(paths->begin(), std::move(folderPath));
-        }
-        else if (paths->size() < maxCount)
-        {
-            paths->push_back(std::move(folderPath));
-        }
-        else
-        {
-            return false;
-        }
-
-        if (paths->size() > maxCount)
-        {
-            paths->resize(maxCount);
-        }
-
-        return true;
-    }
-
-    std::vector<std::wstring> DeserializeFolderPathList(std::wstring_view serialized, std::size_t maxCount)
-    {
-        std::vector<std::wstring> paths;
-        std::wstring current;
-        for (const wchar_t character : serialized)
-        {
-            if (character == L'\r')
-            {
-                continue;
-            }
-
-            if (character == L'\n')
-            {
-                InsertFolderPath(&paths, std::move(current), maxCount, false);
-                current.clear();
-                continue;
-            }
-
-            current.push_back(character);
-        }
-
-        InsertFolderPath(&paths, std::move(current), maxCount, false);
-        return paths;
-    }
-
-    std::wstring SerializeFolderPathList(const std::vector<std::wstring>& paths)
-    {
-        std::wstring serialized;
-        for (std::size_t index = 0; index < paths.size(); ++index)
-        {
-            if (index > 0)
-            {
-                serialized.push_back(L'\n');
-            }
-
-            serialized.append(paths[index]);
-        }
-
-        return serialized;
-    }
-
-    bool CopyTextToClipboard(HWND ownerWindow, std::wstring_view text)
-    {
-        if (!OpenClipboard(ownerWindow))
-        {
-            return false;
-        }
-
-        if (!EmptyClipboard())
-        {
-            CloseClipboard();
-            return false;
-        }
-
-        const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
-        HGLOBAL buffer = GlobalAlloc(GMEM_MOVEABLE, bytes);
-        if (!buffer)
-        {
-            CloseClipboard();
-            return false;
-        }
-
-        void* locked = GlobalLock(buffer);
-        if (!locked)
-        {
-            GlobalFree(buffer);
-            CloseClipboard();
-            return false;
-        }
-
-        memcpy(locked, text.data(), text.size() * sizeof(wchar_t));
-        static_cast<wchar_t*>(locked)[text.size()] = L'\0';
-        GlobalUnlock(buffer);
-
-        if (!SetClipboardData(CF_UNICODETEXT, buffer))
-        {
-            GlobalFree(buffer);
-            CloseClipboard();
-            return false;
-        }
-
-        CloseClipboard();
-        return true;
-    }
-
     std::wstring BuildDeleteConfirmationMessage(std::size_t itemCount, bool permanent)
     {
         if (itemCount <= 1)
@@ -11846,7 +11706,7 @@ namespace hyperbrowse::ui
         // Surface the folder in the taskbar jump list's "Recent" category.
         SHAddToRecentDocs(SHARD_PATHW, folderPath.c_str());
 
-        if (InsertFolderPath(&recentFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
+        if (QuickAccessPathList::Insert(&recentFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
         {
             UpdateMenuState();
         }
@@ -11880,7 +11740,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::RecordRecentDestination(std::wstring folderPath)
     {
-        if (InsertFolderPath(&recentDestinationFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
+        if (QuickAccessPathList::Insert(&recentDestinationFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
         {
             UpdateMenuState();
             if (hwnd_ && detailsStripVisible_)
@@ -11932,7 +11792,7 @@ namespace hyperbrowse::ui
         std::wstring serializedPaths;
         if (TryReadStringValue(key, kRegistryValueFavoriteDestinationFolders, &serializedPaths))
         {
-            favoriteDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kFavoriteDestinationLimit);
+            favoriteDestinationFolders_ = QuickAccessPathList::Deserialize(serializedPaths, kFavoriteDestinationLimit);
         }
 
         TryReadStringValue(key, kRegistryValueLastQuickSendDestination, &lastQuickSendDestination_);
@@ -11958,7 +11818,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, SerializeFolderPathList(favoriteDestinationFolders_));
+        WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, QuickAccessPathList::Serialize(favoriteDestinationFolders_));
         if (!lastQuickSendDestination_.empty())
         {
             WriteStringValue(key, kRegistryValueLastQuickSendDestination, lastQuickSendDestination_);
@@ -14404,7 +14264,7 @@ namespace hyperbrowse::ui
                 continue;
             }
 
-            InsertFolderPath(&paths, recentPath, kQuickAccessFolderLimit, false);
+            QuickAccessPathList::Insert(&paths, recentPath, kQuickAccessFolderLimit, false);
         }
 
         return paths;
@@ -14543,7 +14403,7 @@ namespace hyperbrowse::ui
             }
             else
             {
-                addedFavorite = InsertFolderPath(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
+                addedFavorite = QuickAccessPathList::Insert(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
             }
             SyncQuickSendModel();
             if (addedFavorite)
@@ -15219,7 +15079,7 @@ namespace hyperbrowse::ui
                 }
                 else
                 {
-                    addedFavorite = InsertFolderPath(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
+                    addedFavorite = QuickAccessPathList::Insert(&favoriteDestinationFolders_, folderPath, kFavoriteDestinationLimit, false);
                 }
                 SyncQuickSendModel();
                 if (addedFavorite)
@@ -16812,91 +16672,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        // Build a CF_HDROP (DROPFILES + double-NUL-terminated path list) so the
-        // selection can be pasted into Explorer or any other shell target.
-        std::size_t pathChars = 0;
-        for (const std::wstring& path : selectedPaths)
-        {
-            pathChars += path.size() + 1;
-        }
-
-        const std::size_t totalBytes = sizeof(DROPFILES) + (pathChars + 1) * sizeof(wchar_t);
-        HGLOBAL buffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, totalBytes);
-        if (!buffer)
-        {
-            MessageBoxW(hwnd_,
-                        L"Failed to allocate the clipboard data.",
-                        movePreferred ? L"Cut" : L"Copy",
-                        MB_OK | MB_ICONERROR);
-            return;
-        }
-
-        auto* dropFiles = static_cast<DROPFILES*>(GlobalLock(buffer));
-        if (!dropFiles)
-        {
-            GlobalFree(buffer);
-            MessageBoxW(hwnd_,
-                        L"Failed to lock the clipboard data.",
-                        movePreferred ? L"Cut" : L"Copy",
-                        MB_OK | MB_ICONERROR);
-            return;
-        }
-
-        dropFiles->pFiles = sizeof(DROPFILES);
-        dropFiles->fWide = TRUE;
-        wchar_t* cursor = reinterpret_cast<wchar_t*>(reinterpret_cast<BYTE*>(dropFiles) + sizeof(DROPFILES));
-        for (const std::wstring& path : selectedPaths)
-        {
-            memcpy(cursor, path.data(), path.size() * sizeof(wchar_t));
-            cursor += path.size() + 1;
-        }
-        GlobalUnlock(buffer);
-
-        // Signal copy or cut semantics so Paste can reuse the shell's move contract.
-        HGLOBAL effectBuffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
-        if (effectBuffer)
-        {
-            if (DWORD* effect = static_cast<DWORD*>(GlobalLock(effectBuffer)))
-            {
-                *effect = movePreferred ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
-                GlobalUnlock(effectBuffer);
-            }
-        }
-
-        if (!OpenClipboard(hwnd_))
-        {
-            GlobalFree(buffer);
-            if (effectBuffer)
-            {
-                GlobalFree(effectBuffer);
-            }
-            MessageBoxW(hwnd_,
-                        L"Failed to open the clipboard.",
-                        movePreferred ? L"Cut" : L"Copy",
-                        MB_OK | MB_ICONERROR);
-            return;
-        }
-
-        bool success = EmptyClipboard() != FALSE;
-        if (success && SetClipboardData(CF_HDROP, buffer) == nullptr)
-        {
-            success = false;
-        }
-        if (success && effectBuffer)
-        {
-            const UINT effectFormat = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
-            if (SetClipboardData(effectFormat, effectBuffer) == nullptr)
-            {
-                GlobalFree(effectBuffer);
-            }
-        }
-        if (!success)
-        {
-            GlobalFree(buffer);
-        }
-        CloseClipboard();
-
-        if (!success)
+        if (!CopyFilePathsToClipboard(hwnd_, selectedPaths, movePreferred))
         {
             MessageBoxW(hwnd_,
                         movePreferred ? L"Failed to cut the selected files to the clipboard."
@@ -16919,50 +16695,8 @@ namespace hyperbrowse::ui
             return;
         }
 
-        if (!OpenClipboard(hwnd_))
-        {
-            return;
-        }
-
-        std::vector<std::wstring> sourcePaths;
         DWORD pasteEffect = DROPEFFECT_COPY;
-        if (IsClipboardFormatAvailable(CF_HDROP))
-        {
-            if (HGLOBAL data = GetClipboardData(CF_HDROP))
-            {
-                if (auto* dropFiles = static_cast<const DROPFILES*>(GlobalLock(data)))
-                {
-                    if (dropFiles->fWide)
-                    {
-                        const wchar_t* cursor = reinterpret_cast<const wchar_t*>(
-                            reinterpret_cast<const BYTE*>(dropFiles) + dropFiles->pFiles);
-                        while (*cursor != L'\0')
-                        {
-                            const std::size_t length = wcslen(cursor);
-                            if (length == 0)
-                            {
-                                break;
-                            }
-                            sourcePaths.emplace_back(cursor, length);
-                            cursor += length + 1;
-                        }
-                    }
-                    GlobalUnlock(data);
-                }
-            }
-
-            const UINT effectFormat = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
-            if (HGLOBAL effectData = GetClipboardData(effectFormat))
-            {
-                if (const DWORD* effect = static_cast<const DWORD*>(GlobalLock(effectData)))
-                {
-                    pasteEffect = *effect;
-                    GlobalUnlock(effectData);
-                }
-            }
-        }
-        CloseClipboard();
-
+        std::vector<std::wstring> sourcePaths = ReadClipboardFilePaths(hwnd_, &pasteEffect);
         if (sourcePaths.empty())
         {
             return;
@@ -19596,17 +19330,17 @@ namespace hyperbrowse::ui
             std::wstring serializedPaths;
             if (TryReadStringValue(key, kRegistryValueRecentFolders, &serializedPaths))
             {
-                recentFolders_ = DeserializeFolderPathList(serializedPaths, kQuickAccessFolderLimit);
+                recentFolders_ = QuickAccessPathList::Deserialize(serializedPaths, kQuickAccessFolderLimit);
             }
 
             if (TryReadStringValue(key, kRegistryValueRecentDestinationFolders, &serializedPaths))
             {
-                recentDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kQuickAccessFolderLimit);
+                recentDestinationFolders_ = QuickAccessPathList::Deserialize(serializedPaths, kQuickAccessFolderLimit);
             }
 
             if (TryReadStringValue(key, kRegistryValueFavoriteDestinationFolders, &serializedPaths))
             {
-                favoriteDestinationFolders_ = DeserializeFolderPathList(serializedPaths, kFavoriteDestinationLimit);
+                favoriteDestinationFolders_ = QuickAccessPathList::Deserialize(serializedPaths, kFavoriteDestinationLimit);
             }
 
             TryReadStringValue(key, kRegistryValueLastQuickSendDestination, &lastQuickSendDestination_);
@@ -19851,8 +19585,8 @@ namespace hyperbrowse::ui
             {
                 RegDeleteValueW(key, kRegistryValueSelectedImagePath);
             }
-            WriteStringValue(key, kRegistryValueRecentFolders, SerializeFolderPathList(recentFolders_));
-            WriteStringValue(key, kRegistryValueRecentDestinationFolders, SerializeFolderPathList(recentDestinationFolders_));
+            WriteStringValue(key, kRegistryValueRecentFolders, QuickAccessPathList::Serialize(recentFolders_));
+            WriteStringValue(key, kRegistryValueRecentDestinationFolders, QuickAccessPathList::Serialize(recentDestinationFolders_));
             if (browserPaneController_)
             {
                 WriteDwordValue(key, kRegistryValueSortMode, static_cast<DWORD>(browserPaneController_->GetSortMode()));

@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <shlobj.h>
 
 #include <algorithm>
 #include <array>
@@ -15,6 +16,7 @@
 #include "services/BatchConvertService.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
+#include "ui/ClipboardFileTransfer.h"
 #include "ui/DetailsPanelHistogram.h"
 #include "ui/DetailsPanelLayout.h"
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
@@ -23,6 +25,7 @@
 #include "ui/FolderHistory.h"
 #include "ui/QuickAccessLayout.h"
 #include "ui/QuickAccessMenuBuilder.h"
+#include "ui/QuickAccessPathList.h"
 #include "ui/RightPaneHitTester.h"
 #include "ui/ViewCommandController.h"
 #include "ui/WindowAsyncMessageRouter.h"
@@ -595,6 +598,56 @@ namespace hyperbrowse::tests
                    "Display-surface recovery policy did not reset after exhaustion");
         }
 
+        void RunClipboardFileTransferScenario()
+        {
+            const std::vector<std::wstring> expectedPaths{
+                L"C:\\Clipboard\\first.jpg",
+                L"D:\\Clipboard\\second.png",
+            };
+
+            Expect(hyperbrowse::ui::CopyFilePathsToClipboard(nullptr, expectedPaths, true),
+                   "Clipboard file transfer failed to publish a cut selection");
+            DWORD preferredDropEffect = 0;
+            const std::vector<std::wstring> cutPaths = hyperbrowse::ui::ReadClipboardFilePaths(
+                nullptr,
+                &preferredDropEffect);
+            Expect(cutPaths == expectedPaths && preferredDropEffect == DROPEFFECT_MOVE,
+                   "Clipboard file transfer did not preserve cut paths and move semantics");
+
+            Expect(hyperbrowse::ui::CopyFilePathsToClipboard(nullptr, expectedPaths, false),
+                   "Clipboard file transfer failed to publish a copied selection");
+            preferredDropEffect = 0;
+            const std::vector<std::wstring> copiedPaths = hyperbrowse::ui::ReadClipboardFilePaths(
+                nullptr,
+                &preferredDropEffect);
+            Expect(copiedPaths == expectedPaths && preferredDropEffect == DROPEFFECT_COPY,
+                   "Clipboard file transfer did not preserve copy paths and copy semantics");
+        }
+
+        void RunQuickAccessPathListScenario()
+        {
+            using hyperbrowse::ui::QuickAccessPathList;
+
+            std::vector<std::wstring> paths{L"C:\\One"};
+            Expect(!QuickAccessPathList::Insert(&paths, L"c:/one", 2, false)
+                       && paths == std::vector<std::wstring>{L"C:\\One"},
+                   "Quick Access path insertion did not suppress normalized duplicates");
+            Expect(QuickAccessPathList::Insert(&paths, L"D:\\Two", 2, false)
+                       && paths == std::vector<std::wstring>{L"C:\\One", L"D:\\Two"},
+                   "Quick Access path insertion did not append within its cap");
+            Expect(QuickAccessPathList::Insert(&paths, L"E:/Three", 2, true)
+                       && paths == std::vector<std::wstring>{L"E:\\Three", L"C:\\One"},
+                   "Quick Access path insertion did not move a new path to the front and trim the cap");
+
+            const std::vector<std::wstring> deserialized = QuickAccessPathList::Deserialize(
+                L"C:/One\r\nc:\\one\nD:\\Two\nE:\\Three",
+                2);
+            Expect(deserialized == std::vector<std::wstring>{L"C:\\One", L"D:\\Two"},
+                   "Quick Access path deserialization changed normalization, duplicate, or cap behavior");
+            Expect(QuickAccessPathList::Serialize(deserialized) == L"C:\\One\nD:\\Two",
+                   "Quick Access path serialization changed list order or separators");
+        }
+
         void RunWindowTimerRouterScenario()
         {
             using hyperbrowse::ui::WindowTimerRouter;
@@ -750,6 +803,8 @@ namespace hyperbrowse::tests
         RunQuickAccessLayoutScenario();
         RunDetailsPanelLayoutScenario();
         RunDisplaySurfaceRecoveryPolicyScenario();
+        RunClipboardFileTransferScenario();
+        RunQuickAccessPathListScenario();
         RunWindowTimerRouterScenario();
         RunWindowAsyncMessageRouterScenario();
     }
@@ -779,6 +834,14 @@ namespace hyperbrowse::tests
         else if (scenario == "--display-recovery")
         {
             RunDisplaySurfaceRecoveryPolicyScenario();
+        }
+        else if (scenario == "--clipboard")
+        {
+            RunClipboardFileTransferScenario();
+        }
+        else if (scenario == "--quick-access-paths")
+        {
+            RunQuickAccessPathListScenario();
         }
         else if (scenario == "--timer-router")
         {
