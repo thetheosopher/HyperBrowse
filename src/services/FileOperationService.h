@@ -80,6 +80,8 @@ namespace hyperbrowse::services
 
         void Cancel() noexcept;
         void Shutdown() noexcept;
+        bool IsCancellationRequested() const noexcept;
+        bool IsShutdownRequested() const noexcept;
 
         std::uint64_t Start(HWND targetWindow,
                             HWND ownerWindow,

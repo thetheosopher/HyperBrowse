@@ -38,19 +38,27 @@ namespace hyperbrowse::util
 
         ~BackgroundExecutor()
         {
+            Shutdown();
+        }
+
+        void Shutdown() noexcept
+        {
+            std::call_once(shutdownOnce_, [this]()
             {
-                std::scoped_lock lock(mutex_);
-                shuttingDown_ = true;
-                tasks_.clear();
-            }
-            condition_.notify_all();
-            for (std::thread& worker : workers_)
-            {
-                if (worker.joinable())
                 {
-                    worker.join();
+                    std::scoped_lock lock(mutex_);
+                    shuttingDown_ = true;
+                    tasks_.clear();
                 }
-            }
+                condition_.notify_all();
+                for (std::thread& worker : workers_)
+                {
+                    if (worker.joinable())
+                    {
+                        worker.join();
+                    }
+                }
+            });
         }
 
         BackgroundExecutor(const BackgroundExecutor&) = delete;
@@ -157,6 +165,7 @@ namespace hyperbrowse::util
         std::condition_variable condition_;
         std::deque<std::function<void()>> tasks_;
         std::vector<std::thread> workers_;
+        std::once_flag shutdownOnce_;
         std::size_t maxPendingTaskCount_{};
         std::size_t peakPendingTaskCount_{};
         bool shuttingDown_{false};

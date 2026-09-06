@@ -1768,18 +1768,24 @@ namespace
         std::condition_variable performCondition;
         bool performEntered = false;
         bool releasePerform = false;
+        bool ownerValidDuringPerform = false;
+        bool shutdownCompleted = false;
         bool destructionCompleted = false;
+        HWND operationOwnerWindow = CreateTestWindow(nullptr, GetModuleHandleW(nullptr));
+        Expect(operationOwnerWindow != nullptr,
+               "File operation shutdown scenario could not create its shell owner window");
 
         auto service = std::make_unique<hyperbrowse::services::FileOperationService>([&]() -> HRESULT
         {
             std::unique_lock lock(performMutex);
             performEntered = true;
+            ownerValidDuringPerform = IsWindow(operationOwnerWindow) != FALSE;
             performCondition.notify_all();
             performCondition.wait(lock, [&]() { return releasePerform; });
             return E_ABORT;
         });
-        service->Start(nullptr,
-                       nullptr,
+        service->Start(operationOwnerWindow,
+                       operationOwnerWindow,
                        hyperbrowse::services::FileOperationType::Copy,
                        {sourcePath.wstring()},
                        destinationFolder.wstring(),
@@ -1798,8 +1804,12 @@ namespace
         }
         performCondition.notify_all();
         Expect(reachedPerform, "File operation shutdown scenario did not enter the blocked shell operation");
+         Expect(ownerValidDuringPerform,
+             "File operation shutdown scenario did not keep its shell owner valid during PerformOperations");
 
         service->Cancel();
+         Expect(service->IsCancellationRequested(),
+             "File operation service did not expose its requested cancellation state");
         std::vector<std::uint64_t> burstRequestIds;
         burstRequestIds.reserve(16);
         for (int index = 0; index < 16; ++index)
@@ -1826,8 +1836,19 @@ namespace
                "File operation service exceeded its configured peak queue depth");
         Expect(service->CancellationCount() >= 18,
                "File operation service did not record supersession and shutdown cancellation requests");
-        std::thread destructionThread([service = std::move(service), &performMutex, &performCondition, &destructionCompleted]() mutable
+         auto* serviceAddress = service.get();
+         std::thread shutdownThread([service = std::move(service),
+                         &performMutex,
+                         &performCondition,
+                         &shutdownCompleted,
+                         &destructionCompleted]() mutable
         {
+            service->Shutdown();
+            {
+                std::scoped_lock lock(performMutex);
+                shutdownCompleted = true;
+            }
+            performCondition.notify_all();
             service.reset();
             {
                 std::scoped_lock lock(performMutex);
@@ -1836,24 +1857,31 @@ namespace
             performCondition.notify_all();
         });
 
-        bool returnedBeforeRelease = false;
+        Expect(PumpMessagesUntil([&]() { return serviceAddress->IsShutdownRequested(); }, 1000),
+               "File operation service did not expose its shutdown request while shell work was blocked");
+
+         bool returnedBeforeRelease = false;
         {
             std::unique_lock lock(performMutex);
             returnedBeforeRelease = performCondition.wait_for(lock,
                                                                std::chrono::milliseconds(250),
-                                                               [&]() { return destructionCompleted; });
+                                                               [&]() { return shutdownCompleted; });
         }
         Expect(!returnedBeforeRelease,
-               "File operation service destruction returned while shell work was still blocked");
+               "File operation service shutdown returned while shell work was still blocked");
 
         {
             std::scoped_lock lock(performMutex);
             releasePerform = true;
         }
         performCondition.notify_all();
-        destructionThread.join();
+        shutdownThread.join();
 
+        Expect(shutdownCompleted, "File operation service shutdown did not complete after shell work was released");
         Expect(destructionCompleted, "File operation service destruction did not complete after shell work was released");
+        Expect(IsWindow(operationOwnerWindow) != FALSE,
+               "File operation shutdown scenario destroyed its shell owner before worker completion");
+        DestroyWindow(operationOwnerWindow);
         Expect(!fs::exists(destinationPath),
                "Cancelled file operation created a destination after shutdown began");
     }

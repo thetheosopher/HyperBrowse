@@ -21,6 +21,7 @@ namespace hyperbrowse::services
     struct FileOperationSharedState
     {
         std::atomic_uint64_t activeRequestId{0};
+        std::atomic_bool cancellationRequested{false};
         std::atomic_bool shutdown{false};
     };
 
@@ -549,6 +550,7 @@ namespace hyperbrowse::services
     void FileOperationService::Cancel() noexcept
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
+        sharedState_->cancellationRequested.store(true, std::memory_order_release);
         cancellationCount_.fetch_add(1, std::memory_order_relaxed);
         util::IncrementCounter(L"service.file_operation.cancelled");
     }
@@ -557,6 +559,18 @@ namespace hyperbrowse::services
     {
         sharedState_->shutdown.store(true, std::memory_order_release);
         Cancel();
+        executor_.Shutdown();
+    }
+
+    bool FileOperationService::IsCancellationRequested() const noexcept
+    {
+        return sharedState_->shutdown.load(std::memory_order_acquire)
+            || sharedState_->cancellationRequested.load(std::memory_order_acquire);
+    }
+
+    bool FileOperationService::IsShutdownRequested() const noexcept
+    {
+        return sharedState_->shutdown.load(std::memory_order_acquire);
     }
 
     std::uint64_t FileOperationService::Start(HWND targetWindow,
@@ -571,6 +585,7 @@ namespace hyperbrowse::services
 
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
         sharedState_->activeRequestId.store(requestId, std::memory_order_release);
+        sharedState_->cancellationRequested.store(false, std::memory_order_release);
         if (targetLeafNames.size() != sourcePaths.size())
         {
             targetLeafNames.clear();
