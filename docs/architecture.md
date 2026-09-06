@@ -116,6 +116,10 @@ controller:
 	LibRaw helper preferences, paired RAW/JPEG behavior, and secondary-monitor
 	viewer preference. MainWindow retains decoder/service application, pairing
 	policy, and registry-handle ownership.
+- `ui/PairedRawJpegResolver.*` owns pure viewer-item substitution for paired
+	RAW/JPEG siblings, including same-folder and case-insensitive stem matching
+	and the configured display preference. MainWindow retains model snapshots,
+	slideshow preference selection, ViewerWindow calls, and the enablement gate.
 - `ui/PerformanceSettingsPersistence.*` owns the DWORD/QWORD codec for
 	persistent thumbnail cache, resource profile, prefetch depth, cache
 	capacities, pressure-status display, and close-on-Escape settings. MainWindow

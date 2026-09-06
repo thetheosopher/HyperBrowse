@@ -136,6 +136,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/ImageWorkflowPersistence.cpp
     src/ui/MenuPainter.cpp
     src/ui/PerformanceSettingsPersistence.cpp
+    src/ui/PairedRawJpegResolver.cpp
     src/ui/QuickAccessMenuBuilder.cpp
     src/ui/QuickAccessPathList.cpp
     src/ui/QuickAccessLayout.cpp

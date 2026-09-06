@@ -332,5 +332,10 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   display, and close-on-Escape settings. MainWindow retains scheduler/cache
   application and dialog behavior; deterministic coverage verifies defaults,
   enum validation, QWORD saturation, and prefetch clamping.
+- [x] Extract paired RAW/JPEG viewer-item substitution into
+  `src/ui/PairedRawJpegResolver.*`. MainWindow retains browser-model snapshots,
+  slideshow JPEG preference selection, ViewerWindow orchestration, and the
+  enablement gate; deterministic coverage verifies same-folder matching,
+  case-insensitive stems, preference reversal, and unmatched-item preservation.
 - [x] Complete the Phase 7 verification gate after the focused test-source
   splits: Debug and Release builds plus all four registered smoke tests pass.

@@ -213,9 +213,6 @@ namespace hyperbrowse::ui
                        bool preferSecondaryMonitor = false,
                        bool resolvePairedRawJpegItems = true);
         bool ShouldDefaultViewerToSecondaryMonitor() const;
-        browser::BrowserItem ResolvePairedRawJpegViewerItem(
-            const browser::BrowserItem& item,
-            browser::RawJpegDisplayPreference preference) const;
         std::vector<browser::BrowserItem> ResolvePairedRawJpegViewerItems(
             std::vector<browser::BrowserItem> items,
             bool startSlideshow) const;

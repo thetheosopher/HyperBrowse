@@ -27,6 +27,7 @@
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderHistory.h"
 #include "ui/ImageWorkflowPersistence.h"
+#include "ui/PairedRawJpegResolver.h"
 #include "ui/QuickAccessLayout.h"
 #include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickAccessPathList.h"
@@ -39,6 +40,7 @@
 #include "ui/WindowTimerRouter.h"
 #include "ui/PerformanceSettingsPersistence.h"
 #include "util/ResourceSizing.h"
+#include "util/PathUtils.h"
 
 namespace hyperbrowse::tests
 {
@@ -1161,6 +1163,65 @@ namespace hyperbrowse::tests
                    "Performance settings persistence did not write the expected value contract");
         }
 
+        void RunPairedRawJpegResolverScenario()
+        {
+            using hyperbrowse::browser::BrowserItem;
+            using hyperbrowse::browser::RawJpegDisplayPreference;
+            using hyperbrowse::ui::PairedRawJpegResolver;
+
+            const auto MakeItem = [](std::wstring path, std::wstring fileType)
+            {
+                BrowserItem item;
+                item.filePath = std::move(path);
+                item.fileType = std::move(fileType);
+                return item;
+            };
+            const BrowserItem jpeg = MakeItem(L"C:\\Pictures\\IMG_001.jpg", L"jpg");
+            const BrowserItem raw = MakeItem(L"C:\\Pictures\\IMG_001.nef", L"nef");
+            const BrowserItem otherFolderRaw = MakeItem(L"C:\\Other\\IMG_001.nef", L"nef");
+            const std::vector<BrowserItem> candidates{jpeg, raw, otherFolderRaw};
+            const PairedRawJpegResolver::FolderPathEquals folderPathEquals =
+                [](std::wstring_view lhs, std::wstring_view rhs)
+                {
+                    return util::NormalizedPathEquals(lhs, rhs);
+                };
+
+            const BrowserItem rawPreferred = PairedRawJpegResolver::Resolve(
+                jpeg,
+                candidates,
+                RawJpegDisplayPreference::Raw,
+                folderPathEquals);
+            Expect(rawPreferred.filePath == raw.filePath,
+                   "Paired RAW/JPEG resolver did not select the same-folder RAW companion");
+
+            const BrowserItem jpegPreferred = PairedRawJpegResolver::Resolve(
+                raw,
+                candidates,
+                RawJpegDisplayPreference::Jpeg,
+                folderPathEquals);
+            Expect(jpegPreferred.filePath == jpeg.filePath,
+                   "Paired RAW/JPEG resolver did not select the same-folder JPEG companion");
+
+            const BrowserItem unmatched = MakeItem(L"C:\\Pictures\\IMG_002.jpg", L"jpg");
+            const BrowserItem unchanged = PairedRawJpegResolver::Resolve(
+                unmatched,
+                candidates,
+                RawJpegDisplayPreference::Raw,
+                folderPathEquals);
+            Expect(unchanged.filePath == unmatched.filePath,
+                   "Paired RAW/JPEG resolver matched a different stem or folder");
+
+            const std::vector<BrowserItem> resolved = PairedRawJpegResolver::ResolveItems(
+                std::vector<BrowserItem>{jpeg, raw},
+                candidates,
+                RawJpegDisplayPreference::Raw,
+                folderPathEquals);
+            Expect(resolved.size() == 2
+                       && resolved[0].filePath == raw.filePath
+                       && resolved[1].filePath == raw.filePath,
+                   "Paired RAW/JPEG resolver did not apply the preference to all items");
+        }
+
         void RunWindowTimerRouterScenario()
         {
             using hyperbrowse::ui::WindowTimerRouter;
@@ -1324,6 +1385,7 @@ namespace hyperbrowse::tests
         RunBrowserPresentationPersistenceScenario();
         RunImageWorkflowPersistenceScenario();
         RunPerformanceSettingsPersistenceScenario();
+        RunPairedRawJpegResolverScenario();
         RunWindowTimerRouterScenario();
         RunWindowAsyncMessageRouterScenario();
     }
@@ -1385,6 +1447,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--performance-settings")
         {
             RunPerformanceSettingsPersistenceScenario();
+        }
+        else if (scenario == "--paired-raw-jpeg")
+        {
+            RunPairedRawJpegResolverScenario();
         }
         else if (scenario == "--timer-router")
         {

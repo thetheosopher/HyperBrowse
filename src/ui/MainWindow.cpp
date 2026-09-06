@@ -68,6 +68,7 @@
 #include "ui/BrowserPresentationPersistence.h"
 #include "ui/ImageWorkflowPersistence.h"
 #include "ui/PerformanceSettingsPersistence.h"
+#include "ui/PairedRawJpegResolver.h"
 #include "ui/ViewerSettingsPersistence.h"
 #include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
@@ -13112,57 +13113,6 @@ namespace hyperbrowse::ui
         return FindAlternateMonitorForWindow(hwnd_) != nullptr;
     }
 
-    browser::BrowserItem MainWindow::ResolvePairedRawJpegViewerItem(
-        const browser::BrowserItem& item,
-        browser::RawJpegDisplayPreference preference) const
-    {
-        if (!rawJpegPairedOperationsEnabled_ || !browserModel_)
-        {
-            return item;
-        }
-
-        const bool itemIsRaw = decode::IsRawFileType(item.fileType);
-        const bool itemIsJpeg = IsJpegFileType(item.fileType);
-        if (!itemIsRaw && !itemIsJpeg)
-        {
-            return item;
-        }
-
-        const bool preferRaw = preference == browser::RawJpegDisplayPreference::Raw;
-        if ((preferRaw && itemIsRaw) || (!preferRaw && itemIsJpeg))
-        {
-            return item;
-        }
-
-        const fs::path itemPath(item.filePath);
-        const std::wstring itemParent = itemPath.parent_path().wstring();
-        const std::wstring itemStem = itemPath.stem().wstring();
-        for (const browser::BrowserItem& candidate : browserModel_->Items())
-        {
-            if (browser::FilePathsEqual(candidate.filePath, item.filePath))
-            {
-                continue;
-            }
-
-            if (!FolderPathsEqual(fs::path(candidate.filePath).parent_path().wstring(), itemParent)
-                || !StringsEqualInsensitive(fs::path(candidate.filePath).stem().wstring(), itemStem))
-            {
-                continue;
-            }
-
-            if (preferRaw && decode::IsRawFileType(candidate.fileType))
-            {
-                return candidate;
-            }
-            if (!preferRaw && IsJpegFileType(candidate.fileType))
-            {
-                return candidate;
-            }
-        }
-
-        return item;
-    }
-
     std::vector<browser::BrowserItem> MainWindow::ResolvePairedRawJpegViewerItems(
         std::vector<browser::BrowserItem> items,
         bool startSlideshow) const
@@ -13175,12 +13125,14 @@ namespace hyperbrowse::ui
         const browser::RawJpegDisplayPreference preference = startSlideshow
             ? browser::RawJpegDisplayPreference::Jpeg
             : pairedRawJpegViewerPreference_;
-        for (browser::BrowserItem& item : items)
-        {
-            item = ResolvePairedRawJpegViewerItem(item, preference);
-        }
-
-        return items;
+        return PairedRawJpegResolver::ResolveItems(
+            std::move(items),
+            browserModel_ ? browserModel_->Items() : std::vector<browser::BrowserItem>{},
+            preference,
+            [](std::wstring_view lhs, std::wstring_view rhs)
+            {
+                return FolderPathsEqual(lhs, rhs);
+            });
     }
 
     void MainWindow::OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor)
