@@ -1271,6 +1271,7 @@ namespace hyperbrowse::decode
                                                                         std::wstring* errorMessage) const
     {
 #if !defined(HYPERBROWSE_ENABLE_NVJPEG)
+        static_cast<void>(key);
         if (errorMessage)
         {
             *errorMessage = L"This build does not include nvJPEG support.";
@@ -1375,7 +1376,10 @@ namespace hyperbrowse::decode
         std::vector<std::wstring>* errorMessages) const
     {
 #if !defined(HYPERBROWSE_ENABLE_NVJPEG)
-        SetAllErrorMessages(errorMessages, keys.size(), L"This build does not include nvJPEG support.");
+        if (errorMessages)
+        {
+            errorMessages->assign(keys.size(), L"This build does not include nvJPEG support.");
+        }
         return std::vector<std::shared_ptr<const cache::CachedThumbnail>>(keys.size());
 #else
         std::vector<std::shared_ptr<const cache::CachedThumbnail>> thumbnails(keys.size());

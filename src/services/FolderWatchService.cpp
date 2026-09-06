@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <filesystem>
 
+#include "util/Diagnostics.h"
 #include "util/Log.h"
 
 namespace fs = std::filesystem;
@@ -12,6 +13,25 @@ namespace fs = std::filesystem;
 namespace
 {
     constexpr std::size_t kCoalescedEventReloadLimit = 64;
+
+    void RequestFullReload(hyperbrowse::services::FolderWatchUpdate* update,
+                           std::wstring_view message = {})
+    {
+        if (!update)
+        {
+            return;
+        }
+
+        if (!update->requiresFullReload)
+        {
+            hyperbrowse::util::IncrementCounter(L"folder_watch.full_reload_fallbacks");
+        }
+        update->requiresFullReload = true;
+        if (!message.empty())
+        {
+            update->message.assign(message);
+        }
+    }
 
     void MergeUpdate(hyperbrowse::services::FolderWatchUpdate& destination,
                      hyperbrowse::services::FolderWatchUpdate&& source)
@@ -40,7 +60,7 @@ namespace
                                       std::make_move_iterator(source.events.end()));
             if (destination.events.size() >= kCoalescedEventReloadLimit)
             {
-                destination.requiresFullReload = true;
+                RequestFullReload(&destination);
                 destination.events.clear();
             }
         }
@@ -66,7 +86,7 @@ namespace
             {
                 if (update->events.size() >= kCoalescedEventReloadLimit)
                 {
-                    update->requiresFullReload = true;
+                    RequestFullReload(update.get());
                     update->events.clear();
                 }
                 sharedState->pendingUpdate = std::move(update);
@@ -146,8 +166,7 @@ namespace
             auto update = std::make_unique<hyperbrowse::services::FolderWatchUpdate>();
             update->requestId = requestId;
             update->folderPath = folderPath;
-            update->requiresFullReload = true;
-            update->message = L"Failed to open the folder watcher handle.";
+            RequestFullReload(update.get(), L"Failed to open the folder watcher handle.");
             QueueUpdate(sharedState, targetWindow, std::move(update));
             return;
         }
@@ -198,8 +217,7 @@ namespace
                 auto update = std::make_unique<hyperbrowse::services::FolderWatchUpdate>();
                 update->requestId = requestId;
                 update->folderPath = folderPath;
-                update->requiresFullReload = true;
-                update->message = L"ReadDirectoryChangesW failed for the current folder watcher.";
+                RequestFullReload(update.get(), L"ReadDirectoryChangesW failed for the current folder watcher.");
                 QueueUpdate(sharedState, targetWindow, std::move(update));
                 break;
             }
@@ -230,10 +248,9 @@ namespace
                 auto update = std::make_unique<hyperbrowse::services::FolderWatchUpdate>();
                 update->requestId = requestId;
                 update->folderPath = folderPath;
-                update->requiresFullReload = true;
-                update->message = error == ERROR_NOTIFY_ENUM_DIR
+                RequestFullReload(update.get(), error == ERROR_NOTIFY_ENUM_DIR
                     ? L"Folder watcher overflowed and requested a full reload."
-                    : L"Folder watcher could not process a filesystem notification.";
+                    : L"Folder watcher could not process a filesystem notification.");
                 QueueUpdate(sharedState, targetWindow, std::move(update));
                 continue;
             }
@@ -269,8 +286,7 @@ namespace hyperbrowse::services
         {
             if (update)
             {
-                update->requiresFullReload = true;
-                update->message = L"Folder watcher received a malformed filesystem notification.";
+                RequestFullReload(update, L"Folder watcher received a malformed filesystem notification.");
             }
             Reset();
             return;
@@ -282,8 +298,7 @@ namespace hyperbrowse::services
             const DWORD remainingBytes = bufferSize - offset;
             if (remainingBytes < offsetof(FILE_NOTIFY_INFORMATION, FileName))
             {
-                update->requiresFullReload = true;
-                update->message = L"Folder watcher received a malformed filesystem notification.";
+                RequestFullReload(update, L"Folder watcher received a malformed filesystem notification.");
                 Reset();
                 return;
             }
@@ -295,8 +310,7 @@ namespace hyperbrowse::services
                 || info->FileNameLength > recordBytes - offsetof(FILE_NOTIFY_INFORMATION, FileName)
                 || info->FileNameLength % sizeof(WCHAR) != 0)
             {
-                update->requiresFullReload = true;
-                update->message = L"Folder watcher received a malformed filesystem notification.";
+                RequestFullReload(update, L"Folder watcher received a malformed filesystem notification.");
                 Reset();
                 return;
             }
@@ -305,8 +319,7 @@ namespace hyperbrowse::services
             const std::wstring fullPath = CombinePath(folderPath, relativePath);
             if (info->Action != FILE_ACTION_RENAMED_NEW_NAME && !pendingRenameOldPath_.empty())
             {
-                update->requiresFullReload = true;
-                update->message = L"Folder watcher received an unpaired rename notification.";
+                RequestFullReload(update, L"Folder watcher received an unpaired rename notification.");
                 pendingRenameOldPath_.clear();
             }
 
@@ -324,16 +337,14 @@ namespace hyperbrowse::services
             case FILE_ACTION_RENAMED_OLD_NAME:
                 if (!pendingRenameOldPath_.empty())
                 {
-                    update->requiresFullReload = true;
-                    update->message = L"Folder watcher received an unpaired rename notification.";
+                    RequestFullReload(update, L"Folder watcher received an unpaired rename notification.");
                 }
                 pendingRenameOldPath_ = fullPath;
                 break;
             case FILE_ACTION_RENAMED_NEW_NAME:
                 if (pendingRenameOldPath_.empty())
                 {
-                    update->requiresFullReload = true;
-                    update->message = L"Folder watcher received an unpaired rename notification.";
+                    RequestFullReload(update, L"Folder watcher received an unpaired rename notification.");
                 }
                 else
                 {

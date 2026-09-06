@@ -41,14 +41,17 @@ The tests cover model/service behavior and selected application/viewer state wit
 
 CI runs `tools/TestStartupBenchmark.ps1` against the Release build with budgets for first-window visibility and first-thumbnail presentation. Performance changes should use the repository benchmark tools and report before/after measurements rather than relying on subjective timing.
 
-The CI startup dataset is the checked-in `assets` directory. It is intentionally
-small and deterministic for a gate, while large-folder, removable-media, and
-network-path measurements remain release investigations rather than hard CI
+The deterministic CI fixture is the checked-in `assets` directory. CI points
+the isolated `SelectedFolderPath` setting at that directory; no generated,
+network, removable-media, or user-library content is part of the gate. The
+fixture is intentionally small and stable, while large-folder, removable-media,
+and network-path measurements remain release investigations rather than hard CI
 thresholds. Hosted Windows runners have variable CPU, storage, and desktop
 startup latency, so a benchmark result is interpreted as a regression only when
-the configured budget is exceeded; repeated-run distributions should be
-captured before tightening those budgets. JSON snapshots and the debug log are
-uploaded for every matrix leg, including failed runs.
+the configured budget is exceeded. Capture repeated-run distributions before
+tightening those budgets or comparing small timing deltas. JSON snapshots and
+the debug log are uploaded for every matrix leg, including failed runs, and the
+release job separately preserves the package files under `build-ci-package/dist`.
 
 Do not use the release packaging target as a routine performance or correctness check. It can stage package contents and optional CUDA redistributables.
 
@@ -87,22 +90,21 @@ When investigating a failure:
 
 ### Sanitizer and fuzz policy
 
-The repository does not currently enable a sanitizer job. The production CMake
-configuration uses the static MSVC runtime, while an AddressSanitizer build
-requires a separately configured MSVC runtime/toolchain and has additional
-linker and runtime constraints; enabling it blindly in the normal Visual
-Studio preset would test a different configuration and can conflict with the
-packaging assumptions. Visual Studio's native fuzzing support is likewise not
-part of the current CMake/CTest toolchain, and no libFuzzer integration is
-checked in.
+CI now runs a dedicated AddressSanitizer boundary-fuzz job with the dynamic
+MSVC runtime. The opt-in `HYPERBROWSE_BUILD_FUZZ_TESTS` target uses fixed seeds
+and bounded mutations, so it is deterministic and does not require a separate
+fuzzing engine. `HyperBrowsePersistentCacheFuzz` mutates persistent-cache
+headers and index rows, while `HyperBrowseRawHelperProtocolFuzz` mutates RAW
+helper payload sizes, headers, and bytes. The job disables optional LibRaw and
+nvJPEG dependencies because these tests exercise the protocol and cache
+boundaries, not codec implementations.
 
-The supported substitute is deterministic malformed-input coverage in the
-smoke suite: cache corruption, folder-watch payload parsing, RAW helper
-protocol validation, and decoder failure paths. New parsers or binary input
-boundaries must add bounded malformed fixtures there. A future sanitizer/fuzz
-job should use a dedicated dynamic-runtime preset, isolate generated corpus
-artifacts, and upload crashes and minimized reproducers without changing the
-shipping build or the normal CTest matrix.
+The sanitizer job is intentionally separate from the shipping matrix: it uses
+`HYPERBROWSE_STATIC_MSVC_RUNTIME=OFF` and `/fsanitize=address`, uploads the
+CTest log and any Windows dump files, and does not replace the normal Debug,
+Release, startup, or package gates. New binary input boundaries should add a
+bounded seed mutation to this target as well as a focused deterministic smoke
+assertion when a user-visible failure mode is involved.
 
 ## Test isolation and safety
 

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "services/FolderWatchService.h"
+#include "util/Diagnostics.h"
 
 #include "smoke_watch.h"
 
@@ -60,6 +61,19 @@ namespace hyperbrowse::tests
         {
             constexpr wchar_t folderPath[] = L"C:\\HyperBrowseWatchTest";
             hyperbrowse::services::FolderWatchNotificationParser parser;
+            const auto counterValue = [](std::wstring_view name)
+            {
+                const hyperbrowse::util::DiagnosticsSnapshot snapshot = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+                for (const hyperbrowse::util::DiagnosticCounterRow& row : snapshot.counters)
+                {
+                    if (row.name == name)
+                    {
+                        return row.value;
+                    }
+                }
+                return std::uint64_t{};
+            };
+            const std::uint64_t fallbackCountBefore = counterValue(L"folder_watch.full_reload_fallbacks");
 
             std::vector<BYTE> oldNameBuffer;
             AppendFolderWatchRecord(&oldNameBuffer, FILE_ACTION_RENAMED_OLD_NAME, L"old-name.jpg");
@@ -120,6 +134,8 @@ namespace hyperbrowse::tests
             parser.Append(malformedBuffer.data(), static_cast<DWORD>(malformedBuffer.size()), folderPath, &malformedUpdate);
             Expect(malformedUpdate.requiresFullReload,
                    "Folder watcher did not request a full reload for a malformed notification");
+                 Expect(counterValue(L"folder_watch.full_reload_fallbacks") >= fallbackCountBefore + 4,
+                     "Folder watcher did not count distinct full-reload fallbacks");
         }
     }
 

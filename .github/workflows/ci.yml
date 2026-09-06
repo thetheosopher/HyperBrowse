@@ -102,3 +102,52 @@ jobs:
           name: release-artifacts
           if-no-files-found: ignore
           path: build-ci-package/dist/*
+
+  sanitizer-fuzz:
+    name: AddressSanitizer boundary fuzz tests
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure dynamic-runtime ASAN build
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-ci-asan -G "Visual Studio 17 2022" -A x64
+          -DHYPERBROWSE_BUILD_TESTS=ON
+          -DHYPERBROWSE_BUILD_FUZZ_TESTS=ON
+          -DHYPERBROWSE_ENABLE_LIBRAW=OFF
+          -DHYPERBROWSE_ENABLE_NVJPEG=OFF
+          -DHYPERBROWSE_BUNDLE_CUDA_REDIST=OFF
+          -DHYPERBROWSE_STATIC_MSVC_RUNTIME=OFF
+          -DHYPERBROWSE_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS="/fsanitize=address"
+          -DCMAKE_EXE_LINKER_FLAGS_DEBUG="/DEBUG /INCREMENTAL:NO"
+
+      - name: Build boundary fuzz target
+        run: cmake --build build-ci-asan --config Debug --target HyperBrowseBoundaryFuzz -- /m /v:minimal
+
+      - name: Run cache and RAW-helper boundary fuzz tests
+        shell: pwsh
+        run: >-
+          $asanRuntime = Get-ChildItem "$env:ProgramFiles\Microsoft Visual Studio\2022"
+          -Recurse -Filter clang_rt.asan_dynamic-x86_64.dll |
+          Select-Object -First 1;
+          if ($null -eq $asanRuntime) { throw 'MSVC AddressSanitizer runtime was not found.' };
+          $env:PATH = "$($asanRuntime.DirectoryName);$env:PATH";
+          $env:ASAN_OPTIONS = 'abort_on_error=1:halt_on_error=1:detect_leaks=0';
+          ctest --test-dir build-ci-asan -C Debug -R 'HyperBrowse(PersistentCache|RawHelperProtocol)Fuzz' --output-on-failure 2>&1 |
+          Tee-Object -FilePath build-ci-asan/asan-fuzz.log;
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload sanitizer and fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-fuzz-artifacts
+          if-no-files-found: ignore
+          path: |
+            build-ci-asan/asan-fuzz.log
+            build-ci-asan/Testing/Temporary/LastTest.log
+            build-ci-asan/**/*.dmp

@@ -45,3 +45,15 @@ add_test(NAME HyperBrowseSmoke COMMAND HyperBrowseTests)
 add_test(NAME HyperBrowseViewerFitSmoke COMMAND HyperBrowseTests --viewer-fit)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)
 add_test(NAME HyperBrowseSettingsSmoke COMMAND HyperBrowseTests --settings)
+
+if(HYPERBROWSE_BUILD_FUZZ_TESTS)
+    add_executable(HyperBrowseBoundaryFuzz
+        fuzz.cpp
+    )
+
+    target_compile_features(HyperBrowseBoundaryFuzz PRIVATE cxx_std_20)
+    target_link_libraries(HyperBrowseBoundaryFuzz PRIVATE HyperBrowseCore)
+
+    add_test(NAME HyperBrowsePersistentCacheFuzz COMMAND HyperBrowseBoundaryFuzz --persistent-cache)
+    add_test(NAME HyperBrowseRawHelperProtocolFuzz COMMAND HyperBrowseBoundaryFuzz --raw-helper)
+endif()

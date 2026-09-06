@@ -181,6 +181,7 @@ Launch the `HyperBrowse` startup project from Visual Studio, or run the built ex
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `HYPERBROWSE_BUILD_TESTS` | `ON` | Build the smoke and integration test suite |
+| `HYPERBROWSE_BUILD_FUZZ_TESTS` | `OFF` | Build deterministic cache and RAW-helper boundary fuzz tests |
 | `HYPERBROWSE_ENABLE_LIBRAW` | `ON` | Enable vendored LibRaw support and the RAW helper executable |
 | `HYPERBROWSE_ENABLE_NVJPEG` | `ON` | Compile the optional nvJPEG acceleration path |
 | `HYPERBROWSE_BUNDLE_CUDA_REDIST` | `ON` | Download and stage official NVIDIA runtime redistributables for packaging |

@@ -263,6 +263,7 @@ namespace hyperbrowse::ui
         void StartPersistentThumbnailCacheStatistics();
         void StartPersistentThumbnailCacheMaintenance(bool purge);
         void ShowDiagnosticsSnapshot();
+        void ExportRedactedDiagnosticsSnapshot();
         void ResetDiagnosticsState();
         void ShowImageInformation(HWND ownerWindow = nullptr);
         void StartRenameSelectedImage();

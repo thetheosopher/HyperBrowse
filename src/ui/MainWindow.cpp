@@ -8955,6 +8955,7 @@ namespace hyperbrowse::ui
             }
         };
         viewCommandHandlers.onDiagnosticsSnapshot = std::bind_front(&MainWindow::ShowDiagnosticsSnapshot, this);
+        viewCommandHandlers.onDiagnosticsExport = std::bind_front(&MainWindow::ExportRedactedDiagnosticsSnapshot, this);
         viewCommandHandlers.onDiagnosticsReset = std::bind_front(&MainWindow::ResetDiagnosticsState, this);
         viewCommandController_.Configure(std::move(viewCommandHandlers));
     }
@@ -9548,6 +9549,7 @@ namespace hyperbrowse::ui
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"&Snapshot\tCtrl+Shift+D");
+        AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_EXPORT, L"Export &Redacted Snapshot...");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"&Reset\tCtrl+Shift+X");
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SETTINGS, L"&Settings...\tCtrl+Shift+T");
@@ -13963,6 +13965,57 @@ namespace hyperbrowse::ui
             util::CaptureDiagnosticsSnapshot(),
             themeMode_ == ThemeMode::Dark);
         util::LogInfo(L"Opened diagnostics snapshot window.");
+    }
+
+    void MainWindow::ExportRedactedDiagnosticsSnapshot()
+    {
+        Microsoft::WRL::ComPtr<IFileSaveDialog> dialog;
+        const HRESULT createResult = CoCreateInstance(CLSID_FileSaveDialog,
+                                                       nullptr,
+                                                       CLSCTX_INPROC_SERVER,
+                                                       IID_PPV_ARGS(dialog.GetAddressOf()));
+        if (FAILED(createResult) || !dialog)
+        {
+            MessageBoxW(hwnd_, L"Windows could not open the diagnostics export dialog.", L"Diagnostics", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        constexpr COMDLG_FILTERSPEC filters[] = {
+            {L"JSON diagnostics", L"*.json"},
+            {L"All files", L"*.*"},
+        };
+        dialog->SetFileTypes(static_cast<UINT>(std::size(filters)), filters);
+        dialog->SetDefaultExtension(L"json");
+        dialog->SetFileName(L"HyperBrowse-diagnostics-redacted.json");
+        dialog->SetTitle(L"Export Redacted Diagnostics Snapshot");
+        if (FAILED(dialog->Show(hwnd_)))
+        {
+            return;
+        }
+
+        Microsoft::WRL::ComPtr<IShellItem> shellItem;
+        if (FAILED(dialog->GetResult(&shellItem)) || !shellItem)
+        {
+            return;
+        }
+
+        PWSTR rawPath = nullptr;
+        if (FAILED(shellItem->GetDisplayName(SIGDN_FILESYSPATH, &rawPath)) || !rawPath)
+        {
+            MessageBoxW(hwnd_, L"Windows did not return a writable diagnostics export path.", L"Diagnostics", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        const std::wstring outputPath(rawPath);
+        CoTaskMemFree(rawPath);
+        if (!util::WriteRedactedDiagnosticsSnapshot(outputPath))
+        {
+            MessageBoxW(hwnd_, L"HyperBrowse could not write the diagnostics snapshot.", L"Diagnostics", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        util::LogInfo(L"Wrote redacted diagnostics snapshot.");
+        MessageBoxW(hwnd_, L"The redacted diagnostics snapshot was exported.", L"Diagnostics", MB_OK | MB_ICONINFORMATION);
     }
 
     void MainWindow::ShowUserGuide() const

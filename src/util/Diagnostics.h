@@ -72,6 +72,7 @@ namespace hyperbrowse::util
     void MarkStartupWindowVisible();
     void MarkStartupFirstThumbnailPainted();
     bool WriteStartupBenchmarkSnapshot(std::wstring* outputPath = nullptr);
+    bool WriteRedactedDiagnosticsSnapshot(const std::wstring& outputPath);
     void ResetDiagnostics();
     DiagnosticsSnapshot CaptureDiagnosticsSnapshot();
     std::wstring BuildDiagnosticsReport();

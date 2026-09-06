@@ -5,7 +5,7 @@
 Use a **low-overhead pure native Windows architecture**:
 
 - Win32 application shell
-- Direct2D/DirectWrite rendering for browser, viewer, and selected shell surfaces
+- Direct2D/DirectWrite rendering for browser and viewer surfaces
 - GDI retained for compatible shell and dialog paths
 - WIC for baseline common-format decode
 - LibRaw for supported mainstream RAW formats (in-process or out-of-process via helper executable)
@@ -47,10 +47,10 @@ Single-process desktop app.
 
 ### App shell and UI
 - `Application` — app lifecycle, message loop, accelerator translation
-- `MainWindow` — window procedure, input handling, layout, command routing, presentation coordination, folder tree management, action strip, filter, status bar, theme management, settings persistence
+- `MainWindow` — current shell coordinator for the window procedure, input handling, layout, command routing, presentation coordination, folder tree management, action strip, filter, status bar, theme management, and settings persistence
 - `DiagnosticsWindow` — timing/counter/derived metric display window
 
-Note: The original modular decomposition (`AppShell`, `MenuController`, `CommandRouter`, `ThemeManager`, `StatusBarController`) was consolidated into `MainWindow` for pragmatic simplicity. The current implementation handles the remaining shell concerns in a single ~21,208-line translation unit; focused collaborators own policy, persistence, painting, and message-routing boundaries.
+Note: The original modular decomposition (`AppShell`, `MenuController`, `CommandRouter`, `ThemeManager`, `StatusBarController`) was consolidated into `MainWindow` for pragmatic simplicity. The current implementation keeps shell orchestration in one large translation unit; focused collaborators own policy, persistence, painting, and message-routing boundaries.
 
 ### Browser UI
 - `BrowserPane` — virtualized thumbnail grid and details list, selection model, sort, filter, rubber-band selection, thumbnail scheduling integration, metadata integration
@@ -84,11 +84,12 @@ Note: The original modular decomposition (`ViewerNavigationController`, `ZoomPan
 Note: The decode layer uses free functions and static methods rather than a formal polymorphic interface. The decode chain is: nvJPEG → WIC → LibRaw (in-process or out-of-process) with per-image fallback.
 
 ### Caching
-- `ThumbnailCache` — LRU eviction by byte count (default 96 MB), normalized path keys
+- `ThumbnailCache` — in-memory LRU eviction by byte count (default 96 MB), normalized path keys
+- `DiskThumbnailCache` — optional persistent thumbnail entries with a normalized-key index, append journal, compaction, bounded capacity, corruption cleanup, and asynchronous access metadata persistence
 - Metadata LRU cache — 512-entry bounded cache inside `ImageMetadataService`
 - Viewer 3-slot adjacent image cache — current/previous/next prefetch slots inside `ViewerWindow`
 
-Note: `FileListCache`, `ViewerImageCache`, and `RawPreviewCache` from the original design are not implemented as separate modules. Caching is handled inline by the owning components.
+Note: `FileListCache` and `RawPreviewCache` from the original design are not implemented as separate modules. Memory caching is handled inline by the owning components; persistent thumbnails are owned by `DiskThumbnailCache` and remain behind scheduler/service worker paths.
 
 ### Rendering
 - `D2DRenderer` owns shared Direct2D/DirectWrite factory and bitmap helpers
@@ -204,8 +205,8 @@ Viewer window uses a dedicated rendering path optimized for:
 
 ## 9. Cache Design
 
-## 9.1 Memory-only v1 caching
-Persistent disk caching is out of scope for v1. Use memory-only bounded caches.
+## 9.1 Cache policy
+Use bounded memory caches for active presentation and an optional persistent disk cache for decoded thumbnails. Persistent cache work, including index/journal I/O and corruption cleanup, must not run on the UI thread.
 
 ### Recommended caches
 - `ThumbnailMemoryCache`
@@ -223,6 +224,8 @@ At minimum include:
 ### Eviction
 Use LRU or segmented-LRU style eviction with hard memory ceilings.
 
+Persistent-cache invalid entries are removed from the index and backing file when detected and increment the `persistent_cache.invalid_entries` diagnostic counter.
+
 ## 10. Folder Watching
 
 ### Responsibilities
@@ -230,6 +233,8 @@ Use LRU or segmented-LRU style eviction with hard memory ceilings.
 - patch browser model incrementally
 - invalidate relevant cache entries
 - avoid full folder teardown unless necessary
+
+Asynchronous updates are coalesced before they are posted to the UI thread. Parser failures, watcher-handle failures, notification overflow, and oversized coalesced updates request a full reload through one fallback path. Each distinct update that enters that path increments `folder_watch.full_reload_fallbacks`.
 
 ## 11. Batch Convert Architecture
 
@@ -258,6 +263,8 @@ Instrument all key pipeline stages.
 - viewer decode time
 - prefetch time
 - batch convert throughput
+
+Diagnostics snapshots include timings, counters, and derived values. The Help > Diagnostics menu can export a redacted JSON snapshot with schema metadata and no UI/runtime paths; the export is intentionally separate from the path-bearing on-screen diagnostics report.
 
 ## 13. Project Structure Recommendation
 

@@ -57,6 +57,7 @@ namespace hyperbrowse::ui
             CommandHandler onPerformanceSettings;
             CommandIdHandler onPerformanceProfile;
             CommandHandler onDiagnosticsSnapshot;
+            CommandHandler onDiagnosticsExport;
             CommandHandler onDiagnosticsReset;
         };
 

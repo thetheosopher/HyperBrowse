@@ -471,6 +471,97 @@ namespace hyperbrowse::util
         return true;
     }
 
+    bool WriteRedactedDiagnosticsSnapshot(const std::wstring& outputPath)
+    {
+        if (outputPath.empty())
+        {
+            return false;
+        }
+
+        const DiagnosticsSnapshot snapshot = CaptureDiagnosticsSnapshot();
+        std::string json;
+        json.reserve(4096);
+        json.append("{\n  \"schemaVersion\": 1,\n  \"redacted\": true,\n  \"product\": ");
+        AppendEscapedJsonString(&json, L"HyperBrowse");
+        json.append(",\n  \"pathsIncluded\": false,\n  \"timings\": [");
+
+        for (std::size_t index = 0; index < snapshot.timings.size(); ++index)
+        {
+            const DiagnosticTimingRow& row = snapshot.timings[index];
+            if (index != 0)
+            {
+                json.append(",");
+            }
+            json.append("\n    {\"name\": ");
+            AppendEscapedJsonString(&json, row.name);
+            json.append(", \"count\": ");
+            json.append(std::to_string(row.count));
+            json.append(", \"averageMs\": ");
+            AppendJsonNumber(&json, row.averageMs);
+            json.append(", \"lastMs\": ");
+            AppendJsonNumber(&json, row.lastMs);
+            json.append(", \"minMs\": ");
+            AppendJsonNumber(&json, row.minMs);
+            json.append(", \"maxMs\": ");
+            AppendJsonNumber(&json, row.maxMs);
+            json.append("}");
+        }
+        json.append(snapshot.timings.empty() ? "]" : "\n  ]");
+
+        json.append(",\n  \"counters\": [");
+        for (std::size_t index = 0; index < snapshot.counters.size(); ++index)
+        {
+            const DiagnosticCounterRow& row = snapshot.counters[index];
+            if (index != 0)
+            {
+                json.append(",");
+            }
+            json.append("\n    {\"name\": ");
+            AppendEscapedJsonString(&json, row.name);
+            json.append(", \"value\": ");
+            json.append(std::to_string(row.value));
+            json.append("}");
+        }
+        json.append(snapshot.counters.empty() ? "]" : "\n  ]");
+
+        json.append(",\n  \"derived\": [");
+        for (std::size_t index = 0; index < snapshot.derived.size(); ++index)
+        {
+            const DiagnosticValueRow& row = snapshot.derived[index];
+            if (index != 0)
+            {
+                json.append(",");
+            }
+            json.append("\n    {\"name\": ");
+            AppendEscapedJsonString(&json, row.name);
+            json.append(", \"value\": ");
+            AppendEscapedJsonString(&json, row.value);
+            json.append("}");
+        }
+        json.append(snapshot.derived.empty() ? "]\n}\n" : "\n  ]\n}\n");
+
+        namespace fs = std::filesystem;
+        fs::path path(outputPath);
+        std::error_code error;
+        if (path.has_parent_path())
+        {
+            fs::create_directories(path.parent_path(), error);
+            if (error)
+            {
+                return false;
+            }
+        }
+
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        if (!stream)
+        {
+            return false;
+        }
+
+        stream.write(json.data(), static_cast<std::streamsize>(json.size()));
+        return static_cast<bool>(stream);
+    }
+
     void ResetDiagnostics()
     {
         DiagnosticsStore& store = GetStore();

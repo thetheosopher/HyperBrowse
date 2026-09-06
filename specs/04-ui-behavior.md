@@ -78,14 +78,16 @@ Note: The Tools menu from the original spec was not implemented. Refresh is avai
 
 - Settings are shipped for Appearance, Viewer, Performance, Diagnostics, Integration, Behavior, and Slideshow behavior.
 - `F2` opens the shipped rename dialog; inline label editing remains deferred.
+- The rename dialog validates the selected item and performs the native file operation asynchronously; it does not turn the thumbnail label into an inline editor.
 - Copy-path and shell file-selection clipboard workflows are shipped, as are duplicate-file operations (`Ctrl+D`) and bounded Copy/Move/Rename undo/redo (`Ctrl+Z` / `Ctrl+Y`).
-- Shell drag-out and in-app drag/drop file workflows are shipped. The separate product idea of content-based duplicate finding remains deferred.
+- Shell drag-out is provided through an OLE shell file data object and drop source. In-app drops accept OLE `IDataObject` file payloads on the main window and support folder-tree, browser, viewer, and Quick Actions destinations; the legacy `WM_DROPFILES` path remains a fallback. The separate product idea of content-based duplicate finding remains deferred.
 - Optional single-instance mode forwards a second launch path to the existing window. Taskbar progress is shown for active file operations and batch conversion.
 - Viewer inspection includes the Tab HUD, the metadata pane, image information, compare mode, and slideshow controls. Metadata extraction failures remain non-blocking.
 
 ### Help
 - About
 - Diagnostics Snapshot
+- Export Redacted Snapshot...
 - Reset Diagnostics
 
 ## 4. Folder Tree Behavior
@@ -144,8 +146,11 @@ Each cell may include:
 ## 5.3 In-folder filter
 
 ### Requirements
-- live filename filter via text box in the action strip
-- case-insensitive substring match
+- live filter query via the text box in the action strip
+- case-insensitive filename terms are substring matches
+- whitespace-separated terms are ANDed
+- structured terms are supported: `rating:rated`, `rating:unrated`, `rating:<n>`, `rating:<=n`, `rating:=n`, `rating:>n`, `rating:>=n`, and `tag:<text>` / `tags:<text>`
+- structured rating and tag terms use the current item's user metadata; unrecognized `rating:` expressions remain filename terms
 - filters the current browser view without affecting the underlying model
 - status bar shows "N of M" when filter is active
 - filter cleared on folder change
@@ -233,7 +238,7 @@ Status bar should update incrementally and never block UI.
 - Small matches the legacy overlay size; Medium and Large are progressively larger without changing overlay content
 - top-left panel: filename, position (N/Total), file type, file size
 - bottom-right panel: dimensions, zoom percentage, zoom mode (Fit/Custom); this block uses a more prominent treatment than the upper HUD text
-- optional full metadata pane: rendered over the right third of the viewer with a translucent background and the available image metadata; when shown, the bottom-right panel is hidden; visibility is persisted independently for windowed and full-screen viewing modes
+- optional full metadata pane: rendered over the right third of the viewer with a translucent background and the available image metadata; when shown, the bottom-right panel is hidden; visibility is persisted independently for windowed and full-screen viewing modes, so changing one mode does not change the other
 - loading and error states always visible regardless of overlay toggle
 
 ## 9. Slideshow Behavior
@@ -243,7 +248,9 @@ Status bar should update incrementally and never block UI.
 - respect recursive mode when appropriate
 - allow next/previous during slideshow
 - support full-screen slideshow mode
-- default interval 3000 ms (minimum 250 ms)
+- default interval 3000 ms, bounded to 250-60000 ms
+- Settings > Slideshow Settings persists the slide interval, transition style, transition duration (100-5000 ms), and whether transitions are enabled
+- transition styles include cut, crossfade, wipes, slides, zoom/fade, and other shipped animated styles; Random selects among animated styles
 - Space bar toggles slideshow on/off in the viewer
 - Ctrl+Shift+F in the viewer starts a current-folder slideshow from the currently displayed image
 

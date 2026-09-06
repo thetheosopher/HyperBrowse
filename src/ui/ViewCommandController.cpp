@@ -149,6 +149,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onPerformanceProfile, commandId);
         case ID_HELP_DIAGNOSTICS_SNAPSHOT:
             return Invoke(handlers_.onDiagnosticsSnapshot);
+        case ID_HELP_DIAGNOSTICS_EXPORT:
+            return Invoke(handlers_.onDiagnosticsExport);
         case ID_HELP_DIAGNOSTICS_RESET:
             return Invoke(handlers_.onDiagnosticsReset);
         default:

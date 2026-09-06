@@ -1,6 +1,6 @@
-# HyperBrowse — Direct2D Rendering Migration Plan
+# HyperBrowse — Direct2D Rendering Migration Status
 
-This document describes the phased migration from GDI to Direct2D (D2D) rendering, including per-monitor DPI awareness, GPU-accelerated image compositing, DirectWrite text rendering, and optional smooth interactions.
+This document records the phased migration from GDI to Direct2D (D2D) rendering, including the shipped per-monitor DPI behavior, GPU-accelerated image compositing, DirectWrite text rendering, and optional smooth interactions.
 
 Created: 2026-04-13
 
@@ -12,14 +12,14 @@ HyperBrowse is branded around speed. The current GDI rendering pipeline is funct
 
 | Concern | GDI Status | D2D Benefit |
 |---------|-----------|-------------|
-| Viewer zoom/pan on 30–50 MP images | CPU `StretchBlt(HALFTONE)` — slow on large images | GPU bicubic scaling — order of magnitude faster |
-| Thumbnail grid scrolling | CPU `AlphaBlend` per visible cell | GPU texture blit — essentially zero CPU cost per thumbnail |
-| Rotation | `PlgBlt()` — expensive CPU transform | GPU matrix multiply during single DrawBitmap call |
-| Anti-aliased geometry | GDI `RoundRect` — aliased (jaggy) edges | D2D — hardware anti-aliased rounded rectangles natively |
-| Text rendering | GDI `DrawText` — decent ClearType | DirectWrite — superior sub-pixel positioning, sharper at small sizes |
-| High-DPI support | **None** — app runs in DPI virtualization (blurry on modern displays) | D2D uses device-independent pixels natively |
-| Image scaling quality | HALFTONE (adequate) | GPU high-quality cubic (faster AND better) |
-| Compositing/overlays | CPU alpha blending | GPU compositing — zero CPU cost |
+| Viewer zoom/pan on 30–50 MP images | Historical GDI `StretchBlt(HALFTONE)` path | Shipped D2D bitmap scaling with high-quality cubic mode where supported |
+| Thumbnail grid scrolling | Historical GDI `AlphaBlend` path | Shipped D2D bitmap presentation for visible cells |
+| Rotation | Historical `PlgBlt()` path | Shipped D2D matrix transform in the viewer |
+| Anti-aliased geometry | GDI remains at shell/dialog boundaries | Shipped D2D geometry in BrowserPane and ViewerWindow |
+| Text rendering | GDI remains at shell/dialog boundaries | Shipped DirectWrite text in BrowserPane and ViewerWindow |
+| High-DPI support | Historical DPI virtualization | Shipped per-monitor DPI v2 and `WM_DPICHANGED` handling |
+| Image scaling quality | Historical HALFTONE fallback | Shipped high-quality cubic interpolation with linear fallback |
+| Compositing/overlays | GDI remains for selected shell paths | Shipped D2D compositing and overlays in browser/viewer surfaces |
 
 ---
 
@@ -29,7 +29,7 @@ HyperBrowse is branded around speed. The current GDI rendering pipeline is funct
 - `D2DRenderer` provides shared factory, render-target, bitmap-conversion, and text-format helpers; the owning windows retain their own device-dependent resources.
 - MainWindow shell and dialog paths retain GDI rendering where that is still the simplest compatible Win32 path.
 - Image decode and cache compatibility still use BGRA32/HBITMAP representations at the decode boundary; D2D bitmaps are created for presentation as needed.
-- `d2d1`, `dwrite`, and `d3d11` are active link dependencies, with WARP/device-loss recovery paths in the renderer.
+- `d2d1` and `dwrite` are active rendering dependencies; the owning windows handle `D2DERR_RECREATE_TARGET` by rebuilding their device-dependent resources.
 - Per-monitor DPI v2, `WM_DPICHANGED`, display-change recovery, and DPI-scaled layout/text paths are implemented.
 - The original all-GDI baseline and the Phase 0 through Phase 2 migration work are historical context, not the current implementation state.
 
@@ -39,50 +39,40 @@ The remaining migration work is deliberately limited to evaluating additional sh
 
 ## 3. Architecture Decisions
 
-1. **No GDI/D2D abstraction layer.** Migrate directly. D2D is available on Windows 7 SP2+ with Platform Update. All target systems support it.
+1. **No GDI/D2D abstraction layer.** BrowserPane and ViewerWindow use D2D directly through the shared `D2DRenderer` helpers; MainWindow keeps its intentional GDI shell boundary.
 
-2. **Texture cache mirrors thumbnail cache.** When an HBITMAP enters the thumbnail LRU cache, the D2D bitmap is created at the same time. Both evicted together on LRU eviction.
+2. **Presentation resources follow their owners.** BrowserPane and ViewerWindow own device-dependent D2D bitmaps and brushes; the decode boundary may continue to use BGRA32/HBITMAP representations.
 
-3. **Deferred device creation.** The D3D11/D2D device is not created until first WM_PAINT. Startup time stays instant.
+3. **Lazy render-target creation.** D2D render targets and dependent resources are created when an owning window first needs to paint, keeping startup independent of surface creation.
 
-4. **WARP fallback is automatic.** D2D falls back to WARP (software rasterizer) if no GPU is available. Still benefits from anti-aliased geometry and DirectWrite.
+4. **Capability-driven rendering.** D2D creation failures and target loss are handled at the owning window boundary; the application does not maintain a separate WARP device abstraction.
 
 5. **Animation philosophy.** Any future animation must be instantly interruptible by user input and must increase perceived speed, not diminish it. If profiling says otherwise, remove it.
 
-6. **Shared device factory.** A single `ID2D1Factory` and `IDWriteFactory` are created in `Application::Run()` and passed to windows that need them. Each window creates its own `ID2D1HwndRenderTarget`.
+6. **Shared factory helpers.** `D2DRenderer` lazily owns the shared `ID2D1Factory` and `IDWriteFactory`; each window creates and recovers its own `ID2D1HwndRenderTarget`.
 
 ---
 
-## 4. Phase 0 — Per-Monitor DPI Awareness
+## 4. Completed: Per-Monitor DPI Awareness
 
-**Goal:** Fix blurry rendering on high-DPI displays. Independent of D2D.
+**Status:** Shipped at the window boundaries and in DPI-scaled layout/text paths. This work is independent of the D2D surface ownership.
 
-**Changes:**
-- `WinMain.cpp`: Call `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` before window creation
-- `MainWindow`: Handle `WM_DPICHANGED`, scale layout constants and fonts by DPI
-- `BrowserPane`: Scale thumbnail layout metrics, fonts, and cell sizes by DPI
-- `ViewerWindow`: Scale overlay layout by DPI
-- All `CreateFont` / `CreateSizedUiFont` calls: use DPI-scaled point sizes
+**Shipped implementation:**
+- `WinMain.cpp`, `MainWindow`, `BrowserPane`, and `ViewerWindow` establish per-monitor DPI v2 behavior and handle DPI changes.
+- Layout metrics, fonts, thumbnail cells, and viewer overlays are DPI-scaled.
 
-**Constraint:** No visible regression at 100% DPI. At 125%/150%/200%, must be pixel-crisp.
+The 100% layout remains the compatibility baseline; higher DPI layouts use the same scaled ownership paths.
 
 ---
 
-## 5. Phase 1 — D2D Thumbnail Grid (BrowserPane)
+## 5. Completed: D2D Thumbnail Grid (BrowserPane)
 
-**Goal:** GPU-accelerated thumbnail compositing with anti-aliased geometry and DirectWrite text.
+**Status:** Shipped. BrowserPane owns the D2D thumbnail-grid and details presentation resources.
 
-**New files:**
-- `src/render/D2DRenderer.h` — Shared D2D/DirectWrite factory management, render target creation, HBITMAP→ID2D1Bitmap conversion
-- `src/render/D2DRenderer.cpp` — Implementation
-
-**BrowserPane changes:**
-- Replace `WM_PAINT` handler: create `ID2D1HwndRenderTarget`, render directly (D2D is inherently double-buffered via present)
-- Replace `AlphaBlend` thumbnail draws → `ID2D1RenderTarget::DrawBitmap()`
-- Replace `RoundRect` → `ID2D1RenderTarget::FillRoundedRectangle()` + `DrawRoundedRectangle()` (anti-aliased)
-- Replace `DrawText` → `IDWriteFactory::CreateTextFormat()` + `ID2D1RenderTarget::DrawText()`
-- Replace GDI brush/pen resource management → D2D `ID2D1SolidColorBrush` (lightweight, no kernel objects)
-- Thumbnail HBITMAP→ID2D1Bitmap conversion at cache insertion time
+**Shipped implementation:**
+- `src/render/D2DRenderer.h/.cpp` provides shared factory, render-target, bitmap-conversion, and text-format helpers.
+- BrowserPane creates an `ID2D1HwndRenderTarget` and draws visible thumbnails, placeholders, details, geometry, and text through its D2D resources.
+- Device-dependent resources are rebuilt after target loss.
 
 **Performance invariants preserved:**
 - Only visible cells painted (virtualization unchanged)
@@ -91,42 +81,34 @@ The remaining migration work is deliberately limited to evaluating additional sh
 
 ---
 
-## 6. Phase 2 — D2D Viewer Window
+## 6. Completed: D2D Viewer Window
 
-**Goal:** GPU-accelerated image scaling, rotation, and overlay compositing.
+**Status:** Shipped. ViewerWindow owns the D2D full-image, overlay, metadata-panel, and transition presentation paths.
 
-**ViewerWindow changes:**
-- Replace `WM_PAINT` handler: create `ID2D1HwndRenderTarget`, render directly
-- Replace `StretchBlt(HALFTONE)` → `ID2D1DeviceContext::DrawBitmap()` with
-  `D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC` (acquired by QI on the
-  `ID2D1HwndRenderTarget`; requires the factory to be `ID2D1Factory1`,
-  Windows 8+). Falls back to `D2D1_BITMAP_INTERPOLATION_MODE_LINEAR` on
-  Windows 7 if QI fails.
-- Replace `PlgBlt()` rotation → `SetTransform()` with rotation matrix + `DrawBitmap()`
-- Replace info overlay panels: D2D rounded rectangles + DirectWrite text
-- Upload decoded full-resolution image as `ID2D1Bitmap` once on decode completion
+**Shipped implementation:**
+- ViewerWindow creates its own `ID2D1HwndRenderTarget` for image, overlay, metadata-panel, and transition presentation.
+- High-quality cubic interpolation is used when the runtime exposes a device context, with linear interpolation as the fallback.
+- Rotation and transitions use D2D transforms; overlay and metadata-panel text use DirectWrite.
 
 **Key benefit:** Smooth pan/zoom on 30–50 MP images because GPU handles all scaling.
 
 ---
 
-## 7. Phase 3 — DirectWrite Text and Polished Geometry
+## 7. Deferred: Additional Shell Surfaces
 
-**Goal:** Replace all remaining GDI text and geometry with D2D/DirectWrite equivalents.
+The hybrid split is intentional. MainWindow action-strip, folder-tree, status-bar, menu owner-draw, and native/custom dialog paths retain GDI because they are shell surfaces with established Win32 ownership. Replacing those surfaces with D2D is optional follow-up work, not an unfinished prerequisite for browser or viewer rendering.
 
-**Changes:**
-- MainWindow action strip buttons: D2D rounded rectangles + DirectWrite text (if action strip gets a D2D render target, otherwise keep GDI for the thin strip)
-- Placeholder states: D2D rendering with anti-aliased panels
-- All `CreateFont`/`CreateSizedUiFont` calls → `IDWriteTextFormat` objects
-- Theme resource management simplified: D2D brushes are lightweight (no `DeleteObject` lifecycle)
+**Current boundary:**
+- MainWindow action strip buttons, folder tree, status bar, menu owner-draw, and native/custom dialog paths intentionally retain GDI.
+- A D2D action strip or DirectWrite treatment for selected custom dialogs may be evaluated later, but is not required by the browser/viewer migration.
 
 ---
 
-## 8. Phase 4 — Optional Smooth Interactions
+## 8. Deferred: Optional Smooth Interactions
 
 **Goal:** Evaluate and optionally add GPU-powered interaction polish. Only ship what makes the app feel faster.
 
-**Candidates (evaluate post-Phase 2):**
+**Candidates for later evaluation:**
 - Smooth inertial scrolling (vsync-aligned, decelerating) in thumbnail grid
 - Animated zoom in viewer (smooth step rather than instant jump)
 - Slideshow crossfade transitions
@@ -144,39 +126,34 @@ The remaining migration work is deliberately limited to evaluating additional sh
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Texture upload cost (HBITMAP → ID2D1Bitmap) | Medium | One-time per cache entry. Thumbnails ~256KB each. Viewer images uploaded once. |
+| Texture upload cost (HBITMAP → ID2D1Bitmap) | Medium | One-time per presentation resource. Thumbnails and viewer images are uploaded when their owning surface needs them. |
 | VRAM pressure | Low | 500 visible thumbnails ≈ 128 MB VRAM. LRU eviction releases GPU textures. |
-| D3D device loss | Low | Handle `D2DERR_RECREATE_TARGET`: recreate device + all resources. Rare in practice. |
-| Startup time (D3D11 device creation ~50–100 ms) | Medium | Defer to first paint. Don't block WinMain. |
+| D2D target loss | Low | Handle `D2DERR_RECREATE_TARGET`: recreate the owning target and all dependent resources. |
+| Startup surface creation | Medium | Defer render-target creation until first paint. Don't block WinMain. |
 | Complexity | Medium | Phased migration — one component at a time, each phase independently shippable. |
-| Weak/missing GPU | Low | D2D auto-falls back to WARP. Still benefits from anti-aliased geometry and DirectWrite. |
+| Weak/missing GPU | Low | Keep the D2D path capability-driven and allow the owning window's existing recovery behavior to remain usable. |
 
 ---
 
 ## 10. Files Affected
 
-| File | Phase | Change |
+| File | Status | Current responsibility |
 |------|-------|--------|
-| `CMakeLists.txt` | 1 | Add `dwrite` link, add new source files |
-| `src/app/WinMain.cpp` | 0 | DPI awareness context |
-| `src/app/Application.cpp` | 1 | Create shared D2D/DWrite factories |
-| `src/render/D2DRenderer.h` | 1 | New: factory management, render target creation, bitmap conversion |
-| `src/render/D2DRenderer.cpp` | 1 | New: implementation |
-| `src/browser/BrowserPane.h` | 1 | D2D render target, brush, text format members |
-| `src/browser/BrowserPane.cpp` | 1 | Replace all GDI paint code with D2D equivalents |
-| `src/viewer/ViewerWindow.h` | 2 | D2D render target, brush members |
-| `src/viewer/ViewerWindow.cpp` | 2 | Replace all GDI paint code with D2D equivalents |
-| `src/ui/MainWindow.cpp` | 3 | Optional: D2D action strip buttons |
-| `src/cache/ThumbnailCache.h` | 1 | No change (HBITMAP retained for decode compatibility) |
+| `CMakeLists.txt` | Shipped | Links D2D/DWrite/D3D dependencies and includes renderer sources |
+| `src/app/WinMain.cpp` | Shipped | Establishes process DPI behavior |
+| `src/render/D2DRenderer.h/.cpp` | Shipped | Shared factory, render-target, bitmap, and text helpers |
+| `src/browser/BrowserPane.h/.cpp` | Shipped | D2D browser presentation and device-dependent resource recovery |
+| `src/viewer/ViewerWindow.h/.cpp` | Shipped | D2D image, transform, overlay, metadata, and transition presentation |
+| `src/ui/MainWindow.cpp` | Intentional GDI | Shell orchestration and compatible shell/dialog painting |
 
 ---
 
 ## 11. Verification
 
-1. Build and pass HyperBrowseSmoke after each phase
-2. Visual comparison screenshots at 100%, 150%, and 200% DPI scaling
-3. Profile scroll FPS in 5,000+ image folder (before/after)
-4. Profile viewer zoom/pan latency on 50 MP image (before/after)
-5. VRAM monitoring during large-folder browsing
-6. Test device-loss recovery
-7. Test on integrated GPU to ensure WARP fallback works
+1. Build and pass HyperBrowseSmoke after rendering changes
+2. Verify browser and viewer D2D surfaces at 100%, 150%, and 200% DPI scaling
+3. Profile scroll FPS in a 5,000+ image folder
+4. Profile viewer zoom/pan latency on a 50 MP image
+5. Monitor resource pressure during large-folder browsing
+6. Exercise D2D target/device-loss recovery and confirm resource recreation
+7. Test on integrated GPU and confirm the D2D capability/recovery path remains usable

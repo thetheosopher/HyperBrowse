@@ -19,7 +19,7 @@ Codebase: HyperBrowse
 | MP1 Redesign persistent cache index/I/O | Performance | Complete in 2.1.0 | Archived | M | `src/cache/`, `src/services/` |
 | MP2 Bound background service execution | Performance/Reliability | Partial: bounded executors, service metrics, diagnostics counters, and deterministic service coverage landed; capacity measurement remains | P0 | M | `src/services/`, `src/util/` |
 | MP3 Define cancellable file-operation shutdown | Reliability/UX | Partial: close contract, wait state, post suppression, and blocked-service destruction coverage landed; real MainWindow/shell-prompt validation remains | P0 | M | `FileOperationService`, `MainWindow` |
-| MP4 Establish CI quality/performance matrix | Reliability | Partial: Windows matrix now covers nvJPEG and WIC fallback with Debug/Release/startup/package gates; sanitizer/fuzz job remains toolchain work | P1 | M | CI, tests, tools |
+| MP4 Establish CI quality/performance matrix | Reliability | Complete in 2.1.0 for the current toolchain: nvJPEG/WIC Debug/Release/startup/package matrix plus dynamic-runtime AddressSanitizer boundary fuzz coverage | Archived | M | CI, tests, tools |
 | MP5 Split focused test targets and fixtures | DX/Reliability | Partial: broad executable with four CTest entry points | P1 | M | `tests/` |
 | MP6 Saved structured filters | Feature/UX | Open | P2 | M | browser/UI/settings |
 | SI1 Decompose MainWindow by ownership | DX/Reliability | Partial: current cleanup pass complete; long-term decomposition remains | P2 | L | `src/ui/MainWindow.*` |
@@ -47,11 +47,11 @@ Work should now proceed in this order:
    reports a five-second wait notice, suppresses late posts, and joins the
    worker before destruction. The remaining validation is a real MainWindow
    close path against shell prompts and slow storage; never detach shell work.
-3. **P1 - Finish the quality matrix.** The CI matrix now runs nvJPEG-on and
+3. **P1 - Finish the quality matrix.** The CI matrix runs nvJPEG-on and
    WIC-fallback Debug/Release tests and startup checks, with deterministic
-   fixture and hosted-run variance policy documented. A dedicated sanitizer /
-   fuzz toolchain remains future work; malformed-input smoke coverage is the
-   current substitute.
+   fixture and hosted-run variance policy documented. A separate dynamic-runtime
+   AddressSanitizer job now runs bounded cache and RAW-helper boundary fuzz
+   cases; broader sanitizer/fuzz toolchains remain future work.
 4. **P1 - Improve observability.** Count invalid cache entries and watcher
    full-reload fallbacks separately from ordinary misses, and make a redacted
    diagnostics snapshot export available for issue reports.
@@ -172,13 +172,13 @@ not requests to repeat the work.
 
 ### MP4: CI quality and performance matrix
 
-- **Status:** Partial. The committed Windows workflow is now an nvJPEG-on/WIC-fallback configuration matrix with Debug/Release CTest and startup gates; sanitizer/fuzz remains a separate toolchain configuration.
+- **Status:** Complete in 2.1.0 for the current toolchain. The committed Windows workflow is an nvJPEG-on/WIC-fallback configuration matrix with Debug/Release CTest and startup gates, a release-package gate, and a separate dynamic-runtime AddressSanitizer job for bounded persistent-cache and RAW-helper boundary fuzz cases.
 - **Category:** Reliability, Performance
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** High
 - **Area:** `.github/workflows/`, `CMakePresets.json`, `tools/`, `tests/`
-- **Recommendation:** retain the current matrix and package gate, preserve diagnostics artifacts, and add scheduled dependency/security review. A dedicated dynamic-runtime sanitizer/fuzz preset remains the next quality-tooling step.
+- **Recommendation:** retain the current matrix and package gate, preserve JSON/log, release, and sanitizer artifacts, and add scheduled dependency/security review. Broader sanitizer/fuzz engines remain optional follow-up tooling.
 
 ### MP5: Focused tests and deterministic fixtures
 

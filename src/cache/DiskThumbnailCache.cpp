@@ -15,6 +15,7 @@
 
 #include "util/HashUtils.h"
 #include "util/PathUtils.h"
+#include "util/Diagnostics.h"
 
 namespace
 {
@@ -477,6 +478,7 @@ namespace hyperbrowse::cache
         std::ifstream stream(fs::path(cachePath), std::ios::binary);
         const auto removeInvalidEntry = [&]()
         {
+            util::IncrementCounter(L"persistent_cache.invalid_entries");
             stream.close();
             {
                 std::scoped_lock lock(mutex_);

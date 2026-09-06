@@ -20,6 +20,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -1392,6 +1393,19 @@ namespace
         Expect(thumbnail != nullptr, "Failed to create the thumbnail used for persistent-cache testing");
 
         hyperbrowse::cache::DiskThumbnailCache cache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
+        const auto diagnosticsCounterValue = [](std::wstring_view name)
+        {
+            const hyperbrowse::util::DiagnosticsSnapshot snapshot = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+            for (const hyperbrowse::util::DiagnosticCounterRow& row : snapshot.counters)
+            {
+                if (row.name == name)
+                {
+                    return row.value;
+                }
+            }
+            return std::uint64_t{};
+        };
+        const std::uint64_t invalidEntryCountBefore = diagnosticsCounterValue(L"persistent_cache.invalid_entries");
         cache.Store(key, thumbnail);
         Expect(cache.Compact(), "Persistent thumbnail cache did not compact its initial journal");
          std::wstring indexLineBeforeHit;
@@ -1556,6 +1570,8 @@ namespace
              Expect(reloadedCache.TryLoad(key) != nullptr,
                  "Persistent thumbnail cache discarded a valid row beside malformed index rows");
          }
+                Expect(diagnosticsCounterValue(L"persistent_cache.invalid_entries") > invalidEntryCountBefore,
+                             "Persistent thumbnail cache did not count invalid entries");
 
         const fs::path outsideCacheFile = root.Root() / L"outside.thumb";
         {
@@ -1583,6 +1599,32 @@ namespace
         Expect(fs::exists(outsideCacheFile),
                "Persistent thumbnail cache cleanup escaped its cache directory");
     }
+
+        void RunRedactedDiagnosticsExportScenario()
+        {
+         TempFolder root(L"HyperBrowseRedactedDiagnostics");
+         const fs::path outputPath = root.Root() / L"diagnostics.json";
+         hyperbrowse::util::ResetDiagnostics();
+         hyperbrowse::util::RecordTiming(L"diagnostics.test.timing", 1.0);
+         hyperbrowse::util::IncrementCounter(L"diagnostics.test.counter", 3);
+
+         Expect(hyperbrowse::util::WriteRedactedDiagnosticsSnapshot(outputPath.wstring()),
+             "Redacted diagnostics snapshot export failed");
+
+         std::ifstream stream(outputPath, std::ios::binary);
+         const std::string json((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+         Expect(json.find("\"redacted\": true") != std::string::npos,
+             "Diagnostics export did not declare its redacted form");
+         Expect(json.find("\"pathsIncluded\": false") != std::string::npos,
+             "Diagnostics export did not declare that paths were omitted");
+         Expect(json.find("diagnostics.test.counter") != std::string::npos,
+             "Diagnostics export omitted a recorded counter");
+         Expect(json.find(Utf8FromWide(root.Root().wstring())) == std::string::npos,
+             "Diagnostics export leaked the output path");
+         Expect(json.find("folderScope") == std::string::npos && json.find("jpegPath") == std::string::npos,
+             "Diagnostics export included UI path fields");
+         hyperbrowse::util::ResetDiagnostics();
+        }
 
     void RunWicDecoderScenario()
     {
@@ -3929,6 +3971,7 @@ int main(int argc, char* argv[])
             hyperbrowse::tests::RunWatchPolicyScenarios();
             RunThumbnailCacheNormalizationScenario();
             RunDiskThumbnailCacheCorruptionScenario();
+            RunRedactedDiagnosticsExportScenario();
             RunWicDecoderScenario();
             RunJpegOrientationAdjustmentScenario();
             RunBatchConvertCancellationScenario(hwnd);

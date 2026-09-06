@@ -51,6 +51,7 @@ endif()
 
 option(HYPERBROWSE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(HYPERBROWSE_BUILD_TESTS "Build the HyperBrowse smoke/integration test suite" ON)
+option(HYPERBROWSE_BUILD_FUZZ_TESTS "Build deterministic sanitizer/fuzz boundary tests" OFF)
 option(HYPERBROWSE_ENABLE_LIBRAW "Build with vendored LibRaw support" ON)
 option(HYPERBROWSE_ENABLE_NVJPEG "Enable optional nvJPEG acceleration plumbing" ON)
 option(HYPERBROWSE_BUNDLE_CUDA_REDIST "Download and bundle NVIDIA CUDA runtime redistributables with HyperBrowse" ON)
