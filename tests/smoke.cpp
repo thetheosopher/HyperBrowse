@@ -33,7 +33,6 @@
 #include "app/Application.h"
 #include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
-#include "decode/RawHelperProtocol.h"
 #include "decode/WicThumbnailDecoder.h"
 
 #include "services/BatchConvertService.h"
@@ -46,9 +45,6 @@
 #include "services/ThumbnailScheduler.h"
 #include "ui/CommandIds.h"
 #include "ui/MainWindow.h"
-#include "ui/QuickSend.h"
-#include "ui/ShortcutCatalog.h"
-#include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
 #include "util/ResourceSizing.h"
 #include "util/SettingsRegistry.h"
@@ -56,6 +52,10 @@
 #include "viewer/ViewerWindow.h"
 
 #include "smoke_policy.h"
+#include "smoke_decode.h"
+#include "smoke_model.h"
+#include "smoke_runtime.h"
+#include "smoke_watch.h"
 
 namespace fs = std::filesystem;
 
@@ -426,246 +426,6 @@ namespace
         require(GetExitCodeProcess(processInfo.hProcess, &exitCode) != FALSE && exitCode == 0,
                 "HyperBrowse exited unsuccessfully during idle-client testing");
         cleanup();
-    }
-
-        void RunShortcutCatalogScenario()
-        {
-         using hyperbrowse::ui::ShortcutContext;
-         using hyperbrowse::ui::ShortcutDefinition;
-         using namespace hyperbrowse::ui::command_ids;
-
-         Expect(hyperbrowse::ui::kMainMenuMnemonicCatalogValid,
-             "Main command-bar menu contains duplicate access keys");
-         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('F') == 0,
-             "Alt+F does not select the File menu");
-         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('E') == 1,
-             "Alt+E does not select the Edit menu");
-         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('V') == 2,
-             "Alt+V does not select the View menu");
-         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('H') == 3,
-             "Alt+H does not select the Help menu");
-         Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('x') == -1,
-             "An unrelated access key selected a command-bar menu");
-
-         Expect(hyperbrowse::ui::kShortcutCatalogValid,
-             "Main-window shortcut catalog contains duplicate accelerator ownership");
-         Expect(!hyperbrowse::ui::HasDuplicateShortcuts(hyperbrowse::ui::kViewerShortcutCatalog),
-             "Viewer shortcut catalog contains duplicate keyboard behavior");
-
-         const auto hasShortcut = [](std::span<const ShortcutDefinition> catalog,
-                         ShortcutContext context,
-                         UINT commandId,
-                         WORD virtualKey,
-                         BYTE modifiers)
-         {
-             return std::any_of(catalog.begin(),
-                       catalog.end(),
-                       [&](const ShortcutDefinition& shortcut)
-                       {
-                        return shortcut.context == context
-                            && shortcut.commandId == commandId
-                            && shortcut.virtualKey == virtualKey
-                            && shortcut.modifiers == modifiers;
-                       });
-         };
-
-         const auto mainShortcuts = hyperbrowse::ui::MainWindowShortcuts();
-         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_ESCAPE, VK_ESCAPE, 0),
-             "Escape is not owned by the dedicated Escape command");
-         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, 'W', FCONTROL),
-             "Ctrl+W no longer owns the main-window minimize command");
-         Expect(!hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, VK_ESCAPE, 0),
-             "Escape still shares the Ctrl+W minimize command");
-         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_EDIT_CUT, 'X', FCONTROL),
-             "Ctrl+X is missing from the main-window shortcut catalog");
-         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_NAVIGATE_FORWARD_FOLDER, VK_RIGHT, FALT),
-             "Alt+Right is missing from the folder navigation catalog");
-         Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_ADD, 0),
-             "Numpad plus is missing from the thumbnail stepping catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
-                      ShortcutContext::Viewer,
-                      ID_FILE_COPY_IMAGE_PIXELS,
-                      'I',
-                      FCONTROL | FSHIFT),
-             "Viewer Copy Image shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
-                      ShortcutContext::Viewer,
-                      0,
-                      '0',
-                      0),
-             "Viewer 0 fit shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
-                      ShortcutContext::Viewer,
-                      0,
-                      '1',
-                      0),
-             "Viewer 1 actual-size shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
-                      ShortcutContext::Viewer,
-                      ID_VIEW_SLIDESHOW_FOLDER,
-                      'F',
-                      FCONTROL | FSHIFT),
-             "Viewer Ctrl+Shift+F slideshow shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
-                      ShortcutContext::Viewer,
-                      ID_FILE_QUICK_SEND_MOVE,
-                      VK_F7,
-                      0),
-             "Viewer F7 Quick Actions shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
-                      ShortcutContext::Viewer,
-                      ID_FILE_QUICK_SEND_COPY,
-                      VK_F8,
-                      0),
-             "Viewer F8 Quick Actions shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'H', 0),
-             "Viewer H fit-height shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'W', 0),
-             "Viewer W fit-width shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'L', 0),
-             "Viewer L rotate-left shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'R', 0),
-             "Viewer R rotate-right shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'C', 0),
-             "Viewer C compare shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'X', 0),
-             "Viewer X compared-image shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_TAB, 0),
-             "Viewer Tab overlay shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_SPACE, 0),
-             "Viewer Space slideshow shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_F11, 0),
-             "Viewer F11 full-screen shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_RETURN, FCONTROL),
-             "Viewer Ctrl+Enter full-screen shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_PRIOR, 0),
-             "Viewer Page Up shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_NEXT, 0),
-             "Viewer Page Down shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_RETURN, 0),
-             "Viewer Enter fit-toggle shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_OEM_PLUS, 0),
-             "Viewer plus zoom shortcut is missing from the shared catalog");
-         Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_OEM_MINUS, 0),
-             "Viewer minus zoom shortcut is missing from the shared catalog");
-        }
-
-    void RunBackgroundExecutorExceptionScenario()
-    {
-        hyperbrowse::util::BackgroundExecutor executor(1, 2);
-        std::mutex completionMutex;
-        std::condition_variable completionCondition;
-        bool completed = false;
-
-        Expect(executor.Post([]()
-        {
-            throw std::runtime_error("intentional background executor test failure");
-        }), "Background executor rejected the exception-isolation test task");
-        Expect(executor.Post([&]()
-        {
-            {
-                std::scoped_lock lock(completionMutex);
-                completed = true;
-            }
-            completionCondition.notify_one();
-        }), "Background executor rejected the post-exception recovery task");
-
-        std::unique_lock lock(completionMutex);
-        Expect(completionCondition.wait_for(lock, std::chrono::seconds(2), [&]() { return completed; }),
-               "Background executor did not continue after a task exception");
-    }
-
-    void RunBackgroundExecutorCapacityScenario()
-    {
-        std::mutex mutex;
-        std::condition_variable condition;
-        bool firstStarted = false;
-        bool releaseFirst = false;
-        bool secondCompleted = false;
-
-        hyperbrowse::util::BackgroundExecutor executor(1, 1);
-        Expect(executor.Post([&]()
-        {
-            std::unique_lock lock(mutex);
-            firstStarted = true;
-            condition.notify_all();
-            condition.wait(lock, [&]() { return releaseFirst; });
-        }), "Background executor rejected its active task");
-
-        {
-            std::unique_lock lock(mutex);
-            Expect(condition.wait_for(lock, std::chrono::seconds(2), [&]() { return firstStarted; }),
-                   "Background executor did not start its active task");
-        }
-        Expect(executor.ActiveTaskCount() == 1, "Background executor did not report active work");
-
-        Expect(executor.Post([&]()
-        {
-            {
-                std::scoped_lock lock(mutex);
-                secondCompleted = true;
-            }
-            condition.notify_all();
-        }), "Background executor rejected its available pending slot");
-        Expect(executor.PendingTaskCount() == 1, "Background executor did not report pending work");
-        Expect(!executor.Post([]() {}), "Background executor accepted work beyond its pending limit");
-        Expect(executor.RejectedTaskCount() == 1, "Background executor did not count rejected work");
-
-        {
-            std::scoped_lock lock(mutex);
-            releaseFirst = true;
-        }
-        condition.notify_all();
-
-        {
-            std::unique_lock lock(mutex);
-            Expect(condition.wait_for(lock, std::chrono::seconds(2), [&]() { return secondCompleted; }),
-                   "Background executor did not drain pending work");
-        }
-        Expect(executor.ActiveTaskCount() == 0, "Background executor retained an active-work count after completion");
-        Expect(executor.PendingTaskCount() == 0, "Background executor retained a pending-work count after completion");
-
-        auto destructionExecutor = std::make_unique<hyperbrowse::util::BackgroundExecutor>(1, 1);
-        firstStarted = false;
-        releaseFirst = false;
-        bool queuedRan = false;
-        bool destructionCompleted = false;
-
-        Expect(destructionExecutor->Post([&]()
-        {
-            std::unique_lock lock(mutex);
-            firstStarted = true;
-            condition.notify_all();
-            condition.wait(lock, [&]() { return releaseFirst; });
-        }), "Background executor rejected its destruction test task");
-        {
-            std::unique_lock lock(mutex);
-            Expect(condition.wait_for(lock, std::chrono::seconds(2), [&]() { return firstStarted; }),
-                   "Background executor destruction task did not start");
-        }
-        Expect(destructionExecutor->Post([&]() { queuedRan = true; }),
-               "Background executor rejected the queued destruction test task");
-
-        std::thread destructionThread([&]()
-        {
-            destructionExecutor.reset();
-            {
-                std::scoped_lock lock(mutex);
-                destructionCompleted = true;
-            }
-            condition.notify_all();
-        });
-
-        {
-            std::unique_lock lock(mutex);
-            Expect(!condition.wait_for(lock, std::chrono::milliseconds(100), [&]() { return destructionCompleted; }),
-                   "Background executor destruction returned before its active task completed");
-            releaseFirst = true;
-        }
-        condition.notify_all();
-        destructionThread.join();
-        Expect(destructionCompleted, "Background executor destruction did not complete");
-        Expect(!queuedRan, "Background executor ran queued work after destruction began");
     }
 
     void SetRegistryDwordValue(const wchar_t* path, const wchar_t* valueName, DWORD value)
@@ -1514,103 +1274,6 @@ namespace
         }
     }
 
-        void AppendFolderWatchRecord(std::vector<BYTE>* buffer, DWORD action, const std::wstring& relativePath)
-        {
-         Expect(buffer != nullptr, "Folder watch test buffer was null");
-         const std::size_t headerBytes = offsetof(FILE_NOTIFY_INFORMATION, FileName);
-         const std::size_t recordBytes = headerBytes + relativePath.size() * sizeof(WCHAR);
-         const std::size_t alignedRecordBytes = (recordBytes + sizeof(DWORD) - 1) & ~(sizeof(DWORD) - 1);
-         const std::size_t recordOffset = buffer->size();
-         buffer->resize(recordOffset + alignedRecordBytes);
-         std::memset(buffer->data() + recordOffset, 0, alignedRecordBytes);
-
-         if (recordOffset != 0)
-         {
-             std::size_t previousOffset = 0;
-             while (true)
-             {
-              auto* previous = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer->data() + previousOffset);
-              if (previous->NextEntryOffset == 0)
-              {
-                  previous->NextEntryOffset = static_cast<DWORD>(recordOffset - previousOffset);
-                  break;
-              }
-              previousOffset += previous->NextEntryOffset;
-             }
-         }
-
-         auto* record = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer->data() + recordOffset);
-         record->Action = action;
-         record->FileNameLength = static_cast<DWORD>(relativePath.size() * sizeof(WCHAR));
-         std::memcpy(record->FileName, relativePath.data(), record->FileNameLength);
-        }
-
-        void RunFolderWatchNotificationParserScenario()
-        {
-         constexpr wchar_t folderPath[] = L"C:\\HyperBrowseWatchTest";
-         hyperbrowse::services::FolderWatchNotificationParser parser;
-
-         std::vector<BYTE> oldNameBuffer;
-         AppendFolderWatchRecord(&oldNameBuffer, FILE_ACTION_RENAMED_OLD_NAME, L"old-name.jpg");
-         hyperbrowse::services::FolderWatchUpdate oldNameUpdate;
-         parser.Append(oldNameBuffer.data(), static_cast<DWORD>(oldNameBuffer.size()), folderPath, &oldNameUpdate);
-         Expect(oldNameUpdate.events.empty() && !oldNameUpdate.requiresFullReload,
-             "Folder watcher did not retain the first half of a rename");
-
-         std::vector<BYTE> newNameBuffer;
-         AppendFolderWatchRecord(&newNameBuffer, FILE_ACTION_RENAMED_NEW_NAME, L"new-name.jpg");
-         hyperbrowse::services::FolderWatchUpdate splitRenameUpdate;
-         parser.Append(newNameBuffer.data(), static_cast<DWORD>(newNameBuffer.size()), folderPath, &splitRenameUpdate);
-         Expect(splitRenameUpdate.events.size() == 1,
-             "Folder watcher did not pair rename records split across completions");
-         Expect(splitRenameUpdate.events.front().kind == hyperbrowse::services::FolderWatchEventKind::Renamed
-                 && fs::path(splitRenameUpdate.events.front().oldPath).filename() == L"old-name.jpg"
-                 && fs::path(splitRenameUpdate.events.front().path).filename() == L"new-name.jpg",
-             "Folder watcher paired split rename records incorrectly");
-
-         parser.Reset();
-         std::vector<BYTE> sameBuffer;
-         AppendFolderWatchRecord(&sameBuffer, FILE_ACTION_RENAMED_OLD_NAME, L"first.jpg");
-         AppendFolderWatchRecord(&sameBuffer, FILE_ACTION_RENAMED_NEW_NAME, L"second.jpg");
-         hyperbrowse::services::FolderWatchUpdate sameBufferUpdate;
-         parser.Append(sameBuffer.data(), static_cast<DWORD>(sameBuffer.size()), folderPath, &sameBufferUpdate);
-         Expect(sameBufferUpdate.events.size() == 1 && !sameBufferUpdate.requiresFullReload,
-             "Folder watcher did not pair rename records in one completion");
-
-         parser.Reset();
-         hyperbrowse::services::FolderWatchUpdate orphanNewUpdate;
-         parser.Append(newNameBuffer.data(), static_cast<DWORD>(newNameBuffer.size()), folderPath, &orphanNewUpdate);
-         Expect(orphanNewUpdate.requiresFullReload,
-             "Folder watcher did not request a full reload for an orphan new-name record");
-
-         parser.Reset();
-         hyperbrowse::services::FolderWatchUpdate pendingOldUpdate;
-         parser.Append(oldNameBuffer.data(), static_cast<DWORD>(oldNameBuffer.size()), folderPath, &pendingOldUpdate);
-         std::vector<BYTE> addedBuffer;
-         AppendFolderWatchRecord(&addedBuffer, FILE_ACTION_ADDED, L"added.jpg");
-         hyperbrowse::services::FolderWatchUpdate orphanOldUpdate;
-         parser.Append(addedBuffer.data(), static_cast<DWORD>(addedBuffer.size()), folderPath, &orphanOldUpdate);
-         Expect(orphanOldUpdate.requiresFullReload,
-             "Folder watcher did not request a full reload for an orphan old-name record");
-
-         parser.Reset();
-         hyperbrowse::services::FolderWatchUpdate resetOldUpdate;
-         parser.Append(oldNameBuffer.data(), static_cast<DWORD>(oldNameBuffer.size()), folderPath, &resetOldUpdate);
-         parser.Reset();
-         hyperbrowse::services::FolderWatchUpdate resetNewUpdate;
-         parser.Append(newNameBuffer.data(), static_cast<DWORD>(newNameBuffer.size()), folderPath, &resetNewUpdate);
-         Expect(resetNewUpdate.requiresFullReload,
-             "Folder watcher did not clear rename state after reset");
-
-         std::vector<BYTE> malformedBuffer(offsetof(FILE_NOTIFY_INFORMATION, FileName));
-         auto* malformedRecord = reinterpret_cast<FILE_NOTIFY_INFORMATION*>(malformedBuffer.data());
-         malformedRecord->NextEntryOffset = 1;
-         hyperbrowse::services::FolderWatchUpdate malformedUpdate;
-         parser.Append(malformedBuffer.data(), static_cast<DWORD>(malformedBuffer.size()), folderPath, &malformedUpdate);
-         Expect(malformedUpdate.requiresFullReload,
-             "Folder watcher did not request a full reload for a malformed notification");
-        }
-
     void RunThumbnailCacheNormalizationScenario()
     {
         TempFolder root(L"HyperBrowseThumbnailCacheNormalization");
@@ -2238,16 +1901,6 @@ namespace
              "Invalidating a file path should clear the scheduler's known-failure state");
         }
 
-    void RunThumbnailFailureClassificationScenario()
-    {
-        Expect(hyperbrowse::decode::ClassifyThumbnailDecodeFailure(L"The RAW helper timed out and was terminated.")
-                   == hyperbrowse::decode::ThumbnailDecodeFailureKind::TimedOut,
-               "Timeout classification did not detect a helper timeout");
-        Expect(hyperbrowse::decode::ClassifyThumbnailDecodeFailure(L"Failed to process the RAW thumbnail fallback.")
-                   == hyperbrowse::decode::ThumbnailDecodeFailureKind::DecodeFailed,
-               "Decode-failure classification misidentified a generic decode failure");
-    }
-
         void RunThumbnailSchedulerWorkerAllocationScenario()
         {
          hyperbrowse::services::ThumbnailScheduler minimumScheduler(8ULL * 1024ULL * 1024ULL, 1);
@@ -2498,113 +2151,6 @@ namespace
                "Expanded image information did not surface the extracted SwarmUI negative prompt");
     }
 
-    void RunRawFormatAllowlistScenario()
-    {
-        const std::vector<std::wstring> supportedRawFormats{
-            L"ARW",
-            L"CR2",
-            L"CR3",
-            L"DNG",
-            L"NEF",
-            L"NRW",
-            L"RAF",
-            L"RW2",
-        };
-
-        for (const std::wstring& rawFormat : supportedRawFormats)
-        {
-            Expect(hyperbrowse::decode::IsRawFileType(rawFormat),
-                   std::string("RAW allowlist omitted format: ") + Utf8FromWide(rawFormat));
-
-            hyperbrowse::browser::BrowserItem item;
-            item.fileName = L"sample." + rawFormat;
-            item.filePath = L"C:\\Raw\\sample." + rawFormat;
-            item.fileType = rawFormat;
-
-            Expect(hyperbrowse::decode::CanDecodeThumbnail(item),
-                   std::string("RAW thumbnail routing omitted format: ") + Utf8FromWide(rawFormat));
-            Expect(hyperbrowse::decode::CanDecodeFullImage(item),
-                   std::string("RAW full-image routing omitted format: ") + Utf8FromWide(rawFormat));
-        }
-
-        Expect(!hyperbrowse::decode::IsRawFileType(L"ORF"),
-               "The RAW allowlist unexpectedly includes ORF before it was requested");
-    }
-
-        void RunRawHelperProtocolScenario()
-        {
-         TempFolder root(L"HyperBrowseRawHelperProtocol");
-         const fs::path payloadPath = root.Root() / L"payload.bin";
-
-         hyperbrowse::decode::RawHelperDecodedPixels payload;
-         payload.bitmapWidth = 32;
-         payload.bitmapHeight = 16;
-         payload.sourceWidth = 64;
-         payload.sourceHeight = 32;
-         payload.bgraPixels.assign(32U * 16U * 4U, 0x7f);
-
-         std::wstring errorMessage;
-         Expect(hyperbrowse::decode::WriteRawHelperPayload(payloadPath.wstring(), payload, &errorMessage),
-             "RAW helper protocol failed to write a valid payload");
-
-         hyperbrowse::decode::RawHelperDecodedPixels loaded;
-         Expect(hyperbrowse::decode::ReadRawHelperPayload(payloadPath.wstring(), &loaded, &errorMessage),
-             "RAW helper protocol failed to read a valid payload");
-         Expect(loaded.bitmapWidth == payload.bitmapWidth
-              && loaded.bitmapHeight == payload.bitmapHeight
-              && loaded.sourceWidth == payload.sourceWidth
-              && loaded.sourceHeight == payload.sourceHeight
-              && loaded.bgraPixels == payload.bgraPixels,
-             "RAW helper protocol did not preserve a valid payload");
-
-    #pragma pack(push, 1)
-         struct TestRawHelperFileHeader
-         {
-             std::uint32_t magic{};
-             std::uint32_t version{};
-             std::uint32_t bitmapWidth{};
-             std::uint32_t bitmapHeight{};
-             std::uint32_t sourceWidth{};
-             std::uint32_t sourceHeight{};
-             std::uint64_t pixelBytes{};
-         };
-    #pragma pack(pop)
-
-         TestRawHelperFileHeader validHeader{
-             0x52425748,
-             1,
-             32,
-             16,
-             64,
-             32,
-             32ULL * 16ULL * 4ULL,
-         };
-         const auto writeHeaderAndPayload = [&](const TestRawHelperFileHeader& header, std::size_t payloadBytes)
-         {
-             std::ofstream stream(payloadPath, std::ios::binary | std::ios::trunc);
-             stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
-             std::vector<unsigned char> bytes(payloadBytes, 0x7f);
-             stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-         };
-
-         TestRawHelperFileHeader oversizedHeader = validHeader;
-         oversizedHeader.bitmapWidth = UINT32_MAX;
-         writeHeaderAndPayload(oversizedHeader, 0);
-         loaded = {};
-         Expect(!hyperbrowse::decode::ReadRawHelperPayload(payloadPath.wstring(), &loaded, &errorMessage),
-             "RAW helper protocol accepted oversized dimensions");
-
-         writeHeaderAndPayload(validHeader, static_cast<std::size_t>(validHeader.pixelBytes - 1));
-         loaded = {};
-         Expect(!hyperbrowse::decode::ReadRawHelperPayload(payloadPath.wstring(), &loaded, &errorMessage),
-             "RAW helper protocol accepted a truncated payload");
-
-         writeHeaderAndPayload(validHeader, static_cast<std::size_t>(validHeader.pixelBytes + 1));
-         loaded = {};
-         Expect(!hyperbrowse::decode::ReadRawHelperPayload(payloadPath.wstring(), &loaded, &errorMessage),
-             "RAW helper protocol accepted trailing payload data");
-        }
-
     void RunRawDecoderScenario()
     {
         const fs::path fixtureRoot = TestSourceDirectory() / L"fixtures" / L"raw";
@@ -2797,180 +2343,6 @@ namespace
         Expect(ListView_GetItemCount(listView) == 3, "Disabling RAW+JPEG stacking did not restore both browser items");
 
         DestroyWindow(hostWindow);
-    }
-
-    void RunBrowserModelBulkRemovalScenario()
-    {
-        hyperbrowse::browser::BrowserModel model;
-        std::vector<hyperbrowse::browser::BrowserItem> items;
-        items.push_back(hyperbrowse::browser::BrowserItem{L"alpha.jpg", L"C:\\Alpha\\alpha.jpg", L"JPG", L"", 1, 10});
-        items.push_back(hyperbrowse::browser::BrowserItem{L"beta.jpg", L"C:\\Alpha\\beta.jpg", L"JPG", L"", 2, 20});
-        items.push_back(hyperbrowse::browser::BrowserItem{L"gamma.jpg", L"C:\\Alpha\\gamma.jpg", L"JPG", L"", 3, 30});
-        model.Reset(L"C:\\Alpha", false);
-        model.AppendItems(std::move(items), 3, 60);
-        model.Complete();
-
-        Expect(model.RemoveItemsByPath({L"c:/alpha/BETA.jpg", L"C:\\Alpha\\missing.jpg"}),
-               "Bulk model removal did not match normalized file paths");
-        Expect(model.Items().size() == 2, "Bulk model removal removed the wrong number of items");
-        Expect(model.TotalCount() == 2, "Bulk model removal did not update the item count");
-        Expect(model.TotalBytes() == 40, "Bulk model removal did not update total bytes");
-        Expect(model.FindItemIndexByPath(L"C:\\Alpha\\beta.jpg") < 0,
-               "Bulk model removal left the requested item in the model");
-    }
-
-    void RunQuickSendModelScenario()
-    {
-        using hyperbrowse::ui::QuickSendAssignmentResult;
-        using hyperbrowse::ui::QuickSendModel;
-
-        QuickSendModel model;
-        model.SetFavoriteDestinations({
-            L"C:\\Favorites\\One\\",
-            L"c:/favorites/one",
-            L"D:\\Favorites\\Two",
-            L"E:\\Favorites\\Three",
-            L"F:\\Favorites\\Four",
-            L"G:\\Favorites\\Five",
-        });
-
-        Expect(model.FavoriteDestinations().size() == 5,
-            "Quick Send did not deduplicate favorite destinations while preserving more than four entries");
-        Expect(model.FavoriteDestinations().front() == L"C:\\Favorites\\One\\",
-            "Quick Send did not preserve the first favorite path for display");
-        Expect(std::ranges::none_of(model.FavoriteDestinations(), [](const std::wstring& path)
-            {
-                return hyperbrowse::util::NormalizedPathEquals(path, L"H:\\RecentOnly");
-            }),
-            "Recent-only destinations leaked into the favorite Quick Send list");
-        Expect(QuickSendModel::ShortcutIndexFromText(L"0") == 0,
-            "Quick Send did not map the first digit shortcut");
-        Expect(QuickSendModel::ShortcutIndexFromText(L"9") == 9,
-            "Quick Send did not map the last digit shortcut");
-        Expect(QuickSendModel::ShortcutIndexFromText(L"A") == 10,
-            "Quick Send did not map the first letter shortcut");
-        Expect(QuickSendModel::ShortcutIndexFromText(L"z") == 35,
-            "Quick Send did not normalize the last lowercase letter shortcut");
-        Expect(QuickSendModel::ShortcutIndexFromText(L"AB") == std::nullopt,
-            "Quick Send accepted a multi-character shortcut key");
-        for (const wchar_t character : hyperbrowse::ui::kQuickSendPunctuationShortcuts)
-        {
-            const std::wstring shortcutText(1, character);
-            const std::optional<int> shortcutIndex = QuickSendModel::ShortcutIndexFromText(shortcutText);
-            Expect(shortcutIndex.has_value()
-                    && QuickSendModel::ShortcutCharacter(*shortcutIndex) == character,
-                "Quick Send did not round-trip a printable punctuation shortcut");
-        }
-        Expect(QuickSendModel::ShortcutIndexFromText(L" ") == std::nullopt,
-            "Quick Send accepted a whitespace shortcut key");
-        Expect(QuickSendModel::ShortcutIndexFromText(L"\x00E9") == std::nullopt,
-            "Quick Send accepted an unsupported non-ASCII shortcut key");
-        Expect(QuickSendModel::ShortcutIndexFromText(L"F1") == std::nullopt,
-            "Quick Send accepted a function-key name as a shortcut");
-        Expect(QuickSendModel::ShortcutCharacter(0) == L'0'
-                && QuickSendModel::ShortcutCharacter(9) == L'9'
-                && QuickSendModel::ShortcutCharacter(10) == L'A'
-                && QuickSendModel::ShortcutCharacter(35) == L'Z'
-                && QuickSendModel::ShortcutCharacter(36) == L'`'
-                && QuickSendModel::ShortcutCharacter(static_cast<int>(hyperbrowse::ui::kQuickSendShortcutCount - 1)) == L'?'
-                && QuickSendModel::ShortcutCharacter(static_cast<int>(hyperbrowse::ui::kQuickSendShortcutCount)) == L'\0',
-            "Quick Send did not map shortcut indexes to display keys");
-
-        Expect(model.SetShortcutForDestination(L"c:/FAVORITES/one/", L"2")
-                == QuickSendAssignmentResult::Accepted,
-            "Quick Send rejected a valid normalized favorite assignment");
-        Expect(model.ShortcutForDestination(L"C:\\Favorites\\One") == 2,
-            "Quick Send did not resolve a destination assignment by normalized path");
-        Expect(model.ShortcutAssignmentsByKey()[2] == L"c:\\favorites\\one",
-            "Quick Send did not persist assignments in normalized form");
-
-        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"2")
-                == QuickSendAssignmentResult::DuplicateShortcut,
-            "Quick Send allowed two favorite destinations to claim one digit");
-        Expect(model.ShortcutForDestination(L"C:\\Favorites\\One") == 2,
-            "Quick Send duplicate rejection disturbed the existing assignment");
-        Expect(model.AssignNextAvailableShortcut(L"D:\\Favorites\\Two") == 0,
-            "Quick Send did not assign the lowest available shortcut");
-        Expect(model.AssignNextAvailableShortcut(L"D:\\Favorites\\Two") == 0,
-            "Quick Send changed an existing automatic shortcut assignment");
-        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"12")
-                == QuickSendAssignmentResult::InvalidShortcut,
-            "Quick Send accepted a multi-character shortcut");
-        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"x")
-                == QuickSendAssignmentResult::Accepted
-                && model.ShortcutForDestination(L"D:\\Favorites\\Two") == 33,
-            "Quick Send did not accept and normalize a lowercase letter shortcut");
-        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"!")
-                == QuickSendAssignmentResult::Accepted
-                && model.ShortcutForDestination(L"D:\\Favorites\\Two") == 38,
-            "Quick Send did not accept a printable punctuation shortcut");
-        Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", {})
-                == QuickSendAssignmentResult::Accepted,
-            "Quick Send did not accept a blank shortcut to clear an assignment");
-
-        QuickSendModel restoredModel;
-        restoredModel.SetFavoriteDestinations(model.FavoriteDestinations());
-        QuickSendModel::ShortcutAssignments persisted{};
-        persisted[1] = L"C:\\FAVORITES\\ONE";
-        persisted[2] = L"C:\\Removed\\Destination";
-        persisted[3] = L"c:/favorites/one/";
-        persisted[10] = L"E:\\Favorites\\Three";
-        restoredModel.SetShortcutAssignments(persisted);
-        Expect(restoredModel.ShortcutForDestination(L"C:\\Favorites\\One") == 1,
-            "Quick Send did not restore a persisted path assignment");
-        Expect(restoredModel.ShortcutForDestination(L"E:\\Favorites\\Three") == 10,
-            "Quick Send did not restore a persisted letter assignment");
-        Expect(restoredModel.DestinationForShortcut(2) == std::nullopt,
-            "Quick Send did not prune a persisted destination that is no longer favorited");
-        Expect(restoredModel.DestinationForShortcut(3) == std::nullopt,
-            "Quick Send did not reject duplicate persisted assignments");
-
-        restoredModel.SetFavoriteDestinations({
-            L"G:\\Favorites\\Five",
-            L"C:\\Favorites\\One",
-            L"E:\\Favorites\\Three",
-            L"D:\\Favorites\\Two",
-            L"F:\\Favorites\\Four",
-        });
-        Expect(restoredModel.ShortcutForDestination(L"C:\\Favorites\\One") == 1,
-            "Quick Send assignment changed when favorite ordering changed");
-
-        QuickSendModel sortedModel;
-        sortedModel.SetFavoriteDestinations({
-            L"C:\\Favorites\\Unassigned",
-            L"C:\\Favorites\\Letter",
-            L"C:\\Favorites\\Digit",
-        });
-        Expect(sortedModel.SetShortcutForDestination(L"C:\\Favorites\\Letter", L"A")
-                == QuickSendAssignmentResult::Accepted
-                && sortedModel.SetShortcutForDestination(L"C:\\Favorites\\Digit", L"2")
-                    == QuickSendAssignmentResult::Accepted,
-            "Quick Send rejected valid shortcuts for sort coverage");
-        sortedModel.SortFavoriteDestinationsByShortcut();
-        Expect(sortedModel.FavoriteDestinations().size() == 3
-                && sortedModel.FavoriteDestinations()[0] == L"C:\\Favorites\\Digit"
-                && sortedModel.FavoriteDestinations()[1] == L"C:\\Favorites\\Letter"
-                && sortedModel.FavoriteDestinations()[2] == L"C:\\Favorites\\Unassigned",
-            "Quick Send did not sort favorites by digit-then-letter shortcuts with unassigned entries last");
-
-        QuickSendModel fullModel;
-        std::vector<std::wstring> fullFavorites;
-        for (std::size_t index = 0; index < hyperbrowse::ui::kQuickSendShortcutCount; ++index)
-        {
-            fullFavorites.push_back(L"C:\\Favorites\\Shortcut" + std::to_wstring(index));
-        }
-        fullModel.SetFavoriteDestinations(fullFavorites);
-        for (std::size_t index = 0; index < hyperbrowse::ui::kQuickSendShortcutCount; ++index)
-        {
-            Expect(fullModel.AssignNextAvailableShortcut(fullFavorites[index]) == static_cast<int>(index),
-                "Quick Send did not consume shortcuts in digit-then-letter order");
-        }
-        Expect(fullModel.ShortcutForDestination(L"C:\\Favorites\\Shortcut10") == 10,
-            "Quick Send did not assign A after the digit shortcuts");
-        fullFavorites.push_back(L"C:\\Favorites\\New");
-        fullModel.SetFavoriteDestinations(fullFavorites);
-        Expect(fullModel.AssignNextAvailableShortcut(L"C:\\Favorites\\New") == std::nullopt,
-            "Quick Send assigned a shortcut when all supported keys were already occupied");
     }
 
     void RunViewerWindowFitModeChecks(hyperbrowse::viewer::ViewerWindow& viewer,
@@ -4381,14 +3753,12 @@ int main(int argc, char* argv[])
         else
         {
             hyperbrowse::tests::RunPolicyScenarios();
-            RunShortcutCatalogScenario();
-            RunBackgroundExecutorExceptionScenario();
-            RunBackgroundExecutorCapacityScenario();
+            hyperbrowse::tests::RunRuntimeScenarios();
             RunSingleInstanceIdleClientScenario();
             RunEnumerationScenario(hwnd, &state);
             RunFolderTreeEnumerationScenario(hwnd, &state);
             RunFolderWatchStartStopScenario(hwnd);
-            RunFolderWatchNotificationParserScenario();
+            hyperbrowse::tests::RunWatchPolicyScenarios();
             RunThumbnailCacheNormalizationScenario();
             RunDiskThumbnailCacheCorruptionScenario();
             RunWicDecoderScenario();
@@ -4401,15 +3771,12 @@ int main(int argc, char* argv[])
             RunThumbnailSchedulerScenario(hwnd, &state);
             RunThumbnailReadyBeforePersistenceScenario(hwnd, &state);
             RunThumbnailSchedulerFailureScenario(hwnd, &state);
-            RunThumbnailFailureClassificationScenario();
             RunImageMetadataServiceScenario();
             RunSwarmUiMetadataExtractionScenario();
-            RunRawFormatAllowlistScenario();
-            RunRawHelperProtocolScenario();
+            hyperbrowse::tests::RunDecodePolicyScenarios();
             RunRawDecoderScenario();
             RunBrowserPaneScenario(instance);
-            RunBrowserModelBulkRemovalScenario();
-            RunQuickSendModelScenario();
+            hyperbrowse::tests::RunModelScenarios();
             RunViewerWindowScenario(instance, hwnd);
             RunAppTextSizeScenario(instance);
             RunMainWindowCascadeScenario(instance);

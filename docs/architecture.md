@@ -10,8 +10,14 @@ This document describes the current implementation. The planning documents in `s
 `HyperBrowseTests.exe` runs the smoke and integration checks registered by
 `tests/CMakeLists.txt`. Its shared Win32/service harness remains in
 `tests/smoke.cpp`, while deterministic controller, layout, presentation-policy,
-and router scenarios live in `tests/smoke_policy.cpp` behind the same
-executable and command-line selectors.
+and router scenarios live in `tests/smoke_policy.cpp` and shortcut/executor
+runtime scenarios live in `tests/smoke_runtime.cpp`, and deterministic browser
+model/Quick Send scenarios live in `tests/smoke_model.cpp`, behind the same
+executable and command-line selectors. Folder-watch notification parser
+coverage lives in `tests/smoke_watch.cpp`; the service lifecycle coverage
+remains in `tests/smoke.cpp`. Deterministic RAW allowlist and helper-protocol
+coverage lives in `tests/smoke_decode.cpp`; fixture-backed LibRaw decoding
+remains in `tests/smoke.cpp`.
 
 The core library is organized by responsibility:
 

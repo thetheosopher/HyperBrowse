@@ -269,4 +269,18 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `tests/smoke_policy.cpp` with a small declaration header while retaining one
   `HyperBrowseTests` executable, all existing CTest entries, and all focused
   command-line selectors. The shared Win32/service harness remains in
-  `tests/smoke.cpp`. The complete Debug and Release smoke suites pass.
+  `tests/smoke.cpp`.
+- [x] Split the self-contained shortcut-catalog and BackgroundExecutor
+  runtime/lifetime scenarios into `tests/smoke_runtime.cpp` while retaining
+  their original invocation order and the single `HyperBrowseTests` target.
+  Debug and Release test-target builds pass; the full suites currently retain
+  unrelated viewer failures.
+- [x] Split the deterministic BrowserModel bulk-removal and Quick Send model
+  scenarios into `tests/smoke_model.cpp`, retaining the BrowserPane HWND
+  scenario in `tests/smoke.cpp` and the existing invocation order.
+- [x] Split folder-watch notification record construction and parser policy
+  coverage into `tests/smoke_watch.cpp`, retaining FolderWatchService lifecycle
+  coverage in `tests/smoke.cpp`.
+- [x] Split deterministic RAW format allowlist and helper-protocol coverage
+  into `tests/smoke_decode.cpp`, retaining fixture-backed LibRaw decoding in
+  `tests/smoke.cpp`.
