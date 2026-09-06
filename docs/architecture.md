@@ -104,6 +104,10 @@ controller:
 	registry value codec, including the invariant that an empty transient folder
 	does not overwrite a valid persisted folder. MainWindow retains path
 	normalization, startup validation, and viewer/browser routing.
+- `ui/ViewerSettingsPersistence.*` owns the typed DWORD codec and validation
+	for viewer mouse-wheel/Escape behavior, keyboard panning, and slideshow
+	settings. MainWindow retains runtime application to ViewerWindow, dialog
+	editing, and registry-handle ownership.
 - `ui/ExternalDropTarget.*` owns the OLE `IDropTarget` COM lifetime and
 	screen-to-client conversion. It calls synchronous callbacks supplied by
 	`MainWindow` for drag feedback, drop handling, and visual cleanup; it does

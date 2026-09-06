@@ -159,6 +159,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/WindowAsyncMessageRouter.cpp
     src/ui/WindowBoundsPersistence.cpp
     src/ui/WindowTimerRouter.cpp
+    src/ui/ViewerSettingsPersistence.cpp
     src/util/Diagnostics.cpp
     src/util/Log.cpp
     src/viewer/ViewerWindow.cpp

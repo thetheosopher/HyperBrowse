@@ -65,6 +65,7 @@
 #include "ui/ToolbarIconLibrary.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowBoundsPersistence.h"
+#include "ui/ViewerSettingsPersistence.h"
 #include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
@@ -121,15 +122,8 @@ namespace
     constexpr LONG kWindowCascadeOffset = 32;
     constexpr wchar_t kRegistryValueSortMode[] = L"SortMode";
     constexpr wchar_t kRegistryValueSortAscending[] = L"SortAscending";
-    constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
-    constexpr wchar_t kRegistryValueSlideshowTransitionStyle[] = L"SlideshowTransitionStyle";
-    constexpr wchar_t kRegistryValueSlideshowTransitionDuration[] = L"SlideshowTransitionDurationMs";
-    constexpr wchar_t kRegistryValueUseSlideshowTransition[] = L"UseSlideshowTransition";
     constexpr wchar_t kRegistryValueDetailsStripVisible[] = L"DetailsStripVisible";
     constexpr wchar_t kRegistryValueDetailsPanelWidth[] = L"DetailsPanelWidth";
-    constexpr wchar_t kRegistryValueViewerMouseWheelBehavior[] = L"ViewerMouseWheelBehavior";
-    constexpr wchar_t kRegistryValueViewerEscapeKeyBehavior[] = L"ViewerEscapeKeyBehavior";
-        constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
     constexpr wchar_t kQuickSendStateMutexName[] = L"Local\\TheTheosopher.HyperBrowse.QuickSendState";
@@ -19291,27 +19285,27 @@ namespace hyperbrowse::ui
                 sortAscending_ = value != 0;
             }
 
-            if (TryReadDwordValue(key, kRegistryValueSlideshowInterval, &value))
-            {
-                slideshowIntervalMs_ = NormalizeSlideshowDuration(static_cast<UINT>(value));
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionStyle, &value)
-                && value <= static_cast<DWORD>(viewer::TransitionStyle::MonochromeReveal))
-            {
-                slideshowTransitionStyle_ = static_cast<viewer::TransitionStyle>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueSlideshowTransitionDuration, &value))
-            {
-                slideshowTransitionDurationMs_ = NormalizeSlideshowTransitionDuration(static_cast<UINT>(value));
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueUseSlideshowTransition, &value))
-            {
-                useSlideshowTransition_ = value != 0;
-            }
-
+            ViewerSettingsState viewerSettings = ViewerSettingsPersistence::Load(
+                [&](std::wstring_view valueName, DWORD* persistedValue)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadDwordValue(key, registryValueName.c_str(), persistedValue);
+                },
+                ViewerSettingsState{
+                    slideshowIntervalMs_,
+                    slideshowTransitionStyle_,
+                    slideshowTransitionDurationMs_,
+                    useSlideshowTransition_,
+                    viewerMouseWheelBehavior_,
+                    invertKeyboardPanning_,
+                    viewerEscapeKeyBehavior_});
+            slideshowIntervalMs_ = viewerSettings.slideshowIntervalMs;
+            slideshowTransitionStyle_ = viewerSettings.slideshowTransitionStyle;
+            slideshowTransitionDurationMs_ = viewerSettings.slideshowTransitionDurationMs;
+            useSlideshowTransition_ = viewerSettings.useSlideshowTransition;
+            viewerMouseWheelBehavior_ = viewerSettings.mouseWheelBehavior;
+            invertKeyboardPanning_ = viewerSettings.invertKeyboardPanning;
+            viewerEscapeKeyBehavior_ = viewerSettings.escapeKeyBehavior;
             if (TryReadDwordValue(key, kRegistryValueDetailsStripVisible, &value))
             {
                 detailsStripVisible_ = value != 0;
@@ -19320,23 +19314,6 @@ namespace hyperbrowse::ui
             if (TryReadDwordValue(key, kRegistryValueDetailsPanelWidth, &value))
             {
                 detailsPanelWidth_ = static_cast<int>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueViewerMouseWheelBehavior, &value)
-                && value <= static_cast<DWORD>(viewer::MouseWheelBehavior::Navigate))
-            {
-                viewerMouseWheelBehavior_ = static_cast<viewer::MouseWheelBehavior>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueViewerEscapeKeyBehavior, &value)
-                && value <= static_cast<DWORD>(viewer::EscapeKeyBehavior::ActualSize))
-            {
-                viewerEscapeKeyBehavior_ = static_cast<viewer::EscapeKeyBehavior>(value);
-            }
-
-            if (TryReadDwordValue(key, kRegistryValueInvertKeyboardPanning, &value))
-            {
-                invertKeyboardPanning_ = value != 0;
             }
 
             if (TryReadDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, &value))
@@ -19517,15 +19494,22 @@ namespace hyperbrowse::ui
                 WriteDwordValue(key, kRegistryValueSortMode, static_cast<DWORD>(browserPaneController_->GetSortMode()));
                 WriteDwordValue(key, kRegistryValueSortAscending, browserPaneController_->IsSortAscending() ? 1UL : 0UL);
             }
-            WriteDwordValue(key, kRegistryValueSlideshowInterval, static_cast<DWORD>(slideshowIntervalMs_));
-            WriteDwordValue(key, kRegistryValueSlideshowTransitionStyle, static_cast<DWORD>(slideshowTransitionStyle_));
-            WriteDwordValue(key, kRegistryValueSlideshowTransitionDuration, static_cast<DWORD>(slideshowTransitionDurationMs_));
-            WriteDwordValue(key, kRegistryValueUseSlideshowTransition, useSlideshowTransition_ ? 1UL : 0UL);
+            ViewerSettingsPersistence::Save(
+                ViewerSettingsState{
+                    slideshowIntervalMs_,
+                    slideshowTransitionStyle_,
+                    slideshowTransitionDurationMs_,
+                    useSlideshowTransition_,
+                    viewerMouseWheelBehavior_,
+                    invertKeyboardPanning_,
+                    viewerEscapeKeyBehavior_},
+                [&](std::wstring_view valueName, DWORD value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    WriteDwordValue(key, registryValueName.c_str(), value);
+                });
             WriteDwordValue(key, kRegistryValueDetailsStripVisible, detailsStripVisible_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueDetailsPanelWidth, static_cast<DWORD>(std::max(detailsPanelWidth_, kDetailsPanelMinWidth)));
-            WriteDwordValue(key, kRegistryValueViewerMouseWheelBehavior, static_cast<DWORD>(viewerMouseWheelBehavior_));
-            WriteDwordValue(key, kRegistryValueViewerEscapeKeyBehavior, static_cast<DWORD>(viewerEscapeKeyBehavior_));
-            WriteDwordValue(key, kRegistryValueInvertKeyboardPanning, invertKeyboardPanning_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueRawJpegPairedOperationsEnabled, rawJpegPairedOperationsEnabled_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValuePairedRawJpegViewerPreference, static_cast<DWORD>(pairedRawJpegViewerPreference_));
             WriteDwordValue(key, kRegistryValueDefaultViewerToSecondaryMonitor, defaultViewerToSecondaryMonitor_ ? 1UL : 0UL);

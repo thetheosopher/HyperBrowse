@@ -308,5 +308,10 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `src/ui/SelectedPathPersistence.*`. MainWindow retains path normalization,
   startup validation, and viewer/browser routing; deterministic coverage
   verifies round trips, empty-folder preservation, and stale-image deletion.
+- [x] Extract viewer mouse-wheel/Escape behavior, keyboard-panning, and
+  slideshow settings persistence into `src/ui/ViewerSettingsPersistence.*`.
+  MainWindow retains runtime ViewerWindow application, dialog editing, and
+  registry-handle ownership; deterministic coverage verifies valid restoration,
+  invalid-value defaults, and value mapping.
 - [x] Complete the Phase 7 verification gate after the focused test-source
   splits: Debug and Release builds plus all four registered smoke tests pass.

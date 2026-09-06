@@ -31,6 +31,7 @@
 #include "ui/RightPaneHitTester.h"
 #include "ui/SelectedPathPersistence.h"
 #include "ui/ViewCommandController.h"
+#include "ui/ViewerSettingsPersistence.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowBoundsPersistence.h"
 #include "ui/WindowTimerRouter.h"
@@ -790,6 +791,86 @@ namespace hyperbrowse::tests
                    "Selected-path persistence overwrote a valid folder or retained a stale image path");
         }
 
+        void RunViewerSettingsPersistenceScenario()
+        {
+            using hyperbrowse::ui::ViewerSettingsPersistence;
+            using hyperbrowse::ui::ViewerSettingsState;
+            using hyperbrowse::viewer::EscapeKeyBehavior;
+            using hyperbrowse::viewer::MouseWheelBehavior;
+            using hyperbrowse::viewer::TransitionStyle;
+
+            std::map<std::wstring, DWORD> values{
+                {L"SlideshowIntervalMs", 5000},
+                {L"SlideshowTransitionStyle", static_cast<DWORD>(TransitionStyle::Push)},
+                {L"SlideshowTransitionDurationMs", 900},
+                {L"UseSlideshowTransition", 1},
+                {L"ViewerMouseWheelBehavior", static_cast<DWORD>(MouseWheelBehavior::Navigate)},
+                {L"ViewerEscapeKeyBehavior", static_cast<DWORD>(EscapeKeyBehavior::ActualSize)},
+                {L"InvertKeyboardPanning", 1},
+            };
+
+            const ViewerSettingsState restored = ViewerSettingsPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(restored.slideshowIntervalMs == 5000
+                       && restored.slideshowTransitionStyle == TransitionStyle::Push
+                       && restored.slideshowTransitionDurationMs == 900
+                       && restored.useSlideshowTransition
+                       && restored.mouseWheelBehavior == MouseWheelBehavior::Navigate
+                       && restored.escapeKeyBehavior == EscapeKeyBehavior::ActualSize
+                       && restored.invertKeyboardPanning,
+                   "Viewer settings persistence did not restore valid viewer and slideshow values");
+
+            values[L"SlideshowIntervalMs"] = 1;
+            values[L"SlideshowTransitionStyle"] = 99;
+            values[L"SlideshowTransitionDurationMs"] = 6001;
+            values[L"ViewerMouseWheelBehavior"] = 99;
+            values[L"ViewerEscapeKeyBehavior"] = 99;
+            const ViewerSettingsState fallback = ViewerSettingsPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(fallback.slideshowIntervalMs == 3000
+                       && fallback.slideshowTransitionStyle == TransitionStyle::Crossfade
+                       && fallback.slideshowTransitionDurationMs == 350
+                       && fallback.mouseWheelBehavior == MouseWheelBehavior::Zoom
+                       && fallback.escapeKeyBehavior == EscapeKeyBehavior::Close,
+                   "Viewer settings persistence did not apply defaults to invalid persisted values");
+
+            values.clear();
+            ViewerSettingsPersistence::Save(
+                restored,
+                [&values](std::wstring_view valueName, DWORD value)
+                {
+                    values[std::wstring(valueName)] = value;
+                });
+            Expect(values[L"SlideshowIntervalMs"] == 5000
+                       && values[L"SlideshowTransitionStyle"] == static_cast<DWORD>(TransitionStyle::Push)
+                       && values[L"SlideshowTransitionDurationMs"] == 900
+                       && values[L"UseSlideshowTransition"] == 1
+                       && values[L"ViewerMouseWheelBehavior"] == static_cast<DWORD>(MouseWheelBehavior::Navigate)
+                       && values[L"ViewerEscapeKeyBehavior"] == static_cast<DWORD>(EscapeKeyBehavior::ActualSize)
+                       && values[L"InvertKeyboardPanning"] == 1,
+                   "Viewer settings persistence did not write the expected registry value contract");
+        }
+
         void RunWindowTimerRouterScenario()
         {
             using hyperbrowse::ui::WindowTimerRouter;
@@ -949,6 +1030,7 @@ namespace hyperbrowse::tests
         RunQuickAccessPathListScenario();
         RunWindowBoundsPersistenceScenario();
         RunSelectedPathPersistenceScenario();
+        RunViewerSettingsPersistenceScenario();
         RunWindowTimerRouterScenario();
         RunWindowAsyncMessageRouterScenario();
     }
@@ -994,6 +1076,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--selected-paths")
         {
             RunSelectedPathPersistenceScenario();
+        }
+        else if (scenario == "--viewer-settings")
+        {
+            RunViewerSettingsPersistenceScenario();
         }
         else if (scenario == "--timer-router")
         {
