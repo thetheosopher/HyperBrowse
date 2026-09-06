@@ -20461,6 +20461,289 @@ namespace hyperbrowse::ui
                 return effect;
     }
 
+    LRESULT MainWindow::HandleNotifyMessage(LPARAM lParam)
+    {
+        const auto* nmh = reinterpret_cast<NMHDR*>(lParam);
+        if (nmh->hwndFrom == tooltipControl_ && nmh->code == TTN_GETDISPINFOW)
+        {
+            auto* di = reinterpret_cast<NMTTDISPINFOW*>(lParam);
+            if (treePane_ && di->hdr.idFrom == reinterpret_cast<UINT_PTR>(treePane_))
+            {
+                treeFolderTooltipText_.clear();
+                if (!treeTooltipPath_.empty())
+                {
+                    if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(treeTooltipPath_))
+                    {
+                        const wchar_t shortcutCharacter = QuickSendModel::ShortcutCharacter(*assignedShortcut);
+                        if (shortcutCharacter != L'\0')
+                        {
+                            treeFolderTooltipText_ = L"Move: F7,";
+                            treeFolderTooltipText_.push_back(shortcutCharacter);
+                            treeFolderTooltipText_.append(L"  Copy: F8,");
+                            treeFolderTooltipText_.push_back(shortcutCharacter);
+                        }
+                    }
+                }
+
+                di->lpszText = const_cast<wchar_t*>(treeFolderTooltipText_.c_str());
+                return 0;
+            }
+
+            if (di->hdr.idFrom == kQuickAccessSortTooltipId)
+            {
+                di->lpszText = const_cast<LPWSTR>(L"Sort Quick Actions destinations by hotkey");
+                return 0;
+            }
+
+            if (di->hdr.idFrom == kDetailsPanelHistogramTooltipId)
+            {
+                di->lpszText = const_cast<LPWSTR>(L"RGB histogram: shows the distribution of pixel brightness across the red, green, and blue channels.");
+                return 0;
+            }
+
+            const auto idx = static_cast<std::size_t>(di->hdr.idFrom);
+            if (idx < toolbarItems_.size() && !toolbarItems_[idx].tooltip.empty())
+            {
+                di->lpszText = const_cast<wchar_t*>(toolbarItems_[idx].tooltip.c_str());
+            }
+            return 0;
+        }
+
+        return OnFolderTreeNotify(lParam);
+    }
+
+    std::optional<LRESULT> MainWindow::HandleMouseInputMessage(UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        switch (message)
+        {
+        case WM_LBUTTONDOWN:
+            OnLButtonDown(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        case WM_PARENTNOTIFY:
+            if (commandBarKeyboardActive_)
+            {
+                switch (LOWORD(wParam))
+                {
+                case WM_LBUTTONDOWN:
+                case WM_RBUTTONDOWN:
+                case WM_MBUTTONDOWN:
+                case WM_XBUTTONDOWN:
+                    DeactivateCommandBarKeyboardMode(false);
+                    break;
+                default:
+                    break;
+                }
+            }
+            return std::nullopt;
+        case WM_LBUTTONDBLCLK:
+            OnLButtonDoubleClick(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        case WM_LBUTTONUP:
+            OnLButtonUp();
+            return 0;
+        case WM_MOUSEMOVE:
+            OnMouseMove(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        case WM_MOUSEWHEEL:
+            if (OnQuickAccessMouseWheel(wParam, lParam))
+            {
+                return 0;
+            }
+            return std::nullopt;
+        case WM_VSCROLL:
+            if (reinterpret_cast<HWND>(lParam) == quickAccessScrollBar_)
+            {
+                OnQuickAccessScroll(wParam);
+                return 0;
+            }
+            return std::nullopt;
+        case WM_CAPTURECHANGED:
+            if (folderTreeDragController_.IsActive())
+            {
+                FinishFolderTreeDrag(false);
+                return 0;
+            }
+            if (dragMode_ == DragMode::QuickAccessInternal)
+            {
+                FinishInternalSelectionDrag(false);
+                return 0;
+            }
+            return std::nullopt;
+        case WM_CANCELMODE:
+            if (folderTreeDragController_.IsActive())
+            {
+                FinishFolderTreeDrag(false);
+                return 0;
+            }
+            if (dragMode_ == DragMode::QuickAccessInternal)
+            {
+                FinishInternalSelectionDrag(false);
+                return 0;
+            }
+            return std::nullopt;
+        case WM_DROPFILES:
+            return OnDropFiles(reinterpret_cast<HDROP>(wParam));
+        case WM_SETCURSOR:
+        {
+            POINT point{};
+            GetCursorPos(&point);
+            ScreenToClient(hwnd_, &point);
+            if (folderTreeDragController_.IsActive())
+            {
+                SetCursor(LoadCursorW(nullptr,
+                                      folderTreeDragController_.IsDropAllowed() ? IDC_HAND : IDC_NO));
+                return TRUE;
+            }
+            if (dragMode_ == DragMode::QuickAccessInternal)
+            {
+                SetCursor(LoadCursorW(nullptr,
+                                      (quickAccessHotRowIndex_ >= 0 || internalSelectionTreeDropItem_ != nullptr)
+                                          ? IDC_HAND
+                                          : IDC_NO));
+                return TRUE;
+            }
+            if (dragMode_ == DragMode::LeftSplitter || dragMode_ == DragMode::DetailsSplitter || IsOverSplitter(point.x, point.y))
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+                return TRUE;
+            }
+            if (HitTestQuickAccessDestinationRow(point.x, point.y) >= 0)
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
+            if (HitTestQuickAccessSortButton(point.x, point.y) >= 0)
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
+            if (HitTestQuickAccessDestinationButton(point.x, point.y) >= 0)
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
+            if ((folderLoadCoordinator_ && folderLoadCoordinator_->IsEnumerationActive())
+                || (folderTreeController_ && folderTreeController_->IsBusy()))
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_APPSTARTING));
+                return TRUE;
+            }
+            return std::nullopt;
+        }
+        case WM_MOUSELEAVE:
+            toolbarMouseTracking_ = false;
+            if (toolbarHotIndex_ >= 0)
+            {
+                toolbarHotIndex_ = -1;
+                InvalidateToolbarStrip();
+            }
+            if (!commandBarKeyboardActive_ && commandBarHotIndex_ >= 0)
+            {
+                commandBarHotIndex_ = -1;
+                InvalidateToolbarStrip();
+            }
+            if (detailsPanelHotTabIndex_ >= 0)
+            {
+                detailsPanelHotTabIndex_ = -1;
+                if (!IsRectEmpty(&detailsPanelTabStripRect_))
+                {
+                    InvalidateRect(hwnd_, &detailsPanelTabStripRect_, FALSE);
+                }
+            }
+            if (detailsPanelCloseButtonHot_ || detailsPanelCloseButtonPressed_)
+            {
+                detailsPanelCloseButtonHot_ = false;
+                detailsPanelCloseButtonPressed_ = false;
+                if (!IsRectEmpty(&detailsPanelRect_))
+                {
+                    InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+                }
+            }
+            if (quickAccessHotRowIndex_ >= 0
+                || quickAccessHotButtonIndex_ >= 0
+                || quickAccessSortButtonHot_)
+            {
+                quickAccessHotRowIndex_ = -1;
+                quickAccessHotButtonIndex_ = -1;
+                quickAccessSortButtonHot_ = false;
+                if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+                {
+                    InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+                }
+            }
+            return std::nullopt;
+        default:
+            return std::nullopt;
+        }
+    }
+
+    std::optional<LRESULT> MainWindow::HandleCommandMessage(WPARAM wParam, LPARAM lParam)
+    {
+        if (LOWORD(wParam) >= kQuickAccessShortcutEditBaseId
+            && LOWORD(wParam) < kQuickAccessShortcutEditBaseId + quickAccessShortcutEdits_.size())
+        {
+            if (HIWORD(wParam) == EN_SETFOCUS)
+            {
+                PostMessageW(reinterpret_cast<HWND>(lParam), EM_SETSEL, 0, static_cast<LPARAM>(-1));
+                return 0;
+            }
+
+            if (HIWORD(wParam) == EN_CHANGE && !updatingQuickAccessShortcutEdits_)
+            {
+                const std::size_t rowIndex = static_cast<std::size_t>(LOWORD(wParam) - kQuickAccessShortcutEditBaseId);
+                if (rowIndex < quickAccessDestinationRows_.size())
+                {
+                    HWND edit = quickAccessShortcutEdits_[rowIndex];
+                    const int textLength = GetWindowTextLengthW(edit);
+                    std::wstring shortcutText(static_cast<std::size_t>(textLength) + 1, L'\0');
+                    GetWindowTextW(edit, shortcutText.data(), static_cast<int>(shortcutText.size()));
+                    shortcutText.resize(wcslen(shortcutText.c_str()));
+
+                    QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
+                    QuickSendAssignmentResult result = QuickSendAssignmentResult::DestinationNotFavorite;
+                    MutateQuickSendState([&]
+                    {
+                        result = quickSendModel_.SetShortcutForDestination(
+                            row.destinationPath,
+                            shortcutText);
+                    });
+                    const QuickAccessShortcutEditPolicy::Result editUpdate =
+                        QuickAccessShortcutEditPolicy::Reconcile(
+                            result,
+                            quickSendModel_.ShortcutForDestination(row.destinationPath),
+                            shortcutText);
+                    row.assignedShortcut = editUpdate.assignedShortcut;
+                    if (editUpdate.updateText)
+                    {
+                        updatingQuickAccessShortcutEdits_ = true;
+                        SetWindowTextW(edit, editUpdate.canonicalText.c_str());
+                        updatingQuickAccessShortcutEdits_ = false;
+                    }
+
+                    InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+                }
+            }
+            return 0;
+        }
+
+        if (LOWORD(wParam) == ID_ACTION_FILTER_EDIT && HIWORD(wParam) == EN_CHANGE && browserPaneController_)
+        {
+            const int textLength = GetWindowTextLengthW(filterEdit_);
+            std::wstring filterText(static_cast<std::size_t>(textLength) + 1, L'\0');
+            GetWindowTextW(filterEdit_, filterText.data(), static_cast<int>(filterText.size()));
+            filterText.resize(wcslen(filterText.c_str()));
+            browserPaneController_->SetFilterQuery(std::move(filterText));
+            return 0;
+        }
+
+        if (HandleCommand(LOWORD(wParam)))
+        {
+            return 0;
+        }
+
+        return std::nullopt;
+    }
+
     std::optional<LRESULT> MainWindow::HandleControlColorMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
         const HWND control = reinterpret_cast<HWND>(lParam);
@@ -20586,6 +20869,23 @@ namespace hyperbrowse::ui
     {
         switch (message)
         {
+        case WM_PARENTNOTIFY:
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+        case WM_LBUTTONUP:
+        case WM_MOUSEMOVE:
+        case WM_MOUSEWHEEL:
+        case WM_VSCROLL:
+        case WM_CAPTURECHANGED:
+        case WM_CANCELMODE:
+        case WM_DROPFILES:
+        case WM_SETCURSOR:
+        case WM_MOUSELEAVE:
+            if (const std::optional<LRESULT> result = HandleMouseInputMessage(message, wParam, lParam))
+            {
+                return *result;
+            }
+            break;
         case WM_CLOSE:
             if (fileOperationActive_ || batchConvertActive_)
             {
@@ -20742,120 +21042,6 @@ namespace hyperbrowse::ui
                 return 0;
             }
             break;
-        case WM_LBUTTONDOWN:
-            OnLButtonDown(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-            return 0;
-        case WM_PARENTNOTIFY:
-            if (commandBarKeyboardActive_)
-            {
-                switch (LOWORD(wParam))
-                {
-                case WM_LBUTTONDOWN:
-                case WM_RBUTTONDOWN:
-                case WM_MBUTTONDOWN:
-                case WM_XBUTTONDOWN:
-                    DeactivateCommandBarKeyboardMode(false);
-                    break;
-                default:
-                    break;
-                }
-            }
-            break;
-        case WM_LBUTTONDBLCLK:
-            OnLButtonDoubleClick(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-            return 0;
-        case WM_LBUTTONUP:
-            OnLButtonUp();
-            return 0;
-        case WM_MOUSEMOVE:
-            OnMouseMove(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-            return 0;
-        case WM_MOUSEWHEEL:
-            if (OnQuickAccessMouseWheel(wParam, lParam))
-            {
-                return 0;
-            }
-            break;
-        case WM_VSCROLL:
-            if (reinterpret_cast<HWND>(lParam) == quickAccessScrollBar_)
-            {
-                OnQuickAccessScroll(wParam);
-                return 0;
-            }
-            break;
-        case WM_CAPTURECHANGED:
-            if (folderTreeDragController_.IsActive())
-            {
-                FinishFolderTreeDrag(false);
-                return 0;
-            }
-            if (dragMode_ == DragMode::QuickAccessInternal)
-            {
-                FinishInternalSelectionDrag(false);
-                return 0;
-            }
-            break;
-        case WM_CANCELMODE:
-            if (folderTreeDragController_.IsActive())
-            {
-                FinishFolderTreeDrag(false);
-                return 0;
-            }
-            if (dragMode_ == DragMode::QuickAccessInternal)
-            {
-                FinishInternalSelectionDrag(false);
-                return 0;
-            }
-            break;
-        case WM_DROPFILES:
-            return OnDropFiles(reinterpret_cast<HDROP>(wParam));
-        case WM_SETCURSOR:
-        {
-            POINT point{};
-            GetCursorPos(&point);
-            ScreenToClient(hwnd_, &point);
-            if (folderTreeDragController_.IsActive())
-            {
-                SetCursor(LoadCursorW(nullptr,
-                                      folderTreeDragController_.IsDropAllowed() ? IDC_HAND : IDC_NO));
-                return TRUE;
-            }
-            if (dragMode_ == DragMode::QuickAccessInternal)
-            {
-                SetCursor(LoadCursorW(nullptr,
-                                      (quickAccessHotRowIndex_ >= 0 || internalSelectionTreeDropItem_ != nullptr)
-                                          ? IDC_HAND
-                                          : IDC_NO));
-                return TRUE;
-            }
-            if (dragMode_ == DragMode::LeftSplitter || dragMode_ == DragMode::DetailsSplitter || IsOverSplitter(point.x, point.y))
-            {
-                SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
-                return TRUE;
-            }
-            if (HitTestQuickAccessDestinationRow(point.x, point.y) >= 0)
-            {
-                SetCursor(LoadCursorW(nullptr, IDC_HAND));
-                return TRUE;
-            }
-            if (HitTestQuickAccessSortButton(point.x, point.y) >= 0)
-            {
-                SetCursor(LoadCursorW(nullptr, IDC_HAND));
-                return TRUE;
-            }
-            if (HitTestQuickAccessDestinationButton(point.x, point.y) >= 0)
-            {
-                SetCursor(LoadCursorW(nullptr, IDC_HAND));
-                return TRUE;
-            }
-            if ((folderLoadCoordinator_ && folderLoadCoordinator_->IsEnumerationActive())
-                || (folderTreeController_ && folderTreeController_->IsBusy()))
-            {
-                SetCursor(LoadCursorW(nullptr, IDC_APPSTARTING));
-                return TRUE;
-            }
-            break;
-        }
         case WM_MEASUREITEM:
         {
             auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
@@ -20889,97 +21075,8 @@ namespace hyperbrowse::ui
                 return *result;
             }
             break;
-        case WM_MOUSELEAVE:
-            toolbarMouseTracking_ = false;
-            if (toolbarHotIndex_ >= 0)
-            {
-                toolbarHotIndex_ = -1;
-                InvalidateToolbarStrip();
-            }
-            if (!commandBarKeyboardActive_ && commandBarHotIndex_ >= 0)
-            {
-                commandBarHotIndex_ = -1;
-                InvalidateToolbarStrip();
-            }
-            if (detailsPanelHotTabIndex_ >= 0)
-            {
-                detailsPanelHotTabIndex_ = -1;
-                if (!IsRectEmpty(&detailsPanelTabStripRect_))
-                {
-                    InvalidateRect(hwnd_, &detailsPanelTabStripRect_, FALSE);
-                }
-            }
-            if (detailsPanelCloseButtonHot_ || detailsPanelCloseButtonPressed_)
-            {
-                detailsPanelCloseButtonHot_ = false;
-                detailsPanelCloseButtonPressed_ = false;
-                if (!IsRectEmpty(&detailsPanelRect_))
-                {
-                    InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
-                }
-            }
-            if (quickAccessHotRowIndex_ >= 0
-                || quickAccessHotButtonIndex_ >= 0
-                || quickAccessSortButtonHot_)
-            {
-                quickAccessHotRowIndex_ = -1;
-                quickAccessHotButtonIndex_ = -1;
-                quickAccessSortButtonHot_ = false;
-                if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
-                {
-                    InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
-                }
-            }
-            break;
         case WM_NOTIFY:
-        {
-            const auto* nmh = reinterpret_cast<NMHDR*>(lParam);
-            if (nmh->hwndFrom == tooltipControl_ && nmh->code == TTN_GETDISPINFOW)
-            {
-                auto* di = reinterpret_cast<NMTTDISPINFOW*>(lParam);
-                if (treePane_ && di->hdr.idFrom == reinterpret_cast<UINT_PTR>(treePane_))
-                {
-                    treeFolderTooltipText_.clear();
-                    if (!treeTooltipPath_.empty())
-                    {
-                        if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(treeTooltipPath_))
-                        {
-                            const wchar_t shortcutCharacter = QuickSendModel::ShortcutCharacter(*assignedShortcut);
-                            if (shortcutCharacter != L'\0')
-                            {
-                                treeFolderTooltipText_ = L"Move: F7,";
-                                treeFolderTooltipText_.push_back(shortcutCharacter);
-                                treeFolderTooltipText_.append(L"  Copy: F8,");
-                                treeFolderTooltipText_.push_back(shortcutCharacter);
-                            }
-                        }
-                    }
-
-                    di->lpszText = const_cast<wchar_t*>(treeFolderTooltipText_.c_str());
-                    return 0;
-                }
-
-                if (di->hdr.idFrom == kQuickAccessSortTooltipId)
-                {
-                    di->lpszText = const_cast<LPWSTR>(L"Sort Quick Actions destinations by hotkey");
-                    return 0;
-                }
-
-                if (di->hdr.idFrom == kDetailsPanelHistogramTooltipId)
-                {
-                    di->lpszText = const_cast<LPWSTR>(L"RGB histogram: shows the distribution of pixel brightness across the red, green, and blue channels.");
-                    return 0;
-                }
-
-                const auto idx = static_cast<std::size_t>(di->hdr.idFrom);
-                if (idx < toolbarItems_.size() && !toolbarItems_[idx].tooltip.empty())
-                {
-                    di->lpszText = const_cast<wchar_t*>(toolbarItems_[idx].tooltip.c_str());
-                }
-                return 0;
-            }
-            return OnFolderTreeNotify(lParam);
-        }
+            return HandleNotifyMessage(lParam);
         case WM_CTLCOLOREDIT:
             if (const std::optional<LRESULT> result = HandleControlColorMessage(message, wParam, lParam))
             {
@@ -20993,64 +21090,9 @@ namespace hyperbrowse::ui
             }
             break;
         case WM_COMMAND:
-            if (LOWORD(wParam) >= kQuickAccessShortcutEditBaseId
-                && LOWORD(wParam) < kQuickAccessShortcutEditBaseId + quickAccessShortcutEdits_.size())
+            if (const std::optional<LRESULT> result = HandleCommandMessage(wParam, lParam))
             {
-                if (HIWORD(wParam) == EN_SETFOCUS)
-                {
-                    PostMessageW(reinterpret_cast<HWND>(lParam), EM_SETSEL, 0, static_cast<LPARAM>(-1));
-                    return 0;
-                }
-
-                if (HIWORD(wParam) == EN_CHANGE && !updatingQuickAccessShortcutEdits_)
-                {
-                    const std::size_t rowIndex = static_cast<std::size_t>(LOWORD(wParam) - kQuickAccessShortcutEditBaseId);
-                    if (rowIndex < quickAccessDestinationRows_.size())
-                    {
-                        HWND edit = quickAccessShortcutEdits_[rowIndex];
-                        const int textLength = GetWindowTextLengthW(edit);
-                        std::wstring shortcutText(static_cast<std::size_t>(textLength) + 1, L'\0');
-                        GetWindowTextW(edit, shortcutText.data(), static_cast<int>(shortcutText.size()));
-                        shortcutText.resize(wcslen(shortcutText.c_str()));
-
-                        QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
-                        QuickSendAssignmentResult result = QuickSendAssignmentResult::DestinationNotFavorite;
-                        MutateQuickSendState([&]
-                        {
-                            result = quickSendModel_.SetShortcutForDestination(
-                                row.destinationPath,
-                                shortcutText);
-                        });
-                        const QuickAccessShortcutEditPolicy::Result editUpdate =
-                            QuickAccessShortcutEditPolicy::Reconcile(
-                                result,
-                                quickSendModel_.ShortcutForDestination(row.destinationPath),
-                                shortcutText);
-                        row.assignedShortcut = editUpdate.assignedShortcut;
-                        if (editUpdate.updateText)
-                        {
-                            updatingQuickAccessShortcutEdits_ = true;
-                            SetWindowTextW(edit, editUpdate.canonicalText.c_str());
-                            updatingQuickAccessShortcutEdits_ = false;
-                        }
-
-                        InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
-                    }
-                }
-                return 0;
-            }
-            if (LOWORD(wParam) == ID_ACTION_FILTER_EDIT && HIWORD(wParam) == EN_CHANGE && browserPaneController_)
-            {
-                const int textLength = GetWindowTextLengthW(filterEdit_);
-                std::wstring filterText(static_cast<std::size_t>(textLength) + 1, L'\0');
-                GetWindowTextW(filterEdit_, filterText.data(), static_cast<int>(filterText.size()));
-                filterText.resize(wcslen(filterText.c_str()));
-                browserPaneController_->SetFilterQuery(std::move(filterText));
-                return 0;
-            }
-            if (HandleCommand(LOWORD(wParam)))
-            {
-                return 0;
+                return *result;
             }
             break;
         case WM_ERASEBKGND:

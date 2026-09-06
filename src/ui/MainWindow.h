@@ -456,6 +456,9 @@ namespace hyperbrowse::ui
         void StopDisplaySurfaceRecoveryRetries();
         LRESULT HandlePaintMessage();
         std::optional<LRESULT> HandleControlColorMessage(UINT message, WPARAM wParam, LPARAM lParam);
+        LRESULT HandleNotifyMessage(LPARAM lParam);
+        std::optional<LRESULT> HandleMouseInputMessage(UINT message, WPARAM wParam, LPARAM lParam);
+        std::optional<LRESULT> HandleCommandMessage(WPARAM wParam, LPARAM lParam);
 
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);

@@ -14,7 +14,7 @@ shutdown. Dialog, file-operation policy, folder-enumeration coordination,
 folder-tree coordination, folder-watch policy, async message routing, menu
 message policy, file-command dispatch, view-command dispatch, command-bar
 policy, dynamic menu construction, and histogram policy extractions have
-  reduced the current translation unit to 22,634 lines. The folder-tree slice places node
+  reduced the current translation unit to approximately 21,208 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -419,3 +419,20 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
 - [x] Reduce `HandleMessage` through `HandlePaintMessage` and
   `HandleControlColorMessage`, keeping paint transactions, D2D/GDI fallback,
   control colors, and default message fall-through behavior unchanged.
+- [x] Extract `HandleNotifyMessage` for tooltip text preparation and
+  folder-tree notification forwarding, preserving unhandled notification
+  fall-through.
+- [x] Extract `HandleMouseInputMessage` for mouse, drag-capture, cursor,
+  drop-file, and mouse-leave effects, preserving handled/unhandled message
+  results.
+- [x] Extract `HandleCommandMessage` for Quick Actions edit notifications,
+  filter changes, and command-controller forwarding, preserving command
+  fall-through.
+- [x] Perform the available manual executable verification: the exact
+  `build\\Debug\\HyperBrowse.exe` started successfully and reported
+  responsive. Native interactive scenarios requiring desktop input remain not
+  verified in the available tooling: folder-watch changes, file operations,
+  viewer navigation/deletion recovery, drag/drop, focus restoration, settings
+  persistence, DPI/display recovery, and repeated interactive create/destroy.
+- [x] Add `docs/architecture.md` ownership/lifecycle updates and create the
+  concise `docs/mainwindow-ownership-map.md`.
