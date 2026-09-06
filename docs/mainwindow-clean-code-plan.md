@@ -367,3 +367,7 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   painting into `src/ui/DetailsPanelSurfacePainter.*`. MainWindow retains
   panel visibility, resource ownership, and content composition while the
   painter consumes the panel geometry and existing drawing resources.
+- [x] Consolidate duplicated populated Quick Actions state and palette
+  assembly behind named MainWindow helpers. MainWindow retains destination
+  validity and interaction policy while both rendering backends pass the same
+  explicit painter state.

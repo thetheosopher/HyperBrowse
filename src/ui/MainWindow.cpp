@@ -12080,6 +12080,56 @@ namespace hyperbrowse::ui
         LayoutChildren();
     }
 
+    QuickAccessPainter::State MainWindow::BuildQuickAccessPainterState(
+        const QuickAccessLayout::Metrics& metrics,
+        std::vector<QuickAccessPainter::RowState>& rowStates) const
+    {
+        RECT headerRect{quickAccessDestinationPanelRect_.left,
+                        quickAccessDestinationPanelRect_.top,
+                        quickAccessDestinationPanelRect_.right,
+                        quickAccessDestinationPanelRect_.top + metrics.headerHeight};
+        if (!IsRectEmpty(&quickAccessSortButtonRect_))
+        {
+            headerRect.right = quickAccessSortButtonRect_.left - kQuickAccessPanelSortButtonGap;
+        }
+
+        rowStates.clear();
+        rowStates.reserve(quickAccessDestinationRows_.size());
+        for (const QuickAccessDestinationRow& row : quickAccessDestinationRows_)
+        {
+            rowStates.push_back(QuickAccessPainter::RowState{
+                &row,
+                CanNavigateToQuickAccessDestination(row.destinationPath),
+                CanUseQuickAccessDestinationActions(row.destinationPath)});
+        }
+
+        return QuickAccessPainter::State{
+            headerRect,
+            quickAccessDestinationViewportRect_,
+            quickAccessSortButtonRect_,
+            rowStates,
+            metrics,
+            quickAccessSortButtonHot_,
+            quickAccessSortButtonPressed_,
+            quickAccessHotRowIndex_,
+            quickAccessHotButtonIndex_,
+            quickAccessPressedButtonIndex_};
+    }
+
+    QuickAccessPainter::Palette MainWindow::BuildQuickAccessPainterPalette(const ThemePalette& palette) const
+    {
+        return QuickAccessPainter::Palette{
+            palette.actionFieldBackground,
+            palette.paneBackground,
+            palette.actionStripBorder,
+            palette.accent,
+            palette.accentFill,
+            palette.accentText,
+            palette.text,
+            palette.mutedText,
+            themeMode_ == ThemeMode::Dark};
+    }
+
     bool MainWindow::PaintDetailsPanelD2D(HDC hdc, const RECT& clientRect) const
     {
         if (!hdc || !detailsStripVisible_ || IsRectEmpty(&detailsPanelRect_))
@@ -12258,44 +12308,9 @@ namespace hyperbrowse::ui
             && !IsRectEmpty(&quickAccessDestinationPanelRect_))
         {
             const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
-            RECT headerRect{quickAccessDestinationPanelRect_.left,
-                            quickAccessDestinationPanelRect_.top,
-                            quickAccessDestinationPanelRect_.right,
-                            quickAccessDestinationPanelRect_.top + metrics.headerHeight};
-            if (!IsRectEmpty(&quickAccessSortButtonRect_))
-            {
-                headerRect.right = quickAccessSortButtonRect_.left - kQuickAccessPanelSortButtonGap;
-            }
             std::vector<QuickAccessPainter::RowState> rowStates;
-            rowStates.reserve(quickAccessDestinationRows_.size());
-            for (const QuickAccessDestinationRow& row : quickAccessDestinationRows_)
-            {
-                rowStates.push_back(QuickAccessPainter::RowState{
-                    &row,
-                    CanNavigateToQuickAccessDestination(row.destinationPath),
-                    CanUseQuickAccessDestinationActions(row.destinationPath)});
-            }
-            const QuickAccessPainter::State quickAccessState{
-                headerRect,
-                quickAccessDestinationViewportRect_,
-                quickAccessSortButtonRect_,
-                rowStates,
-                metrics,
-                quickAccessSortButtonHot_,
-                quickAccessSortButtonPressed_,
-                quickAccessHotRowIndex_,
-                quickAccessHotButtonIndex_,
-                quickAccessPressedButtonIndex_};
-            const QuickAccessPainter::Palette quickAccessPalette{
-                palette.actionFieldBackground,
-                palette.paneBackground,
-                palette.actionStripBorder,
-                palette.accent,
-                palette.accentFill,
-                palette.accentText,
-                palette.text,
-                palette.mutedText,
-                themeMode_ == ThemeMode::Dark};
+            const QuickAccessPainter::State quickAccessState = BuildQuickAccessPainterState(metrics, rowStates);
+            const QuickAccessPainter::Palette quickAccessPalette = BuildQuickAccessPainterPalette(palette);
             QuickAccessPainter::PaintD2D(renderTarget.Get(),
                                          bufferedDc,
                                          quickAccessState,
@@ -12458,44 +12473,9 @@ namespace hyperbrowse::ui
         if (activeRightPaneTab_ == RightPaneTab::QuickSend && !quickAccessDestinationRows_.empty() && !IsRectEmpty(&quickAccessDestinationPanelRect_))
         {
             const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
-            RECT headerRect{quickAccessDestinationPanelRect_.left,
-                            quickAccessDestinationPanelRect_.top,
-                            quickAccessDestinationPanelRect_.right,
-                            quickAccessDestinationPanelRect_.top + metrics.headerHeight};
-            if (!IsRectEmpty(&quickAccessSortButtonRect_))
-            {
-                headerRect.right = quickAccessSortButtonRect_.left - kQuickAccessPanelSortButtonGap;
-            }
             std::vector<QuickAccessPainter::RowState> rowStates;
-            rowStates.reserve(quickAccessDestinationRows_.size());
-            for (const QuickAccessDestinationRow& row : quickAccessDestinationRows_)
-            {
-                rowStates.push_back(QuickAccessPainter::RowState{
-                    &row,
-                    CanNavigateToQuickAccessDestination(row.destinationPath),
-                    CanUseQuickAccessDestinationActions(row.destinationPath)});
-            }
-            const QuickAccessPainter::State quickAccessState{
-                headerRect,
-                quickAccessDestinationViewportRect_,
-                quickAccessSortButtonRect_,
-                rowStates,
-                metrics,
-                quickAccessSortButtonHot_,
-                quickAccessSortButtonPressed_,
-                quickAccessHotRowIndex_,
-                quickAccessHotButtonIndex_,
-                quickAccessPressedButtonIndex_};
-            const QuickAccessPainter::Palette quickAccessPalette{
-                palette.actionFieldBackground,
-                palette.paneBackground,
-                palette.actionStripBorder,
-                palette.accent,
-                palette.accentFill,
-                palette.accentText,
-                palette.text,
-                palette.mutedText,
-                themeMode_ == ThemeMode::Dark};
+            const QuickAccessPainter::State quickAccessState = BuildQuickAccessPainterState(metrics, rowStates);
+            const QuickAccessPainter::Palette quickAccessPalette = BuildQuickAccessPainterPalette(palette);
             QuickAccessPainter::PaintGdi(hdc,
                                          quickAccessState,
                                          quickAccessPalette,

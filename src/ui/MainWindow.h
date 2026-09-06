@@ -33,6 +33,7 @@
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickAccessLayout.h"
+#include "ui/QuickAccessPainter.h"
 #include "ui/QuickSend.h"
 #include "ui/ViewCommandController.h"
 #include "ui/WindowAsyncMessageRouter.h"
@@ -413,6 +414,10 @@ namespace hyperbrowse::ui
         void ResetDetailsPanelHistogram();
         void RequestDetailsPanelHistogram(const browser::BrowserItem& item, int modelIndex);
         void ApplyDetailsPanelHistogram(const cache::CachedThumbnail& thumbnail);
+        QuickAccessPainter::State BuildQuickAccessPainterState(
+            const QuickAccessLayout::Metrics& metrics,
+            std::vector<QuickAccessPainter::RowState>& rowStates) const;
+        QuickAccessPainter::Palette BuildQuickAccessPainterPalette(const ThemePalette& palette) const;
         bool PaintDetailsPanelD2D(HDC hdc, const RECT& clientRect) const;
         void PaintDetailsPanel(HDC hdc, const RECT& clientRect) const;
         void DrawStatusStrip(const DRAWITEMSTRUCT& drawItem) const;
