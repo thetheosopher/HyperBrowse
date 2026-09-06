@@ -12,6 +12,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <condition_variable>
@@ -45,11 +46,14 @@
 #include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
 #include "ui/DetailsPanelHistogram.h"
+#include "ui/DetailsPanelLayout.h"
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderHistory.h"
 #include "ui/MainWindow.h"
 #include "ui/QuickAccessMenuBuilder.h"
+#include "ui/QuickAccessLayout.h"
+#include "ui/RightPaneHitTester.h"
 #include "ui/QuickSend.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ViewCommandController.h"
@@ -559,6 +563,132 @@ namespace
         DetailsPanelHistogram::Result emptyResult;
         Expect(!DetailsPanelHistogram::Compute(nullptr, &emptyResult) && !emptyResult.visible && emptyResult.peak == 0,
                "Details-panel histogram did not reset invalid input to an empty result");
+    }
+
+    void RunRightPaneHitTesterScenario()
+    {
+        using hyperbrowse::ui::RightPaneHitTester;
+
+        const std::array<RECT, 2> tabRects{
+            RECT{10, 10, 60, 30},
+            RECT{64, 10, 114, 30}};
+        const RECT tabStripRect{10, 10, 114, 30};
+        Expect(RightPaneHitTester::Tab(true, tabStripRect, tabRects, 20, 20) == 0
+                   && RightPaneHitTester::Tab(true, tabStripRect, tabRects, 70, 20) == 1
+                   && RightPaneHitTester::Tab(true, tabStripRect, tabRects, 60, 20) == -1
+                   && RightPaneHitTester::Tab(false, tabStripRect, tabRects, 20, 20) == -1,
+               "Right-pane hit tester did not preserve tab visibility and edge behavior");
+
+        const RECT closeButtonRect{120, 10, 138, 28};
+        const RECT sortButtonRect{10, 40, 28, 58};
+        Expect(RightPaneHitTester::CloseButton(true, closeButtonRect, 120, 10) == 0
+                   && RightPaneHitTester::CloseButton(true, closeButtonRect, 138, 28) == -1
+                   && RightPaneHitTester::CloseButton(false, closeButtonRect, 124, 14) == -1
+                   && RightPaneHitTester::SortButton(sortButtonRect, 20, 50) == 0
+                   && RightPaneHitTester::SortButton(sortButtonRect, 30, 50) == -1,
+               "Right-pane hit tester did not preserve close and sort button geometry");
+    }
+
+    void RunDetailsPanelLayoutScenario()
+    {
+        using hyperbrowse::ui::DetailsPanelLayout;
+
+        DetailsPanelLayout::Input input;
+        input.panelRect = RECT{100, 20, 420, 400};
+        input.margin = 14;
+        input.tabHeight = 30;
+        input.tabGap = 10;
+        input.tabButtonGap = 10;
+        input.tabButtonHorizontalPadding = 16;
+        input.tabMinButtonWidth = 96;
+        input.closeButtonSize = 18;
+        input.closeButtonMargin = 8;
+        input.closeButtonGap = 8;
+        input.tabLabelWidth = 70;
+        input.titleHeight = 22;
+        input.summaryHeight = 18;
+        input.histogramHeight = 88;
+        input.textTopGap = 14;
+        input.fileDetailsActive = true;
+        input.histogramVisible = true;
+
+        const DetailsPanelLayout::Result result = DetailsPanelLayout::Build(input);
+        Expect(result.tabRects[0].left == 114 && result.tabRects[0].top == 34
+                   && result.tabRects[0].right == 216 && result.tabRects[1].left == 226
+                   && result.tabRects[1].right == 328,
+               "Details-panel layout changed tab geometry");
+        Expect(result.contentRect.left == 114 && result.contentRect.top == 74
+                   && result.contentRect.right == 406 && result.contentRect.bottom == 386
+                   && result.closeButtonRect.left == 394 && result.closeButtonRect.top == 28,
+               "Details-panel layout changed content or close-button geometry");
+        Expect(result.histogramRect.left == 114 && result.histogramRect.top == 128
+                   && result.histogramRect.right == 406 && result.histogramRect.bottom == 216
+                   && result.textRect.top == 230 && result.textRect.bottom == 386,
+               "Details-panel layout changed histogram or text placement");
+
+        input.panelRect = RECT{100, 20, 270, 200};
+        input.histogramVisible = false;
+        const DetailsPanelLayout::Result narrowResult = DetailsPanelLayout::Build(input);
+        Expect(narrowResult.tabRects[0].right == 180 && narrowResult.tabRects[1].left == 190
+                   && narrowResult.tabRects[1].right == 256
+                   && IsRectEmpty(&narrowResult.closeButtonRect),
+               "Details-panel layout did not preserve narrow-panel tab and close-button behavior");
+    }
+
+    void RunQuickAccessLayoutScenario()
+    {
+        using hyperbrowse::ui::QuickAccessLayout;
+
+        QuickAccessLayout::Input input;
+        input.innerLeft = 10;
+        input.innerRight = 260;
+        input.top = 40;
+        input.viewportTop = 70;
+        input.panelBottom = 160;
+        input.contentRight = 240;
+        input.scrollOffset = 12;
+        input.sortLabelWidth = 80;
+        input.sortButtonGap = 6;
+        input.sortButtonSize = 18;
+        input.metrics.headerHeight = 18;
+        input.metrics.rowHeight = 40;
+        input.metrics.labelTopInset = 5;
+        input.metrics.labelHeight = 15;
+        input.metrics.metadataTopInset = 24;
+        input.metrics.metadataBottomInset = 6;
+        input.metrics.buttonHeight = 28;
+        input.metrics.buttonTopInset = 6;
+        input.metrics.rowGap = 6;
+        input.metrics.buttonWidth = 56;
+        input.metrics.buttonGap = 8;
+        input.metrics.buttonRightInset = 8;
+        input.metrics.removeButtonWidth = 24;
+        input.metrics.shortcutWidth = 24;
+        input.metrics.shortcutGap = 8;
+        input.destinations = {
+            QuickAccessLayout::Destination{L"C:\\One", L"One", L"1 image", 2, true},
+            QuickAccessLayout::Destination{L"D:\\Two", L"Two", L"2 images", -1, true},
+        };
+
+        const QuickAccessLayout::Result result = QuickAccessLayout::Build(input);
+        Expect(result.panelRect.left == 10 && result.panelRect.top == 40
+                   && result.panelRect.right == 260 && result.panelRect.bottom == 160,
+               "Quick Actions layout did not preserve the panel bounds");
+        Expect(result.viewportRect.left == 10 && result.viewportRect.top == 70
+                   && result.viewportRect.right == 240 && result.viewportRect.bottom == 160,
+               "Quick Actions layout did not preserve the viewport bounds");
+        Expect(result.sortButtonRect.left == 96 && result.sortButtonRect.top == 40
+                   && result.sortButtonRect.right == 114 && result.sortButtonRect.bottom == 58,
+               "Quick Actions layout did not place the sort button from the header label");
+        Expect(result.rows.size() == 2
+                   && result.rows[0].destinationPath == L"C:\\One"
+                   && result.rows[0].rowRect.top == 58
+                   && result.rows[1].rowRect.top == 104
+                   && result.rows[0].copyRect.left == 80
+                   && result.rows[0].moveRect.left == 144
+                   && result.rows[0].removeRect.left == 208
+                   && result.rows[0].shortcutRect.left == 48,
+               "Quick Actions layout did not preserve scrolled row and control geometry");
     }
 
     struct EnumerationResult
@@ -4830,6 +4960,9 @@ int main(int argc, char* argv[])
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
         const bool quickAccessOnly = argc > 1 && std::string_view(argv[1]) == "--quick-access";
         const bool detailsPanelHistogramOnly = argc > 1 && std::string_view(argv[1]) == "--details-histogram";
+        const bool rightPaneHitTesterOnly = argc > 1 && std::string_view(argv[1]) == "--right-pane-hit-test";
+        const bool quickAccessLayoutOnly = argc > 1 && std::string_view(argv[1]) == "--quick-access-layout";
+        const bool detailsPanelLayoutOnly = argc > 1 && std::string_view(argv[1]) == "--details-layout";
         if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
@@ -4850,6 +4983,18 @@ int main(int argc, char* argv[])
         {
             RunDetailsPanelHistogramScenario();
         }
+        else if (rightPaneHitTesterOnly)
+        {
+            RunRightPaneHitTesterScenario();
+        }
+        else if (quickAccessLayoutOnly)
+        {
+            RunQuickAccessLayoutScenario();
+        }
+        else if (detailsPanelLayoutOnly)
+        {
+            RunDetailsPanelLayoutScenario();
+        }
         else
         {
             RunPrefetchSizingScenario();
@@ -4860,6 +5005,9 @@ int main(int argc, char* argv[])
             RunCommandBarControllerScenario();
             RunQuickAccessMenuBuilderScenario();
             RunDetailsPanelHistogramScenario();
+            RunRightPaneHitTesterScenario();
+            RunQuickAccessLayoutScenario();
+            RunDetailsPanelLayoutScenario();
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
             RunBackgroundExecutorCapacityScenario();

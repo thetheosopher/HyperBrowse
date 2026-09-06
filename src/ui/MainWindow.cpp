@@ -47,7 +47,9 @@
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarPainter.h"
 #include "ui/DetailsPanelHistogram.h"
+#include "ui/DetailsPanelLayout.h"
 #include "ui/FileOperationJournal.h"
+#include "ui/RightPaneHitTester.h"
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
 #include "ui/MenuMessageHandling.h"
@@ -1460,17 +1462,7 @@ namespace
         return std::max(minimumWidth, static_cast<int>(size.cx) + 24);
     }
 
-    struct QuickAccessPanelMetrics
-    {
-        int headerHeight{kQuickAccessPanelHeaderHeight};
-        int rowHeight{kQuickAccessPanelRowHeight};
-        int labelTopInset{kQuickAccessPanelRowTextTopInset};
-        int labelHeight{15};
-        int metadataTopInset{21};
-        int metadataBottomInset{kQuickAccessPanelRowBottomInset};
-        int buttonHeight{kTextInputButtonHeight};
-        int buttonTopInset{kQuickAccessPanelButtonVerticalInset};
-    };
+    using QuickAccessPanelMetrics = hyperbrowse::ui::QuickAccessLayout::Metrics;
 
     int MeasureSingleLineTextHeight(HFONT font, int minimumHeight)
     {
@@ -1488,6 +1480,21 @@ namespace
         const HFONT effectiveBodyFont = bodyFont ? bodyFont : defaultGuiFont;
 
         QuickAccessPanelMetrics metrics;
+        metrics.headerHeight = kQuickAccessPanelHeaderHeight;
+        metrics.rowHeight = kQuickAccessPanelRowHeight;
+        metrics.labelTopInset = kQuickAccessPanelRowTextTopInset;
+        metrics.labelHeight = 15;
+        metrics.metadataTopInset = 21;
+        metrics.metadataBottomInset = kQuickAccessPanelRowBottomInset;
+        metrics.buttonHeight = kTextInputButtonHeight;
+        metrics.buttonTopInset = kQuickAccessPanelButtonVerticalInset;
+        metrics.rowGap = kQuickAccessPanelRowGap;
+        metrics.buttonWidth = kQuickAccessPanelButtonWidth;
+        metrics.buttonGap = kQuickAccessPanelButtonGap;
+        metrics.buttonRightInset = kQuickAccessPanelButtonRightInset;
+        metrics.removeButtonWidth = kQuickAccessPanelRemoveButtonWidth;
+        metrics.shortcutWidth = kQuickAccessPanelShortcutWidth;
+        metrics.shortcutGap = kQuickAccessPanelShortcutGap;
         metrics.headerHeight = std::max(kQuickAccessPanelHeaderHeight,
                                         MeasureSingleLineTextHeight(effectiveSummaryFont, kQuickAccessPanelHeaderHeight)
                                             + kQuickAccessPanelHeaderVerticalPadding);
@@ -11535,84 +11542,62 @@ namespace hyperbrowse::ui
                 const int innerLeft = detailsPanelRect_.left + kDetailsPanelMargin;
                 const int innerRight = detailsPanelRect_.right - kDetailsPanelMargin;
                 const int innerWidth = std::max(0, innerRight - innerLeft);
-                const int tabTop = detailsPanelRect_.top + kDetailsPanelMargin;
-                const int tabHeight = std::min(
-                    kDetailsPanelTabHeight,
-                    std::max(0, static_cast<int>(detailsPanelRect_.bottom - tabTop - kDetailsPanelMargin)));
 
-                if (innerWidth > 0 && tabHeight > 0)
+                const HFONT tabFont = detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                const int maxLabelWidth = std::max(MeasureTextWidth(tabFont, L"File Details"),
+                                                   MeasureTextWidth(tabFont, L"Quick Actions"));
+                DetailsPanelLayout::Input layoutInput;
+                layoutInput.panelRect = detailsPanelRect_;
+                layoutInput.margin = kDetailsPanelMargin;
+                layoutInput.tabHeight = kDetailsPanelTabHeight;
+                layoutInput.tabGap = kDetailsPanelTabGap;
+                layoutInput.tabButtonGap = kDetailsPanelTabButtonGap;
+                layoutInput.tabButtonHorizontalPadding = kDetailsPanelTabButtonHorizontalPadding;
+                layoutInput.tabMinButtonWidth = kDetailsPanelTabMinButtonWidth;
+                layoutInput.closeButtonSize = kDetailsPanelCloseButtonSize;
+                layoutInput.closeButtonMargin = kDetailsPanelCloseButtonMargin;
+                layoutInput.closeButtonGap = kDetailsPanelCloseButtonGap;
+                layoutInput.tabLabelWidth = maxLabelWidth;
+                layoutInput.fileDetailsActive = activeRightPaneTab_ == RightPaneTab::FileDetails;
+
+                if (layoutInput.fileDetailsActive)
                 {
-                    const HFONT tabFont = detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-                    const int maxLabelWidth = std::max(MeasureTextWidth(tabFont, L"File Details"),
-                                                       MeasureTextWidth(tabFont, L"Quick Actions"));
-                    const int desiredButtonWidth = std::max(kDetailsPanelTabMinButtonWidth,
-                                                            maxLabelWidth + (kDetailsPanelTabButtonHorizontalPadding * 2));
-                    const int maxButtonWidth = std::max(1, (std::max(0, innerWidth - kDetailsPanelTabButtonGap) / 2));
-                    const int buttonWidth = std::min(desiredButtonWidth, maxButtonWidth);
-                    const int secondButtonLeft = innerLeft + buttonWidth + kDetailsPanelTabButtonGap;
-
-                    detailsPanelTabRects_[0] = RECT{innerLeft, tabTop, innerLeft + buttonWidth, tabTop + tabHeight};
-                    detailsPanelTabRects_[1] = RECT{secondButtonLeft, tabTop, secondButtonLeft + buttonWidth, tabTop + tabHeight};
-                    detailsPanelTabStripRect_ = RECT{detailsPanelTabRects_[0].left,
-                                                     detailsPanelTabRects_[0].top,
-                                                     detailsPanelTabRects_[1].right,
-                                                     detailsPanelTabRects_[0].bottom};
+                    const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
+                    layoutInput.titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
+                                                                      title,
+                                                                      innerWidth,
+                                                                      DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                                      22);
+                    layoutInput.summaryHeight = detailsPanelSummaryText_.empty()
+                        ? 0
+                        : MeasureTextBlockHeight(detailsPanelSummaryFont_,
+                                                 detailsPanelSummaryText_,
+                                                 innerWidth,
+                                                 DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
+                                                 18);
+                    layoutInput.histogramHeight = kDetailsPanelHistogramHeight;
+                    layoutInput.textTopGap = kDetailsPanelTextTopGap;
+                    layoutInput.histogramVisible = detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_;
                 }
 
-                detailsPanelContentRect_ = RECT{
-                    innerLeft,
-                    tabTop + tabHeight + kDetailsPanelTabGap,
-                    innerRight,
-                    detailsPanelRect_.bottom - kDetailsPanelMargin,
-                };
-
-                const int closeButtonRight = detailsPanelRect_.right - kDetailsPanelCloseButtonMargin;
-                const int closeButtonLeft = closeButtonRight - kDetailsPanelCloseButtonSize;
-                const int closeButtonTop = detailsPanelRect_.top + kDetailsPanelCloseButtonMargin;
-                const int closeButtonBottom = closeButtonTop + kDetailsPanelCloseButtonSize;
-                if (closeButtonLeft > detailsPanelTabStripRect_.right + kDetailsPanelCloseButtonGap)
-                {
-                    detailsPanelCloseButtonRect_ = RECT{closeButtonLeft, closeButtonTop, closeButtonRight, closeButtonBottom};
-                }
+                const DetailsPanelLayout::Result layout = DetailsPanelLayout::Build(layoutInput);
+                detailsPanelTabStripRect_ = layout.tabStripRect;
+                detailsPanelTabRects_ = layout.tabRects;
+                detailsPanelContentRect_ = layout.contentRect;
+                detailsPanelHistogramRect_ = layout.histogramRect;
+                detailsPanelCloseButtonRect_ = layout.closeButtonRect;
 
                 if (detailsPanelContentRect_.right > detailsPanelContentRect_.left
                     && detailsPanelContentRect_.bottom > detailsPanelContentRect_.top)
                 {
-                    if (activeRightPaneTab_ == RightPaneTab::FileDetails)
+                    if (layoutInput.fileDetailsActive)
                     {
-                        const std::wstring title = detailsPanelTitleText_.empty() ? std::wstring(L"File Details") : detailsPanelTitleText_;
-                        const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
-                                                                       title,
-                                                                       innerWidth,
-                                                                       DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                                       22);
-                        const int summaryHeight = detailsPanelSummaryText_.empty()
-                            ? 0
-                            : MeasureTextBlockHeight(detailsPanelSummaryFont_,
-                                                     detailsPanelSummaryText_,
-                                                     innerWidth,
-                                                     DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                     18);
-
-                        int top = detailsPanelContentRect_.top + titleHeight + 6;
-                        if (summaryHeight > 0)
-                        {
-                            top += summaryHeight + 8;
-                        }
-
-                        if (detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_)
-                        {
-                            detailsPanelHistogramRect_ = RECT{
-                                detailsPanelContentRect_.left,
-                                top,
-                                detailsPanelContentRect_.right,
-                                top + kDetailsPanelHistogramHeight,
-                            };
-                            top = detailsPanelHistogramRect_.bottom + kDetailsPanelTextTopGap;
-                        }
-
-                        const int availableTextHeight = std::max(0, static_cast<int>(detailsPanelContentRect_.bottom) - top);
-                        MoveWindow(detailsPanelText_, detailsPanelContentRect_.left, top, innerWidth, availableTextHeight, TRUE);
+                        MoveWindow(detailsPanelText_,
+                                   layout.textRect.left,
+                                   layout.textRect.top,
+                                   layout.textRect.right - layout.textRect.left,
+                                   layout.textRect.bottom - layout.textRect.top,
+                                   TRUE);
                         ShowWindow(detailsPanelText_, SW_SHOW);
                     }
                     else
@@ -14062,11 +14047,23 @@ namespace hyperbrowse::ui
             return;
         }
 
-        std::vector<std::pair<std::wstring, bool>> destinations;
+        std::vector<QuickAccessLayout::Destination> destinations;
         destinations.reserve(quickSendModel_.FavoriteDestinations().size());
         for (const std::wstring& favoritePath : quickSendModel_.FavoriteDestinations())
         {
-            destinations.emplace_back(favoritePath, true);
+            QuickAccessLayout::Destination destination;
+            destination.destinationPath = favoritePath;
+            destination.displayLabel = QuickAccessMenuBuilder::FormatFolderShortcutMenuLabel(favoritePath);
+            destination.metadataLabel = BuildQuickAccessDestinationMetadata(
+                favoritePath,
+                true,
+                IsQuickAccessDestinationCurrentFolder(favoritePath));
+            if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(favoritePath))
+            {
+                destination.assignedShortcut = *assignedShortcut;
+            }
+            destination.favorite = true;
+            destinations.push_back(std::move(destination));
         }
 
         if (destinations.empty())
@@ -14137,56 +14134,26 @@ namespace hyperbrowse::ui
         const HFONT headerFont = detailsPanelSummaryFont_
             ? detailsPanelSummaryFont_
             : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        const int sortButtonSize = std::min(kQuickAccessPanelSortButtonSize, metrics.headerHeight);
-        const int sortButtonLeft = innerLeft
-            + MeasureTextWidth(headerFont, L"Quick Actions")
-            + kQuickAccessPanelSortButtonGap;
-        const int sortButtonTop = top + std::max(0, (metrics.headerHeight - sortButtonSize) / 2);
-        if (sortButtonSize > 0 && sortButtonLeft + sortButtonSize <= innerRight)
-        {
-            quickAccessSortButtonRect_ = RECT{sortButtonLeft,
-                                              sortButtonTop,
-                                              sortButtonLeft + sortButtonSize,
-                                              sortButtonTop + sortButtonSize};
-        }
-        UpdateQuickAccessSortTooltip();
+        QuickAccessLayout::Input layoutInput;
+        layoutInput.innerLeft = innerLeft;
+        layoutInput.innerRight = innerRight;
+        layoutInput.top = top;
+        layoutInput.viewportTop = viewportTop;
+        layoutInput.panelBottom = panelBottom;
+        layoutInput.contentRight = contentRight;
+        layoutInput.scrollOffset = quickAccessScrollOffset_;
+        layoutInput.sortLabelWidth = MeasureTextWidth(headerFont, L"Quick Actions");
+        layoutInput.sortButtonGap = kQuickAccessPanelSortButtonGap;
+        layoutInput.sortButtonSize = std::min(kQuickAccessPanelSortButtonSize, metrics.headerHeight);
+        layoutInput.metrics = metrics;
+        layoutInput.destinations = std::move(destinations);
 
-        int rowTop = viewportTop - quickAccessScrollOffset_;
-        for (const auto& [path, favorite] : destinations)
-        {
-            QuickAccessDestinationRow row;
-            row.destinationPath = path;
-            row.displayLabel = QuickAccessMenuBuilder::FormatFolderShortcutMenuLabel(path);
-            row.metadataLabel = BuildQuickAccessDestinationMetadata(path, favorite, IsQuickAccessDestinationCurrentFolder(path));
-            if (const std::optional<int> assignedShortcut = quickSendModel_.ShortcutForDestination(path))
-            {
-                row.assignedShortcut = *assignedShortcut;
-            }
-            row.favorite = favorite;
-            row.rowRect = RECT{innerLeft, rowTop, contentRight, rowTop + metrics.rowHeight};
-            const int buttonTop = rowTop + metrics.buttonTopInset;
-            int buttonRight = contentRight - kQuickAccessPanelButtonRightInset;
-            row.removeRect = RECT{buttonRight - kQuickAccessPanelRemoveButtonWidth,
-                                  buttonTop,
-                                  buttonRight,
-                                  buttonTop + metrics.buttonHeight};
-            buttonRight = row.removeRect.left - kQuickAccessPanelButtonGap;
-            row.moveRect = RECT{buttonRight - kQuickAccessPanelButtonWidth,
-                                buttonTop,
-                                buttonRight,
-                                buttonTop + metrics.buttonHeight};
-            row.copyRect = RECT{row.moveRect.left - kQuickAccessPanelButtonGap - kQuickAccessPanelButtonWidth,
-                                row.moveRect.top,
-                                row.moveRect.left - kQuickAccessPanelButtonGap,
-                                row.moveRect.bottom};
-            const int shortcutRight = row.copyRect.left - kQuickAccessPanelShortcutGap;
-            row.shortcutRect = RECT{shortcutRight - kQuickAccessPanelShortcutWidth,
-                                    buttonTop,
-                                    shortcutRight,
-                                    buttonTop + metrics.buttonHeight};
-            quickAccessDestinationRows_.push_back(std::move(row));
-            rowTop += metrics.rowHeight + kQuickAccessPanelRowGap;
-        }
+        QuickAccessLayout::Result layout = QuickAccessLayout::Build(layoutInput);
+        quickAccessDestinationPanelRect_ = layout.panelRect;
+        quickAccessDestinationViewportRect_ = layout.viewportRect;
+        quickAccessSortButtonRect_ = layout.sortButtonRect;
+        quickAccessDestinationRows_ = std::move(layout.rows);
+        UpdateQuickAccessSortTooltip();
 
         UpdateQuickAccessShortcutEditControls();
     }
@@ -14456,43 +14423,17 @@ namespace hyperbrowse::ui
 
     int MainWindow::HitTestDetailsPanelTab(int x, int y) const
     {
-        if (!detailsStripVisible_ || IsRectEmpty(&detailsPanelTabStripRect_))
-        {
-            return -1;
-        }
-
-        const POINT point{x, y};
-        for (std::size_t index = 0; index < detailsPanelTabRects_.size(); ++index)
-        {
-            if (!IsRectEmpty(&detailsPanelTabRects_[index]) && PtInRect(&detailsPanelTabRects_[index], point) != FALSE)
-            {
-                return static_cast<int>(index);
-            }
-        }
-
-        return -1;
+        return RightPaneHitTester::Tab(detailsStripVisible_, detailsPanelTabStripRect_, detailsPanelTabRects_, x, y);
     }
 
     int MainWindow::HitTestDetailsPanelCloseButton(int x, int y) const
     {
-        if (!detailsStripVisible_ || IsRectEmpty(&detailsPanelCloseButtonRect_))
-        {
-            return -1;
-        }
-
-        const POINT point{x, y};
-        return PtInRect(&detailsPanelCloseButtonRect_, point) != FALSE ? 0 : -1;
+        return RightPaneHitTester::CloseButton(detailsStripVisible_, detailsPanelCloseButtonRect_, x, y);
     }
 
     int MainWindow::HitTestQuickAccessSortButton(int x, int y) const
     {
-        if (IsRectEmpty(&quickAccessSortButtonRect_))
-        {
-            return -1;
-        }
-
-        const POINT point{x, y};
-        return PtInRect(&quickAccessSortButtonRect_, point) != FALSE ? 0 : -1;
+        return RightPaneHitTester::SortButton(quickAccessSortButtonRect_, x, y);
     }
 
     std::vector<browser::BrowserItem> MainWindow::CollectItemsForScope(bool selectionScope) const

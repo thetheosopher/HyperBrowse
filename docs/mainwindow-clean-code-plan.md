@@ -14,7 +14,7 @@ shutdown. Dialog, file-operation policy, folder-enumeration coordination,
 folder-tree coordination, folder-watch policy, async message routing, menu
 message policy, file-command dispatch, view-command dispatch, command-bar
 policy, dynamic menu construction, and histogram policy extractions have
-reduced the current translation unit to 23,131 lines. The folder-tree slice places node
+  reduced the current translation unit to 23,093 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -230,3 +230,19 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   cancellation, panel state, and rendering. Deterministic smoke coverage
   verifies channel bins, peak detection, visibility, and invalid-input reset.
   The current `MainWindow.cpp` size is 23,131 lines.
+- [x] Extract pure right-pane tab, close-button, and Quick Actions sort-button
+  hit testing into `src/ui/RightPaneHitTester.*`. MainWindow retains visibility
+  state, mouse tracking, and the resulting actions. Deterministic smoke
+  coverage verifies hidden-panel behavior and Win32 rectangle edge semantics.
+- [x] Extract pure Quick Actions panel, viewport, sort-button, and destination
+  row/control rectangle layout into `src/ui/QuickAccessLayout.*`. MainWindow
+  retains scrollbar HWND updates, tooltip and shortcut-edit control lifetimes,
+  enablement policy, and action effects. Deterministic smoke coverage verifies
+  scrolled row placement and control geometry. The current `MainWindow.cpp`
+  size is 23,093 lines.
+- [x] Extract pure details-panel, tab, content, histogram, close-button, and
+  metadata-editor rectangle layout into `src/ui/DetailsPanelLayout.*`.
+  MainWindow retains text measurement, child-window movement, tooltip updates,
+  panel state, and painting. Deterministic smoke coverage verifies normal,
+  histogram-visible, and narrow-panel geometry. `MainWindow.cpp` is currently
+  21,127 lines in this checkout.

@@ -31,6 +31,7 @@
 #include "ui/MenuPainter.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickAccessMenuBuilder.h"
+#include "ui/QuickAccessLayout.h"
 #include "ui/QuickSend.h"
 #include "ui/ViewCommandController.h"
 #include "ui/WindowAsyncMessageRouter.h"
@@ -169,19 +170,7 @@ namespace hyperbrowse::ui
         using ToolbarItem = CommandBarController::ToolbarItem;
         using CommandBarMenuButton = CommandBarController::CommandBarMenuButton;
 
-        struct QuickAccessDestinationRow
-        {
-            std::wstring destinationPath;
-            std::wstring displayLabel;
-            std::wstring metadataLabel;
-            int assignedShortcut{-1};
-            bool favorite{};
-            RECT rowRect{};
-            RECT shortcutRect{};
-            RECT copyRect{};
-            RECT moveRect{};
-            RECT removeRect{};
-        };
+        using QuickAccessDestinationRow = QuickAccessLayout::Row;
 
         bool RegisterWindowClass() const;
         bool CreateAccelerators();

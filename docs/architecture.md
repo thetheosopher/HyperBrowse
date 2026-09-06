@@ -134,6 +134,17 @@ controller:
 	thumbnail bitmaps and returns fixed-size bin data with peak/visibility state.
 	MainWindow retains thumbnail scheduling, cancellation, panel state, and
 	painting.
+- `ui/RightPaneHitTester.*` owns pure rectangle hit testing for right-pane tabs,
+	the close button, and the Quick Actions sort button. MainWindow retains
+	visibility state, mouse tracking, and the resulting actions.
+- `ui/QuickAccessLayout.*` owns pure Quick Actions panel, viewport, sort-button,
+	and destination-row/control rectangle layout from explicit metrics and
+	destination data. MainWindow retains scrollbar HWND updates, tooltip and
+	shortcut-edit control lifetimes, enablement policy, and action effects.
+- `ui/DetailsPanelLayout.*` owns pure right-pane panel, tab, content,
+	histogram, close-button, and metadata-editor rectangle layout from explicit
+	metrics and measured text heights. MainWindow retains font measurement,
+	child-window movement, tooltip updates, panel state, and painting.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own
