@@ -416,7 +416,6 @@ namespace hyperbrowse::ui
         bool PaintDetailsPanelD2D(HDC hdc, const RECT& clientRect) const;
         void PaintDetailsPanel(HDC hdc, const RECT& clientRect) const;
         void DrawStatusStrip(const DRAWITEMSTRUCT& drawItem) const;
-        bool DrawStatusStripD2D(const DRAWITEMSTRUCT& drawItem) const;
         void MeasureOwnerDrawMenuItem(MEASUREITEMSTRUCT* measureItem) const;
         void DrawOwnerDrawMenuItem(const DRAWITEMSTRUCT& drawItem) const;
         int CommandBarMenuHitTest(int x, int y) const;

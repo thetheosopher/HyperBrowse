@@ -62,6 +62,7 @@
 #include "ui/ShellDragSource.h"
 #include "ui/ShellPainter.h"
 #include "ui/SelectedPathPersistence.h"
+#include "ui/StatusBarPainter.h"
 #include "ui/ToolbarIconLibrary.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowBoundsPersistence.h"
@@ -11152,144 +11153,31 @@ namespace hyperbrowse::ui
         InvalidateRect(statusBar_, nullptr, TRUE);
     }
 
-    bool MainWindow::DrawStatusStripD2D(const DRAWITEMSTRUCT& drawItem) const
-    {
-        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
-        if (!renderer.IsAvailable() || !drawItem.hDC)
-        {
-            return false;
-        }
-
-        const RECT& itemRect = drawItem.rcItem;
-        const int width = itemRect.right - itemRect.left;
-        const int height = itemRect.bottom - itemRect.top;
-        if (width <= 0 || height <= 0)
-        {
-            return false;
-        }
-
-        const auto renderTarget = renderer.CreateDCRenderTarget();
-        if (!renderTarget || FAILED(renderTarget->BindDC(drawItem.hDC, &itemRect)))
-        {
-            return false;
-        }
-
-        const ThemePalette palette = GetThemePalette();
-        const int firstPartWidth = width > 0 ? width / 2 : 420;
-        const COLORREF backgroundColor = BlendColor(palette.paneBackground,
-                                                    palette.windowBackground,
-                                                    themeMode_ == ThemeMode::Dark ? 34 : 18);
-        const auto createBrush = [renderTarget](COLORREF color)
-        {
-            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> brush;
-            renderTarget->CreateSolidColorBrush(
-                hyperbrowse::render::ToD2DColor(color),
-                brush.GetAddressOf());
-            return brush;
-        };
-
-        const auto backgroundBrush = createBrush(backgroundColor);
-        const auto borderBrush = createBrush(palette.actionStripBorder);
-        const auto textBrush = createBrush(palette.text);
-        const auto mutedTextBrush = createBrush(palette.mutedText);
-        const auto statusTextFormat = renderer.CreateTextFormatFromFont(detailsPanelSummaryFont_);
-        if (!backgroundBrush || !borderBrush || !textBrush || !mutedTextBrush || !statusTextFormat)
-        {
-            return false;
-        }
-
-        renderTarget->BeginDraw();
-        renderTarget->Clear(hyperbrowse::render::ToD2DColor(backgroundColor));
-        renderTarget->FillRectangle(
-            D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
-            backgroundBrush.Get());
-        renderTarget->DrawLine(
-            hyperbrowse::render::ToD2DPoint(0.0f, 0.5f),
-            hyperbrowse::render::ToD2DPoint(static_cast<float>(width), 0.5f),
-            borderBrush.Get());
-        renderTarget->DrawLine(
-            hyperbrowse::render::ToD2DPoint(static_cast<float>(firstPartWidth), 5.0f),
-            hyperbrowse::render::ToD2DPoint(static_cast<float>(firstPartWidth), static_cast<float>(std::max(5, height - 5))),
-            borderBrush.Get());
-
-        RECT primaryRect{kStatusStripHorizontalPadding,
-                         0,
-                         std::max(kStatusStripHorizontalPadding, firstPartWidth - kStatusStripHorizontalPadding),
-                         height};
-        RECT secondaryRect{firstPartWidth + kStatusStripHorizontalPadding,
-                           0,
-                           std::max(firstPartWidth + kStatusStripHorizontalPadding, width - kStatusStripHorizontalPadding),
-                           height};
-        renderTarget->DrawText(
-            statusPrimaryText_.c_str(),
-            static_cast<UINT32>(statusPrimaryText_.size()),
-            statusTextFormat.Get(),
-            hyperbrowse::render::ToD2DRect(primaryRect),
-            textBrush.Get());
-        renderTarget->DrawText(
-            statusSecondaryText_.c_str(),
-            static_cast<UINT32>(statusSecondaryText_.size()),
-            statusTextFormat.Get(),
-            hyperbrowse::render::ToD2DRect(secondaryRect),
-            mutedTextBrush.Get());
-
-        const HRESULT drawResult = renderTarget->EndDraw();
-        return SUCCEEDED(drawResult);
-    }
-
     void MainWindow::DrawStatusStrip(const DRAWITEMSTRUCT& drawItem) const
     {
-        if (DrawStatusStripD2D(drawItem))
+        const ThemePalette palette = GetThemePalette();
+        const StatusBarPainterPalette painterPalette{
+            BlendColor(palette.paneBackground,
+                       palette.windowBackground,
+                       themeMode_ == ThemeMode::Dark ? 34 : 18),
+            palette.actionStripBorder,
+            palette.text,
+            palette.mutedText};
+        if (StatusBarPainter::PaintD2D(drawItem.hDC,
+                                       drawItem.rcItem,
+                                       painterPalette,
+                                       detailsPanelSummaryFont_,
+                                       statusPrimaryText_,
+                                       statusSecondaryText_))
         {
             return;
         }
-
-        const ThemePalette palette = GetThemePalette();
-        RECT clientRect = drawItem.rcItem;
-        const int width = clientRect.right - clientRect.left;
-        const int firstPartWidth = width > 0 ? width / 2 : 420;
-
-        const COLORREF backgroundColor = BlendColor(palette.paneBackground,
-                                                    palette.windowBackground,
-                                                    themeMode_ == ThemeMode::Dark ? 34 : 18);
-        const HBRUSH backgroundBrush = CreateSolidBrush(backgroundColor);
-        FillRect(drawItem.hDC, &clientRect, backgroundBrush);
-        DeleteObject(backgroundBrush);
-
-        const HPEN borderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
-        const HGDIOBJ oldPen = SelectObject(drawItem.hDC, borderPen);
-        MoveToEx(drawItem.hDC, clientRect.left, clientRect.top, nullptr);
-        LineTo(drawItem.hDC, clientRect.right, clientRect.top);
-        MoveToEx(drawItem.hDC, clientRect.left + firstPartWidth, clientRect.top + 5, nullptr);
-        LineTo(drawItem.hDC, clientRect.left + firstPartWidth, clientRect.bottom - 5);
-        SelectObject(drawItem.hDC, oldPen);
-        DeleteObject(borderPen);
-
-        RECT primaryRect{clientRect.left + kStatusStripHorizontalPadding,
-                         clientRect.top,
-                         clientRect.left + firstPartWidth - kStatusStripHorizontalPadding,
-                         clientRect.bottom};
-        render::DrawGdiText(drawItem.hDC,
-                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                    statusPrimaryText_.c_str(),
-                    -1,
-                    primaryRect,
-                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
-                    palette.text,
-                    backgroundColor);
-
-        RECT secondaryRect{clientRect.left + firstPartWidth + kStatusStripHorizontalPadding,
-                           clientRect.top,
-                           clientRect.right - kStatusStripHorizontalPadding,
-                           clientRect.bottom};
-        render::DrawGdiText(drawItem.hDC,
-                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                    statusSecondaryText_.c_str(),
-                    -1,
-                    secondaryRect,
-                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
-                    palette.mutedText,
-                    backgroundColor);
+        StatusBarPainter::PaintGdi(drawItem.hDC,
+                                   drawItem.rcItem,
+                                   painterPalette,
+                                   detailsPanelSummaryFont_,
+                                   statusPrimaryText_,
+                                   statusSecondaryText_);
     }
 
     void MainWindow::MeasureOwnerDrawMenuItem(MEASUREITEMSTRUCT* measureItem) const

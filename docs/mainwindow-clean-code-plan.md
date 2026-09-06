@@ -339,3 +339,7 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   case-insensitive stems, preference reversal, and unmatched-item preservation.
 - [x] Complete the Phase 7 verification gate after the focused test-source
   splits: Debug and Release builds plus all four registered smoke tests pass.
+- [x] Extract status-strip GDI and Direct2D painting into
+  `src/ui/StatusBarPainter.*`. MainWindow retains status text construction,
+  theme-state selection, invalidation, and owner-draw routing while the
+  painter consumes explicit colors, font, geometry, and text inputs.

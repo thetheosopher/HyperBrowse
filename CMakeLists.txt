@@ -158,6 +158,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/ShellDragSource.cpp
     src/ui/ShellPainter.cpp
     src/ui/SelectedPathPersistence.cpp
+    src/ui/StatusBarPainter.cpp
     src/ui/ToolbarIconLibrary.cpp
     src/ui/ViewCommandController.cpp
     src/ui/WindowAsyncMessageRouter.cpp
