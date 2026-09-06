@@ -59,6 +59,7 @@
 #include "ui/MainWindowDialogState.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickAccessPathList.h"
+#include "ui/QuickAccessPainter.h"
 #include "ui/QuickSendPersistence.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
@@ -12171,28 +12172,6 @@ namespace hyperbrowse::ui
                                        brush);
             }
         };
-        const auto drawRounded = [renderTarget](const RECT& rect,
-                                                COLORREF fillColor,
-                                                COLORREF borderColor,
-                                                float radius)
-        {
-            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> fillBrush;
-            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> outlineBrush;
-            renderTarget->CreateSolidColorBrush(hyperbrowse::render::ToD2DColor(fillColor), fillBrush.GetAddressOf());
-            renderTarget->CreateSolidColorBrush(hyperbrowse::render::ToD2DColor(borderColor), outlineBrush.GetAddressOf());
-            RECT insetRect = rect;
-            InflateRect(&insetRect, -1, -1);
-            const auto roundedRect = hyperbrowse::render::ToD2DRoundedRect(insetRect, radius, radius);
-            if (fillBrush)
-            {
-                renderTarget->FillRoundedRectangle(&roundedRect, fillBrush.Get());
-            }
-            if (outlineBrush)
-            {
-                renderTarget->DrawRoundedRectangle(&roundedRect, outlineBrush.Get(), 1.0f);
-            }
-        };
-
         renderTarget->BeginDraw();
         renderTarget->FillRectangle(hyperbrowse::render::ToD2DRect(detailsPanelRect_), panelBrush.Get());
         renderTarget->DrawLine(
@@ -12295,111 +12274,42 @@ namespace hyperbrowse::ui
             {
                 headerRect.right = quickAccessSortButtonRect_.left - kQuickAccessPanelSortButtonGap;
             }
-            drawText(L"Quick Actions", summaryFormat.Get(), headerRect, mutedBrush.Get());
-
-            if (!IsRectEmpty(&quickAccessSortButtonRect_))
+            std::vector<QuickAccessPainter::RowState> rowStates;
+            rowStates.reserve(quickAccessDestinationRows_.size());
+            for (const QuickAccessDestinationRow& row : quickAccessDestinationRows_)
             {
-                const bool hot = quickAccessSortButtonHot_;
-                const bool pressed = quickAccessSortButtonPressed_;
-                if (hot || pressed)
-                {
-                    drawRounded(quickAccessSortButtonRect_,
-                                pressed
-                                    ? BlendColor(palette.accentFill, palette.accent, themeMode_ == ThemeMode::Dark ? 40 : 18)
-                                    : BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 28 : 16),
-                                palette.accent,
-                                4.0f);
-                }
-                const auto sortBrush = createBrush(hot || pressed ? palette.accentText : palette.mutedText);
-                if (sortBrush)
-                {
-                    const RECT& sortRect = quickAccessSortButtonRect_;
-                    const int centerX = (sortRect.left + sortRect.right) / 2;
-                    renderTarget->DrawLine(hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX - 6), static_cast<float>(sortRect.top + 6)),
-                                           hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX + 6), static_cast<float>(sortRect.top + 6)),
-                                           sortBrush.Get(), 1.5f);
-                    renderTarget->DrawLine(hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX - 4), static_cast<float>(sortRect.top + 10)),
-                                           hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX + 4), static_cast<float>(sortRect.top + 10)),
-                                           sortBrush.Get(), 1.5f);
-                    renderTarget->DrawLine(hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX - 2), static_cast<float>(sortRect.top + 14)),
-                                           hyperbrowse::render::ToD2DPoint(static_cast<float>(centerX + 2), static_cast<float>(sortRect.top + 14)),
-                                           sortBrush.Get(), 1.5f);
-                }
+                rowStates.push_back(QuickAccessPainter::RowState{
+                    &row,
+                    CanNavigateToQuickAccessDestination(row.destinationPath),
+                    CanUseQuickAccessDestinationActions(row.destinationPath)});
             }
-
-            const COLORREF rowBackground = BlendColor(palette.actionFieldBackground,
-                                                       palette.paneBackground,
-                                                       themeMode_ == ThemeMode::Dark ? 24 : 12);
-            const COLORREF disabledButtonFill = BlendColor(palette.actionFieldBackground,
-                                                           palette.paneBackground,
-                                                           themeMode_ == ThemeMode::Dark ? 10 : 20);
-            const auto drawActionButton = [&](const RECT& rect,
-                                              const wchar_t* label,
-                                              int buttonIndex,
-                                              bool enabled,
-                                              COLORREF baseFill,
-                                              COLORREF baseText,
-                                              COLORREF enabledBorder)
-            {
-                const bool hot = buttonIndex == quickAccessHotButtonIndex_;
-                const bool pressed = buttonIndex == quickAccessPressedButtonIndex_;
-                const COLORREF fillColor = enabled
-                    ? (pressed ? palette.accent : (hot ? BlendColor(baseFill, palette.accent, 48) : baseFill))
-                    : disabledButtonFill;
-                const COLORREF textColor = enabled ? baseText : palette.mutedText;
-                drawRounded(rect, fillColor, enabled ? enabledBorder : palette.actionStripBorder, 5.0f);
-                const auto buttonBrush = createBrush(textColor);
-                drawText(label, bodyFormat.Get(), rect, buttonBrush.Get());
-            };
-
-            const int savedDC = SaveDC(bufferedDc);
-            IntersectClipRect(bufferedDc,
-                              quickAccessDestinationViewportRect_.left,
-                              quickAccessDestinationViewportRect_.top,
-                              quickAccessDestinationViewportRect_.right,
-                              quickAccessDestinationViewportRect_.bottom);
-            renderTarget->PushAxisAlignedClip(
-                hyperbrowse::render::ToD2DRect(quickAccessDestinationViewportRect_),
-                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
-            {
-                const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
-                const bool rowEnabled = CanNavigateToQuickAccessDestination(row.destinationPath);
-                const bool actionsEnabled = CanUseQuickAccessDestinationActions(row.destinationPath);
-                const bool rowHot = rowEnabled && static_cast<int>(rowIndex) == quickAccessHotRowIndex_;
-                const bool rowPressed = rowEnabled && static_cast<int>(rowIndex) == quickAccessPressedRowIndex_;
-                const COLORREF currentRowBackground = rowPressed
-                    ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 28 : 18)
-                    : (rowHot
-                        ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 20 : 12)
-                        : rowBackground);
-                drawRounded(row.rowRect, currentRowBackground, rowHot ? palette.accent : palette.actionStripBorder, 6.0f);
-
-                RECT labelRect = row.rowRect;
-                labelRect.left += 10;
-                labelRect.top += metrics.labelTopInset;
-                labelRect.right = row.shortcutRect.left - 10;
-                labelRect.bottom = labelRect.top + metrics.labelHeight;
-                const auto rowTextBrush = createBrush(rowEnabled ? palette.text : palette.mutedText);
-                drawText(row.displayLabel, summaryFormat.Get(), labelRect, rowTextBrush.Get());
-
-                RECT metadataRect = row.rowRect;
-                metadataRect.left += 10;
-                metadataRect.top += metrics.metadataTopInset;
-                metadataRect.right = row.copyRect.left - 10;
-                metadataRect.bottom -= metrics.metadataBottomInset;
-                drawText(row.metadataLabel, bodyFormat.Get(), metadataRect, mutedBrush.Get());
-
-                drawActionButton(row.copyRect, L"Copy", static_cast<int>(rowIndex * 3), actionsEnabled,
-                                 palette.accentFill, palette.accentText, palette.accent);
-                drawActionButton(row.moveRect, L"Move", static_cast<int>(rowIndex * 3 + 1), actionsEnabled,
-                                 palette.accentFill, palette.accentText, palette.accent);
-                drawActionButton(row.removeRect, L"x", static_cast<int>(rowIndex * 3 + 2), true,
-                                 BlendColor(rowBackground, palette.actionFieldBackground, themeMode_ == ThemeMode::Dark ? 12 : 20),
-                                 palette.mutedText, palette.actionStripBorder);
-            }
-            renderTarget->PopAxisAlignedClip();
-            RestoreDC(bufferedDc, savedDC);
+            const QuickAccessPainter::State quickAccessState{
+                headerRect,
+                quickAccessDestinationViewportRect_,
+                quickAccessSortButtonRect_,
+                rowStates,
+                metrics,
+                quickAccessSortButtonHot_,
+                quickAccessSortButtonPressed_,
+                quickAccessHotRowIndex_,
+                quickAccessHotButtonIndex_,
+                quickAccessPressedButtonIndex_};
+            const QuickAccessPainter::Palette quickAccessPalette{
+                palette.actionFieldBackground,
+                palette.paneBackground,
+                palette.actionStripBorder,
+                palette.accent,
+                palette.accentFill,
+                palette.accentText,
+                palette.text,
+                palette.mutedText,
+                themeMode_ == ThemeMode::Dark};
+            QuickAccessPainter::PaintD2D(renderTarget.Get(),
+                                         bufferedDc,
+                                         quickAccessState,
+                                         quickAccessPalette,
+                                         summaryFormat.Get(),
+                                         bodyFormat.Get());
         }
         else if (activeRightPaneTab_ == RightPaneTab::QuickSend && !IsRectEmpty(&detailsPanelContentRect_))
         {
@@ -12558,176 +12468,42 @@ namespace hyperbrowse::ui
             {
                 headerRect.right = quickAccessSortButtonRect_.left - kQuickAccessPanelSortButtonGap;
             }
-            render::DrawGdiText(hdc,
-                                detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                L"Quick Actions",
-                                -1,
-                                headerRect,
-                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_SINGLELINE,
-                                palette.mutedText,
-                                palette.paneBackground);
-
-            if (!IsRectEmpty(&quickAccessSortButtonRect_))
+            std::vector<QuickAccessPainter::RowState> rowStates;
+            rowStates.reserve(quickAccessDestinationRows_.size());
+            for (const QuickAccessDestinationRow& row : quickAccessDestinationRows_)
             {
-                const bool hot = quickAccessSortButtonHot_;
-                const bool pressed = quickAccessSortButtonPressed_;
-                if (hot || pressed)
-                {
-                    const COLORREF fillColor = pressed
-                        ? BlendColor(palette.accentFill, palette.accent, themeMode_ == ThemeMode::Dark ? 40 : 18)
-                        : BlendColor(palette.actionFieldBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 28 : 16);
-                    RECT buttonRect = quickAccessSortButtonRect_;
-                    InflateRect(&buttonRect, -1, -1);
-                    HBRUSH buttonBrush = CreateSolidBrush(fillColor);
-                    HPEN buttonPen = CreatePen(PS_SOLID, 1, palette.accent);
-                    const HGDIOBJ oldSortBrush = SelectObject(hdc, buttonBrush);
-                    const HGDIOBJ oldSortPen = SelectObject(hdc, buttonPen);
-                    RoundRect(hdc, buttonRect.left, buttonRect.top, buttonRect.right, buttonRect.bottom, 8, 8);
-                    SelectObject(hdc, oldSortPen);
-                    SelectObject(hdc, oldSortBrush);
-                    DeleteObject(buttonPen);
-                    DeleteObject(buttonBrush);
-                }
-
-                HDC iconDC = toolbarIconLibrary_ ? CreateCompatibleDC(hdc) : nullptr;
-                if (toolbarIconLibrary_ && iconDC)
-                {
-                    const COLORREF iconColor = hot || pressed ? palette.accentText : palette.mutedText;
-                    const int iconSize = 14;
-                    const int iconX = quickAccessSortButtonRect_.left
-                        + ((quickAccessSortButtonRect_.right - quickAccessSortButtonRect_.left) - iconSize) / 2;
-                    const int iconY = quickAccessSortButtonRect_.top
-                        + ((quickAccessSortButtonRect_.bottom - quickAccessSortButtonRect_.top) - iconSize) / 2;
-                    const HBITMAP sortBitmap = toolbarIconLibrary_->GetBitmap("sort", iconSize, iconColor);
-                    AlphaBlendBitmap(hdc, iconDC, sortBitmap, iconX, iconY, iconSize, iconSize);
-                }
-                if (iconDC)
-                {
-                    DeleteDC(iconDC);
-                }
+                rowStates.push_back(QuickAccessPainter::RowState{
+                    &row,
+                    CanNavigateToQuickAccessDestination(row.destinationPath),
+                    CanUseQuickAccessDestinationActions(row.destinationPath)});
             }
-
-            const COLORREF rowBackground = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 24 : 12);
-            const COLORREF rowBorder = palette.actionStripBorder;
-            const COLORREF enabledButtonFill = palette.accentFill;
-            const COLORREF enabledButtonText = palette.accentText;
-            const COLORREF disabledButtonFill = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 10 : 20);
-
-            auto drawActionButton = [&](const RECT& rect,
-                                        const wchar_t* label,
-                                        int buttonIndex,
-                                        bool enabled,
-                                        COLORREF baseFill,
-                                        COLORREF baseText,
-                                        COLORREF enabledBorder)
-            {
-                const bool hot = buttonIndex == quickAccessHotButtonIndex_;
-                const bool pressed = buttonIndex == quickAccessPressedButtonIndex_;
-                const COLORREF fillColor = enabled
-                    ? (pressed ? palette.accent : (hot ? BlendColor(baseFill, palette.accent, 48) : baseFill))
-                    : disabledButtonFill;
-                const COLORREF textColor = enabled ? baseText : palette.mutedText;
-
-                HBRUSH buttonBrush = CreateSolidBrush(fillColor);
-                HPEN buttonPen = CreatePen(PS_SOLID, 1, enabled ? enabledBorder : rowBorder);
-                const HGDIOBJ oldBrush = SelectObject(hdc, buttonBrush);
-                const HGDIOBJ oldButtonPen = SelectObject(hdc, buttonPen);
-                RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, 10, 10);
-                SelectObject(hdc, oldButtonPen);
-                SelectObject(hdc, oldBrush);
-                DeleteObject(buttonPen);
-                DeleteObject(buttonBrush);
-
-                RECT textRect = rect;
-                render::DrawGdiText(hdc,
-                                    detailsPanelBodyFont_ ? detailsPanelBodyFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                    label,
-                                    -1,
-                                    textRect,
-                                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
-                                    textColor,
-                                    fillColor);
-            };
-
-            const int savedDC = SaveDC(hdc);
-            IntersectClipRect(hdc,
-                              quickAccessDestinationViewportRect_.left,
-                              quickAccessDestinationViewportRect_.top,
-                              quickAccessDestinationViewportRect_.right,
-                              quickAccessDestinationViewportRect_.bottom);
-            for (std::size_t rowIndex = 0; rowIndex < quickAccessDestinationRows_.size(); ++rowIndex)
-            {
-                const QuickAccessDestinationRow& row = quickAccessDestinationRows_[rowIndex];
-                const bool rowEnabled = CanNavigateToQuickAccessDestination(row.destinationPath);
-                const bool actionsEnabled = CanUseQuickAccessDestinationActions(row.destinationPath);
-                const bool rowHot = rowEnabled && static_cast<int>(rowIndex) == quickAccessHotRowIndex_;
-                const bool rowPressed = rowEnabled && static_cast<int>(rowIndex) == quickAccessPressedRowIndex_;
-                const COLORREF currentRowBackground = rowPressed
-                    ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 28 : 18)
-                    : (rowHot
-                        ? BlendColor(rowBackground, palette.accentFill, themeMode_ == ThemeMode::Dark ? 20 : 12)
-                        : rowBackground);
-                HBRUSH rowBrush = CreateSolidBrush(currentRowBackground);
-                HPEN rowPen = CreatePen(PS_SOLID, 1, rowHot ? palette.accent : rowBorder);
-                const HGDIOBJ oldBrush = SelectObject(hdc, rowBrush);
-                const HGDIOBJ oldRowPen = SelectObject(hdc, rowPen);
-                RoundRect(hdc, row.rowRect.left, row.rowRect.top, row.rowRect.right, row.rowRect.bottom, 12, 12);
-                SelectObject(hdc, oldRowPen);
-                SelectObject(hdc, oldBrush);
-                DeleteObject(rowPen);
-                DeleteObject(rowBrush);
-
-                RECT labelRect = row.rowRect;
-                labelRect.left += 10;
-                labelRect.top += metrics.labelTopInset;
-                labelRect.right = row.shortcutRect.left - 10;
-                labelRect.bottom = labelRect.top + metrics.labelHeight;
-                render::DrawGdiText(hdc,
-                                    detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                    row.displayLabel.c_str(),
-                                    -1,
-                                    labelRect,
-                                    DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-                                    rowEnabled ? palette.text : palette.mutedText,
-                                    currentRowBackground);
-
-                RECT metadataRect = row.rowRect;
-                metadataRect.left += 10;
-                metadataRect.top += metrics.metadataTopInset;
-                metadataRect.right = row.copyRect.left - 10;
-                metadataRect.bottom -= metrics.metadataBottomInset;
-                render::DrawGdiText(hdc,
-                                    detailsPanelBodyFont_ ? detailsPanelBodyFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                    row.metadataLabel.c_str(),
-                                    -1,
-                                    metadataRect,
-                                    DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-                                    palette.mutedText,
-                                    currentRowBackground);
-
-                drawActionButton(row.copyRect,
-                                 L"Copy",
-                                 static_cast<int>(rowIndex * 3),
-                                 actionsEnabled,
-                                 enabledButtonFill,
-                                 enabledButtonText,
-                                 palette.accent);
-                drawActionButton(row.moveRect,
-                                 L"Move",
-                                 static_cast<int>(rowIndex * 3 + 1),
-                                 actionsEnabled,
-                                 enabledButtonFill,
-                                 enabledButtonText,
-                                 palette.accent);
-                drawActionButton(row.removeRect,
-                                 L"x",
-                                 static_cast<int>(rowIndex * 3 + 2),
-                                 true,
-                                 BlendColor(rowBackground, palette.actionFieldBackground, themeMode_ == ThemeMode::Dark ? 12 : 20),
-                                 palette.mutedText,
-                                 rowBorder);
-            }
-            RestoreDC(hdc, savedDC);
+            const QuickAccessPainter::State quickAccessState{
+                headerRect,
+                quickAccessDestinationViewportRect_,
+                quickAccessSortButtonRect_,
+                rowStates,
+                metrics,
+                quickAccessSortButtonHot_,
+                quickAccessSortButtonPressed_,
+                quickAccessHotRowIndex_,
+                quickAccessHotButtonIndex_,
+                quickAccessPressedButtonIndex_};
+            const QuickAccessPainter::Palette quickAccessPalette{
+                palette.actionFieldBackground,
+                palette.paneBackground,
+                palette.actionStripBorder,
+                palette.accent,
+                palette.accentFill,
+                palette.accentText,
+                palette.text,
+                palette.mutedText,
+                themeMode_ == ThemeMode::Dark};
+            QuickAccessPainter::PaintGdi(hdc,
+                                         quickAccessState,
+                                         quickAccessPalette,
+                                         detailsPanelSummaryFont_,
+                                         detailsPanelBodyFont_,
+                                         toolbarIconLibrary_.get());
         }
         else if (activeRightPaneTab_ == RightPaneTab::QuickSend && !IsRectEmpty(&detailsPanelContentRect_))
         {

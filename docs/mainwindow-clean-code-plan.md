@@ -352,3 +352,9 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   into `src/ui/DetailsPanelChromePainter.*`. MainWindow retains interaction
   state, panel composition, and invalidation while the painter consumes
   explicit rectangles, interaction flags, palette values, and text resources.
+- [x] Extract populated Quick Actions header, sort control, destination rows,
+  and row action-button GDI and Direct2D painting into
+  `src/ui/QuickAccessPainter.*`. MainWindow retains destination-validity
+  policy, interaction state, clipping geometry, and icon-library ownership
+  while the painter consumes explicit row states, layout metrics, palette,
+  and text resources.
