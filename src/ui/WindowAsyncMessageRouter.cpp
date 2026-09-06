@@ -28,6 +28,12 @@ namespace hyperbrowse::ui
 
     void WindowAsyncMessageRouter::Configure(Handlers handlers)
     {
+        Configure(MessageIds{}, std::move(handlers));
+    }
+
+    void WindowAsyncMessageRouter::Configure(MessageIds messageIds, Handlers handlers)
+    {
+        messageIds_ = messageIds;
         handlers_ = std::move(handlers);
     }
 
@@ -36,6 +42,24 @@ namespace hyperbrowse::ui
         WPARAM wParam,
         LPARAM lParam) const
     {
+        if (messageIds_.externalLaunch != 0 && message == messageIds_.externalLaunch)
+        {
+            return Invoke(handlers_.onExternalLaunch, lParam);
+        }
+        if (messageIds_.memoryPressureSampled != 0 && message == messageIds_.memoryPressureSampled)
+        {
+            return Invoke(handlers_.onMemoryPressureSampled, lParam);
+        }
+        if (messageIds_.persistentThumbnailCacheMaintenance != 0
+            && message == messageIds_.persistentThumbnailCacheMaintenance)
+        {
+            return Invoke(handlers_.onPersistentThumbnailCacheMaintenance, wParam);
+        }
+        if (messageIds_.deferredMenuState != 0 && message == messageIds_.deferredMenuState)
+        {
+            return Invoke(handlers_.onDeferredMenuState);
+        }
+
         switch (message)
         {
         case FolderLoadCoordinator::kEnumerationMessageId:

@@ -53,6 +53,7 @@
 #include "ui/RightPaneHitTester.h"
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
+#include "ui/MainWindowDialogState.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
@@ -81,6 +82,25 @@ using namespace hyperbrowse::ui::command_ids;
 
 namespace
 {
+    using hyperbrowse::ui::dialog_detail::AboutDialogState;
+    using hyperbrowse::ui::dialog_detail::AboutDialogLinkPalette;
+    using hyperbrowse::ui::dialog_detail::ConsolidatedSettingsControl;
+    using hyperbrowse::ui::dialog_detail::ConsolidatedSettingsDialogState;
+    using hyperbrowse::ui::dialog_detail::ConsolidatedSettingsPage;
+    using hyperbrowse::ui::dialog_detail::EscapeKeyBehaviorOption;
+    using hyperbrowse::ui::dialog_detail::ExperimentalSettingsDialogResult;
+    using hyperbrowse::ui::dialog_detail::ExperimentalSettingsDialogState;
+    using hyperbrowse::ui::dialog_detail::ExperimentalSettingsLabel;
+    using hyperbrowse::ui::dialog_detail::FileAssociationsDialogLayoutMetrics;
+    using hyperbrowse::ui::dialog_detail::FileAssociationsDialogState;
+    using hyperbrowse::ui::dialog_detail::ImageInformationDialogState;
+    using hyperbrowse::ui::dialog_detail::PerformanceSettingsDialogLayoutMetrics;
+    using hyperbrowse::ui::dialog_detail::PerformanceSettingsDialogState;
+    using hyperbrowse::ui::dialog_detail::ShortcutReferenceState;
+    using hyperbrowse::ui::dialog_detail::SlideshowSettingsDialogLayoutMetrics;
+    using hyperbrowse::ui::dialog_detail::SlideshowSettingsDialogState;
+    using hyperbrowse::ui::dialog_detail::SlideshowTransitionOption;
+
     thread_local hyperbrowse::ui::MainWindow* g_commandBarMenuFilterWindow = nullptr;
 
     constexpr wchar_t kRegistryValueLeftPaneWidth[] = L"LeftPaneWidth";
@@ -361,62 +381,6 @@ namespace
     constexpr int kConsolidatedSettingsButtonHeight = 30;
     constexpr int kConsolidatedSettingsButtonGap = 10;
 
-    enum class ConsolidatedSettingsPage : std::size_t
-    {
-        Slideshow = 0,
-        Viewer,
-        Appearance,
-        Performance,
-        Behavior,
-        Count,
-    };
-
-    enum class ConsolidatedSettingsControl : std::size_t
-    {
-        TransitionEnabled,
-        TransitionStyle,
-        SlideshowDuration,
-        SlideshowDurationSpin,
-        TransitionDuration,
-        TransitionDurationSpin,
-        ViewerWheelZoom,
-        ViewerWheelNavigate,
-        InvertKeyboardPanning,
-        RawPairingEnabled,
-        RawPreferJpeg,
-        RawPreferRaw,
-        SecondaryMonitor,
-        InfoOverlays,
-        FullMetadata,
-        OverlayTextSize,
-        ThemeLight,
-        ThemeDark,
-        AppTextSize,
-        ThumbnailSize,
-        ThumbnailDetails,
-        CompactLayout,
-        DetailsPanel,
-        ResourceProfile,
-        PersistentCache,
-        ThumbnailCache,
-        ThumbnailCacheAutomatic,
-        MetadataCache,
-        MetadataCacheAutomatic,
-        PressureStatus,
-        NvJpeg,
-        LibRawOutOfProcess,
-        RecursiveBrowsing,
-        ShowSubfolders,
-        CloseOnEscape,
-        SingleInstance,
-        EscapeKeyBehavior,
-        WindowedFullMetadata,
-        FullScreenFullMetadata,
-        PrefetchDepth,
-        PrefetchDepthAutomatic,
-        Count,
-    };
-
     constexpr int ConsolidatedSettingsControlId(ConsolidatedSettingsControl control)
     {
         return kConsolidatedSettingsFirstControlId + static_cast<int>(control);
@@ -568,351 +532,6 @@ namespace
         ReleaseStgMedium(&storage);
         return paths;
     }
-
-    struct AboutDialogState
-    {
-        HWND ownerWindow{};
-        HWND githubButton{};
-        HWND supportButton{};
-        HWND okButton{};
-        int githubButtonWidth{};
-        int supportButtonWidth{};
-        HINSTANCE instance{};
-        HFONT titleFont{};
-        HFONT subtitleFont{};
-        HFONT bodyFont{};
-        HFONT footerFont{};
-        HICON heroIcon{};
-        HICON windowIcon{};
-        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
-        bool darkMode{};
-        bool done{};
-        COLORREF background{};
-        COLORREF headerBackground{};
-        COLORREF footerBackground{};
-        COLORREF panelBackground{};
-        COLORREF border{};
-        COLORREF text{};
-        COLORREF mutedText{};
-        COLORREF accent{};
-        std::wstring title;
-        std::wstring subtitle;
-        std::wstring intro;
-        std::wstring bodyHeading;
-        std::wstring bodyContent;
-        std::wstring footer;
-        std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> brandArt;
-        Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget;
-        Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dBrandArtBitmap;
-        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dTitleFormat;
-        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dSubtitleFormat;
-        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dBodyFormat;
-        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dFooterFormat;
-    };
-
-    struct ShortcutReferenceState
-    {
-        HWND ownerWindow{};
-        HWND* windowSlot{};
-        HWND subtitleWindow{};
-        HWND listWindow{};
-        HWND closeButton{};
-        HFONT bodyFont{};
-        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
-        UINT dpi{96};
-        bool darkMode{};
-        COLORREF background{};
-        COLORREF listBackground{};
-        COLORREF text{};
-        COLORREF mutedText{};
-        COLORREF border{};
-        HBRUSH backgroundBrush{};
-        HBRUSH listBackgroundBrush{};
-    };
-
-    struct PerformanceSettingsDialogState
-    {
-        HWND ownerWindow{};
-        HFONT titleFont{};
-        HFONT bodyFont{};
-        hyperbrowse::ui::DialogTheme theme{};
-        HBRUSH backgroundBrush{};
-        HBRUSH fieldBrush{};
-        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
-        HWND instructionWindow{};
-        HWND summaryWindow{};
-        HWND thumbnailEditWindow{};
-        HWND thumbnailAutoCheckWindow{};
-        HWND metadataEditWindow{};
-        HWND metadataAutoCheckWindow{};
-        HWND pressureStatusCheckWindow{};
-        HWND okButton{};
-        std::wstring title;
-        std::wstring instruction;
-        std::wstring summary;
-        std::wstring footnote;
-        std::wstring thumbnailCacheText;
-        std::wstring metadataCacheText;
-        std::size_t thumbnailCacheCapacityOverrideBytes{};
-        std::size_t metadataCacheCapacityOverrideEntries{};
-        bool thumbnailCacheAutomatic{true};
-        bool metadataCacheAutomatic{true};
-        bool showPressureStateInStatusBar{};
-        bool accepted{};
-        bool done{};
-    };
-
-    struct FileAssociationsDialogState
-    {
-        HWND ownerWindow{};
-        HFONT bodyFont{};
-        hyperbrowse::ui::DialogTheme theme{};
-        HBRUSH backgroundBrush{};
-        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
-        HWND firstFormatWindow{};
-        HWND okButton{};
-        std::vector<HWND> formatCheckWindows;
-        std::vector<HWND> formatDescriptionWindows;
-        std::vector<bool> initialDefaults;
-        std::vector<bool> checkedDefaults;
-        std::vector<bool> selectedDefaults;
-        std::wstring title;
-        std::wstring instruction;
-        std::wstring footnote;
-        bool darkMode{};
-        bool accepted{};
-        bool done{};
-    };
-
-    struct FileAssociationsDialogLayoutMetrics
-    {
-        int margin{};
-        int contentWidth{};
-        int instructionTop{};
-        int instructionHeight{};
-        int actionTop{};
-        int actionGap{};
-        int selectAllWidth{};
-        int clearAllWidth{};
-        int defaultAppsButtonWidth{};
-        int buttonHeight{};
-        int defaultAppsButtonHeight{};
-        int formatGroupTop{};
-        int formatGroupHeight{};
-        int formatRowHeight{};
-        int formatGroupContentTop{};
-        int footnoteTop{};
-        int footnoteHeight{};
-        int dividerTop{};
-        int buttonTop{};
-        int buttonRowHeight{};
-        int minimumClientHeight{};
-    };
-
-    struct PerformanceSettingsDialogLayoutMetrics
-    {
-        int margin{};
-        int contentLeft{};
-        int contentWidth{};
-        int sectionInset{};
-        int controlGap{};
-        int titleTop{};
-        int titleHeight{};
-        int instructionTop{};
-        int instructionHeight{};
-        int summaryGroupTop{};
-        int summaryInnerWidth{};
-        int summaryHeight{};
-        int summaryGroupHeight{};
-        int cacheGroupTop{};
-        int cacheGroupHeight{};
-        int rowLabelLeft{};
-        int rowValueLeft{};
-        int rowUnitLeft{};
-        int rowCheckboxLeft{};
-        int labelWidth{};
-        int editWidth{};
-        int unitWidth{};
-        int checkboxWidth{};
-        int rowHeight{};
-        int checkboxHeight{};
-        int firstRowTop{};
-        int secondRowTop{};
-        int pressureStatusTop{};
-        int footnoteTop{};
-        int minimumFootnoteHeight{};
-        int buttonHeight{};
-        int applyButtonWidth{};
-        int cancelButtonWidth{};
-        int minimumClientWidth{};
-        int minimumClientHeight{};
-    };
-
-    struct SlideshowTransitionOption
-    {
-        hyperbrowse::viewer::TransitionStyle style;
-        const wchar_t* label;
-    };
-
-    struct EscapeKeyBehaviorOption
-    {
-        hyperbrowse::viewer::EscapeKeyBehavior behavior;
-        const wchar_t* label;
-    };
-
-    struct SlideshowSettingsDialogState
-    {
-        HWND ownerWindow{};
-        HWND transitionComboWindow{};
-        HWND durationEditWindow{};
-        HWND durationSpinWindow{};
-        HWND transitionDurationEditWindow{};
-        HWND transitionDurationSpinWindow{};
-        HWND okButton{};
-        HFONT bodyFont{};
-        hyperbrowse::ui::DialogTheme theme{};
-        HBRUSH backgroundBrush{};
-        HBRUSH fieldBrush{};
-        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
-        std::wstring title;
-        std::wstring instruction;
-        std::wstring footnote;
-        UINT slideshowDurationMs{3000};
-        UINT transitionDurationMs{350};
-        hyperbrowse::viewer::TransitionStyle transitionStyle{hyperbrowse::viewer::TransitionStyle::Crossfade};
-        int dialogHeight{};
-        bool accepted{};
-        bool done{};
-    };
-
-    struct ConsolidatedSettingsDialogState
-    {
-        HWND ownerWindow{};
-        HINSTANCE instance{};
-        HWND dialogWindow{};
-        HWND tabWindow{};
-        HFONT bodyFont{};
-        hyperbrowse::ui::DialogTheme theme{};
-        HBRUSH backgroundBrush{};
-        HBRUSH fieldBrush{};
-        std::wstring title;
-        std::array<std::vector<HWND>, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> pageControls;
-        std::array<HWND, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controls{};
-        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
-        bool darkTheme{};
-        hyperbrowse::util::ResourceProfile resourceProfile{hyperbrowse::util::ResourceProfile::Balanced};
-        int prefetchDepthOverride{hyperbrowse::util::kAutomaticPrefetchDepth};
-        hyperbrowse::browser::ThumbnailSizePreset thumbnailSizePreset{static_cast<hyperbrowse::browser::ThumbnailSizePreset>(192)};
-        hyperbrowse::viewer::MouseWheelBehavior viewerMouseWheelBehavior{hyperbrowse::viewer::MouseWheelBehavior::Zoom};
-        hyperbrowse::viewer::EscapeKeyBehavior viewerEscapeKeyBehavior{hyperbrowse::viewer::EscapeKeyBehavior::Close};
-            bool invertKeyboardPanning{};
-        hyperbrowse::viewer::TransitionStyle slideshowTransitionStyle{hyperbrowse::viewer::TransitionStyle::Crossfade};
-        hyperbrowse::viewer::InfoOverlayTextSize overlayTextSize{hyperbrowse::viewer::InfoOverlayTextSize::Small};
-        hyperbrowse::browser::RawJpegDisplayPreference pairedRawJpegViewerPreference{hyperbrowse::browser::RawJpegDisplayPreference::Raw};
-        UINT slideshowIntervalMs{3000};
-        UINT slideshowTransitionDurationMs{350};
-        std::size_t thumbnailCacheCapacityOverrideBytes{};
-        std::size_t metadataCacheCapacityOverrideEntries{};
-        bool useSlideshowTransition{};
-        bool infoOverlaysVisible{};
-        bool windowedFullMetadataVisible{};
-        bool fullScreenFullMetadataVisible{};
-        bool compactThumbnailLayout{true};
-        bool thumbnailDetailsVisible{true};
-        bool detailsStripVisible{true};
-        bool recursiveBrowsingEnabled{};
-        bool showSubfoldersInBrowser{};
-        bool rawJpegPairedOperationsEnabled{};
-        bool defaultViewerToSecondaryMonitor{};
-        bool persistentThumbnailCacheEnabled{true};
-        bool showPressureStateInStatusBar{};
-        bool nvJpegEnabled{};
-        bool libRawOutOfProcessEnabled{true};
-        bool closeMainWindowOnEscape{};
-        bool singleInstanceEnabled{};
-        bool secondaryMonitorAvailable{true};
-        bool nvJpegAvailable{};
-        bool libRawAvailable{};
-        std::function<void(const ConsolidatedSettingsDialogState&)> apply;
-        bool accepted{};
-        bool done{};
-    };
-
-    enum class ExperimentalSettingsDialogResult
-    {
-        Unavailable,
-        Cancelled,
-        Accepted,
-    };
-
-    struct ExperimentalSettingsLabel
-    {
-        RECT bounds{};
-        std::wstring text;
-        bool muted{};
-    };
-
-    struct ExperimentalSettingsDialogState
-    {
-        HWND ownerWindow{};
-        HINSTANCE instance{};
-        HWND dialogWindow{};
-        ConsolidatedSettingsDialogState* settings{};
-        Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> renderTarget;
-        Microsoft::WRL::ComPtr<IDWriteTextFormat> bodyFormat;
-        Microsoft::WRL::ComPtr<IDWriteTextFormat> smallFormat;
-        Microsoft::WRL::ComPtr<IDWriteTextFormat> buttonFormat;
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> panelBrush;
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> fieldBrush;
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> borderBrush;
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> textBrush;
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> mutedTextBrush;
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> accentBrush;
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> accentFillBrush;
-        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> buttonTextBrush;
-        HBRUSH editBackgroundBrush{};
-        HFONT controlFont{};
-        std::array<HWND, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> nativeControls{};
-        std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> tabRects{};
-        std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controlRects{};
-        std::array<HWND, 5> numericEdits{};
-        std::array<HWND, 5> numericSpins{};
-        std::vector<ExperimentalSettingsLabel> labels;
-        RECT applyButtonRect{};
-        RECT okButtonRect{};
-        RECT cancelButtonRect{};
-        ConsolidatedSettingsPage page{ConsolidatedSettingsPage::Slideshow};
-        int hoveredControl{-1};
-        int hoveredTab{-1};
-        int pressedControl{-1};
-        bool done{};
-        bool accepted{};
-    };
-
-    struct SlideshowSettingsDialogLayoutMetrics
-    {
-        int margin{};
-        int contentWidth{};
-        int lineHeight{};
-        int instructionHeight{};
-        int labelWidth{};
-        int valueWidth{};
-        int numericEditWidth{};
-        int spinWidth{};
-        int controlHeight{};
-        int rowGap{};
-        int transitionTop{};
-        int durationTop{};
-        int transitionDurationTop{};
-        int footnoteTop{};
-        int footnoteHeight{};
-        int dividerTop{};
-        int buttonTop{};
-        int buttonHeight{};
-        int applyButtonWidth{};
-        int cancelButtonWidth{};
-        int minimumClientHeight{};
-    };
 
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
     bool IsWindows11OrGreater();
@@ -1640,13 +1259,6 @@ namespace
     {
         return darkMode ? RGB(255, 214, 126) : RGB(145, 78, 16);
     }
-
-    struct AboutDialogLinkPalette
-    {
-        COLORREF fill{};
-        COLORREF border{};
-        COLORREF text{};
-    };
 
     AboutDialogLinkPalette BuildAboutDialogLinkPalette(UINT controlId, const AboutDialogState& state, UINT itemState)
     {
@@ -9205,7 +8817,104 @@ namespace hyperbrowse::ui
         messageHandlers.onViewerContextMenuCommand = std::bind_front(&MainWindow::OnViewerContextMenuCommand, this);
         messageHandlers.onViewerDroppedFile = std::bind_front(&MainWindow::OnViewerDroppedFileMessage, this);
         messageHandlers.onViewerClosed = std::bind_front(&MainWindow::OnViewerClosedMessage, this);
-        asyncMessageRouter_.Configure(std::move(messageHandlers));
+        messageHandlers.onExternalLaunch = [this](LPARAM lParam)
+        {
+            std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
+            if (path)
+            {
+                HandleExternalLaunchPath(*path);
+            }
+            return static_cast<LRESULT>(0);
+        };
+        messageHandlers.onMemoryPressureSampled = std::bind_front(&MainWindow::OnMemoryPressureSampleMessage, this);
+        messageHandlers.onPersistentThumbnailCacheMaintenance = std::bind_front(&MainWindow::OnPersistentThumbnailCacheMaintenanceMessage, this);
+        messageHandlers.onDeferredMenuState = [this]()
+        {
+            menuStateRefreshPosted_ = false;
+            if (!menuLoopActive_ && menuStateRefreshPending_)
+            {
+                menuStateRefreshPending_ = false;
+                UpdateMenuState();
+            }
+            return static_cast<LRESULT>(0);
+        };
+        asyncMessageRouter_.Configure(
+            WindowAsyncMessageRouter::MessageIds{
+                kExternalLaunchMessage,
+                kMemoryPressureSampledMessage,
+                kPersistentThumbnailCacheMaintenanceMessage,
+                kDeferredMenuStateMessage},
+            std::move(messageHandlers));
+
+        WindowTimerRouter::Handlers timerHandlers;
+        timerHandlers.onFileOperationShutdown = [this]() -> std::optional<LRESULT>
+        {
+            if (!closePending_)
+            {
+                return std::nullopt;
+            }
+
+            const ULONGLONG elapsed = closePendingSinceTick_ == 0
+                ? 0
+                : GetTickCount64() - closePendingSinceTick_;
+            if (elapsed >= kFileOperationShutdownNoticeDelayMs && !closeWaitNoticeShown_)
+            {
+                closeWaitNoticeShown_ = true;
+                util::IncrementCounter(L"file_operation.shutdown.wait_notice");
+                if (fileOperationActive_)
+                {
+                    activeFileOperationLabel_ = L"Waiting for Windows to finish file operation";
+                }
+                else if (batchConvertActive_)
+                {
+                    activeFileOperationLabel_ = L"Waiting for conversion to finish";
+                }
+                UpdateStatusText();
+            }
+            return static_cast<LRESULT>(0);
+        };
+        timerHandlers.onFolderPresentation = [this]() -> std::optional<LRESULT>
+        {
+            if (!folderLoadCoordinator_)
+            {
+                return std::nullopt;
+            }
+
+            folderLoadCoordinator_->HandlePresentationTimer();
+            return static_cast<LRESULT>(0);
+        };
+        timerHandlers.onMemoryPressure = [this]() -> std::optional<LRESULT>
+        {
+            if (memoryPressureTimerId_ == 0)
+            {
+                return std::nullopt;
+            }
+
+            QueueMemoryPressureSample();
+            return static_cast<LRESULT>(0);
+        };
+        timerHandlers.onDisplaySurfaceRecovery = [this]() -> std::optional<LRESULT>
+        {
+            if (displaySurfaceRecoveryTimerId_ == 0)
+            {
+                return std::nullopt;
+            }
+
+            displaySurfaceRecoveryPolicy_.AdvanceRetry();
+            RecoverDisplaySurfaces(displaySurfaceRecoveryPolicy_.ShouldRelayout());
+            if (displaySurfaceRecoveryPolicy_.Exhausted())
+            {
+                StopDisplaySurfaceRecoveryRetries();
+            }
+            return static_cast<LRESULT>(0);
+        };
+        timerRouter_.Configure(
+            WindowTimerRouter::TimerIds{
+                kFileOperationShutdownTimerId,
+                FolderLoadCoordinator::kPresentationTimerId,
+                kMemoryPressureTimerId,
+                kDisplaySurfaceRecoveryTimerId},
+            std::move(timerHandlers));
 
         FileCommandController::Handlers fileCommandHandlers;
         fileCommandHandlers.onOpenRecentFolder = [this](std::size_t index)
@@ -15850,28 +15559,6 @@ namespace hyperbrowse::ui
         MessageBoxW(hwnd_, L"Diagnostics timings and counters were reset.", L"Diagnostics", MB_OK | MB_ICONINFORMATION);
     }
 
-    struct ImageInformationDialogState
-    {
-        HWND ownerWindow{};
-        HINSTANCE instance{};
-        HWND filenameWindow{};
-        HWND contentWindow{};
-        HWND metadataWindow{};
-        HWND metadataToggleButton{};
-        HWND okButton{};
-        HFONT titleFont{};
-        HFONT bodyFont{};
-        hyperbrowse::ui::DialogTheme theme{};
-        HBRUSH backgroundBrush{};
-        HBRUSH fieldBrush{};
-        hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
-        std::wstring filename;
-        std::wstring content;
-        std::wstring metadata;
-        bool expanded{};
-        bool done{};
-    };
-
     constexpr wchar_t kImageInformationDialogClassName[] = L"HyperBrowseImageInformationDialog";
     constexpr int kImageInformationDialogWidth = 640;
     constexpr int kImageInformationDialogCollapsedHeight = 370;
@@ -22459,15 +22146,6 @@ namespace hyperbrowse::ui
             break;
         case WM_DROPFILES:
             return OnDropFiles(reinterpret_cast<HDROP>(wParam));
-        case kExternalLaunchMessage:
-        {
-            std::unique_ptr<std::wstring> path(reinterpret_cast<std::wstring*>(lParam));
-            if (path)
-            {
-                HandleExternalLaunchPath(*path);
-            }
-            return 0;
-        }
         case WM_SETCURSOR:
         {
             POINT point{};
@@ -22514,18 +22192,6 @@ namespace hyperbrowse::ui
             }
             break;
         }
-        case kMemoryPressureSampledMessage:
-            return OnMemoryPressureSampleMessage(lParam);
-        case kPersistentThumbnailCacheMaintenanceMessage:
-            return OnPersistentThumbnailCacheMaintenanceMessage(wParam);
-        case kDeferredMenuStateMessage:
-            menuStateRefreshPosted_ = false;
-            if (!menuLoopActive_ && menuStateRefreshPending_)
-            {
-                menuStateRefreshPending_ = false;
-                UpdateMenuState();
-            }
-            return 0;
         case WM_MEASUREITEM:
         {
             auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
@@ -22554,47 +22220,9 @@ namespace hyperbrowse::ui
         case WM_MENUCHAR:
             return HandleMenuCharMessage(wParam, lParam);
         case WM_TIMER:
-            if (wParam == kFileOperationShutdownTimerId && closePending_)
+            if (const std::optional<LRESULT> result = timerRouter_.Handle(static_cast<UINT_PTR>(wParam)))
             {
-                const ULONGLONG elapsed = closePendingSinceTick_ == 0
-                    ? 0
-                    : GetTickCount64() - closePendingSinceTick_;
-                if (elapsed >= kFileOperationShutdownNoticeDelayMs && !closeWaitNoticeShown_)
-                {
-                    closeWaitNoticeShown_ = true;
-                    util::IncrementCounter(L"file_operation.shutdown.wait_notice");
-                    if (fileOperationActive_)
-                    {
-                        activeFileOperationLabel_ = L"Waiting for Windows to finish file operation";
-                    }
-                    else if (batchConvertActive_)
-                    {
-                        activeFileOperationLabel_ = L"Waiting for conversion to finish";
-                    }
-                    UpdateStatusText();
-                }
-                return 0;
-            }
-            if (wParam == FolderLoadCoordinator::kPresentationTimerId
-                && folderLoadCoordinator_)
-            {
-                folderLoadCoordinator_->HandlePresentationTimer();
-                return 0;
-            }
-            if (wParam == kMemoryPressureTimerId && memoryPressureTimerId_ != 0)
-            {
-                QueueMemoryPressureSample();
-                return 0;
-            }
-            if (wParam == kDisplaySurfaceRecoveryTimerId && displaySurfaceRecoveryTimerId_ != 0)
-            {
-                displaySurfaceRecoveryPolicy_.AdvanceRetry();
-                RecoverDisplaySurfaces(displaySurfaceRecoveryPolicy_.ShouldRelayout());
-                if (displaySurfaceRecoveryPolicy_.Exhausted())
-                {
-                    StopDisplaySurfaceRecoveryRetries();
-                }
-                return 0;
+                return *result;
             }
             break;
         case WM_MOUSELEAVE:

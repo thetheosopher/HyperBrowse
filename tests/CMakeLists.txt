@@ -1,5 +1,6 @@
 add_executable(HyperBrowseTests
     smoke.cpp
+    smoke_policy.cpp
     ../src/app/Application.cpp
 )
 

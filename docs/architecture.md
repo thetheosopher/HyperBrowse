@@ -7,7 +7,11 @@ This document describes the current implementation. The planning documents in `s
 `HyperBrowseCore` is the static library shared by the application and smoke tests.
 `HyperBrowse.exe` owns application startup, the Win32 message loop, and the main user-facing windows.
 `HyperBrowseRawHelper.exe` is the optional out-of-process RAW decode helper.
-`HyperBrowseTests.exe` runs the smoke and integration checks registered by `tests/CMakeLists.txt`.
+`HyperBrowseTests.exe` runs the smoke and integration checks registered by
+`tests/CMakeLists.txt`. Its shared Win32/service harness remains in
+`tests/smoke.cpp`, while deterministic controller, layout, presentation-policy,
+and router scenarios live in `tests/smoke_policy.cpp` behind the same
+executable and command-line selectors.
 
 The core library is organized by responsibility:
 
@@ -82,6 +86,10 @@ controller:
 	batch-rename preview dialogs. `MainWindow` supplies the owner HWND, theme,
 	text-size, and operation-specific inputs, then consumes only the returned
 	values.
+- `ui/MainWindowDialogState.h` owns the private state records and settings
+	enums shared by MainWindow's remaining custom dialogs. The header is an
+	implementation detail of the dialog procedures; MainWindow retains dialog
+	creation, modal-loop ownership, and result application.
 - `ui/FolderEnumerationCoordinator.*` owns folder-enumeration request
 	lifecycle, cancellation, stale-result filtering, first-batch presentation,
 	50 ms presentation coalescing, and completion/failure settlement. It calls
@@ -101,10 +109,14 @@ controller:
 	refresh, and presentation callbacks; the coordinator does not own HWNDs or
 	folder-watch service lifetime.
 - `ui/WindowAsyncMessageRouter.*` owns the message-ID table for asynchronous
-	folder, browser-pane, service, and viewer notifications. It invokes explicit
-	callbacks configured by MainWindow and returns no result for messages outside
-	that table; MainWindow retains private maintenance messages and all callback
-	policy.
+	folder, browser-pane, service, viewer, and private MainWindow notifications.
+	It invokes explicit callbacks configured by MainWindow, owns cleanup of the
+	heap-owned external-launch payload, and returns no result for messages
+	outside that table.
+- `ui/WindowTimerRouter.*` owns timer-ID dispatch for shutdown notices, folder
+	presentation, memory-pressure sampling, and display-surface recovery. The
+	callbacks retain MainWindow-owned state checks and side effects; unknown or
+	inactive timers fall through to the normal window procedure behavior.
 - `ui/MenuMessageHandling.*` owns the pure `WM_MENUCHAR` owner-draw mnemonic
 	selection policy and the shared `MenuDrawItemData` record. MainWindow retains
 	menu construction, measurement, painting, and command policy.
@@ -172,6 +184,9 @@ controller:
 These helpers are registered as explicit `HyperBrowseCore` translation units,
 and pure policy behavior is covered by deterministic smoke scenarios. OLE
 registration is revoked before the callback-owning drop target is released.
+`WindowProc` only associates the HWND with its `MainWindow` instance and
+forwards messages; asynchronous private messages and timers are routed through
+the explicit collaborators above before synchronous input and paint handling.
 
 ## Rendering
 

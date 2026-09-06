@@ -14,7 +14,7 @@ shutdown. Dialog, file-operation policy, folder-enumeration coordination,
 folder-tree coordination, folder-watch policy, async message routing, menu
 message policy, file-command dispatch, view-command dispatch, command-bar
 policy, dynamic menu construction, and histogram policy extractions have
-  reduced the current translation unit to 23,006 lines. The folder-tree slice places node
+  reduced the current translation unit to 22,634 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -252,4 +252,21 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `src/ui/DisplaySurfaceRecoveryPolicy.*`; MainWindow retains timer, resource,
   invalidation, and shutdown orchestration. Deterministic smoke coverage
   verifies first-attempt relayout, retry sequencing, reset, and exhaustion.
-  The current `MainWindow.cpp` size is 23,006 lines.
+  The current `MainWindow.cpp` size is 23,044 lines.
+- [x] Extend `src/ui/WindowAsyncMessageRouter.*` to own configured private
+  MainWindow message IDs, including external-launch payload cleanup and deferred
+  menu-state forwarding. Extract timer-ID dispatch into
+  `src/ui/WindowTimerRouter.*`; MainWindow retains callback state checks and
+  side effects. Deterministic smoke coverage verifies private-message argument
+  forwarding, unknown-message fall-through, legacy zero-ID configuration, timer
+  dispatch, and inactive-handler behavior.
+- [x] Move the remaining custom-dialog state records, layout metrics, option
+  records, and consolidated-settings enums into the internal
+  `src/ui/MainWindowDialogState.h` header. MainWindow keeps dialog procedures,
+  modal-loop ownership, resource lifetime, and result application. This reduced
+  `MainWindow.cpp` to 22,634 lines without changing runtime paths.
+- [x] Split deterministic policy smoke scenarios into
+  `tests/smoke_policy.cpp` with a small declaration header while retaining one
+  `HyperBrowseTests` executable, all existing CTest entries, and all focused
+  command-line selectors. The shared Win32/service harness remains in
+  `tests/smoke.cpp`. The complete Debug and Release smoke suites pass.

@@ -153,6 +153,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/ToolbarIconLibrary.cpp
     src/ui/ViewCommandController.cpp
     src/ui/WindowAsyncMessageRouter.cpp
+    src/ui/WindowTimerRouter.cpp
     src/util/Diagnostics.cpp
     src/util/Log.cpp
     src/viewer/ViewerWindow.cpp

@@ -15,6 +15,14 @@ namespace hyperbrowse::ui
         using LParamHandler = std::function<LRESULT(LPARAM)>;
         using WParamLParamHandler = std::function<LRESULT(WPARAM, LPARAM)>;
 
+        struct MessageIds
+        {
+            UINT externalLaunch{};
+            UINT memoryPressureSampled{};
+            UINT persistentThumbnailCacheMaintenance{};
+            UINT deferredMenuState{};
+        };
+
         struct Handlers
         {
             LParamHandler onFolderEnumeration;
@@ -37,6 +45,10 @@ namespace hyperbrowse::ui
             WParamHandler onViewerContextMenuCommand;
             LParamHandler onViewerDroppedFile;
             NoArgumentHandler onViewerClosed;
+            LParamHandler onExternalLaunch;
+            LParamHandler onMemoryPressureSampled;
+            WParamHandler onPersistentThumbnailCacheMaintenance;
+            NoArgumentHandler onDeferredMenuState;
         };
 
         WindowAsyncMessageRouter() = default;
@@ -44,9 +56,11 @@ namespace hyperbrowse::ui
         WindowAsyncMessageRouter& operator=(const WindowAsyncMessageRouter&) = delete;
 
         void Configure(Handlers handlers);
+        void Configure(MessageIds messageIds, Handlers handlers);
         std::optional<LRESULT> Handle(UINT message, WPARAM wParam, LPARAM lParam) const;
 
     private:
+        MessageIds messageIds_;
         Handlers handlers_;
     };
 }

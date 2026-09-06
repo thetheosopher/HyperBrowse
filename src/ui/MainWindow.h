@@ -36,6 +36,7 @@
 #include "ui/QuickSend.h"
 #include "ui/ViewCommandController.h"
 #include "ui/WindowAsyncMessageRouter.h"
+#include "ui/WindowTimerRouter.h"
 
 namespace hyperbrowse::browser
 {
@@ -552,6 +553,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<FolderWatchChangeCoordinator> folderWatchChangeCoordinator_;
         std::unique_ptr<FolderTreeController> folderTreeController_;
         WindowAsyncMessageRouter asyncMessageRouter_;
+        WindowTimerRouter timerRouter_;
         FileCommandController fileCommandController_;
         ViewCommandController viewCommandController_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
