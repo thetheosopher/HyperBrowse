@@ -25,13 +25,15 @@ HyperBrowse is branded around speed. The current GDI rendering pipeline is funct
 
 ## 2. Current State
 
-- All rendering: GDI (`StretchBlt`, `PlgBlt`, `AlphaBlend`, `FillRect`, `RoundRect`, `DrawText`)
-- Double-buffered: `CreateCompatibleDC`/`CreateCompatibleBitmap` + `BitBlt` in both BrowserPane and ViewerWindow
-- Image format: HBITMAP (DIB section, BGRA32) throughout
-- `d2d1` and `d3d11` already linked in CMakeLists.txt but unused
-- No DPI awareness manifest, no `WM_DPICHANGED`, no DPI scaling
-- No animation or transitions anywhere (by design: "prefer low latency over animation")
-- Theme system: `ThemePalette` struct with light/dark color sets, applied via GDI brushes/pens
+- Direct2D/DirectWrite rendering is shipped in BrowserPane and ViewerWindow, including thumbnail cells, details presentation, full-image compositing, overlays, and transitions.
+- `D2DRenderer` provides shared factory, render-target, bitmap-conversion, and text-format helpers; the owning windows retain their own device-dependent resources.
+- MainWindow shell and dialog paths retain GDI rendering where that is still the simplest compatible Win32 path.
+- Image decode and cache compatibility still use BGRA32/HBITMAP representations at the decode boundary; D2D bitmaps are created for presentation as needed.
+- `d2d1`, `dwrite`, and `d3d11` are active link dependencies, with WARP/device-loss recovery paths in the renderer.
+- Per-monitor DPI v2, `WM_DPICHANGED`, display-change recovery, and DPI-scaled layout/text paths are implemented.
+- The original all-GDI baseline and the Phase 0 through Phase 2 migration work are historical context, not the current implementation state.
+
+The remaining migration work is deliberately limited to evaluating additional shell surfaces and profiling any further GPU effects. It is not a prerequisite for the current browser/viewer rendering path.
 
 ---
 

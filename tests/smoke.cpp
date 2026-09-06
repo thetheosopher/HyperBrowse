@@ -1154,6 +1154,39 @@ namespace
         Expect(state->enumerationResult.items.front().fileName == L"picked.png", "Cancellation scenario returned the wrong final file");
         Expect(state->enumerationResult.items.front().fileType == L"PNG", "Enumeration did not capture the file type field");
         Expect(state->enumerationResult.items.front().modifiedTimestampUtc != 0, "Enumeration did not capture the modified timestamp field");
+        Expect(PumpMessagesUntil([&]()
+        {
+            return service.ActiveTaskCount() == 0 && service.PendingTaskCount() == 0;
+        }, 1000), "Folder enumeration service retained work after completion");
+        Expect(service.RejectedTaskCount() == 0,
+               "Folder enumeration service rejected work during the focused scenario");
+        Expect(service.CancellationCount() >= 1,
+               "Folder enumeration service did not record the superseded request");
+
+        const std::uint64_t cancellationCountBeforeBurst = service.CancellationCount();
+        for (int index = 0; index < 31; ++index)
+        {
+            service.EnumerateFolderAsync(hwnd, slow.Root().wstring(), true);
+            Expect(service.ActiveTaskCount() <= 2 && service.PendingTaskCount() <= 2,
+                   "Rapid folder navigation exceeded the bounded enumeration capacity");
+        }
+        ResetEnumerationResult(state);
+        state->expectedRequestId = service.EnumerateFolderAsync(hwnd, quick.Root().wstring(), false);
+        Expect(PumpMessagesUntil([&]() { return state->enumerationResult.completed || state->enumerationResult.failed; }, 5000),
+               "Rapid folder navigation did not complete the latest request");
+        Expect(!state->enumerationResult.failed && state->enumerationResult.totalCount == 1,
+               "Rapid folder navigation surfaced a stale or failed request");
+        Expect(state->enumerationResult.items.size() == 1
+                   && state->enumerationResult.items.front().fileName == L"picked.png",
+               "Rapid folder navigation did not preserve the latest folder result");
+        Expect(service.CancellationCount() >= cancellationCountBeforeBurst + 31,
+               "Rapid folder navigation did not advance the enumeration request epoch");
+        Expect(service.PeakPendingTaskCount() <= 2,
+               "Folder enumeration peak queue depth exceeded its configured bound");
+        Expect(PumpMessagesUntil([&]()
+        {
+            return service.ActiveTaskCount() == 0 && service.PendingTaskCount() == 0;
+        }, 1000), "Folder enumeration burst retained background work");
     }
 
         void RunFolderTreeEnumerationScenario(HWND hwnd, TestWindowState* state)
@@ -1256,7 +1289,50 @@ namespace
              Expect(state->folderTreeEnumerationResult.childFolders.size() == 1
                         && fs::path(state->folderTreeEnumerationResult.childFolders.front().path).filename().wstring() == L"final-child",
                  "Folder-tree supersession scenario surfaced stale child folders");
+            Expect(supersessionService.CancellationCount() >= 1,
+                   "Folder-tree service did not record generation cancellation");
+            Expect(PumpMessagesUntil([&]()
+            {
+                return supersessionService.ActiveTaskCount() == 0
+                    && supersessionService.PendingTaskCount() == 0;
+            }, 1000), "Folder-tree service retained work after supersession completion");
+
+            const std::uint64_t cancellationCountBeforeBurst = supersessionService.CancellationCount();
+            ResetFolderTreeEnumerationResult(state);
+            for (int index = 0; index < 31; ++index)
+            {
+                supersessionService.CancelAll();
+                supersessionService.EnumerateChildDirectoriesAsync(hwnd, latestRoot.Root().wstring());
+                Expect(supersessionService.ActiveTaskCount() <= 2
+                           && supersessionService.PendingTaskCount() <= 8,
+                       "Rapid folder-tree navigation exceeded the bounded service capacity");
+            }
+            supersessionService.CancelAll();
+            state->folderTreeEnumerationResult.expectedRequestId =
+                supersessionService.EnumerateChildDirectoriesAsync(hwnd, latestRoot.Root().wstring());
+            Expect(PumpMessagesUntil([&]()
+            {
+                return state->folderTreeEnumerationResult.completed || state->folderTreeEnumerationResult.failed;
+            }, 5000), "Rapid folder-tree navigation did not complete the latest request");
+            Expect(!state->folderTreeEnumerationResult.failed
+                       && state->folderTreeEnumerationResult.childFolders.size() == 1,
+                   "Rapid folder-tree navigation surfaced stale or failed child folders");
+            Expect(supersessionService.CancellationCount() >= cancellationCountBeforeBurst + 32,
+                   "Rapid folder-tree navigation did not advance the cancellation generation");
+            Expect(supersessionService.PeakPendingTaskCount() <= 8,
+                   "Folder-tree peak queue depth exceeded its configured bound");
+            Expect(PumpMessagesUntil([&]()
+            {
+                return supersessionService.ActiveTaskCount() == 0
+                    && supersessionService.PendingTaskCount() == 0;
+            }, 1000), "Folder-tree burst retained background work");
          }
+        Expect(PumpMessagesUntil([&]()
+        {
+            return service.ActiveTaskCount() == 0 && service.PendingTaskCount() == 0;
+        }, 1000), "Folder-tree service retained work after completion");
+        Expect(service.RejectedTaskCount() == 0,
+               "Folder-tree service rejected work during the focused scenario");
         }
 
     void RunFolderWatchStartStopScenario(HWND hwnd)
@@ -1610,6 +1686,44 @@ namespace
         service.Cancel();
         const ULONGLONG elapsed = GetTickCount64() - start;
         Expect(elapsed < 250, "Batch convert cancellation blocked instead of returning promptly");
+        Expect(service.CancellationCount() >= 1,
+               "Batch conversion service did not record cancellation");
+        Expect(service.RejectedTaskCount() == 0,
+               "Batch conversion service rejected work during the focused scenario");
+
+        TempFolder burstOutput(L"HyperBrowseBatchBurst");
+        const auto missingItem = hyperbrowse::browser::BuildBrowserItemFromPath(
+            burstOutput.Root() / L"missing.jpg");
+        const std::uint64_t cancellationCountBeforeBurst = service.CancellationCount();
+        for (int index = 0; index < 31; ++index)
+        {
+            const std::uint64_t requestId = service.Start(
+                nullptr,
+                {missingItem},
+                burstOutput.Root().wstring(),
+                hyperbrowse::services::BatchConvertFormat::Png);
+            Expect(requestId != 0, "Batch conversion burst did not allocate a request ID");
+            Expect(service.ActiveTaskCount() <= 1 && service.PendingTaskCount() <= 1,
+                   "Batch conversion burst exceeded its bounded service capacity");
+        }
+        Expect(PumpMessagesUntil([&]()
+        {
+            return service.ActiveTaskCount() == 0 && service.PendingTaskCount() == 0;
+        }, 5000), "Batch conversion burst retained background work");
+        Expect(service.CancellationCount() >= cancellationCountBeforeBurst + 31,
+               "Batch conversion burst did not cancel superseded requests");
+        Expect(service.PeakPendingTaskCount() <= 1,
+               "Batch conversion peak queue depth exceeded its configured bound");
+
+        const auto diagnostics = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+        const auto queueMetric = std::find_if(diagnostics.counters.begin(),
+                                              diagnostics.counters.end(),
+                                              [](const auto& row)
+                                              {
+                                                  return row.name == L"service.batch_convert.queue_depth_peak";
+                                              });
+        Expect(queueMetric != diagnostics.counters.end() && queueMetric->value <= 1,
+               "Batch conversion queue-depth diagnostics were not surfaced");
     }
 
     void RunFileRenameOperationScenario(HWND hwnd, TestWindowState* state)
@@ -1686,6 +1800,32 @@ namespace
         Expect(reachedPerform, "File operation shutdown scenario did not enter the blocked shell operation");
 
         service->Cancel();
+        std::vector<std::uint64_t> burstRequestIds;
+        burstRequestIds.reserve(16);
+        for (int index = 0; index < 16; ++index)
+        {
+            burstRequestIds.push_back(service->Start(
+                nullptr,
+                nullptr,
+                hyperbrowse::services::FileOperationType::Copy,
+                {sourcePath.wstring()},
+                destinationFolder.wstring(),
+                hyperbrowse::services::FileConflictPolicy::PromptShell));
+        }
+        Expect(std::all_of(burstRequestIds.begin(), burstRequestIds.end(), [](std::uint64_t requestId)
+        {
+            return requestId != 0;
+        }), "File operation queue burst did not allocate request IDs");
+        Expect(service->ActiveTaskCount() == 1,
+               "File operation service did not report its blocked active task");
+        Expect(service->PendingTaskCount() == 1,
+               "File operation service did not retain its bounded pending task");
+        Expect(service->RejectedTaskCount() == 15,
+               "File operation service did not reject work beyond its pending limit during the burst");
+        Expect(service->PeakPendingTaskCount() == 1,
+               "File operation service exceeded its configured peak queue depth");
+        Expect(service->CancellationCount() >= 18,
+               "File operation service did not record supersession and shutdown cancellation requests");
         std::thread destructionThread([service = std::move(service), &performMutex, &performCondition, &destructionCompleted]() mutable
         {
             service.reset();

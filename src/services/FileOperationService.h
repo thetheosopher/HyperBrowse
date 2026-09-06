@@ -92,11 +92,28 @@ namespace hyperbrowse::services
         {
             return executor_.ActiveTaskCount();
         }
+        std::size_t PendingTaskCount() const noexcept
+        {
+            return executor_.PendingTaskCount();
+        }
+        std::size_t RejectedTaskCount() const noexcept
+        {
+            return executor_.RejectedTaskCount();
+        }
+        std::size_t PeakPendingTaskCount() const noexcept
+        {
+            return executor_.PeakPendingTaskCount();
+        }
+        std::uint64_t CancellationCount() const noexcept
+        {
+            return cancellationCount_.load(std::memory_order_acquire);
+        }
 
     private:
         std::shared_ptr<FileOperationSharedState> sharedState_;
         util::BackgroundExecutor executor_;
         PerformOperationsCallback performOperationsCallback_;
         std::atomic_uint64_t nextRequestId_{0};
+        std::atomic_uint64_t cancellationCount_{0};
     };
 }

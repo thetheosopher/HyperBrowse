@@ -72,6 +72,14 @@ Workers return results through the existing window-message or callback contracts
 
 `FileOperationService` performs native shell operations asynchronously and reports completion/progress to `MainWindow`. Browser and viewer workflows share operation types, so operation origin must be tracked separately from the operation type. Completion logic must also account for folder-watch echoes, optimistic viewer state, selection/focus restoration, and shell-dialog foreground activation.
 
+During close, `MainWindow` first enters a close-pending state and requests
+cooperative cancellation. It keeps the HWND and shell owner alive until the
+completion path is observed, then `WM_DESTROY` marks the service shared state as
+shutting down and joins the serialized worker before posting application
+termination. The five-second status notice is a user-visible wait threshold,
+not a forceful worker timeout; shell code is never detached while it can still
+post results.
+
 ## Main-window policy collaborators
 
 Several state and shell boundaries are intentionally kept outside the HWND

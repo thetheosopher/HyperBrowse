@@ -234,6 +234,17 @@ namespace hyperbrowse::util
         store.counters[std::wstring(counterName)] += delta;
     }
 
+    void RecordMaximum(std::wstring_view counterName, std::uint64_t value)
+    {
+        DiagnosticsStore& store = GetStore();
+        std::scoped_lock lock(store.mutex);
+        std::uint64_t& maximum = store.counters[std::wstring(counterName)];
+        if (value > maximum)
+        {
+            maximum = value;
+        }
+    }
+
     void EnableStartupBenchmark(std::wstring outputPath)
     {
         DiagnosticsStore& store = GetStore();

@@ -74,6 +74,10 @@ namespace hyperbrowse::util
                     return false;
                 }
                 tasks_.push_back(std::move(task));
+                if (tasks_.size() > peakPendingTaskCount_)
+                {
+                    peakPendingTaskCount_ = tasks_.size();
+                }
             }
             condition_.notify_one();
             return true;
@@ -104,6 +108,12 @@ namespace hyperbrowse::util
         std::size_t RejectedTaskCount() const noexcept
         {
             return rejectedTaskCount_.load(std::memory_order_acquire);
+        }
+
+        std::size_t PeakPendingTaskCount() const noexcept
+        {
+            std::scoped_lock lock(mutex_);
+            return peakPendingTaskCount_;
         }
 
     private:
@@ -148,6 +158,7 @@ namespace hyperbrowse::util
         std::deque<std::function<void()>> tasks_;
         std::vector<std::thread> workers_;
         std::size_t maxPendingTaskCount_{};
+        std::size_t peakPendingTaskCount_{};
         bool shuttingDown_{false};
         std::atomic<std::size_t> activeTaskCount_{};
         std::atomic<std::size_t> rejectedTaskCount_{};

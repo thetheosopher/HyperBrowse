@@ -549,6 +549,8 @@ namespace hyperbrowse::services
     void FileOperationService::Cancel() noexcept
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
+        cancellationCount_.fetch_add(1, std::memory_order_relaxed);
+        util::IncrementCounter(L"service.file_operation.cancelled");
     }
 
     void FileOperationService::Shutdown() noexcept
@@ -791,6 +793,9 @@ namespace hyperbrowse::services
             update->message = L"The file operation could not be queued.";
             PostUpdate(targetWindow, std::move(update), &sharedState_->shutdown);
         }
+
+        util::RecordMaximum(L"service.file_operation.queue_depth_peak",
+                            executor_.PeakPendingTaskCount());
 
         return requestId;
     }

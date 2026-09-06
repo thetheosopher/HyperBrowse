@@ -1,7 +1,7 @@
 # HyperBrowse Enhancement Roadmap
 
 Original review: 2026-07-30
-Status refresh: 2026-09-04
+Status refresh: 2026-09-06
 Reviewer: GitHub Copilot
 Perspectives: Software Optimization Engineering + Product Management
 Codebase: HyperBrowse
@@ -14,20 +14,20 @@ Codebase: HyperBrowse
 | QW2 Preserve split folder-rename state | Reliability | Complete in 1.2.5 | Archived | S | `src/services/FolderWatchService.*` |
 | QW3 Add malformed-cache regression tests | Reliability | Complete in 1.2.5 and expanded in 2.1.0 | Archived | S | `tests/` |
 | QW4 Wire startup budgets into CI | Performance | Complete in 2.0.0 | Archived | S | `.github/workflows/`, `tools/` |
-| QW5 Correct architecture/UI/backlog docs | DX | In progress in this refresh | P1 | S | `docs/`, `specs/` |
+| QW5 Correct architecture/UI/backlog docs | DX | Complete for the current architecture, UI behavior, D2D migration, and active backlog; historical plans remain explicitly historical | Archived | S | `docs/`, `specs/` |
 | QW6 Add worker exception containment | Reliability | Complete in 2.0.0 | Archived | S | `src/services/ThumbnailScheduler.cpp` |
 | MP1 Redesign persistent cache index/I/O | Performance | Complete in 2.1.0 | Archived | M | `src/cache/`, `src/services/` |
-| MP2 Bound background service execution | Performance/Reliability | Partial: all four services migrated; stress coverage pending | P0 | M | `src/services/`, `src/util/` |
-| MP3 Define cancellable file-operation shutdown | Reliability/UX | Partial: cancellation exists, bounded close does not | P0 | M | `FileOperationService`, `MainWindow` |
-| MP4 Establish CI quality/performance matrix | Reliability | Partial: one Windows gate exists | P1 | M | CI, tests, tools |
+| MP2 Bound background service execution | Performance/Reliability | Partial: bounded executors, service metrics, diagnostics counters, and deterministic service coverage landed; capacity measurement remains | P0 | M | `src/services/`, `src/util/` |
+| MP3 Define cancellable file-operation shutdown | Reliability/UX | Partial: close contract, wait state, post suppression, and blocked-service destruction coverage landed; real MainWindow/shell-prompt validation remains | P0 | M | `FileOperationService`, `MainWindow` |
+| MP4 Establish CI quality/performance matrix | Reliability | Partial: Windows matrix now covers nvJPEG and WIC fallback with Debug/Release/startup/package gates; sanitizer/fuzz job remains toolchain work | P1 | M | CI, tests, tools |
 | MP5 Split focused test targets and fixtures | DX/Reliability | Partial: broad executable with four CTest entry points | P1 | M | `tests/` |
 | MP6 Saved structured filters | Feature/UX | Open | P2 | M | browser/UI/settings |
-| SI1 Decompose MainWindow by ownership | DX/Reliability | Open hygiene work | P2 | L | `src/ui/MainWindow.*` |
+| SI1 Decompose MainWindow by ownership | DX/Reliability | Partial: current cleanup pass complete; long-term decomposition remains | P2 | L | `src/ui/MainWindow.*` |
 | SI2 Pro compare and color-management path | Feature | Open | P2 | L | viewer/decode/render |
 | SI3 Search/smart-folder product decision | Feature | Decision needed | P2 | S | browser/services |
 | SI4 Format frontier | Feature | Open, deliberately later | P3 | L | decode/viewer |
 
-## 2026-09-03 Reprioritization
+## 2026-09-06 Reprioritization
 
 The July quick-win queue is no longer the active execution order. The cache,
 watcher, malformed-input, worker-containment, and startup-gate work has landed
@@ -38,22 +38,26 @@ inspection controls, decoder diagnostics, and stronger large-folder scheduling.
 
 Work should now proceed in this order:
 
-1. **P0 - Validate bounded background execution.** The four service migrations
-   are now implemented with bounded executors. Add burst, cancellation, queue
-   rejection, and service-destruction coverage while preserving request epochs,
-   cancellation checks, and shell-owner lifetime.
-2. **P0 - Define close during file operations.** Specify whether close waits,
-   cancels, or presents a bounded shutdown state. Test slow local, removable,
-   network, and shell-prompt paths without allowing completion messages to
-   target destroyed windows.
-3. **P1 - Finish the quality matrix.** Add an nvJPEG-off fallback build,
-   sanitizer/fuzz coverage for the cache and RAW-helper protocol, deterministic
-   benchmark-fixture documentation, and hosted-run variance reporting.
+1. **P0 - Measure bounded background execution.** The four service migrations
+   now have bounded executors, queue-depth accessors, cancellation metrics,
+   queue-rejection diagnostics, and deterministic service lifecycle assertions.
+   Measure selected capacities against slow local, removable, and network paths.
+2. **P0 - Validate close during file operations.** The close contract now
+   requests cooperative cancellation, keeps the HWND and shell owner alive,
+   reports a five-second wait notice, suppresses late posts, and joins the
+   worker before destruction. The remaining validation is a real MainWindow
+   close path against shell prompts and slow storage; never detach shell work.
+3. **P1 - Finish the quality matrix.** The CI matrix now runs nvJPEG-on and
+   WIC-fallback Debug/Release tests and startup checks, with deterministic
+   fixture and hosted-run variance policy documented. A dedicated sanitizer /
+   fuzz toolchain remains future work; malformed-input smoke coverage is the
+   current substitute.
 4. **P1 - Improve observability.** Count invalid cache entries and watcher
    full-reload fallbacks separately from ordinary misses, and make a redacted
    diagnostics snapshot export available for issue reports.
-5. **P1 - Complete current-state documentation.** Keep architecture, UI, D2D,
-   and release-hardening specifications synchronized with shipped behavior.
+5. **P1 - Maintain current-state documentation.** Architecture, UI, D2D, and
+   backlog specifications now describe shipped behavior; update them with
+   future cross-cutting changes.
 6. **P2 - Add saved structured filters.** Persist named current-folder
    expressions without introducing a catalog database.
 7. **P2 - Professional compare and color management.** Validate color-profile
@@ -107,14 +111,14 @@ not requests to repeat the work.
 - **Area:** [tools/TestStartupBenchmark.ps1](../tools/TestStartupBenchmark.ps1#L13-L15), `.github/workflows/`
 - **Delivered:** `.github/workflows/ci.yml` builds Debug and Release, runs CTest, invokes the startup script with explicit 2.5 s / 2.5 s / 5 s budgets, uploads benchmark/log artifacts, and validates release artifacts. Runner-variance tuning remains in MP4.
 
-### QW5: Correct documentation drift (In progress)
+### QW5: Correct documentation drift (Partial)
 
 - **Category:** DX
 - **Perspective:** Both
 - **Effort:** S
 - **Impact:** Medium
-- **Area:** [specs/02-architecture.md](../specs/02-architecture.md#L8-L14), [specs/04-ui-behavior.md](../specs/04-ui-behavior.md#L133-L140), [specs/14-todo.md](../specs/14-todo.md#L224-L227), [specs/15-d2d-rendering-migration.md](../specs/15-d2d-rendering-migration.md#L26-L35)
-- **Current status:** this review and roadmap now reflect the current release, hybrid rendering, CI, cache, watcher, and workflow state. The architecture, UI-behavior, and D2D migration specs remain the next documentation slice.
+- **Area:** [docs/architecture.md](architecture.md), [docs/mainwindow-ownership-map.md](mainwindow-ownership-map.md), [specs/02-architecture.md](../specs/02-architecture.md#L8-L14), [specs/04-ui-behavior.md](../specs/04-ui-behavior.md#L133-L140), [specs/14-todo.md](../specs/14-todo.md#L224-L227), [specs/15-d2d-rendering-migration.md](../specs/15-d2d-rendering-migration.md#L26-L35)
+- **Current status:** the review, architecture, and MainWindow ownership documents reflect the current release, hybrid rendering, CI, cache, watcher, and workflow state. The architecture and D2D migration specs still require reconciliation; the UI-behavior spec needs an audit for shipped workflow gaps.
 
 ### QW6: Contain thumbnail-worker exceptions (Complete)
 
@@ -142,19 +146,20 @@ not requests to repeat the work.
 
 ### MP2: Bounded background service execution
 
-- **Status:** Partial. All four request-per-task service paths now use bounded executors; executor capacity/destruction smoke coverage, service queue-rejection counters, service active-task snapshots, and folder-tree generation-supersession coverage are landed, while broader burst coverage and capacity tuning remain.
+- **Status:** Partial. All four request-per-task service paths now use bounded executors. Shared executor capacity/destruction coverage, service queue-depth accessors, rejection and cancellation diagnostics, and deterministic service lifecycle assertions are landed; realistic burst measurement and capacity tuning remain.
 - **Category:** Performance, Reliability
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** Medium
 - **Area:** `FolderEnumerationService`, `FolderTreeEnumerationService`, `BatchConvertService`, `FileOperationService`, `util/BackgroundExecutor.h`
 - **Delivered:** folder enumeration, folder-tree queries, batch conversion, and file operations now use member-owned `util::BackgroundExecutor` instances with bounded worker and pending-task counts. Existing request generations and cancellation checks remain in place; stale folder work exits before filesystem access, and shell operations retain COM STA setup and owner-window assignment. Completion/progress posts are suppressed after service shutdown.
-- **Remaining:** extend service-level burst/destruction coverage, export active-work snapshots through diagnostics, and measure whether the selected capacities are appropriate for slow local, removable, and network paths.
+- **Coverage:** smoke tests now exercise rapid folder navigation, rapid folder-tree cancellation, batch-conversion bursts, and deterministic file-operation saturation, including peak queue-depth, rejection, cancellation, worker-drain, and diagnostics assertions.
+- **Remaining:** export live service queue-depth snapshots into the diagnostics window and measure whether the selected capacities are appropriate for slow local, removable, and network paths.
 - **Success metrics:** rapid folder changes never create unbounded threads; stale queued work exits before filesystem access; service destruction joins in-flight work without late completion posts.
 
 ### MP3: Cancellable file-operation shutdown
 
-- **Status:** Partial. Cancellation, progress reporting, explicit close-pending cancellation, pre-destruction post suppression, and a bounded user-visible wait state are implemented; the shell operation can still make shutdown wait without a forceful timeout.
+- **Status:** Partial. Cancellation, progress reporting, explicit close-pending cancellation, pre-destruction post suppression, a bounded user-visible wait state, and deterministic blocked-operation destruction coverage are implemented; the shell operation can still make shutdown wait without a forceful timeout.
 - **Category:** Reliability, UX
 - **Perspective:** Both
 - **Effort:** M
@@ -162,18 +167,18 @@ not requests to repeat the work.
 - **Area:** [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L477-L479), [src/services/FileOperationService.cpp](../src/services/FileOperationService.cpp#L627-L673), `src/ui/MainWindow.cpp`
 - **Current behavior:** closing during an active file operation requests cancellation, keeps the main window alive until the completion update, and shows a cancelling status. `FileOperationService::Shutdown()` is also called from `WM_DESTROY` before the HWND can be invalidated, preventing late completion/progress posts from targeting a destroyed window.
 - After five seconds without completion, the status changes to `Waiting for Windows to finish file operation` and records `file_operation.shutdown.wait_notice`; the UI remains responsive and the shell owner remains valid.
-- **Remaining:** define the user-visible policy for a shell operation that ignores cancellation or remains blocked in Windows, and add a test for destruction during a slow or blocked shell operation. Do not detach a worker that can still post to a destroyed HWND.
+- **Remaining:** exercise the MainWindow close path with slow local, removable, network, and shell-prompt conditions. Do not detach a worker that can still post to a destroyed HWND.
 - **Success metrics:** closing during a slow copy/delete either cancels promptly or presents an explicit bounded wait state; no orphan shell UI or post-destroy completion.
 
 ### MP4: CI quality and performance matrix
 
-- **Status:** Partial. The committed Windows workflow is a real startup/package gate, but not a configuration matrix.
+- **Status:** Partial. The committed Windows workflow is now an nvJPEG-on/WIC-fallback configuration matrix with Debug/Release CTest and startup gates; sanitizer/fuzz remains a separate toolchain configuration.
 - **Category:** Reliability, Performance
 - **Perspective:** Engineering
 - **Effort:** M
 - **Impact:** High
 - **Area:** `.github/workflows/`, `CMakePresets.json`, `tools/`, `tests/`
-- **Recommendation:** retain the current Debug/Release gate, add an nvJPEG-off fallback build, run the same CTest and startup checks, preserve diagnostics artifacts, and add scheduled dependency/security review. Document the hosted-run fixture and variance policy before tightening budgets.
+- **Recommendation:** retain the current matrix and package gate, preserve diagnostics artifacts, and add scheduled dependency/security review. A dedicated dynamic-runtime sanitizer/fuzz preset remains the next quality-tooling step.
 
 ### MP5: Focused tests and deterministic fixtures
 
@@ -201,9 +206,9 @@ not requests to repeat the work.
 
 ### SI1: Decompose MainWindow by ownership
 
-- **Status:** Open engineering hygiene work, lower priority than lifecycle and CI reliability.
-- **Problem:** a ~27,263-line coordinator owns unrelated UI, persistence, tree, drag/drop, file-operation, viewer, and watch concerns.
-- **Approach:** first extract pure registry settings, then menu/toolbar command state, then folder-tree/watch coordination. Keep HWND ownership and message routing explicit; avoid a framework rewrite.
+- **Status:** Partial. The current cleanup pass is complete, lower priority than lifecycle and CI reliability; the longer-term decomposition target remains open.
+- **Problem:** a 21,208-line coordinator still owns unrelated UI, persistence, tree, drag/drop, file-operation, viewer, watch, and rendering orchestration concerns.
+- **Approach:** continue only with narrowly owned slices where they reduce coupling or improve testability. The completed pass already extracted persistence, menu/toolbar policy, folder-tree/watch coordination, viewer lifecycle policy, and message boundaries. Keep HWND ownership and message routing explicit; avoid a framework rewrite.
 - **Risks:** large mechanical diffs and hidden ordering dependencies.
 - **Success metrics:** MainWindow below ~7,000 lines, narrower rebuilds, unchanged smoke/startup metrics, and dedicated tests for extracted logic.
 
@@ -236,7 +241,7 @@ not requests to repeat the work.
 ## Debt Retirement Candidates
 
 1. Replace stale “current state” sections in specs 02 and 15 with an implemented-state architecture record.
-2. Add service-level burst, queue-rejection, and destruction coverage for MP2; keep the executor capacities and cancellation behavior observable.
+2. Add service-level burst, cancellation, queue-rejection, and destruction coverage for MP2; keep service queue depth, active work, rejection, and cancellation behavior observable.
 3. Split the monolithic test source as touched, without pausing product work for a wholesale test-framework migration.
 4. Add cache-corruption and watcher-fallback diagnostic counters so recovery is visible in field reports.
 5. Keep GDI fallback rendering only where it is exercised and documented; do not remove it solely for aesthetic consistency.
@@ -254,7 +259,7 @@ not requests to repeat the work.
 
 ### Workstream 1: Bounded background execution
 
-> Validate the bounded-executor migration in folder enumeration, folder-tree queries, batch conversion, and file operations. Preserve request epochs, cancellation checks, shell-owner lifetime, and completion-message safety. Add queue-depth and cancellation diagnostics plus rapid-navigation coverage.
+> Validate the bounded-executor migration in folder enumeration, folder-tree queries, batch conversion, and file operations. Preserve request epochs, cancellation checks, shell-owner lifetime, and completion-message safety. Surface service-level queue-depth and cancellation diagnostics, then add rapid-navigation and burst coverage.
 
 ### Workstream 2: File-operation shutdown contract
 

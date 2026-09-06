@@ -306,6 +306,9 @@ namespace hyperbrowse::services
             PostFailure(stateView, requestedFolderPath, L"Folder tree enumeration could not be queued.");
         }
 
+        util::RecordMaximum(L"service.folder_tree.queue_depth_peak",
+                            executor_.PeakPendingTaskCount());
+
         return requestId;
     }
 
@@ -340,11 +343,16 @@ namespace hyperbrowse::services
             PostFailure(stateView, requestedFolderPath, L"Folder tree child-presence query could not be queued.");
         }
 
+        util::RecordMaximum(L"service.folder_tree_presence.queue_depth_peak",
+                            executor_.PeakPendingTaskCount());
+
         return requestId;
     }
 
     void FolderTreeEnumerationService::CancelAll()
     {
         sharedState_->generation.fetch_add(1, std::memory_order_acq_rel);
+        cancellationCount_.fetch_add(1, std::memory_order_relaxed);
+        util::IncrementCounter(L"service.folder_tree.cancelled");
     }
 }

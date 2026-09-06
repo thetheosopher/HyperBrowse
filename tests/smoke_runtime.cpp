@@ -202,6 +202,8 @@ namespace hyperbrowse::tests
             Expect(executor.PendingTaskCount() == 1, "Background executor did not report pending work");
             Expect(!executor.Post([]() {}), "Background executor accepted work beyond its pending limit");
             Expect(executor.RejectedTaskCount() == 1, "Background executor did not count rejected work");
+            Expect(executor.PeakPendingTaskCount() == 1,
+                   "Background executor did not retain its peak pending depth");
 
             {
                 std::scoped_lock lock(mutex);

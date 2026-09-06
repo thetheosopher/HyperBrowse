@@ -12,8 +12,17 @@ concurrency:
 
 jobs:
   build-test-benchmark:
+    name: Build, test, and benchmark (${{ matrix.decode-path.name }})
     runs-on: windows-2022
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        decode-path:
+          - name: nvjpeg
+            nvjpeg: ON
+          - name: wic-fallback
+            nvjpeg: OFF
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -24,7 +33,7 @@ jobs:
           cmake -S . -B build-ci -G "Visual Studio 17 2022" -A x64
           -DHYPERBROWSE_BUILD_TESTS=ON
           -DHYPERBROWSE_ENABLE_LIBRAW=ON
-          -DHYPERBROWSE_ENABLE_NVJPEG=ON
+          -DHYPERBROWSE_ENABLE_NVJPEG=${{ matrix.decode-path.nvjpeg }}
           -DHYPERBROWSE_BUNDLE_CUDA_REDIST=OFF
           -DHYPERBROWSE_WARNINGS_AS_ERRORS=ON
 
@@ -55,7 +64,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: startup-benchmark
+          name: startup-benchmark-${{ matrix.decode-path.name }}
           if-no-files-found: ignore
           path: |
             build-ci/startup-benchmark-release.json

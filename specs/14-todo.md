@@ -1,6 +1,6 @@
 # HyperBrowse Enhancement Plan
 
-Last reviewed: 2026-05-17
+Last reviewed: 2026-09-06
 
 This document tracks the **forward-looking** HyperBrowse backlog. Completed
 items have been archived (see [Appendix A](#appendix-a--recently-completed-archive))
@@ -255,6 +255,10 @@ to the next image, compare mode is preserved when a valid neighbor remains,
 and browser focus is restored if the delete fails.
 
 ### `B1` Drag-and-Drop File Operations (P0)
+
+**Implementation status:** Shipped for shell drag-out, in-app file drops, and
+the existing Copy/Move operation path. Content-based duplicate finding is a
+separate deferred idea and is not implied by the duplicate-file command.
 
 - **Drag out (implemented):** selected thumbnails or image rows are exposed as
   a shell data object so users can drag them into Explorer, mail clients, or

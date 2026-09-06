@@ -74,6 +74,15 @@ Note: "Lossless JPEG Rotate" from the original spec was replaced with EXIF-only 
 
 Note: The Tools menu from the original spec was not implemented. Refresh is available via F5 in the File menu. Preferences are managed through the top-level Settings menu and persisted to the Windows registry.
 
+### Shipped workflow audit (2026-09-06)
+
+- Settings are shipped for Appearance, Viewer, Performance, Diagnostics, Integration, Behavior, and Slideshow behavior.
+- `F2` opens the shipped rename dialog; inline label editing remains deferred.
+- Copy-path and shell file-selection clipboard workflows are shipped, as are duplicate-file operations (`Ctrl+D`) and bounded Copy/Move/Rename undo/redo (`Ctrl+Z` / `Ctrl+Y`).
+- Shell drag-out and in-app drag/drop file workflows are shipped. The separate product idea of content-based duplicate finding remains deferred.
+- Optional single-instance mode forwards a second launch path to the existing window. Taskbar progress is shown for active file operations and batch conversion.
+- Viewer inspection includes the Tab HUD, the metadata pane, image information, compare mode, and slideshow controls. Metadata extraction failures remain non-blocking.
+
 ### Help
 - About
 - Diagnostics Snapshot
@@ -176,6 +185,13 @@ Status bar should update incrementally and never block UI.
 - Part 1 (650 px): image count, total size, load state, active filter query, batch convert progress, file operation status
 - Part 2 (930 px): selection count and selected total size
 - Part 3 (stretch): JPEG acceleration state, RAW decode state, viewer zoom level, slideshow status
+
+### Close during file operations
+
+- Closing while a file operation or batch conversion is active enters a close-pending state and requests cooperative cancellation.
+- The main window remains alive until the service reports completion, preserving the HWND and shell owner needed by in-flight callbacks.
+- After five seconds without completion, the status text changes to an explicit waiting message and the wait is recorded in diagnostics.
+- Destruction shuts down and joins the service worker before the HWND is allowed to become invalid. There is no unsafe force-termination or detached shell worker timeout.
 
 ## 8. Viewer Window Behavior
 

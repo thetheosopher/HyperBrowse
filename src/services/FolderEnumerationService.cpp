@@ -280,7 +280,14 @@ namespace hyperbrowse::services
                                                                  bool includeSubfolders)
     {
         const std::uint64_t requestId = nextRequestId_.fetch_add(1, std::memory_order_acq_rel) + 1;
-        sharedState_->activeRequestId.store(requestId, std::memory_order_release);
+        const std::uint64_t previousRequestId = sharedState_->activeRequestId.exchange(
+            requestId,
+            std::memory_order_acq_rel);
+        if (previousRequestId != 0)
+        {
+            cancellationCount_.fetch_add(1, std::memory_order_relaxed);
+            util::IncrementCounter(L"service.folder_enumeration.superseded");
+        }
 
         EnumerationSharedStateView stateView{sharedState_, targetWindow, requestId};
         util::LogInfo(L"Starting async folder enumeration for " + folderPath);
@@ -302,11 +309,16 @@ namespace hyperbrowse::services
             PostFailure(stateView, requestedFolderPath, L"Folder enumeration could not be queued.");
         }
 
+        util::RecordMaximum(L"service.folder_enumeration.queue_depth_peak",
+                            executor_.PeakPendingTaskCount());
+
         return requestId;
     }
 
     void FolderEnumerationService::Cancel()
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
+        cancellationCount_.fetch_add(1, std::memory_order_relaxed);
+        util::IncrementCounter(L"service.folder_enumeration.cancelled");
     }
 }

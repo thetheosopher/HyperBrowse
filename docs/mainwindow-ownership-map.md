@@ -104,5 +104,11 @@ boundaries. Source code and `docs/architecture.md` remain authoritative.
 6. Revoke OLE drop registration before releasing the callback-owning target.
 7. Save persistent state and post application termination.
 
+`FileOperationService::Shutdown()` suppresses late completion and progress
+posts, but its serialized worker is joined because `IFileOperation` may still
+be inside Windows shell code. The close timer's five-second notice keeps the
+user informed without pretending that a shell call can be forcefully timed
+out safely.
+
 Any new callback or worker must fit this ordering and must not outlive the
 object or HWND receiving its result.

@@ -511,11 +511,15 @@ namespace hyperbrowse::services
             update->message = L"Batch conversion could not be queued.";
             PostUpdate(targetWindow, std::move(update), &sharedState_->shutdown);
         }
+        util::RecordMaximum(L"service.batch_convert.queue_depth_peak",
+                            executor_.PeakPendingTaskCount());
         return requestId;
     }
 
     void BatchConvertService::Cancel()
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
+        cancellationCount_.fetch_add(1, std::memory_order_relaxed);
+        util::IncrementCounter(L"service.batch_convert.cancelled");
     }
 }

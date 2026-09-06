@@ -5,13 +5,14 @@
 Use a **low-overhead pure native Windows architecture**:
 
 - Win32 application shell
-- GDI rendering for all 2D image presentation (double-buffered `StretchBlt`/`PlgBlt`)
+- Direct2D/DirectWrite rendering for browser, viewer, and selected shell surfaces
+- GDI retained for compatible shell and dialog paths
 - WIC for baseline common-format decode
 - LibRaw for supported mainstream RAW formats (in-process or out-of-process via helper executable)
 - nvJPEG as an optional accelerated JPEG thumbnail path
 - CMake-based build
 
-Note: Direct2D and Direct3D 11 are listed as link dependencies but are not currently used for rendering. All painting uses GDI. D2D/D3D11 rendering paths are deferred to a future release if profiling justifies the migration.
+The rendering split is intentional: D2D/DirectWrite owns image presentation and modern painted surfaces, while GDI remains at the Win32 shell and dialog boundaries where the existing ownership model is simpler.
 
 This avoids the extra shell/framework overhead of larger UI stacks and keeps control over rendering, virtualization, threading, and memory behavior.
 
@@ -49,7 +50,7 @@ Single-process desktop app.
 - `MainWindow` — window procedure, input handling, layout, command routing, presentation coordination, folder tree management, action strip, filter, status bar, theme management, settings persistence
 - `DiagnosticsWindow` — timing/counter/derived metric display window
 
-Note: The original modular decomposition (`AppShell`, `MenuController`, `CommandRouter`, `ThemeManager`, `StatusBarController`) was consolidated into `MainWindow` for pragmatic simplicity. The current implementation handles all shell concerns in a single ~3900 line translation unit.
+Note: The original modular decomposition (`AppShell`, `MenuController`, `CommandRouter`, `ThemeManager`, `StatusBarController`) was consolidated into `MainWindow` for pragmatic simplicity. The current implementation handles the remaining shell concerns in a single ~21,208-line translation unit; focused collaborators own policy, persistence, painting, and message-routing boundaries.
 
 ### Browser UI
 - `BrowserPane` — virtualized thumbnail grid and details list, selection model, sort, filter, rubber-band selection, thumbnail scheduling integration, metadata integration
@@ -90,11 +91,13 @@ Note: The decode layer uses free functions and static methods rather than a form
 Note: `FileListCache`, `ViewerImageCache`, and `RawPreviewCache` from the original design are not implemented as separate modules. Caching is handled inline by the owning components.
 
 ### Rendering
-- All rendering currently uses GDI (double-buffered `CreateCompatibleDC`/`CreateCompatibleBitmap`, `StretchBlt` with `HALFTONE` mode, `PlgBlt` for rotation, `DrawText`, `FillRect`, `RoundRect`)
-- `BrowserPane` owns thumbnail grid and details list rendering
-- `ViewerWindow` owns full-image rendering with zoom/pan/rotate
+- `D2DRenderer` owns shared Direct2D/DirectWrite factory and bitmap helpers
+- `BrowserPane` owns Direct2D thumbnail-grid and details-list presentation
+- `ViewerWindow` owns Direct2D full-image presentation with zoom/pan/rotate and transitions
+- MainWindow shell and dialog paths retain GDI resources where they do not benefit from the D2D surface path
+- Per-monitor DPI v2 and `WM_DPICHANGED` handling are implemented at the window boundaries
 
-Note: The original `RenderBackendD2D`, `GpuResourceManager`, `TexturePool`, and `PresentationSurface` modules are not implemented. D2D/D3D11 rendering is deferred.
+Note: The original `RenderBackendD2D`, `GpuResourceManager`, `TexturePool`, and `PresentationSurface` modules are not implemented as separate modules; their required shared behavior is provided by `D2DRenderer` and the owning windows.
 
 ## 5. Decoder Abstraction
 
