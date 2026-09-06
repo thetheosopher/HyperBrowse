@@ -403,3 +403,19 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `PairedRawJpegResolver::ExpandPaths`. MainWindow retains feature gating,
   model snapshots, and companion-count reporting while the resolver owns
   same-folder, same-stem matching and duplicate suppression.
+- [x] Extract `FolderTreeDragController` for tree-drag state, hit testing,
+  drag-image lifetime, capture, cursor feedback, and callback-driven drop
+  effects. MainWindow retains folder operation policy and UI callbacks.
+- [x] Extract `ViewerPendingOperationState` for active and queued viewer
+  deletes plus Quick Send lifecycle ownership. Viewer close now detaches
+  pending viewer effects and saved viewer focus/activation targets so a later
+  viewer cannot inherit stale completion state; deterministic smoke coverage
+  verifies active/queued ordering, Quick Send consumption, and close clearing.
+- [x] Extract `ViewerSynchronizer` for browser-model selection, empty-model
+  close decisions, paired RAW/JPEG payload assembly, and selected-index
+  preservation. MainWindow retains HWND close posting and `ViewerWindow`
+  replacement; deterministic smoke coverage verifies preferred selection and
+  slideshow propagation.
+- [x] Reduce `HandleMessage` through `HandlePaintMessage` and
+  `HandleControlColorMessage`, keeping paint transactions, D2D/GDI fallback,
+  control colors, and default message fall-through behavior unchanged.

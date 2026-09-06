@@ -57,6 +57,7 @@
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderTreeDropPolicy.h"
+#include "ui/FolderTreeDragController.h"
 #include "ui/RightPaneHitTester.h"
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
@@ -82,6 +83,7 @@
 #include "ui/PairedRawJpegResolver.h"
 #include "ui/ViewerSettingsPersistence.h"
 #include "ui/ViewerItemSelectionPolicy.h"
+#include "ui/ViewerSynchronizer.h"
 #include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
@@ -9309,7 +9311,7 @@ namespace hyperbrowse::ui
 
         // Do not translate the Escape accelerator when a folder drag is active.
         // The drag operation should have exclusive control over the Escape key to cancel itself.
-        if (treeFolderDragActive_ && message->message == WM_KEYDOWN && message->wParam == VK_ESCAPE)
+        if (folderTreeDragController_.IsActive() && message->message == WM_KEYDOWN && message->wParam == VK_ESCAPE)
         {
             return false;
         }
@@ -10013,6 +10015,34 @@ namespace hyperbrowse::ui
             folderTreeController_->Configure(hwnd_, treePane_, std::move(handlers));
             folderTreeController_->Initialize(browserModel_ ? browserModel_->FolderPath() : std::wstring{});
         }
+        FolderTreeDragController::Handlers treeDragHandlers;
+        treeDragHandlers.isFileOperationActive = [this]
+        {
+            return fileOperationActive_;
+        };
+        treeDragHandlers.nodePath = [this](HTREEITEM item)
+        {
+            const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
+            return nodeData ? nodeData->path : std::wstring{};
+        };
+        treeDragHandlers.normalizePath = [](std::wstring path)
+        {
+            return NormalizeFolderPath(std::move(path));
+        };
+        treeDragHandlers.isExistingDirectory = [](std::wstring_view path)
+        {
+            return IsExistingDirectory(path);
+        };
+        treeDragHandlers.areFoldersOnSameDrive = [](std::wstring_view sourcePath, std::wstring_view destinationPath)
+        {
+            return AreFoldersOnSameDrive(sourcePath, destinationPath);
+        };
+        treeDragHandlers.onMove = [this](std::wstring sourcePath, std::wstring destinationPath)
+        {
+            StartFolderTreeMoveToDestination(std::move(sourcePath), std::move(destinationPath));
+        };
+        folderTreeDragController_.Configure(hwnd_, treePane_, std::move(treeDragHandlers));
+
         bool startupFolderLoadQueued = false;
         if (!startupFolderPath_.empty())
         {
@@ -10408,249 +10438,18 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnFolderTreeBeginDrag(const NMTREEVIEWW& treeView)
     {
-        if (!treePane_ || fileOperationActive_)
-        {
-            return 0;
-        }
-
-        FolderTreeNodeData* nodeData = GetFolderTreeNodeData(treeView.itemNew.hItem);
-        if (!nodeData || nodeData->path.empty() || !TreeView_GetParent(treePane_, treeView.itemNew.hItem))
-        {
-            return 0;
-        }
-
-        if (treeFolderDragActive_)
-        {
-            FinishFolderTreeDrag(false);
-        }
-
-        treeFolderDragActive_ = true;
-        treeFolderDropAllowed_ = false;
-        treeDragSourceItem_ = treeView.itemNew.hItem;
-        treeDragHoverItem_ = nullptr;
-        treeDragSourcePath_ = NormalizeFolderPath(nodeData->path);
-        treeDragDestinationPath_.clear();
-
-        TreeView_SelectDropTarget(treePane_, nullptr);
-
-        int preferredHotspotX = 8;
-        int preferredHotspotY = 8;
-        treeDragImageList_ = nullptr;
-
-        if (HIMAGELIST treeImageList = TreeView_GetImageList(treePane_, TVSIL_NORMAL))
-        {
-            int iconWidth = 0;
-            int iconHeight = 0;
-            if (ImageList_GetIconSize(treeImageList, &iconWidth, &iconHeight) != FALSE)
-            {
-                if (iconWidth > 0)
-                {
-                    preferredHotspotX = iconWidth / 2;
-                }
-                if (iconHeight > 0)
-                {
-                    preferredHotspotY = iconHeight / 2;
-                }
-            }
-
-            TVITEMW dragItem{};
-            dragItem.mask = TVIF_IMAGE | TVIF_SELECTEDIMAGE;
-            dragItem.hItem = treeDragSourceItem_;
-            if (TreeView_GetItem(treePane_, &dragItem) != FALSE)
-            {
-                const int dragImageIndex = dragItem.iSelectedImage >= 0 ? dragItem.iSelectedImage : dragItem.iImage;
-                if (dragImageIndex >= 0)
-                {
-                    if (HICON dragIcon = ImageList_GetIcon(treeImageList, dragImageIndex, ILD_NORMAL))
-                    {
-                        const int dragImageWidth = std::max(1, preferredHotspotX * 2);
-                        const int dragImageHeight = std::max(1, preferredHotspotY * 2);
-                        treeDragImageList_ = ImageList_Create(dragImageWidth, dragImageHeight, ILC_COLOR32 | ILC_MASK, 1, 1);
-                        if (treeDragImageList_)
-                        {
-                            if (ImageList_AddIcon(treeDragImageList_, dragIcon) == -1)
-                            {
-                                ImageList_Destroy(treeDragImageList_);
-                                treeDragImageList_ = nullptr;
-                            }
-                        }
-                        DestroyIcon(dragIcon);
-                    }
-                }
-            }
-        }
-
-        if (!treeDragImageList_)
-        {
-            treeDragImageList_ = TreeView_CreateDragImage(treePane_, treeDragSourceItem_);
-        }
-
-        POINT dragScreenPoint = treeView.ptDrag;
-        ClientToScreen(treePane_, &dragScreenPoint);
-
-        if (treeDragImageList_)
-        {
-            int hotspotX = preferredHotspotX;
-            int hotspotY = preferredHotspotY;
-
-            int imageWidth = 0;
-            int imageHeight = 0;
-            if (ImageList_GetIconSize(treeDragImageList_, &imageWidth, &imageHeight) != FALSE)
-            {
-                if (imageWidth > 0)
-                {
-                    hotspotX = std::clamp(hotspotX, 0, imageWidth - 1);
-                }
-                if (imageHeight > 0)
-                {
-                    hotspotY = std::clamp(hotspotY, 0, imageHeight - 1);
-                }
-            }
-
-            ImageList_BeginDrag(treeDragImageList_, 0, hotspotX, hotspotY);
-            // ImageList_DragEnter expects coordinates relative to the window origin
-            // (upper-left of the full window, not the client area).
-            RECT windowRect{};
-            GetWindowRect(hwnd_, &windowRect);
-            POINT dragWindowPoint{
-                dragScreenPoint.x - windowRect.left,
-                dragScreenPoint.y - windowRect.top,
-            };
-            ImageList_DragEnter(hwnd_, dragWindowPoint.x, dragWindowPoint.y);
-        }
-
-        SetCapture(hwnd_);
-        POINT dragWindowPoint = dragScreenPoint;
-        ScreenToClient(hwnd_, &dragWindowPoint);
-        UpdateFolderTreeDrag(dragWindowPoint);
+        folderTreeDragController_.Begin(treeView);
         return 0;
     }
 
     void MainWindow::UpdateFolderTreeDrag(POINT windowPoint)
     {
-        if (!treeFolderDragActive_)
-        {
-            return;
-        }
-
-        bool dragImageTemporarilyHidden = false;
-
-        POINT screenPoint = windowPoint;
-        ClientToScreen(hwnd_, &screenPoint);
-        if (treeDragImageList_)
-        {
-            // DragMove expects coordinates relative to the window origin
-            // (upper-left of the full window, not the client area).
-            RECT windowRect{};
-            GetWindowRect(hwnd_, &windowRect);
-            ImageList_DragMove(screenPoint.x - windowRect.left, screenPoint.y - windowRect.top);
-
-            // Hide the drag image while updating tree highlight state to avoid
-            // paint artifacts from control redraws beneath the ghost image.
-            ImageList_DragShowNolock(FALSE);
-            dragImageTemporarilyHidden = true;
-        }
-
-        HTREEITEM hoverItem = nullptr;
-        std::wstring destinationPath;
-        bool dropAllowed = false;
-        if (treePane_)
-        {
-            RECT treeRect{};
-            GetClientRect(treePane_, &treeRect);
-
-            POINT treePoint = screenPoint;
-            ScreenToClient(treePane_, &treePoint);
-            if (PtInRect(&treeRect, treePoint) != FALSE)
-            {
-                TVHITTESTINFO hitTest{};
-                hitTest.pt = treePoint;
-                const HTREEITEM item = TreeView_HitTest(treePane_, &hitTest);
-                if (item && (hitTest.flags & TVHT_ONITEM) != 0)
-                {
-                    const FolderTreeNodeData* nodeData = GetFolderTreeNodeData(item);
-                    if (nodeData && !nodeData->path.empty() && item != treeDragSourceItem_)
-                    {
-                        const std::wstring normalizedDestinationPath = NormalizeFolderPath(nodeData->path);
-                        const std::wstring sourceParentPath = NormalizeFolderPath(
-                            fs::path(treeDragSourcePath_).parent_path().wstring());
-                        if (FolderTreeDropPolicy::IsValid({
-                                treeDragSourcePath_,
-                                normalizedDestinationPath,
-                                sourceParentPath,
-                                IsExistingDirectory(normalizedDestinationPath),
-                                AreFoldersOnSameDrive(treeDragSourcePath_, normalizedDestinationPath)}))
-                        {
-                            hoverItem = item;
-                            destinationPath = normalizedDestinationPath;
-                            dropAllowed = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (hoverItem != treeDragHoverItem_)
-        {
-            treeDragHoverItem_ = hoverItem;
-            TreeView_SelectDropTarget(treePane_, treeDragHoverItem_);
-        }
-
-        if (dragImageTemporarilyHidden)
-        {
-            ImageList_DragShowNolock(TRUE);
-        }
-
-        treeFolderDropAllowed_ = dropAllowed;
-        treeDragDestinationPath_ = dropAllowed ? std::move(destinationPath) : std::wstring{};
-        SetCursor(LoadCursorW(nullptr, dropAllowed ? IDC_HAND : IDC_NO));
+        folderTreeDragController_.Update(windowPoint);
     }
 
     void MainWindow::FinishFolderTreeDrag(bool commitDrop)
     {
-        if (!treeFolderDragActive_)
-        {
-            return;
-        }
-
-        const std::wstring sourcePath = treeDragSourcePath_;
-        const std::wstring destinationPath = (commitDrop && treeFolderDropAllowed_)
-            ? treeDragDestinationPath_
-            : std::wstring{};
-
-        treeFolderDragActive_ = false;
-        treeFolderDropAllowed_ = false;
-        treeDragSourceItem_ = nullptr;
-        treeDragHoverItem_ = nullptr;
-        treeDragSourcePath_.clear();
-        treeDragDestinationPath_.clear();
-
-        if (treePane_)
-        {
-            if (treeDragImageList_)
-            {
-                ImageList_DragShowNolock(FALSE);
-            }
-            TreeView_SelectDropTarget(treePane_, nullptr);
-        }
-
-        if (treeDragImageList_)
-        {
-            ImageList_DragLeave(hwnd_);
-            ImageList_EndDrag();
-            ImageList_Destroy(treeDragImageList_);
-            treeDragImageList_ = nullptr;
-        }
-
-        if (GetCapture() == hwnd_)
-        {
-            ReleaseCapture();
-        }
-
-        if (commitDrop && !sourcePath.empty() && !destinationPath.empty())
-        {
-            StartFolderTreeMoveToDestination(sourcePath, destinationPath);
-        }
+        folderTreeDragController_.Finish(commitDrop);
     }
 
     void MainWindow::UpdateInternalSelectionDrag(POINT windowPoint)
@@ -12641,28 +12440,21 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        const auto& modelItems = browserModel_->Items();
-        if (modelItems.empty())
-        {
-            const HWND viewerHwnd = viewerWindow_->Hwnd();
-            if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
-            {
-                PostMessageW(viewerHwnd, WM_CLOSE, 0, 0);
-            }
-            return false;
-        }
-
         const std::vector<int> orderedModelIndices = browserPaneController_
             ? browserPaneController_->OrderedModelIndicesSnapshot()
             : std::vector<int>{};
-        ViewerItemSelectionPolicy::Result viewerSelection = ViewerItemSelectionPolicy::Build({
-            modelItems,
+        ViewerSynchronizer::Result synchronization = ViewerSynchronizer::Build(
+            browserModel_->Items(),
             orderedModelIndices,
-            -1,
             preferredPath,
             viewerWindow_->CurrentFilePath(),
-            viewerWindow_->CurrentIndex()});
-        if (viewerSelection.items.empty())
+            viewerWindow_->CurrentIndex(),
+            viewerWindow_->IsSlideshowActive(),
+            [this](std::vector<browser::BrowserItem> items, bool startSlideshow)
+            {
+                return ResolvePairedRawJpegViewerItems(std::move(items), startSlideshow);
+            });
+        if (synchronization.closeRequested)
         {
             const HWND viewerHwnd = viewerWindow_->Hwnd();
             if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
@@ -12672,12 +12464,9 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        viewerSelection.items = ResolvePairedRawJpegViewerItems(
-            std::move(viewerSelection.items),
-            viewerWindow_->IsSlideshowActive());
         return viewerWindow_->ReplaceItems(
-            std::move(viewerSelection.items),
-            viewerSelection.selectedIndex);
+            std::move(synchronization.items),
+            synchronization.selectedIndex);
     }
 
     void MainWindow::RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top)
@@ -15400,8 +15189,8 @@ namespace hyperbrowse::ui
             && ((currentFocusWindow
                  && (currentFocusWindow == viewerWindow_->Hwnd()
                      || IsChild(viewerWindow_->Hwnd(), currentFocusWindow)))
-                || !pendingViewerDeleteSourcePath_.empty()
-                || pendingViewerQuickSend_.active);
+                || viewerPendingOperations_.HasActiveDelete()
+                || viewerPendingOperations_.HasActiveQuickSend());
         if (viewerOperationOrigin)
         {
             focusWindowAtFileOperationStart_ = currentFocusWindow
@@ -16375,41 +16164,42 @@ namespace hyperbrowse::ui
     MainWindow::FileOperationCompletionContext MainWindow::CaptureFileOperationCompletionContext()
     {
         FileOperationCompletionContext context;
-        context.completedUndoRedoOperation = fileOperationJournal_.PendingOperation();
+        context.undoRedo.completedOperation = fileOperationJournal_.PendingOperation();
         fileOperationActive_ = false;
         activeFileOperationLabel_.clear();
         applyingUndoRedo_ = false;
 
-        context.activationRestoreWindow = foregroundWindowAtFileOperationStart_;
+        context.activation.activationRestoreWindow = foregroundWindowAtFileOperationStart_;
         foregroundWindowAtFileOperationStart_ = nullptr;
-        context.focusRestoreWindow = focusWindowAtFileOperationStart_;
+        context.activation.focusRestoreWindow = focusWindowAtFileOperationStart_;
         focusWindowAtFileOperationStart_ = nullptr;
 
-        context.viewerDeleteSourcePath = pendingViewerDeleteSourcePath_;
-        context.viewerDeleteSourcePaths = pendingViewerDeleteSourcePaths_;
-        context.viewerDeletePreferredFocusPath = pendingViewerDeletePreferredFocusPath_;
-        pendingViewerDeleteSourcePath_.clear();
-        pendingViewerDeleteSourcePaths_.clear();
-        pendingViewerDeletePreferredFocusPath_.clear();
-
-        context.viewerQuickSend = pendingViewerQuickSend_;
-        pendingViewerQuickSend_ = {};
+        if (const std::optional<PendingViewerDelete> activeDelete = viewerPendingOperations_.TakeActiveDelete())
+        {
+            context.viewer.viewerDeleteSourcePath = activeDelete->sourcePath;
+            context.viewer.viewerDeleteSourcePaths = activeDelete->sourcePaths;
+            context.viewer.viewerDeletePreferredFocusPath = activeDelete->preferredFocusPath;
+        }
+        if (const std::optional<PendingViewerQuickSend> quickSend = viewerPendingOperations_.TakeQuickSend())
+        {
+            context.viewer.viewerQuickSend = *quickSend;
+        }
 
         if (folderLoadCoordinator_)
         {
             const FolderLoadCoordinator::DeferredWatchEffects deferredWatchEffects =
                 folderLoadCoordinator_->TakeDeferredWatchEffects();
-            context.deferredFolderWatchReloadPath = std::move(deferredWatchEffects.reloadPath);
-            context.deferredFolderWatchTreeRefresh = deferredWatchEffects.treeRefresh;
+            context.deferredWatch.deferredFolderWatchReloadPath = std::move(deferredWatchEffects.reloadPath);
+            context.deferredWatch.deferredFolderWatchTreeRefresh = deferredWatchEffects.treeRefresh;
         }
 
-        context.treeFolderOperationPath = activeTreeFolderOperationPath_;
+        context.tree.treeFolderOperationPath = activeTreeFolderOperationPath_;
         activeTreeFolderOperationPath_.clear();
-        context.treeFolderRenamePath = activeTreeFolderRenamePath_;
+        context.tree.treeFolderRenamePath = activeTreeFolderRenamePath_;
         activeTreeFolderRenamePath_.clear();
-        context.treeFolderMoveSourcePath = activeTreeFolderMoveSourcePath_;
+        context.tree.treeFolderMoveSourcePath = activeTreeFolderMoveSourcePath_;
         activeTreeFolderMoveSourcePath_.clear();
-        context.treeFolderMoveDestinationFolder = activeTreeFolderMoveDestinationFolder_;
+        context.tree.treeFolderMoveDestinationFolder = activeTreeFolderMoveDestinationFolder_;
         activeTreeFolderMoveDestinationFolder_.clear();
         return context;
     }
@@ -16421,10 +16211,11 @@ namespace hyperbrowse::ui
         bool viewerQuickSendOperation)
     {
         bool viewerCloseRequested = false;
-        const std::wstring& viewerDeleteSourcePath = completionContext.viewerDeleteSourcePath;
-        const std::vector<std::wstring>& viewerDeleteSourcePaths = completionContext.viewerDeleteSourcePaths;
-        const std::wstring& viewerDeletePreferredFocusPath = completionContext.viewerDeletePreferredFocusPath;
-        const PendingViewerQuickSend& viewerQuickSend = completionContext.viewerQuickSend;
+        const FileOperationViewerContext& viewerContext = completionContext.viewer;
+        const std::wstring& viewerDeleteSourcePath = viewerContext.viewerDeleteSourcePath;
+        const std::vector<std::wstring>& viewerDeleteSourcePaths = viewerContext.viewerDeleteSourcePaths;
+        const std::wstring& viewerDeletePreferredFocusPath = viewerContext.viewerDeletePreferredFocusPath;
+        const PendingViewerQuickSend& viewerQuickSend = viewerContext.viewerQuickSend;
 
         if (viewerDeleteOperation)
         {
@@ -16559,9 +16350,10 @@ namespace hyperbrowse::ui
         bool viewerQuickSendOperation,
         const std::wstring& fallbackFolderPath)
     {
-        const std::wstring& treeFolderOperationPath = completionContext.treeFolderOperationPath;
-        const std::wstring& treeFolderRenamePath = completionContext.treeFolderRenamePath;
-        const std::wstring& treeFolderMoveSourcePath = completionContext.treeFolderMoveSourcePath;
+        const FileOperationTreeContext& treeContext = completionContext.tree;
+        const std::wstring& treeFolderOperationPath = treeContext.treeFolderOperationPath;
+        const std::wstring& treeFolderRenamePath = treeContext.treeFolderRenamePath;
+        const std::wstring& treeFolderMoveSourcePath = treeContext.treeFolderMoveSourcePath;
 
         if (!reloadCurrentFolder && browserModel_ && browserPaneController_)
         {
@@ -16732,9 +16524,9 @@ namespace hyperbrowse::ui
     {
         util::ScopedTimer applyTimer(L"MainWindow::ApplyCompletedFileOperation");
         const FileOperationCompletionContext completionContext = CaptureFileOperationCompletionContext();
-        const UndoRedoOperation completedUndoRedoOperation = completionContext.completedUndoRedoOperation;
-        const HWND activationRestoreWindow = completionContext.activationRestoreWindow;
-        const HWND focusRestoreWindow = completionContext.focusRestoreWindow;
+        const UndoRedoOperation completedUndoRedoOperation = completionContext.undoRedo.completedOperation;
+        const HWND activationRestoreWindow = completionContext.activation.activationRestoreWindow;
+        const HWND focusRestoreWindow = completionContext.activation.focusRestoreWindow;
 
         RecordUndoableOperation(update);
         for (const std::wstring& path : update.succeededSourcePaths)
@@ -16746,9 +16538,9 @@ namespace hyperbrowse::ui
             InvalidateFolderTreeChildPresence(path);
         }
 
-        const std::wstring& viewerDeleteSourcePath = completionContext.viewerDeleteSourcePath;
+        const std::wstring& viewerDeleteSourcePath = completionContext.viewer.viewerDeleteSourcePath;
 
-        const PendingViewerQuickSend& viewerQuickSend = completionContext.viewerQuickSend;
+        const PendingViewerQuickSend& viewerQuickSend = completionContext.viewer.viewerQuickSend;
         const bool viewerQuickSendOperation = viewerQuickSend.active
             && viewerQuickSend.type == update.type;
 
@@ -16761,16 +16553,16 @@ namespace hyperbrowse::ui
             && (update.type == services::FileOperationType::DeleteRecycleBin
                 || update.type == services::FileOperationType::DeletePermanent);
 
-        const bool deferredFolderWatchTreeRefresh = completionContext.deferredFolderWatchTreeRefresh;
+        const bool deferredFolderWatchTreeRefresh = completionContext.deferredWatch.deferredFolderWatchTreeRefresh;
 
-        const std::wstring& treeFolderRenamePath = completionContext.treeFolderRenamePath;
-        const std::wstring& treeFolderMoveSourcePath = completionContext.treeFolderMoveSourcePath;
+        const std::wstring& treeFolderRenamePath = completionContext.tree.treeFolderRenamePath;
+        const std::wstring& treeFolderMoveSourcePath = completionContext.tree.treeFolderMoveSourcePath;
         const FileOperationTreeEffects treeEffects = BuildFileOperationTreeEffects(
             update,
-            completionContext.treeFolderOperationPath,
-            completionContext.treeFolderRenamePath,
-            completionContext.treeFolderMoveSourcePath,
-            completionContext.treeFolderMoveDestinationFolder,
+            completionContext.tree.treeFolderOperationPath,
+            completionContext.tree.treeFolderRenamePath,
+            completionContext.tree.treeFolderMoveSourcePath,
+            completionContext.tree.treeFolderMoveDestinationFolder,
             browserModel_.get());
         const bool treeFolderMoveSucceeded = treeEffects.treeFolderMoveSucceeded;
         const bool treeFolderRenameSucceeded = treeEffects.treeFolderRenameSucceeded;
@@ -16819,7 +16611,7 @@ namespace hyperbrowse::ui
         const bool reloadCurrentFolder = ShouldReloadCurrentFolderForFileOperation(
             update,
             browserModel_.get(),
-            completionContext.deferredFolderWatchReloadPath,
+            completionContext.deferredWatch.deferredFolderWatchReloadPath,
             treeEffects,
             viewerDeleteOperation,
             browserItemDeleteOperation,
@@ -16940,22 +16732,23 @@ namespace hyperbrowse::ui
                 KillTimer(hwnd_, kFileOperationShutdownTimerId);
             }
             closePendingSinceTick_ = 0;
-            pendingViewerDeletes_.clear();
+            viewerPendingOperations_.ClearQueuedDeletes();
             PostMessageW(hwnd_, WM_CLOSE, 0, 0);
         }
-        else if (!pendingViewerDeletes_.empty())
+        else if (const std::optional<PendingViewerDelete> nextRequest = viewerPendingOperations_.TakeNextDelete())
         {
-            PendingViewerDelete next = std::move(pendingViewerDeletes_.front());
-            pendingViewerDeletes_.pop_front();
-            pendingViewerDeleteSourcePath_ = next.sourcePath;
-            pendingViewerDeleteSourcePaths_ = next.sourcePaths;
-            pendingViewerDeletePreferredFocusPath_ = viewerWindow_ && viewerWindow_->IsOpen()
+            PendingViewerDelete next = *nextRequest;
+            next.preferredFocusPath = viewerWindow_ && viewerWindow_->IsOpen()
                 ? viewerWindow_->CurrentFilePath()
                 : next.preferredFocusPath;
+            std::vector<std::wstring> sourcePaths = next.sourcePaths;
+            viewerPendingOperations_.SetActiveDelete(std::move(next));
+            const PendingViewerDelete* activeDelete = viewerPendingOperations_.ActiveDelete();
             StartFileOperation(
-                next.permanent ? services::FileOperationType::DeletePermanent
-                               : services::FileOperationType::DeleteRecycleBin,
-                std::move(next.sourcePaths),
+                activeDelete && activeDelete->permanent
+                    ? services::FileOperationType::DeletePermanent
+                    : services::FileOperationType::DeleteRecycleBin,
+                std::move(sourcePaths),
                 {},
                 services::FileConflictPolicy::PromptShell,
                 {});
@@ -19143,8 +18936,7 @@ namespace hyperbrowse::ui
         pending.sourcePath = sourcePath;
         pending.sourcePaths = sourcePaths;
         pending.destinationFolder = destinationFolder;
-        pending.active = true;
-        pendingViewerQuickSend_ = std::move(pending);
+        viewerPendingOperations_.SetQuickSend(std::move(pending));
 
         const std::wstring quickSendDestination = destinationFolder;
         if (!StartFileOperation(type,
@@ -19154,7 +18946,7 @@ namespace hyperbrowse::ui
                                 std::move(targetLeafNames),
                                 viewerHwnd))
         {
-            pendingViewerQuickSend_ = {};
+            viewerPendingOperations_.ClearQuickSend();
             return false;
         }
         MutateQuickSendState([&]
@@ -19164,7 +18956,10 @@ namespace hyperbrowse::ui
 
         if (type == services::FileOperationType::Move)
         {
-            pendingViewerQuickSend_.viewerAdvanced = viewerWindow_->AdvanceAfterDeleteCurrent();
+            if (PendingViewerQuickSend* activeQuickSend = viewerPendingOperations_.ActiveQuickSend())
+            {
+                activeQuickSend->viewerAdvanced = viewerWindow_->AdvanceAfterDeleteCurrent();
+            }
         }
         return true;
     }
@@ -19219,13 +19014,16 @@ namespace hyperbrowse::ui
             queued.sourcePaths = sourcePaths;
             queued.preferredFocusPath = preferredFocusPath;
             queued.permanent = permanentDelete;
-            pendingViewerDeletes_.push_back(std::move(queued));
+            viewerPendingOperations_.QueueDelete(std::move(queued));
             return 0;
         }
 
-        pendingViewerDeleteSourcePath_ = std::move(sourcePath);
-        pendingViewerDeleteSourcePaths_ = sourcePaths;
-        pendingViewerDeletePreferredFocusPath_ = std::move(preferredFocusPath);
+        PendingViewerDelete active;
+        active.sourcePath = std::move(sourcePath);
+        active.sourcePaths = sourcePaths;
+        active.preferredFocusPath = std::move(preferredFocusPath);
+        active.permanent = permanentDelete;
+        viewerPendingOperations_.SetActiveDelete(std::move(active));
         {
             util::ScopedTimer fileOpTimer(L"MainWindow::OnViewerDeleteRequested StartFileOperation");
             StartFileOperation(
@@ -19314,7 +19112,17 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnViewerClosedMessage()
     {
+        const HWND closingViewerHwnd = viewerWindow_ ? viewerWindow_->Hwnd() : nullptr;
         const std::wstring viewerPath = viewerWindow_ ? NormalizeFolderPath(viewerWindow_->CurrentFilePath()) : std::wstring{};
+        viewerPendingOperations_.Clear();
+        if (focusWindowAtFileOperationStart_ == closingViewerHwnd)
+        {
+            focusWindowAtFileOperationStart_ = nullptr;
+        }
+        if (foregroundWindowAtFileOperationStart_ == closingViewerHwnd)
+        {
+            foregroundWindowAtFileOperationStart_ = nullptr;
+        }
         if (!viewerPath.empty() && browserPaneController_)
         {
             browserPaneController_->RestoreSelectionByFilePaths({viewerPath}, viewerPath);
@@ -19973,7 +19781,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::OnLButtonUp()
     {
-        if (treeFolderDragActive_)
+        if (folderTreeDragController_.IsActive())
         {
             FinishFolderTreeDrag(true);
             return;
@@ -20179,7 +19987,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::OnMouseMove(int x, int y)
     {
-        if (treeFolderDragActive_)
+        if (folderTreeDragController_.IsActive())
         {
             UpdateFolderTreeDrag(POINT{x, y});
             return;
@@ -20653,6 +20461,127 @@ namespace hyperbrowse::ui
                 return effect;
     }
 
+    std::optional<LRESULT> MainWindow::HandleControlColorMessage(UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        const HWND control = reinterpret_cast<HWND>(lParam);
+        if (message == WM_CTLCOLOREDIT && IsQuickAccessShortcutEdit(control))
+        {
+            const ThemePalette palette = GetThemePalette();
+            SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
+            SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionFieldBackground);
+            return reinterpret_cast<INT_PTR>(actionFieldBrush_ ? actionFieldBrush_ : backgroundBrush_);
+        }
+
+        if (message == WM_CTLCOLOREDIT && control == filterEdit_)
+        {
+            const ThemePalette palette = GetThemePalette();
+            SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
+            SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionFieldBackground);
+            return reinterpret_cast<INT_PTR>(actionFieldBrush_ ? actionFieldBrush_ : backgroundBrush_);
+        }
+
+        if (control == detailsPanelText_)
+        {
+            const ThemePalette palette = GetThemePalette();
+            SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
+            SetBkColor(reinterpret_cast<HDC>(wParam), palette.paneBackground);
+            return reinterpret_cast<INT_PTR>(detailsPanelBrush_ ? detailsPanelBrush_ : backgroundBrush_);
+        }
+
+        return std::nullopt;
+    }
+
+    LRESULT MainWindow::HandlePaintMessage()
+    {
+        PAINTSTRUCT ps{};
+        HDC hdc = BeginPaint(hwnd_, &ps);
+        RECT client{};
+        GetClientRect(hwnd_, &client);
+
+        bool paintedWithD2D = false;
+        if (EnsureD2DResources())
+        {
+            const int clientWidth = std::max(1, static_cast<int>(client.right - client.left));
+            const int clientHeight = std::max(1, static_cast<int>(client.bottom - client.top));
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP memBmp = memDC ? CreateCompatibleBitmap(hdc, clientWidth, clientHeight) : nullptr;
+            if (memDC && memBmp)
+            {
+                const HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+                auto bufferedRenderTarget = hyperbrowse::render::D2DRenderer::Instance().CreateDCRenderTarget();
+                if (bufferedRenderTarget
+                    && SUCCEEDED(bufferedRenderTarget->BindDC(memDC, &client)))
+                {
+                    bufferedRenderTarget->BeginDraw();
+                    const ThemePalette palette = GetThemePalette();
+                    const ShellPainterPalette shellPalette{
+                        palette.windowBackground,
+                        palette.splitter,
+                        palette.actionStripBorder};
+                    const ShellPainterGeometry shellGeometry{
+                        leftPaneWidth_,
+                        kActionStripHeight,
+                        kSplitterWidth,
+                        detailsStripVisible_,
+                        detailsPanelRect_};
+                    ShellPainter::PaintD2D(bufferedRenderTarget.Get(), client, shellPalette, shellGeometry);
+                    const RECT stripRect{0, 0, client.right, kActionStripHeight};
+                    PaintToolbarD2D(bufferedRenderTarget.Get(), stripRect);
+                    const HRESULT drawResult = bufferedRenderTarget->EndDraw();
+                    paintedWithD2D = SUCCEEDED(drawResult);
+                }
+
+                if (paintedWithD2D)
+                {
+                    PaintDetailsPanel(memDC, client);
+                    BitBlt(hdc, 0, 0, clientWidth, clientHeight, memDC, 0, 0, SRCCOPY);
+                }
+
+                SelectObject(memDC, oldBmp);
+                DeleteObject(memBmp);
+                DeleteDC(memDC);
+            }
+        }
+
+        if (paintedWithD2D)
+        {
+            EndPaint(hwnd_, &ps);
+            return 0;
+        }
+
+        const int clientWidth = std::max(1, static_cast<int>(client.right - client.left));
+        const int clientHeight = std::max(1, static_cast<int>(client.bottom - client.top));
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBmp = CreateCompatibleBitmap(hdc, clientWidth, clientHeight);
+        HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+
+        const ThemePalette palette = GetThemePalette();
+        const ShellPainterPalette shellPalette{
+            palette.windowBackground,
+            palette.splitter,
+            palette.actionStripBorder};
+        const ShellPainterGeometry shellGeometry{
+            leftPaneWidth_,
+            kActionStripHeight,
+            kSplitterWidth,
+            detailsStripVisible_,
+            detailsPanelRect_};
+        ShellPainter::PaintGdi(memDC, client, shellPalette, shellGeometry);
+
+        const RECT stripRect{0, 0, client.right, kActionStripHeight};
+        PaintToolbar(memDC, stripRect);
+
+        PaintDetailsPanel(memDC, client);
+
+        BitBlt(hdc, 0, 0, clientWidth, clientHeight, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBmp);
+        DeleteObject(memBmp);
+        DeleteDC(memDC);
+
+        EndPaint(hwnd_, &ps);
+        return 0;
+    }
+
     LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
         switch (message)
@@ -20794,7 +20723,9 @@ namespace hyperbrowse::ui
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
         case WM_SYSCHAR:
-            if (treeFolderDragActive_ && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && wParam == VK_ESCAPE)
+            if (folderTreeDragController_.IsActive()
+                && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+                && wParam == VK_ESCAPE)
             {
                 FinishFolderTreeDrag(false);
                 return 0;
@@ -20853,7 +20784,7 @@ namespace hyperbrowse::ui
             }
             break;
         case WM_CAPTURECHANGED:
-            if (treeFolderDragActive_)
+            if (folderTreeDragController_.IsActive())
             {
                 FinishFolderTreeDrag(false);
                 return 0;
@@ -20865,7 +20796,7 @@ namespace hyperbrowse::ui
             }
             break;
         case WM_CANCELMODE:
-            if (treeFolderDragActive_)
+            if (folderTreeDragController_.IsActive())
             {
                 FinishFolderTreeDrag(false);
                 return 0;
@@ -20883,9 +20814,10 @@ namespace hyperbrowse::ui
             POINT point{};
             GetCursorPos(&point);
             ScreenToClient(hwnd_, &point);
-            if (treeFolderDragActive_)
+            if (folderTreeDragController_.IsActive())
             {
-                SetCursor(LoadCursorW(nullptr, treeFolderDropAllowed_ ? IDC_HAND : IDC_NO));
+                SetCursor(LoadCursorW(nullptr,
+                                      folderTreeDragController_.IsDropAllowed() ? IDC_HAND : IDC_NO));
                 return TRUE;
             }
             if (dragMode_ == DragMode::QuickAccessInternal)
@@ -21049,35 +20981,15 @@ namespace hyperbrowse::ui
             return OnFolderTreeNotify(lParam);
         }
         case WM_CTLCOLOREDIT:
-            if (IsQuickAccessShortcutEdit(reinterpret_cast<HWND>(lParam)))
+            if (const std::optional<LRESULT> result = HandleControlColorMessage(message, wParam, lParam))
             {
-                const ThemePalette palette = GetThemePalette();
-                SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
-                SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionFieldBackground);
-                return reinterpret_cast<INT_PTR>(actionFieldBrush_ ? actionFieldBrush_ : backgroundBrush_);
-            }
-            if (reinterpret_cast<HWND>(lParam) == filterEdit_)
-            {
-                const ThemePalette palette = GetThemePalette();
-                SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
-                SetBkColor(reinterpret_cast<HDC>(wParam), palette.actionFieldBackground);
-                return reinterpret_cast<INT_PTR>(actionFieldBrush_ ? actionFieldBrush_ : backgroundBrush_);
-            }
-            if (reinterpret_cast<HWND>(lParam) == detailsPanelText_)
-            {
-                const ThemePalette palette = GetThemePalette();
-                SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
-                SetBkColor(reinterpret_cast<HDC>(wParam), palette.paneBackground);
-                return reinterpret_cast<INT_PTR>(detailsPanelBrush_ ? detailsPanelBrush_ : backgroundBrush_);
+                return *result;
             }
             break;
         case WM_CTLCOLORSTATIC:
-            if (reinterpret_cast<HWND>(lParam) == detailsPanelText_)
+            if (const std::optional<LRESULT> result = HandleControlColorMessage(message, wParam, lParam))
             {
-                const ThemePalette palette = GetThemePalette();
-                SetTextColor(reinterpret_cast<HDC>(wParam), palette.text);
-                SetBkColor(reinterpret_cast<HDC>(wParam), palette.paneBackground);
-                return reinterpret_cast<INT_PTR>(detailsPanelBrush_ ? detailsPanelBrush_ : backgroundBrush_);
+                return *result;
             }
             break;
         case WM_COMMAND:
@@ -21155,95 +21067,7 @@ namespace hyperbrowse::ui
             return 1;
         }
         case WM_PAINT:
-        {
-            PAINTSTRUCT ps{};
-            HDC hdc = BeginPaint(hwnd_, &ps);
-            RECT client{};
-            GetClientRect(hwnd_, &client);
-
-            bool paintedWithD2D = false;
-            if (EnsureD2DResources())
-            {
-                const int clientWidth = std::max(1, static_cast<int>(client.right - client.left));
-                const int clientHeight = std::max(1, static_cast<int>(client.bottom - client.top));
-                HDC memDC = CreateCompatibleDC(hdc);
-                HBITMAP memBmp = memDC ? CreateCompatibleBitmap(hdc, clientWidth, clientHeight) : nullptr;
-                if (memDC && memBmp)
-                {
-                    const HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
-                    auto bufferedRenderTarget = hyperbrowse::render::D2DRenderer::Instance().CreateDCRenderTarget();
-                    if (bufferedRenderTarget
-                        && SUCCEEDED(bufferedRenderTarget->BindDC(memDC, &client)))
-                    {
-                        bufferedRenderTarget->BeginDraw();
-                        const ThemePalette palette = GetThemePalette();
-                        const ShellPainterPalette shellPalette{
-                            palette.windowBackground,
-                            palette.splitter,
-                            palette.actionStripBorder};
-                        const ShellPainterGeometry shellGeometry{
-                            leftPaneWidth_,
-                            kActionStripHeight,
-                            kSplitterWidth,
-                            detailsStripVisible_,
-                            detailsPanelRect_};
-                        ShellPainter::PaintD2D(bufferedRenderTarget.Get(), client, shellPalette, shellGeometry);
-                        const RECT stripRect{0, 0, client.right, kActionStripHeight};
-                        PaintToolbarD2D(bufferedRenderTarget.Get(), stripRect);
-                        const HRESULT drawResult = bufferedRenderTarget->EndDraw();
-                        paintedWithD2D = SUCCEEDED(drawResult);
-                    }
-
-                    if (paintedWithD2D)
-                    {
-                        PaintDetailsPanel(memDC, client);
-                        BitBlt(hdc, 0, 0, clientWidth, clientHeight, memDC, 0, 0, SRCCOPY);
-                    }
-
-                    SelectObject(memDC, oldBmp);
-                    DeleteObject(memBmp);
-                    DeleteDC(memDC);
-                }
-            }
-
-            if (paintedWithD2D)
-            {
-                EndPaint(hwnd_, &ps);
-                return 0;
-            }
-
-            const int clientWidth = std::max(1, static_cast<int>(client.right - client.left));
-            const int clientHeight = std::max(1, static_cast<int>(client.bottom - client.top));
-            HDC memDC = CreateCompatibleDC(hdc);
-            HBITMAP memBmp = CreateCompatibleBitmap(hdc, clientWidth, clientHeight);
-            HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
-
-            const ThemePalette palette = GetThemePalette();
-            const ShellPainterPalette shellPalette{
-                palette.windowBackground,
-                palette.splitter,
-                palette.actionStripBorder};
-            const ShellPainterGeometry shellGeometry{
-                leftPaneWidth_,
-                kActionStripHeight,
-                kSplitterWidth,
-                detailsStripVisible_,
-                detailsPanelRect_};
-            ShellPainter::PaintGdi(memDC, client, shellPalette, shellGeometry);
-
-            const RECT stripRect{0, 0, client.right, kActionStripHeight};
-            PaintToolbar(memDC, stripRect);
-
-            PaintDetailsPanel(memDC, client);
-
-            BitBlt(hdc, 0, 0, clientWidth, clientHeight, memDC, 0, 0, SRCCOPY);
-            SelectObject(memDC, oldBmp);
-            DeleteObject(memBmp);
-            DeleteDC(memDC);
-
-            EndPaint(hwnd_, &ps);
-            return 0;
-        }
+            return HandlePaintMessage();
         case WM_QUERYENDSESSION:
             // Persist state before the session ends. WM_DESTROY is not guaranteed during
             // a forced shutdown / Windows Update / sign-out.
@@ -21258,7 +21082,7 @@ namespace hyperbrowse::ui
             }
             return 0;
         case WM_DESTROY:
-            if (treeFolderDragActive_)
+            if (folderTreeDragController_.IsActive())
             {
                 FinishFolderTreeDrag(false);
             }

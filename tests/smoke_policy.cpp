@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "services/BatchConvertService.h"
+#include "services/FileOperationService.h"
 #include "ui/BrowserItemScopeCollector.h"
 #include "ui/BrowserPresentationPersistence.h"
 #include "ui/CommandBarController.h"
@@ -40,6 +41,8 @@
 #include "ui/SelectionRatingPolicy.h"
 #include "ui/ViewCommandController.h"
 #include "ui/ViewerItemSelectionPolicy.h"
+#include "ui/ViewerPendingOperationState.h"
+#include "ui/ViewerSynchronizer.h"
 #include "ui/ViewerSettingsPersistence.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowBoundsPersistence.h"
@@ -1583,6 +1586,92 @@ namespace hyperbrowse::tests
                    "Viewer item selection policy changed index fallback behavior");
         }
 
+         void RunViewerPendingOperationStateScenario()
+         {
+             using hyperbrowse::services::FileOperationType;
+             using hyperbrowse::ui::ViewerPendingOperationState;
+
+             ViewerPendingOperationState state;
+             ViewerPendingOperationState::DeleteRequest firstDelete;
+             firstDelete.sourcePath = L"C:\\images\\first.jpg";
+             firstDelete.sourcePaths = {firstDelete.sourcePath};
+             firstDelete.preferredFocusPath = firstDelete.sourcePath;
+             state.SetActiveDelete(std::move(firstDelete));
+
+             ViewerPendingOperationState::DeleteRequest queuedDelete;
+             queuedDelete.sourcePath = L"C:\\images\\second.jpg";
+             queuedDelete.sourcePaths = {queuedDelete.sourcePath};
+             queuedDelete.permanent = true;
+             state.QueueDelete(std::move(queuedDelete));
+
+             Expect(state.HasActiveDelete() && state.HasQueuedDeletes(),
+                 "Viewer pending-operation state did not retain active and queued deletes");
+             const auto activeDelete = state.TakeActiveDelete();
+             Expect(activeDelete && activeDelete->sourcePath == L"C:\\images\\first.jpg"
+                  && !state.HasActiveDelete() && state.HasQueuedDeletes(),
+                 "Viewer pending-operation state changed active delete order");
+             const auto nextDelete = state.TakeNextDelete();
+             Expect(nextDelete && nextDelete->sourcePath == L"C:\\images\\second.jpg"
+                  && nextDelete->permanent && !state.HasQueuedDeletes(),
+                 "Viewer pending-operation state did not dequeue the next delete");
+
+             ViewerPendingOperationState::QuickSendRequest quickSend;
+             quickSend.type = FileOperationType::Copy;
+             quickSend.sourcePath = L"C:\\images\\first.jpg";
+             quickSend.sourcePaths = {quickSend.sourcePath};
+             state.SetQuickSend(std::move(quickSend));
+             Expect(state.HasActiveQuickSend() && state.ActiveQuickSend()->active,
+                 "Viewer pending-operation state did not activate Quick Send");
+             Expect(state.TakeQuickSend() && !state.HasActiveQuickSend(),
+                 "Viewer pending-operation state did not consume Quick Send");
+
+             state.SetActiveDelete({});
+             state.QueueDelete({});
+             state.SetQuickSend({});
+             state.Clear();
+             Expect(!state.HasActiveDelete() && !state.HasQueuedDeletes() && !state.HasActiveQuickSend(),
+                 "Viewer pending-operation state did not clear on viewer close");
+         }
+
+        void RunViewerSynchronizerScenario()
+        {
+            using hyperbrowse::browser::BrowserItem;
+            using hyperbrowse::ui::ViewerSynchronizer;
+
+            const std::vector<BrowserItem> modelItems = {
+                BrowserItem{L"first.jpg", L"C:\\images\\first.jpg"},
+                BrowserItem{L"second.jpg", L"C:\\images\\second.jpg"}};
+            bool resolverSawSlideshow = false;
+            const ViewerSynchronizer::Result synchronized = ViewerSynchronizer::Build(
+                modelItems,
+                {0, 1},
+                L"C:\\images\\second.jpg",
+                L"C:\\images\\first.jpg",
+                0,
+                true,
+                [&resolverSawSlideshow](std::vector<BrowserItem> items, bool slideshowActive)
+                {
+                    resolverSawSlideshow = slideshowActive;
+                    return items;
+                });
+            Expect(!synchronized.closeRequested
+                       && synchronized.items.size() == 2
+                       && synchronized.selectedIndex == 1
+                       && resolverSawSlideshow,
+                   "Viewer synchronizer did not preserve preferred selection and slideshow state");
+
+            const ViewerSynchronizer::Result empty = ViewerSynchronizer::Build(
+                {},
+                {},
+                {},
+                {},
+                -1,
+                false,
+                {});
+            Expect(empty.closeRequested && empty.items.empty(),
+                   "Viewer synchronizer did not request close for an empty model");
+        }
+
         void RunQuickAccessShortcutEditPolicyScenario()
         {
             using hyperbrowse::ui::QuickAccessShortcutEditPolicy;
@@ -1647,6 +1736,8 @@ namespace hyperbrowse::tests
         RunFolderTreeDropPolicyScenario();
         RunSelectionRatingPolicyScenario();
         RunViewerItemSelectionPolicyScenario();
+        RunViewerPendingOperationStateScenario();
+        RunViewerSynchronizerScenario();
         RunQuickAccessShortcutEditPolicyScenario();
         RunDetailsPanelLayoutScenario();
         RunDisplaySurfaceRecoveryPolicyScenario();
@@ -1700,6 +1791,14 @@ namespace hyperbrowse::tests
         else if (scenario == "--viewer-item-selection")
         {
             RunViewerItemSelectionPolicyScenario();
+        }
+        else if (scenario == "--viewer-pending-operations")
+        {
+            RunViewerPendingOperationStateScenario();
+        }
+        else if (scenario == "--viewer-synchronizer")
+        {
+            RunViewerSynchronizerScenario();
         }
         else if (scenario == "--quick-access-shortcut")
         {

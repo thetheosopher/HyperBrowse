@@ -23,6 +23,7 @@
 #include "util/UiTextSize.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FileOperationReconciler.h"
+#include "ui/FolderTreeDragController.h"
 #include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
 #include "ui/FileCommandController.h"
@@ -38,6 +39,7 @@
 #include "ui/QuickAccessLayout.h"
 #include "ui/QuickAccessPainter.h"
 #include "ui/QuickSend.h"
+#include "ui/ViewerPendingOperationState.h"
 #include "ui/ViewCommandController.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowTimerRouter.h"
@@ -452,6 +454,8 @@ namespace hyperbrowse::ui
         void RecoverDisplaySurfaces(bool relayout);
         void ScheduleDisplaySurfaceRecoveryRetries();
         void StopDisplaySurfaceRecoveryRetries();
+        LRESULT HandlePaintMessage();
+        std::optional<LRESULT> HandleControlColorMessage(UINT message, WPARAM wParam, LPARAM lParam);
 
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -480,7 +484,6 @@ namespace hyperbrowse::ui
         std::wstring treeTooltipPath_;
         HMODULE detailsPanelRichEditModule_{};
         HIMAGELIST treeImageList_{};
-        HIMAGELIST treeDragImageList_{};
         ExternalDropTarget* externalDropTarget_{};
         HTREEITEM externalDropTreeHoverItem_{};
         ITaskbarList3* taskbarList_{};
@@ -532,8 +535,6 @@ namespace hyperbrowse::ui
         bool defaultViewerToSecondaryMonitor_{false};
         bool suppressTreeSelectionChange_{};
         bool hasPersistedWindowBounds_{};
-        bool treeFolderDragActive_{};
-        bool treeFolderDropAllowed_{};
         DragMode dragMode_{DragMode::None};
         HBRUSH backgroundBrush_{};
         HBRUSH actionFieldBrush_{};
@@ -561,6 +562,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<FolderLoadCoordinator> folderLoadCoordinator_;
         std::unique_ptr<FolderWatchChangeCoordinator> folderWatchChangeCoordinator_;
         std::unique_ptr<FolderTreeController> folderTreeController_;
+        FolderTreeDragController folderTreeDragController_;
         WindowAsyncMessageRouter asyncMessageRouter_;
         WindowTimerRouter timerRouter_;
         FileCommandController fileCommandController_;
@@ -574,10 +576,6 @@ namespace hyperbrowse::ui
         std::shared_ptr<struct PersistentThumbnailCacheMaintenanceState> cacheMaintenanceState_;
         mutable HWND shortcutReferenceWindow_{};
         std::wstring pendingTreeMouseSelectionPath_;
-        HTREEITEM treeDragSourceItem_{};
-        HTREEITEM treeDragHoverItem_{};
-        std::wstring treeDragSourcePath_;
-        std::wstring treeDragDestinationPath_;
         HTREEITEM internalSelectionTreeDropItem_{};
         std::wstring internalSelectionTreeDropPath_;
         RECT detailsPanelRect_{};
@@ -640,43 +638,45 @@ namespace hyperbrowse::ui
         std::wstring activeTreeFolderOperationPath_;
         std::wstring activeTreeFolderRenamePath_;
         std::wstring pendingInlineRenameOriginalPath_;
-        struct PendingViewerDelete
+        using PendingViewerDelete = ViewerPendingOperationState::DeleteRequest;
+        using PendingViewerQuickSend = ViewerPendingOperationState::QuickSendRequest;
+        struct FileOperationActivationContext
         {
-            std::wstring sourcePath;
-            std::vector<std::wstring> sourcePaths;
-            std::wstring preferredFocusPath;
-            bool permanent{};
-        };
-        struct PendingViewerQuickSend
-        {
-            services::FileOperationType type{static_cast<services::FileOperationType>(0)};
-            std::wstring sourcePath;
-            std::vector<std::wstring> sourcePaths;
-            std::wstring destinationFolder;
-            bool viewerAdvanced{};
-            bool active{};
-        };
-        struct FileOperationCompletionContext
-        {
-            UndoRedoOperation completedUndoRedoOperation{UndoRedoOperation::None};
             HWND activationRestoreWindow{};
             HWND focusRestoreWindow{};
+        };
+        struct FileOperationUndoRedoContext
+        {
+            UndoRedoOperation completedOperation{UndoRedoOperation::None};
+        };
+        struct FileOperationViewerContext
+        {
             std::wstring viewerDeleteSourcePath;
             std::vector<std::wstring> viewerDeleteSourcePaths;
             std::wstring viewerDeletePreferredFocusPath;
             PendingViewerQuickSend viewerQuickSend;
+        };
+        struct FileOperationDeferredWatchContext
+        {
             std::wstring deferredFolderWatchReloadPath;
             bool deferredFolderWatchTreeRefresh{};
+        };
+        struct FileOperationTreeContext
+        {
             std::wstring treeFolderOperationPath;
             std::wstring treeFolderRenamePath;
             std::wstring treeFolderMoveSourcePath;
             std::wstring treeFolderMoveDestinationFolder;
         };
-        std::wstring pendingViewerDeleteSourcePath_;
-        std::vector<std::wstring> pendingViewerDeleteSourcePaths_;
-        std::wstring pendingViewerDeletePreferredFocusPath_;
-        std::deque<PendingViewerDelete> pendingViewerDeletes_;
-        PendingViewerQuickSend pendingViewerQuickSend_;
+        struct FileOperationCompletionContext
+        {
+            FileOperationActivationContext activation;
+            FileOperationUndoRedoContext undoRedo;
+            FileOperationViewerContext viewer;
+            FileOperationDeferredWatchContext deferredWatch;
+            FileOperationTreeContext tree;
+        };
+        ViewerPendingOperationState viewerPendingOperations_;
         bool quickSendPopupActive_{};
         std::size_t quickSendPopupInitialDownCount_{};
         std::wstring activeFileOperationLabel_;

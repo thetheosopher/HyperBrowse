@@ -157,6 +157,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/FolderEnumerationCoordinator.cpp
     src/ui/FolderLoadCoordinator.cpp
     src/ui/FolderTreeDropPolicy.cpp
+    src/ui/FolderTreeDragController.cpp
     src/ui/FolderTreeController.cpp
     src/ui/FolderWatchChangeCoordinator.cpp
     src/ui/FolderHistory.cpp
@@ -169,6 +170,8 @@ add_library(HyperBrowseCore STATIC
     src/ui/SelectionRatingPolicy.cpp
     src/ui/SelectedPathPersistence.cpp
     src/ui/ViewerItemSelectionPolicy.cpp
+    src/ui/ViewerPendingOperationState.cpp
+    src/ui/ViewerSynchronizer.cpp
     src/ui/StatusBarPainter.cpp
     src/ui/ToolbarIconLibrary.cpp
     src/ui/ViewCommandController.cpp
