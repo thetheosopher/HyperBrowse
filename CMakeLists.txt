@@ -126,6 +126,7 @@ add_library(HyperBrowseCore STATIC
     src/services/UserMetadataStore.cpp
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
+    src/ui/BrowserItemScopeCollector.cpp
     src/ui/CommandBarController.cpp
     src/ui/CommandBarPainter.cpp
     src/ui/ClipboardFileTransfer.cpp
@@ -155,6 +156,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/FileOperationReconciler.cpp
     src/ui/FolderEnumerationCoordinator.cpp
     src/ui/FolderLoadCoordinator.cpp
+    src/ui/FolderTreeDropPolicy.cpp
     src/ui/FolderTreeController.cpp
     src/ui/FolderWatchChangeCoordinator.cpp
     src/ui/FolderHistory.cpp
@@ -164,7 +166,9 @@ add_library(HyperBrowseCore STATIC
     src/ui/QuickSend.cpp
     src/ui/ShellDragSource.cpp
     src/ui/ShellPainter.cpp
+    src/ui/SelectionRatingPolicy.cpp
     src/ui/SelectedPathPersistence.cpp
+    src/ui/ViewerItemSelectionPolicy.cpp
     src/ui/StatusBarPainter.cpp
     src/ui/ToolbarIconLibrary.cpp
     src/ui/ViewCommandController.cpp

@@ -383,3 +383,23 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `src/ui/QuickAccessDestinationBuilder.*`. MainWindow retains metadata and
   QuickSend lookup callbacks, scrollbar ownership, layout, and HWND updates
   while the builder owns conversion to layout destinations.
+- [x] Extract browser item scope filtering and ordering into
+  `src/ui/BrowserItemScopeCollector.*`. MainWindow retains model and pane
+  snapshot acquisition while the collector owns selection/full-folder scope
+  mapping and invalid-index filtering.
+- [x] Extract pure folder-tree drop path validation into
+  `src/ui/FolderTreeDropPolicy.*`. MainWindow retains filesystem existence,
+  drive checks, image-list handling, and move effects while the policy owns
+  self, child, and parent destination rejection.
+- [x] Extract common and mixed selection-rating aggregation into
+  `src/ui/SelectionRatingPolicy.*`. MainWindow retains metadata-store reads and
+  menu presentation while the policy owns clamping and equality semantics.
+- [x] Extract ordered viewer-item collection and active-index fallback into
+  `src/ui/ViewerItemSelectionPolicy.*`. MainWindow retains model and pane
+  snapshots, paired RAW/JPEG resolution, viewer lifetime, and image loading
+  while the policy owns invalid-index filtering and preferred/current-path
+  selection precedence.
+- [x] Move pure RAW/JPEG companion-path expansion into
+  `PairedRawJpegResolver::ExpandPaths`. MainWindow retains feature gating,
+  model snapshots, and companion-count reporting while the resolver owns
+  same-folder, same-stem matching and duplicate suppression.

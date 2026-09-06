@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "services/BatchConvertService.h"
+#include "ui/BrowserItemScopeCollector.h"
 #include "ui/BrowserPresentationPersistence.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
@@ -25,6 +26,7 @@
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
+#include "ui/FolderTreeDropPolicy.h"
 #include "ui/FolderHistory.h"
 #include "ui/ImageWorkflowPersistence.h"
 #include "ui/PairedRawJpegResolver.h"
@@ -35,7 +37,9 @@
 #include "ui/QuickAccessShortcutEditPolicy.h"
 #include "ui/RightPaneHitTester.h"
 #include "ui/SelectedPathPersistence.h"
+#include "ui/SelectionRatingPolicy.h"
 #include "ui/ViewCommandController.h"
+#include "ui/ViewerItemSelectionPolicy.h"
 #include "ui/ViewerSettingsPersistence.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowBoundsPersistence.h"
@@ -1222,6 +1226,22 @@ namespace hyperbrowse::tests
                        && resolved[0].filePath == raw.filePath
                        && resolved[1].filePath == raw.filePath,
                    "Paired RAW/JPEG resolver did not apply the preference to all items");
+
+            const std::vector<std::wstring> expanded = PairedRawJpegResolver::ExpandPaths(
+                std::vector<std::wstring>{jpeg.filePath},
+                candidates,
+                folderPathEquals);
+            Expect(expanded.size() == 2
+                       && expanded[0] == jpeg.filePath
+                       && expanded[1] == raw.filePath,
+                   "Paired RAW/JPEG resolver did not expand a same-folder companion");
+
+            const std::vector<std::wstring> alreadyExpanded = PairedRawJpegResolver::ExpandPaths(
+                std::vector<std::wstring>{jpeg.filePath, raw.filePath},
+                candidates,
+                folderPathEquals);
+            Expect(alreadyExpanded.size() == 2,
+                   "Paired RAW/JPEG resolver duplicated an existing companion path");
         }
 
         void RunWindowTimerRouterScenario()
@@ -1398,6 +1418,171 @@ namespace hyperbrowse::tests
                    "Quick Actions destination builder changed the layout snapshot contract");
         }
 
+        void RunBrowserItemScopeCollectorScenario()
+        {
+            using hyperbrowse::browser::BrowserItem;
+            using hyperbrowse::ui::BrowserItemScopeCollector;
+
+            const std::vector<BrowserItem> modelItems = {
+                BrowserItem{L"zero.jpg", L"C:\\Images\\zero.jpg", L"JPG", L"", 0, 10},
+                BrowserItem{L"one.jpg", L"C:\\Images\\one.jpg", L"JPG", L"", 1, 20},
+                BrowserItem{L"two.jpg", L"C:\\Images\\two.jpg", L"JPG", L"", 2, 30},
+            };
+            const std::vector<int> orderedModelIndices = {2, 0, 99, -1};
+            const std::vector<int> selectedModelIndices = {1, 2, -1};
+
+            const std::vector<BrowserItem> selectedItems = BrowserItemScopeCollector::Collect({
+                modelItems,
+                orderedModelIndices,
+                selectedModelIndices,
+                true,
+                true});
+            Expect(selectedItems.size() == 2
+                       && selectedItems[0].filePath == L"C:\\Images\\one.jpg"
+                       && selectedItems[1].filePath == L"C:\\Images\\two.jpg",
+                   "Browser item scope collector changed ordered selection filtering");
+
+            const std::vector<BrowserItem> orderedItems = BrowserItemScopeCollector::Collect({
+                modelItems,
+                orderedModelIndices,
+                selectedModelIndices,
+                false,
+                true});
+            Expect(orderedItems.size() == 2
+                       && orderedItems[0].filePath == L"C:\\Images\\two.jpg"
+                       && orderedItems[1].filePath == L"C:\\Images\\zero.jpg",
+                   "Browser item scope collector changed ordered model filtering");
+
+            const std::vector<BrowserItem> fallbackItems = BrowserItemScopeCollector::Collect({
+                modelItems,
+                {},
+                {},
+                false,
+                false});
+            Expect(fallbackItems.size() == 3
+                       && fallbackItems[0].filePath == L"C:\\Images\\zero.jpg"
+                       && fallbackItems[2].filePath == L"C:\\Images\\two.jpg",
+                   "Browser item scope collector changed empty-order fallback behavior");
+        }
+
+        void RunFolderTreeDropPolicyScenario()
+        {
+            using hyperbrowse::ui::FolderTreeDropPolicy;
+
+            Expect(FolderTreeDropPolicy::IsValid({
+                       L"C:\\Images\\Source",
+                       L"C:\\Images\\Destination",
+                       L"C:\\Images",
+                       true,
+                       true}),
+                   "Folder tree drop policy rejected a valid destination");
+            Expect(!FolderTreeDropPolicy::IsValid({
+                        L"C:\\Images\\Source",
+                        L"C:\\Images\\Destination",
+                        L"C:\\Images",
+                        false,
+                        true})
+                       && !FolderTreeDropPolicy::IsValid({
+                           L"C:\\Images\\Source",
+                           L"D:\\Images\\Destination",
+                           L"C:\\Images",
+                           true,
+                           false}),
+                   "Folder tree drop policy accepted an unavailable or cross-drive destination");
+            Expect(!FolderTreeDropPolicy::IsValid({
+                        L"C:\\Images\\Source",
+                        L"C:\\Images\\Source",
+                        L"C:\\Images",
+                        true,
+                        true})
+                       && !FolderTreeDropPolicy::IsValid({
+                           L"C:\\Images\\Source",
+                           L"C:\\Images\\Source\\Child",
+                           L"C:\\Images",
+                           true,
+                           true})
+                       && !FolderTreeDropPolicy::IsValid({
+                           L"C:\\Images\\Source",
+                           L"C:\\Images",
+                           L"C:\\Images",
+                           true,
+                           true}),
+                   "Folder tree drop policy accepted self, child, or parent destinations");
+        }
+
+        void RunSelectionRatingPolicyScenario()
+        {
+            using hyperbrowse::ui::SelectionRatingPolicy;
+
+            const std::vector<int> emptyRatings;
+            const std::vector<int> commonRatings = {4, 4, 4};
+            const std::vector<int> clampedRatings = {-2, 0, 0};
+            const std::vector<int> saturatedRatings = {7, 5, 9};
+            const std::vector<int> mixedRatings = {2, 3};
+            Expect(SelectionRatingPolicy::CommonRating(emptyRatings) == -1
+                       && SelectionRatingPolicy::CommonRating(commonRatings) == 4
+                       && SelectionRatingPolicy::CommonRating(clampedRatings) == 0
+                       && SelectionRatingPolicy::CommonRating(saturatedRatings) == 5
+                       && SelectionRatingPolicy::CommonRating(mixedRatings) == -1,
+                   "Selection rating policy changed common and mixed-rating behavior");
+        }
+
+        void RunViewerItemSelectionPolicyScenario()
+        {
+            using hyperbrowse::browser::BrowserItem;
+            using hyperbrowse::ui::ViewerItemSelectionPolicy;
+
+            const std::vector<BrowserItem> modelItems = {
+                BrowserItem{L"zero.jpg", L"C:\\Images\\zero.jpg", L"JPG", L"", 0, 10},
+                BrowserItem{L"one.jpg", L"C:\\Images\\one.jpg", L"JPG", L"", 1, 20},
+                BrowserItem{L"two.jpg", L"C:\\Images\\two.jpg", L"JPG", L"", 2, 30},
+            };
+            const std::vector<int> orderedModelIndices = {2, 0, 99, -1};
+
+            const ViewerItemSelectionPolicy::Result selected = ViewerItemSelectionPolicy::Build({
+                modelItems,
+                orderedModelIndices,
+                0,
+                {},
+                {},
+                -1});
+            Expect(selected.items.size() == 2
+                       && selected.selectedIndex == 1
+                       && selected.items[0].filePath == L"C:\\Images\\two.jpg"
+                       && selected.items[1].filePath == L"C:\\Images\\zero.jpg",
+                   "Viewer item selection policy changed ordered model selection");
+
+            const ViewerItemSelectionPolicy::Result preferred = ViewerItemSelectionPolicy::Build({
+                modelItems,
+                orderedModelIndices,
+                -1,
+                L"C:\\Images\\zero.jpg",
+                L"C:\\Images\\two.jpg",
+                0});
+            Expect(preferred.selectedIndex == 1,
+                   "Viewer item selection policy did not prefer the requested path");
+
+            const ViewerItemSelectionPolicy::Result currentPath = ViewerItemSelectionPolicy::Build({
+                modelItems,
+                orderedModelIndices,
+                -1,
+                L"C:\\Images\\missing.jpg",
+                L"C:\\Images\\two.jpg",
+                1});
+            Expect(currentPath.selectedIndex == 0,
+                   "Viewer item selection policy did not preserve the current path");
+
+            const ViewerItemSelectionPolicy::Result fallback = ViewerItemSelectionPolicy::Build({
+                modelItems,
+                {},
+                -1,
+                L"C:\\Images\\missing.jpg",
+                L"C:\\Images\\also-missing.jpg",
+                2});
+            Expect(fallback.items.size() == 3 && fallback.selectedIndex == 2,
+                   "Viewer item selection policy changed index fallback behavior");
+        }
+
         void RunQuickAccessShortcutEditPolicyScenario()
         {
             using hyperbrowse::ui::QuickAccessShortcutEditPolicy;
@@ -1458,6 +1643,10 @@ namespace hyperbrowse::tests
         RunRightPaneHitTesterScenario();
         RunQuickAccessLayoutScenario();
         RunQuickAccessDestinationBuilderScenario();
+        RunBrowserItemScopeCollectorScenario();
+        RunFolderTreeDropPolicyScenario();
+        RunSelectionRatingPolicyScenario();
+        RunViewerItemSelectionPolicyScenario();
         RunQuickAccessShortcutEditPolicyScenario();
         RunDetailsPanelLayoutScenario();
         RunDisplaySurfaceRecoveryPolicyScenario();
@@ -1495,6 +1684,22 @@ namespace hyperbrowse::tests
         else if (scenario == "--quick-access-destinations")
         {
             RunQuickAccessDestinationBuilderScenario();
+        }
+        else if (scenario == "--browser-item-scope")
+        {
+            RunBrowserItemScopeCollectorScenario();
+        }
+        else if (scenario == "--folder-tree-drop")
+        {
+            RunFolderTreeDropPolicyScenario();
+        }
+        else if (scenario == "--selection-rating")
+        {
+            RunSelectionRatingPolicyScenario();
+        }
+        else if (scenario == "--viewer-item-selection")
+        {
+            RunViewerItemSelectionPolicyScenario();
         }
         else if (scenario == "--quick-access-shortcut")
         {

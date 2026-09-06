@@ -41,6 +41,7 @@
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
 #include "ui/DialogTheme.h"
+#include "ui/BrowserItemScopeCollector.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/CommandIds.h"
 #include "ui/ClipboardFileTransfer.h"
@@ -55,6 +56,7 @@
 #include "ui/DetailsPanelTextPainter.h"
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileOperationJournal.h"
+#include "ui/FolderTreeDropPolicy.h"
 #include "ui/RightPaneHitTester.h"
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
@@ -68,6 +70,7 @@
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
 #include "ui/ShellPainter.h"
+#include "ui/SelectionRatingPolicy.h"
 #include "ui/SelectedPathPersistence.h"
 #include "ui/StatusBarPainter.h"
 #include "ui/ToolbarIconLibrary.h"
@@ -78,6 +81,7 @@
 #include "ui/PerformanceSettingsPersistence.h"
 #include "ui/PairedRawJpegResolver.h"
 #include "ui/ViewerSettingsPersistence.h"
+#include "ui/ViewerItemSelectionPolicy.h"
 #include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
@@ -1305,14 +1309,6 @@ namespace
     bool StringsEqualInsensitive(std::wstring_view lhs, std::wstring_view rhs)
     {
         return hyperbrowse::util::EqualsIgnoreCaseOrdinal(lhs, rhs);
-    }
-
-    bool IsJpegFileType(std::wstring_view fileType)
-    {
-        return StringsEqualInsensitive(fileType, L"jpg")
-            || StringsEqualInsensitive(fileType, L"jpeg")
-            || StringsEqualInsensitive(fileType, L".jpg")
-            || StringsEqualInsensitive(fileType, L".jpeg");
     }
 
     std::wstring BuildCameraSummaryLabel(const hyperbrowse::services::ImageMetadata& metadata)
@@ -7529,34 +7525,6 @@ namespace
         return FolderPathsEqual(leftRoot, rightRoot);
     }
 
-    bool IsValidFolderTreeDropDestination(std::wstring_view sourcePath, std::wstring_view destinationPath)
-    {
-        if (sourcePath.empty() || destinationPath.empty())
-        {
-            return false;
-        }
-
-        if (!IsExistingDirectory(destinationPath)
-            || !AreFoldersOnSameDrive(sourcePath, destinationPath))
-        {
-            return false;
-        }
-
-        if (FolderPathsEqual(sourcePath, destinationPath)
-            || hyperbrowse::browser::PathHasPrefix(destinationPath, sourcePath))
-        {
-            return false;
-        }
-
-        const std::wstring sourceParentPath = NormalizeFolderPath(fs::path(sourcePath).parent_path().wstring());
-        if (!sourceParentPath.empty() && FolderPathsEqual(sourceParentPath, destinationPath))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
     hyperbrowse::services::FileOperationType ResolveQuickAccessDropOperationType(
         const std::vector<std::wstring>& sourcePaths,
         std::wstring_view destinationFolder)
@@ -10604,7 +10572,14 @@ namespace hyperbrowse::ui
                     if (nodeData && !nodeData->path.empty() && item != treeDragSourceItem_)
                     {
                         const std::wstring normalizedDestinationPath = NormalizeFolderPath(nodeData->path);
-                        if (IsValidFolderTreeDropDestination(treeDragSourcePath_, normalizedDestinationPath))
+                        const std::wstring sourceParentPath = NormalizeFolderPath(
+                            fs::path(treeDragSourcePath_).parent_path().wstring());
+                        if (FolderTreeDropPolicy::IsValid({
+                                treeDragSourcePath_,
+                                normalizedDestinationPath,
+                                sourceParentPath,
+                                IsExistingDirectory(normalizedDestinationPath),
+                                AreFoldersOnSameDrive(treeDragSourcePath_, normalizedDestinationPath)}))
                         {
                             hoverItem = item;
                             destinationPath = normalizedDestinationPath;
@@ -12567,39 +12542,24 @@ namespace hyperbrowse::ui
             return;
         }
 
-        std::vector<int> orderedModelIndices = browserPaneController_->OrderedModelIndicesSnapshot();
-        if (orderedModelIndices.empty())
-        {
-            orderedModelIndices.reserve(modelItems.size());
-            for (std::size_t index = 0; index < modelItems.size(); ++index)
-            {
-                orderedModelIndices.push_back(static_cast<int>(index));
-            }
-        }
-
-        std::vector<browser::BrowserItem> viewerItems;
-        viewerItems.reserve(orderedModelIndices.size());
-        int selectedViewerIndex = -1;
-        for (int orderedModelIndex : orderedModelIndices)
-        {
-            if (orderedModelIndex < 0 || orderedModelIndex >= static_cast<int>(modelItems.size()))
-            {
-                continue;
-            }
-
-            viewerItems.push_back(modelItems[static_cast<std::size_t>(orderedModelIndex)]);
-            if (orderedModelIndex == modelIndex)
-            {
-                selectedViewerIndex = static_cast<int>(viewerItems.size()) - 1;
-            }
-        }
-
-        if (selectedViewerIndex < 0)
+        const std::vector<int> orderedModelIndices = browserPaneController_->OrderedModelIndicesSnapshot();
+        ViewerItemSelectionPolicy::Result viewerSelection = ViewerItemSelectionPolicy::Build({
+            modelItems,
+            orderedModelIndices,
+            modelIndex,
+            {},
+            {},
+            -1});
+        if (viewerSelection.selectedIndex < 0)
         {
             return;
         }
 
-        OpenItemsInViewer(std::move(viewerItems), selectedViewerIndex, false, preferSecondaryMonitor);
+        OpenItemsInViewer(
+            std::move(viewerSelection.items),
+            viewerSelection.selectedIndex,
+            false,
+            preferSecondaryMonitor);
     }
 
     bool MainWindow::OpenItemsInViewer(std::vector<browser::BrowserItem> items,
@@ -12692,50 +12652,17 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        std::vector<int> orderedModelIndices = browserPaneController_
+        const std::vector<int> orderedModelIndices = browserPaneController_
             ? browserPaneController_->OrderedModelIndicesSnapshot()
             : std::vector<int>{};
-        if (orderedModelIndices.empty())
-        {
-            orderedModelIndices.reserve(modelItems.size());
-            for (std::size_t index = 0; index < modelItems.size(); ++index)
-            {
-                orderedModelIndices.push_back(static_cast<int>(index));
-            }
-        }
-
-        const std::wstring currentViewerPath = viewerWindow_->CurrentFilePath();
-        const int currentViewerIndex = viewerWindow_->CurrentIndex();
-        std::vector<browser::BrowserItem> viewerItems;
-        viewerItems.reserve(orderedModelIndices.size());
-        int selectedViewerIndex = -1;
-        int currentPathIndex = -1;
-
-        for (int orderedModelIndex : orderedModelIndices)
-        {
-            if (orderedModelIndex < 0 || orderedModelIndex >= static_cast<int>(modelItems.size()))
-            {
-                continue;
-            }
-
-            viewerItems.push_back(modelItems[static_cast<std::size_t>(orderedModelIndex)]);
-            const int viewerIndex = static_cast<int>(viewerItems.size()) - 1;
-            const std::wstring& path = viewerItems.back().filePath;
-            if (selectedViewerIndex < 0
-                && !preferredPath.empty()
-                && browser::FilePathsEqual(path, preferredPath))
-            {
-                selectedViewerIndex = viewerIndex;
-            }
-            if (currentPathIndex < 0
-                && !currentViewerPath.empty()
-                && browser::FilePathsEqual(path, currentViewerPath))
-            {
-                currentPathIndex = viewerIndex;
-            }
-        }
-
-        if (viewerItems.empty())
+        ViewerItemSelectionPolicy::Result viewerSelection = ViewerItemSelectionPolicy::Build({
+            modelItems,
+            orderedModelIndices,
+            -1,
+            preferredPath,
+            viewerWindow_->CurrentFilePath(),
+            viewerWindow_->CurrentIndex()});
+        if (viewerSelection.items.empty())
         {
             const HWND viewerHwnd = viewerWindow_->Hwnd();
             if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
@@ -12745,21 +12672,12 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        if (selectedViewerIndex < 0)
-        {
-            selectedViewerIndex = currentPathIndex;
-        }
-        if (selectedViewerIndex < 0 && currentViewerIndex >= 0 && currentViewerIndex < static_cast<int>(viewerItems.size()))
-        {
-            selectedViewerIndex = currentViewerIndex;
-        }
-        if (selectedViewerIndex < 0)
-        {
-            selectedViewerIndex = 0;
-        }
-
-        viewerItems = ResolvePairedRawJpegViewerItems(std::move(viewerItems), viewerWindow_->IsSlideshowActive());
-        return viewerWindow_->ReplaceItems(std::move(viewerItems), selectedViewerIndex);
+        viewerSelection.items = ResolvePairedRawJpegViewerItems(
+            std::move(viewerSelection.items),
+            viewerWindow_->IsSlideshowActive());
+        return viewerWindow_->ReplaceItems(
+            std::move(viewerSelection.items),
+            viewerSelection.selectedIndex);
     }
 
     void MainWindow::RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top)
@@ -13172,46 +13090,24 @@ namespace hyperbrowse::ui
 
     std::vector<browser::BrowserItem> MainWindow::CollectItemsForScope(bool selectionScope) const
     {
-        std::vector<browser::BrowserItem> items;
         if (!browserModel_)
         {
-            return items;
+            return {};
         }
 
         const auto& modelItems = browserModel_->Items();
-        if (selectionScope && browserPaneController_)
-        {
-            for (const int modelIndex : browserPaneController_->OrderedSelectedModelIndicesSnapshot())
-            {
-                if (modelIndex >= 0 && modelIndex < static_cast<int>(modelItems.size()))
-                {
-                    items.push_back(modelItems[static_cast<std::size_t>(modelIndex)]);
-                }
-            }
-            return items;
-        }
-
-        std::vector<int> orderedModelIndices = browserPaneController_
+        const std::vector<int> orderedModelIndices = browserPaneController_
             ? browserPaneController_->OrderedModelIndicesSnapshot()
             : std::vector<int>{};
-        if (orderedModelIndices.empty())
-        {
-            orderedModelIndices.reserve(modelItems.size());
-            for (std::size_t index = 0; index < modelItems.size(); ++index)
-            {
-                orderedModelIndices.push_back(static_cast<int>(index));
-            }
-        }
-
-        for (const int modelIndex : orderedModelIndices)
-        {
-            if (modelIndex >= 0 && modelIndex < static_cast<int>(modelItems.size()))
-            {
-                items.push_back(modelItems[static_cast<std::size_t>(modelIndex)]);
-            }
-        }
-
-        return items;
+        const std::vector<int> selectedModelIndices = browserPaneController_
+            ? browserPaneController_->OrderedSelectedModelIndicesSnapshot()
+            : std::vector<int>{};
+        return BrowserItemScopeCollector::Collect({
+            modelItems,
+            orderedModelIndices,
+            selectedModelIndices,
+            selectionScope,
+            browserPaneController_ != nullptr});
     }
 
     std::vector<std::wstring> MainWindow::ExpandRawJpegPairedPaths(const std::vector<std::wstring>& paths,
@@ -13227,57 +13123,13 @@ namespace hyperbrowse::ui
             return paths;
         }
 
-        const auto& modelItems = browserModel_->Items();
-        std::vector<std::wstring> expandedPaths = paths;
-        for (const std::wstring& selectedPath : paths)
-        {
-            const int modelIndex = browserModel_->FindItemIndexByPath(selectedPath);
-            if (modelIndex < 0 || modelIndex >= static_cast<int>(modelItems.size()))
+        const std::vector<std::wstring> expandedPaths = PairedRawJpegResolver::ExpandPaths(
+            paths,
+            browserModel_->Items(),
+            [](std::wstring_view lhs, std::wstring_view rhs)
             {
-                continue;
-            }
-
-            const browser::BrowserItem& selectedItem = modelItems[static_cast<std::size_t>(modelIndex)];
-            const bool selectedIsRaw = decode::IsRawFileType(selectedItem.fileType);
-            const bool selectedIsJpeg = IsJpegFileType(selectedItem.fileType);
-            if (!selectedIsRaw && !selectedIsJpeg)
-            {
-                continue;
-            }
-
-            const fs::path selectedFsPath(selectedItem.filePath);
-            const std::wstring selectedParent = selectedFsPath.parent_path().wstring();
-            const std::wstring selectedStem = selectedFsPath.stem().wstring();
-            for (const browser::BrowserItem& candidate : modelItems)
-            {
-                if (browser::FilePathsEqual(candidate.filePath, selectedItem.filePath))
-                {
-                    continue;
-                }
-
-                if (!FolderPathsEqual(fs::path(candidate.filePath).parent_path().wstring(), selectedParent)
-                    || !StringsEqualInsensitive(fs::path(candidate.filePath).stem().wstring(), selectedStem))
-                {
-                    continue;
-                }
-
-                const bool candidateIsRaw = decode::IsRawFileType(candidate.fileType);
-                const bool candidateIsJpeg = IsJpegFileType(candidate.fileType);
-                if (!((selectedIsRaw && candidateIsJpeg) || (selectedIsJpeg && candidateIsRaw)))
-                {
-                    continue;
-                }
-
-                const auto existing = std::find_if(expandedPaths.begin(), expandedPaths.end(), [&](const std::wstring& existingPath)
-                {
-                    return browser::FilePathsEqual(existingPath, candidate.filePath);
-                });
-                if (existing == expandedPaths.end())
-                {
-                    expandedPaths.push_back(candidate.filePath);
-                }
-            }
-        }
+                return FolderPathsEqual(lhs, rhs);
+            });
 
         if (pairedCompanionCount && expandedPaths.size() > paths.size())
         {
@@ -15497,7 +15349,14 @@ namespace hyperbrowse::ui
             return;
         }
 
-        if (!IsValidFolderTreeDropDestination(folderPath, destinationFolder))
+        const std::wstring sourceParentPath = NormalizeFolderPath(
+            fs::path(folderPath).parent_path().wstring());
+        if (!FolderTreeDropPolicy::IsValid({
+            folderPath,
+            destinationFolder,
+            sourceParentPath,
+            true,
+            AreFoldersOnSameDrive(folderPath, destinationFolder)}))
         {
             MessageBoxW(hwnd_,
                         L"Choose a valid destination on the same drive. The folder cannot move into itself, one of its children, or its current parent.",
@@ -16127,17 +15986,14 @@ namespace hyperbrowse::ui
             return -1;
         }
 
-        int commonRating = std::clamp(userMetadataStore_->EntryForPath(selectedPaths.front()).rating, 0, 5);
-        for (std::size_t index = 1; index < selectedPaths.size(); ++index)
+        std::vector<int> ratings;
+        ratings.reserve(selectedPaths.size());
+        for (const std::wstring& path : selectedPaths)
         {
-            const int candidateRating = std::clamp(userMetadataStore_->EntryForPath(selectedPaths[index]).rating, 0, 5);
-            if (candidateRating != commonRating)
-            {
-                return -1;
-            }
+            ratings.push_back(userMetadataStore_->EntryForPath(path).rating);
         }
 
-        return commonRating;
+        return SelectionRatingPolicy::CommonRating(ratings);
     }
 
     void MainWindow::StartSlideshow(bool selectionScope)

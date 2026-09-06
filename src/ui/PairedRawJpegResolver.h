@@ -23,5 +23,9 @@ namespace hyperbrowse::ui
             const std::vector<browser::BrowserItem>& candidates,
             browser::RawJpegDisplayPreference preference,
             const FolderPathEquals& folderPathEquals);
+        static std::vector<std::wstring> ExpandPaths(
+            const std::vector<std::wstring>& paths,
+            const std::vector<browser::BrowserItem>& candidates,
+            const FolderPathEquals& folderPathEquals);
     };
 }
