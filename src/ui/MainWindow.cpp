@@ -51,6 +51,7 @@
 #include "ui/DetailsPanelChromePainter.h"
 #include "ui/DetailsPanelHistogramPainter.h"
 #include "ui/DetailsPanelLayout.h"
+#include "ui/DetailsPanelSurfacePainter.h"
 #include "ui/DetailsPanelTextPainter.h"
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileOperationJournal.h"
@@ -12160,11 +12161,10 @@ namespace hyperbrowse::ui
         }
 
         renderTarget->BeginDraw();
-        renderTarget->FillRectangle(hyperbrowse::render::ToD2DRect(detailsPanelRect_), panelBrush.Get());
-        renderTarget->DrawLine(
-            hyperbrowse::render::ToD2DPoint(static_cast<float>(detailsPanelRect_.left) + 0.5f, static_cast<float>(detailsPanelRect_.top)),
-            hyperbrowse::render::ToD2DPoint(static_cast<float>(detailsPanelRect_.left) + 0.5f, static_cast<float>(detailsPanelRect_.bottom)),
-            borderBrush.Get());
+        DetailsPanelSurfacePainter::PaintD2D(renderTarget.Get(),
+                                             detailsPanelRect_,
+                                             panelBrush.Get(),
+                                             borderBrush.Get());
 
         const DetailsPanelChromePainter::State chromeState{
             detailsPanelTabStripRect_,
@@ -12362,16 +12362,11 @@ namespace hyperbrowse::ui
         }
 
         const ThemePalette palette = GetThemePalette();
-        FillRect(hdc,
-                 &detailsPanelRect_,
-                 detailsPanelBrush_ ? detailsPanelBrush_ : (backgroundBrush_ ? backgroundBrush_ : reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1)));
-
-        HPEN borderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
-        HGDIOBJ oldPen = SelectObject(hdc, borderPen);
-        MoveToEx(hdc, detailsPanelRect_.left, detailsPanelRect_.top, nullptr);
-        LineTo(hdc, detailsPanelRect_.left, detailsPanelRect_.bottom);
-        SelectObject(hdc, oldPen);
-        DeleteObject(borderPen);
+        DetailsPanelSurfacePainter::PaintGdi(hdc,
+                             detailsPanelRect_,
+                             detailsPanelBrush_,
+                             backgroundBrush_,
+                             palette.actionStripBorder);
 
         const DetailsPanelChromePainter::State chromeState{
             detailsPanelTabStripRect_,

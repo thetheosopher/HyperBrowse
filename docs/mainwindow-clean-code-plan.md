@@ -363,3 +363,7 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   measurement, content-state selection, and panel composition while the
   painter consumes explicit rectangles, text views, palette, and font
   resources.
+- [x] Extract details-panel background and left-border GDI and Direct2D
+  painting into `src/ui/DetailsPanelSurfacePainter.*`. MainWindow retains
+  panel visibility, resource ownership, and content composition while the
+  painter consumes the panel geometry and existing drawing resources.
