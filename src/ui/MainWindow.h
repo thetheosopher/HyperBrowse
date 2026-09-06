@@ -28,6 +28,7 @@
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandBarPainter.h"
+#include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/MenuPainter.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickAccessMenuBuilder.h"
@@ -431,7 +432,6 @@ namespace hyperbrowse::ui
         void PaintToolbar(HDC hdc, const RECT& stripRect);
         bool EnsureD2DResources();
         void ResetD2DResources();
-        void PaintMainShellD2D(ID2D1RenderTarget* renderTarget, const RECT& clientRect);
         void PaintToolbarD2D(ID2D1RenderTarget* renderTarget, const RECT& stripRect);
         int ToolbarHitTest(int x, int y) const;
         void ToolbarHandleClick(int itemIndex);
@@ -698,7 +698,7 @@ namespace hyperbrowse::ui
         viewer::EscapeKeyBehavior viewerEscapeKeyBehavior_{};
         UINT_PTR memoryPressureTimerId_{};
         UINT_PTR displaySurfaceRecoveryTimerId_{};
-        int displaySurfaceRecoveryAttempt_{};
+        DisplaySurfaceRecoveryPolicy displaySurfaceRecoveryPolicy_;
         bool sessionNotificationRegistered_{};
         HPOWERNOTIFY consoleDisplayNotify_{};
         HPOWERNOTIFY monitorPowerNotify_{};

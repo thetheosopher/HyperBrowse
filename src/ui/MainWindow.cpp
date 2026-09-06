@@ -48,6 +48,7 @@
 #include "ui/CommandBarPainter.h"
 #include "ui/DetailsPanelHistogram.h"
 #include "ui/DetailsPanelLayout.h"
+#include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/RightPaneHitTester.h"
 #include "ui/FolderWatchChangeCoordinator.h"
@@ -55,6 +56,7 @@
 #include "ui/MenuMessageHandling.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
+#include "ui/ShellPainter.h"
 #include "ui/ToolbarIconLibrary.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "render/D2DRenderer.h"
@@ -18907,7 +18909,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        displaySurfaceRecoveryAttempt_ = 0;
+        displaySurfaceRecoveryPolicy_.BeginRetries();
         if (displaySurfaceRecoveryTimerId_ != 0)
         {
             return;
@@ -18928,7 +18930,7 @@ namespace hyperbrowse::ui
         }
 
         displaySurfaceRecoveryTimerId_ = 0;
-        displaySurfaceRecoveryAttempt_ = 0;
+        displaySurfaceRecoveryPolicy_.BeginRetries();
     }
 
     void MainWindow::UpdateWindowTitle() const
@@ -21206,67 +21208,6 @@ namespace hyperbrowse::ui
         d2dRenderTarget_.Reset();
     }
 
-    void MainWindow::PaintMainShellD2D(ID2D1RenderTarget* renderTarget, const RECT& clientRect)
-    {
-        if (!renderTarget)
-        {
-            return;
-        }
-
-        const ThemePalette palette = GetThemePalette();
-        renderTarget->Clear(hyperbrowse::render::ToD2DColor(palette.windowBackground));
-
-        const auto createBrush = [renderTarget](COLORREF color)
-        {
-            hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> brush;
-            renderTarget->CreateSolidColorBrush(
-                hyperbrowse::render::ToD2DColor(color),
-                brush.GetAddressOf());
-            return brush;
-        };
-
-        const auto splitterBrush = createBrush(palette.splitter);
-        const auto gripBrush = createBrush(palette.actionStripBorder);
-        const auto paintSplitter = [&](const RECT& splitterRect)
-        {
-            if (splitterBrush)
-            {
-                renderTarget->FillRectangle(
-                    hyperbrowse::render::ToD2DRect(splitterRect),
-                    splitterBrush.Get());
-            }
-            if (gripBrush)
-            {
-                const float gripX = static_cast<float>((splitterRect.left + splitterRect.right) / 2);
-                const float gripTop = static_cast<float>(splitterRect.top + 20);
-                const float gripBottom = static_cast<float>(std::max(
-                    static_cast<int>(splitterRect.top) + 32,
-                    static_cast<int>(splitterRect.bottom) - 20));
-                renderTarget->DrawLine(
-                    hyperbrowse::render::ToD2DPoint(gripX, gripTop),
-                    hyperbrowse::render::ToD2DPoint(gripX, gripBottom),
-                    gripBrush.Get());
-            }
-        };
-
-        const RECT splitterRect{leftPaneWidth_,
-                                kActionStripHeight,
-                                leftPaneWidth_ + kSplitterWidth,
-                                clientRect.bottom};
-        paintSplitter(splitterRect);
-        if (detailsStripVisible_ && !IsRectEmpty(&detailsPanelRect_))
-        {
-            const RECT detailsSplitterRect{detailsPanelRect_.left - kSplitterWidth,
-                                           kActionStripHeight,
-                                           detailsPanelRect_.left,
-                                           clientRect.bottom};
-            paintSplitter(detailsSplitterRect);
-        }
-
-        const RECT stripRect{0, 0, clientRect.right, kActionStripHeight};
-        PaintToolbarD2D(renderTarget, stripRect);
-    }
-
     void MainWindow::PaintToolbarD2D(ID2D1RenderTarget* renderTarget, const RECT& stripRect)
     {
         const ThemePalette sourcePalette = GetThemePalette();
@@ -22647,9 +22588,9 @@ namespace hyperbrowse::ui
             }
             if (wParam == kDisplaySurfaceRecoveryTimerId && displaySurfaceRecoveryTimerId_ != 0)
             {
-                ++displaySurfaceRecoveryAttempt_;
-                RecoverDisplaySurfaces(displaySurfaceRecoveryAttempt_ == 1);
-                if (displaySurfaceRecoveryAttempt_ >= kDisplaySurfaceRecoveryRetryLimit)
+                displaySurfaceRecoveryPolicy_.AdvanceRetry();
+                RecoverDisplaySurfaces(displaySurfaceRecoveryPolicy_.ShouldRelayout());
+                if (displaySurfaceRecoveryPolicy_.Exhausted())
                 {
                     StopDisplaySurfaceRecoveryRetries();
                 }
@@ -22899,7 +22840,20 @@ namespace hyperbrowse::ui
                         && SUCCEEDED(bufferedRenderTarget->BindDC(memDC, &client)))
                     {
                         bufferedRenderTarget->BeginDraw();
-                        PaintMainShellD2D(bufferedRenderTarget.Get(), client);
+                        const ThemePalette palette = GetThemePalette();
+                        const ShellPainterPalette shellPalette{
+                            palette.windowBackground,
+                            palette.splitter,
+                            palette.actionStripBorder};
+                        const ShellPainterGeometry shellGeometry{
+                            leftPaneWidth_,
+                            kActionStripHeight,
+                            kSplitterWidth,
+                            detailsStripVisible_,
+                            detailsPanelRect_};
+                        ShellPainter::PaintD2D(bufferedRenderTarget.Get(), client, shellPalette, shellGeometry);
+                        const RECT stripRect{0, 0, client.right, kActionStripHeight};
+                        PaintToolbarD2D(bufferedRenderTarget.Get(), stripRect);
                         const HRESULT drawResult = bufferedRenderTarget->EndDraw();
                         paintedWithD2D = SUCCEEDED(drawResult);
                     }
@@ -22928,41 +22882,21 @@ namespace hyperbrowse::ui
             HBITMAP memBmp = CreateCompatibleBitmap(hdc, clientWidth, clientHeight);
             HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
 
-            FillRect(memDC,
-                     &client,
-                     backgroundBrush_ ? backgroundBrush_ : reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
-
-            RECT stripRect{0, 0, client.right, kActionStripHeight};
-            PaintToolbar(memDC, stripRect);
-
             const ThemePalette palette = GetThemePalette();
-            auto paintSplitter = [&](const RECT& splitterRect)
-            {
-                const HBRUSH splitterBrush = CreateSolidBrush(palette.splitter);
-                FillRect(memDC, &splitterRect, splitterBrush);
-                DeleteObject(splitterBrush);
+            const ShellPainterPalette shellPalette{
+                palette.windowBackground,
+                palette.splitter,
+                palette.actionStripBorder};
+            const ShellPainterGeometry shellGeometry{
+                leftPaneWidth_,
+                kActionStripHeight,
+                kSplitterWidth,
+                detailsStripVisible_,
+                detailsPanelRect_};
+            ShellPainter::PaintGdi(memDC, client, shellPalette, shellGeometry);
 
-                const HPEN gripPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
-                const HGDIOBJ oldPen = SelectObject(memDC, gripPen);
-                const int gripX = (splitterRect.left + splitterRect.right) / 2;
-                const int gripTop = splitterRect.top + 20;
-                const int gripBottom = std::max(gripTop + 12, static_cast<int>(splitterRect.bottom) - 20);
-                MoveToEx(memDC, gripX, gripTop, nullptr);
-                LineTo(memDC, gripX, gripBottom);
-                SelectObject(memDC, oldPen);
-                DeleteObject(gripPen);
-            };
-
-            RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
-            paintSplitter(splitterRect);
-            if (detailsStripVisible_ && !IsRectEmpty(&detailsPanelRect_))
-            {
-                RECT detailsSplitterRect{detailsPanelRect_.left - kSplitterWidth,
-                                         kActionStripHeight,
-                                         detailsPanelRect_.left,
-                                         client.bottom};
-                paintSplitter(detailsSplitterRect);
-            }
+            const RECT stripRect{0, 0, client.right, kActionStripHeight};
+            PaintToolbar(memDC, stripRect);
 
             PaintDetailsPanel(memDC, client);
 

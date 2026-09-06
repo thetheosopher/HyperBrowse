@@ -14,7 +14,7 @@ shutdown. Dialog, file-operation policy, folder-enumeration coordination,
 folder-tree coordination, folder-watch policy, async message routing, menu
 message policy, file-command dispatch, view-command dispatch, command-bar
 policy, dynamic menu construction, and histogram policy extractions have
-  reduced the current translation unit to 23,093 lines. The folder-tree slice places node
+  reduced the current translation unit to 23,006 lines. The folder-tree slice places node
 ownership, child-presence
 caching, lazy enumeration, request settlement, and selection restoration in
 `FolderTreeController`. The folder-load slice places enumeration presentation,
@@ -244,5 +244,12 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   metadata-editor rectangle layout into `src/ui/DetailsPanelLayout.*`.
   MainWindow retains text measurement, child-window movement, tooltip updates,
   panel state, and painting. Deterministic smoke coverage verifies normal,
-  histogram-visible, and narrow-panel geometry. `MainWindow.cpp` is currently
-  21,127 lines in this checkout.
+  histogram-visible, and narrow-panel geometry. That slice was recorded at
+  21,127 lines before subsequent presentation-surface work.
+- [x] Extract stateless main-shell background and splitter painting into
+  `src/ui/ShellPainter.*`, with both GDI and Direct2D paths consuming explicit
+  palette and geometry inputs. Extract display-surface retry sequencing into
+  `src/ui/DisplaySurfaceRecoveryPolicy.*`; MainWindow retains timer, resource,
+  invalidation, and shutdown orchestration. Deterministic smoke coverage
+  verifies first-attempt relayout, retry sequencing, reset, and exhaustion.
+  The current `MainWindow.cpp` size is 23,006 lines.

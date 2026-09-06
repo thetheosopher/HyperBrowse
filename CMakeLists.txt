@@ -130,6 +130,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/CommandBarPainter.cpp
     src/ui/DetailsPanelHistogram.cpp
     src/ui/DetailsPanelLayout.cpp
+    src/ui/DisplaySurfaceRecoveryPolicy.cpp
     src/ui/MenuPainter.cpp
     src/ui/QuickAccessMenuBuilder.cpp
     src/ui/QuickAccessLayout.cpp
@@ -148,6 +149,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/MenuMessageHandling.cpp
     src/ui/QuickSend.cpp
     src/ui/ShellDragSource.cpp
+    src/ui/ShellPainter.cpp
     src/ui/ToolbarIconLibrary.cpp
     src/ui/ViewCommandController.cpp
     src/ui/WindowAsyncMessageRouter.cpp

@@ -145,6 +145,14 @@ controller:
 	histogram, close-button, and metadata-editor rectangle layout from explicit
 	metrics and measured text heights. MainWindow retains font measurement,
 	child-window movement, tooltip updates, panel state, and painting.
+- `ui/ShellPainter.*` owns stateless GDI and Direct2D painting of the main
+	shell background and pane splitters from explicit palette and geometry
+	inputs. MainWindow retains render-target, device-resource, and window
+	paint orchestration, including toolbar and details-panel painting.
+- `ui/DisplaySurfaceRecoveryPolicy.*` owns display-surface retry sequencing,
+	including first-attempt relayout and retry-limit decisions. MainWindow
+	retains timer ownership, resource recovery, invalidation, and shutdown
+	coordination.
 - `ui/FileOperationReconciler.*` owns path-based tree effects, current-folder
 	reload policy, and delete-focus selection policy. It returns typed effects and
 	accepts explicit model/pane snapshots and a scope predicate; it does not own

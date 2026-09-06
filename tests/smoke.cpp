@@ -47,6 +47,7 @@
 #include "ui/CommandIds.h"
 #include "ui/DetailsPanelHistogram.h"
 #include "ui/DetailsPanelLayout.h"
+#include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FolderHistory.h"
@@ -634,6 +635,27 @@ namespace
                    && IsRectEmpty(&narrowResult.closeButtonRect),
                "Details-panel layout did not preserve narrow-panel tab and close-button behavior");
     }
+
+        void RunDisplaySurfaceRecoveryPolicyScenario()
+        {
+         using hyperbrowse::ui::DisplaySurfaceRecoveryPolicy;
+
+         DisplaySurfaceRecoveryPolicy policy;
+         policy.BeginRetries();
+         Expect(!policy.ShouldRelayout() && !policy.Exhausted(),
+             "Display-surface recovery policy did not reset before the first retry");
+         Expect(policy.AdvanceRetry() == 1 && policy.ShouldRelayout() && !policy.Exhausted(),
+             "Display-surface recovery policy did not request relayout on the first retry");
+         Expect(policy.AdvanceRetry() == 2 && !policy.ShouldRelayout() && !policy.Exhausted(),
+             "Display-surface recovery policy changed later retry behavior");
+         Expect(policy.AdvanceRetry() == DisplaySurfaceRecoveryPolicy::kRetryLimit
+                 && policy.Exhausted(),
+             "Display-surface recovery policy did not stop at its retry limit");
+
+         policy.BeginRetries();
+         Expect(!policy.ShouldRelayout() && !policy.Exhausted() && policy.AdvanceRetry() == 1,
+             "Display-surface recovery policy did not reset after exhaustion");
+        }
 
     void RunQuickAccessLayoutScenario()
     {
@@ -4963,6 +4985,7 @@ int main(int argc, char* argv[])
         const bool rightPaneHitTesterOnly = argc > 1 && std::string_view(argv[1]) == "--right-pane-hit-test";
         const bool quickAccessLayoutOnly = argc > 1 && std::string_view(argv[1]) == "--quick-access-layout";
         const bool detailsPanelLayoutOnly = argc > 1 && std::string_view(argv[1]) == "--details-layout";
+        const bool displaySurfaceRecoveryOnly = argc > 1 && std::string_view(argv[1]) == "--display-recovery";
         if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
@@ -4995,6 +5018,10 @@ int main(int argc, char* argv[])
         {
             RunDetailsPanelLayoutScenario();
         }
+        else if (displaySurfaceRecoveryOnly)
+        {
+            RunDisplaySurfaceRecoveryPolicyScenario();
+        }
         else
         {
             RunPrefetchSizingScenario();
@@ -5008,6 +5035,7 @@ int main(int argc, char* argv[])
             RunRightPaneHitTesterScenario();
             RunQuickAccessLayoutScenario();
             RunDetailsPanelLayoutScenario();
+            RunDisplaySurfaceRecoveryPolicyScenario();
             RunShortcutCatalogScenario();
             RunBackgroundExecutorExceptionScenario();
             RunBackgroundExecutorCapacityScenario();
