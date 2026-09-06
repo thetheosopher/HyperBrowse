@@ -292,5 +292,21 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `src/ui/QuickAccessPathList.*`. MainWindow retains registry access, Quick
   Send assignments, menu refresh, and presentation effects; deterministic
   smoke coverage verifies list mutation and round-trip ordering.
+- [x] Extract the Quick Send registry value codec into
+  `src/ui/QuickSendPersistence.*`. MainWindow retains registry handles,
+  cross-process mutex synchronization, model synchronization, and menu/
+  presentation effects; deterministic in-memory coverage verifies value
+  mapping, capped favorite restoration, shortcut slots, and empty-destination
+  deletion.
+- [x] Extract persisted window-rectangle loading, overflow-safe geometry,
+  minimum-size/work-area validation, and DWORD mapping into
+  `src/ui/WindowBoundsPersistence.*`. MainWindow retains monitor discovery,
+  HWND placement, and registry-handle ownership; deterministic coverage
+  verifies signed coordinates, invalid values, overflow rejection, and write
+  suppression for undersized bounds.
+- [x] Extract selected-folder and selected-image persistence into
+  `src/ui/SelectedPathPersistence.*`. MainWindow retains path normalization,
+  startup validation, and viewer/browser routing; deterministic coverage
+  verifies round trips, empty-folder preservation, and stale-image deletion.
 - [x] Complete the Phase 7 verification gate after the focused test-source
   splits: Debug and Release builds plus all four registered smoke tests pass.

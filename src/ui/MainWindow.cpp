@@ -57,11 +57,14 @@
 #include "ui/MainWindowDialogState.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickAccessPathList.h"
+#include "ui/QuickSendPersistence.h"
 #include "ui/ShortcutCatalog.h"
 #include "ui/ShellDragSource.h"
 #include "ui/ShellPainter.h"
+#include "ui/SelectedPathPersistence.h"
 #include "ui/ToolbarIconLibrary.h"
 #include "ui/WindowAsyncMessageRouter.h"
+#include "ui/WindowBoundsPersistence.h"
 #include "render/D2DRenderer.h"
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
@@ -115,12 +118,6 @@ namespace
     constexpr wchar_t kRegistryValueCompactThumbnailLayout[] = L"CompactThumbnailLayout";
     constexpr wchar_t kRegistryValueThumbnailDetailsVisible[] = L"ThumbnailDetailsVisible";
     constexpr wchar_t kRegistryValueShowSubfoldersInBrowser[] = L"ShowSubfoldersInBrowser";
-    constexpr wchar_t kRegistryValueSelectedFolderPath[] = L"SelectedFolderPath";
-    constexpr wchar_t kRegistryValueSelectedImagePath[] = L"SelectedImagePath";
-    constexpr wchar_t kRegistryValueWindowLeft[] = L"WindowLeft";
-    constexpr wchar_t kRegistryValueWindowTop[] = L"WindowTop";
-    constexpr wchar_t kRegistryValueWindowWidth[] = L"WindowWidth";
-    constexpr wchar_t kRegistryValueWindowHeight[] = L"WindowHeight";
     constexpr LONG kWindowCascadeOffset = 32;
     constexpr wchar_t kRegistryValueSortMode[] = L"SortMode";
     constexpr wchar_t kRegistryValueSortAscending[] = L"SortAscending";
@@ -135,9 +132,6 @@ namespace
         constexpr wchar_t kRegistryValueInvertKeyboardPanning[] = L"InvertKeyboardPanning";
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
-    constexpr wchar_t kRegistryValueFavoriteDestinationFolders[] = L"FavoriteDestinationFolders";
-    constexpr wchar_t kRegistryValueLastQuickSendDestination[] = L"LastQuickSendDestination";
-    constexpr wchar_t kRegistryValueQuickSendShortcutPrefix[] = L"QuickSendShortcut";
     constexpr wchar_t kQuickSendStateMutexName[] = L"Local\\TheTheosopher.HyperBrowse.QuickSendState";
     constexpr wchar_t kRegistryValueRawJpegPairedOperationsEnabled[] = L"RawJpegPairedOperationsEnabled";
     constexpr wchar_t kRegistryValuePairedRawJpegViewerPreference[] = L"PairedRawJpegViewerPreference";
@@ -596,85 +590,6 @@ namespace
     void WriteDwordValue(HKEY key, const wchar_t* valueName, DWORD value)
     {
         RegSetValueExW(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
-    }
-
-    bool TryReadPersistedWindowBounds(HKEY key, RECT* bounds)
-    {
-        if (!bounds)
-        {
-            return false;
-        }
-
-        DWORD leftValue = 0;
-        DWORD topValue = 0;
-        DWORD widthValue = 0;
-        DWORD heightValue = 0;
-        if (!TryReadDwordValue(key, kRegistryValueWindowLeft, &leftValue)
-            || !TryReadDwordValue(key, kRegistryValueWindowTop, &topValue)
-            || !TryReadDwordValue(key, kRegistryValueWindowWidth, &widthValue)
-            || !TryReadDwordValue(key, kRegistryValueWindowHeight, &heightValue))
-        {
-            return false;
-        }
-
-        if (widthValue > static_cast<DWORD>(std::numeric_limits<LONG>::max())
-            || heightValue > static_cast<DWORD>(std::numeric_limits<LONG>::max()))
-        {
-            return false;
-        }
-
-        const LONG left = static_cast<LONG>(leftValue);
-        const LONG top = static_cast<LONG>(topValue);
-        const LONG width = static_cast<LONG>(widthValue);
-        const LONG height = static_cast<LONG>(heightValue);
-        if (width <= 0 || height <= 0)
-        {
-            return false;
-        }
-
-        const long long right = static_cast<long long>(left) + static_cast<long long>(width);
-        const long long bottom = static_cast<long long>(top) + static_cast<long long>(height);
-        if (right < static_cast<long long>(std::numeric_limits<LONG>::min())
-            || right > static_cast<long long>(std::numeric_limits<LONG>::max())
-            || bottom < static_cast<long long>(std::numeric_limits<LONG>::min())
-            || bottom > static_cast<long long>(std::numeric_limits<LONG>::max()))
-        {
-            return false;
-        }
-
-        bounds->left = left;
-        bounds->top = top;
-        bounds->right = static_cast<LONG>(right);
-        bounds->bottom = static_cast<LONG>(bottom);
-        return true;
-    }
-
-    bool IsPersistedWindowBoundsValid(const RECT& bounds, LONG minimumWidth, LONG minimumHeight)
-    {
-        const LONG width = bounds.right - bounds.left;
-        const LONG height = bounds.bottom - bounds.top;
-        if (width < minimumWidth || height < minimumHeight)
-        {
-            return false;
-        }
-
-        const HMONITOR monitor = MonitorFromRect(&bounds, MONITOR_DEFAULTTONULL);
-        if (!monitor)
-        {
-            return false;
-        }
-
-        MONITORINFO monitorInfo{};
-        monitorInfo.cbSize = sizeof(monitorInfo);
-        if (!GetMonitorInfoW(monitor, &monitorInfo))
-        {
-            return false;
-        }
-
-        return bounds.left >= monitorInfo.rcWork.left
-            && bounds.top >= monitorInfo.rcWork.top
-            && bounds.right <= monitorInfo.rcWork.right
-            && bounds.bottom <= monitorInfo.rcWork.bottom;
     }
 
     BOOL CALLBACK CountMainWindowInstances(HWND window, LPARAM parameter)
@@ -11789,23 +11704,17 @@ namespace hyperbrowse::ui
             return;
         }
 
-        std::wstring serializedPaths;
-        if (TryReadStringValue(key, kRegistryValueFavoriteDestinationFolders, &serializedPaths))
-        {
-            favoriteDestinationFolders_ = QuickAccessPathList::Deserialize(serializedPaths, kFavoriteDestinationLimit);
-        }
-
-        TryReadStringValue(key, kRegistryValueLastQuickSendDestination, &lastQuickSendDestination_);
-
+        const QuickSendPersistedState persistedState = QuickSendPersistence::Load(
+            [&](std::wstring_view valueName, std::wstring* value)
+            {
+                const std::wstring registryValueName(valueName);
+                return TryReadStringValue(key, registryValueName.c_str(), value);
+            },
+            kFavoriteDestinationLimit);
+        favoriteDestinationFolders_ = persistedState.favoriteDestinationFolders;
+        lastQuickSendDestination_ = persistedState.lastQuickSendDestination;
         SyncQuickSendModel();
-        QuickSendModel::ShortcutAssignments shortcutAssignments{};
-        for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
-        {
-            const std::wstring valueName = std::wstring(kRegistryValueQuickSendShortcutPrefix)
-                + std::to_wstring(index);
-            TryReadStringValue(key, valueName.c_str(), &shortcutAssignments[index]);
-        }
-        quickSendModel_.SetShortcutAssignments(shortcutAssignments);
+        quickSendModel_.SetShortcutAssignments(persistedState.shortcutAssignments);
         SortFavoriteDestinationsByShortcutInMemory();
         RegCloseKey(key);
     }
@@ -11818,23 +11727,22 @@ namespace hyperbrowse::ui
             return;
         }
 
-        WriteStringValue(key, kRegistryValueFavoriteDestinationFolders, QuickAccessPathList::Serialize(favoriteDestinationFolders_));
-        if (!lastQuickSendDestination_.empty())
-        {
-            WriteStringValue(key, kRegistryValueLastQuickSendDestination, lastQuickSendDestination_);
-        }
-        else
-        {
-            RegDeleteValueW(key, kRegistryValueLastQuickSendDestination);
-        }
-
-        const QuickSendModel::ShortcutAssignments& shortcutAssignments = quickSendModel_.ShortcutAssignmentsByKey();
-        for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
-        {
-            const std::wstring valueName = std::wstring(kRegistryValueQuickSendShortcutPrefix)
-                + std::to_wstring(index);
-            WriteStringValue(key, valueName.c_str(), shortcutAssignments[index]);
-        }
+        QuickSendPersistedState state;
+        state.favoriteDestinationFolders = favoriteDestinationFolders_;
+        state.lastQuickSendDestination = lastQuickSendDestination_;
+        state.shortcutAssignments = quickSendModel_.ShortcutAssignmentsByKey();
+        QuickSendPersistence::Save(
+            state,
+            [&](std::wstring_view valueName, std::wstring_view value)
+            {
+                const std::wstring registryValueName(valueName);
+                WriteStringValue(key, registryValueName.c_str(), value);
+            },
+            [&](std::wstring_view valueName)
+            {
+                const std::wstring registryValueName(valueName);
+                RegDeleteValueW(key, registryValueName.c_str());
+            });
         RegCloseKey(key);
     }
 
@@ -19316,15 +19224,37 @@ namespace hyperbrowse::ui
                 showSubfoldersInBrowser_ = value != 0;
             }
 
-            TryReadStringValue(key, kRegistryValueSelectedFolderPath, &startupFolderPath_);
-            TryReadStringValue(key, kRegistryValueSelectedImagePath, &startupSelectedImagePath_);
+            const SelectedPathState selectedPathState = SelectedPathPersistence::Load(
+                [&](std::wstring_view valueName, std::wstring* value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadStringValue(key, registryValueName.c_str(), value);
+                });
+            startupFolderPath_ = selectedPathState.folderPath;
+            startupSelectedImagePath_ = selectedPathState.imagePath;
 
-            RECT persistedWindowBounds{};
-            if (TryReadPersistedWindowBounds(key, &persistedWindowBounds)
-                && IsPersistedWindowBoundsValid(persistedWindowBounds, kMinWindowWidth, kMinWindowHeight))
+            const std::optional<RECT> persistedWindowBounds = WindowBoundsPersistence::Load(
+                [&](std::wstring_view valueName, DWORD* persistedValue)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadDwordValue(key, registryValueName.c_str(), persistedValue);
+                });
+            if (persistedWindowBounds)
             {
-                persistedWindowBounds_ = persistedWindowBounds;
-                hasPersistedWindowBounds_ = true;
+                const HMONITOR monitor = MonitorFromRect(&*persistedWindowBounds, MONITOR_DEFAULTTONULL);
+                MONITORINFO monitorInfo{};
+                monitorInfo.cbSize = sizeof(monitorInfo);
+                if (monitor
+                    && GetMonitorInfoW(monitor, &monitorInfo)
+                    && WindowBoundsPersistence::IsWithinWorkArea(
+                        *persistedWindowBounds,
+                        kMinWindowWidth,
+                        kMinWindowHeight,
+                        monitorInfo.rcWork))
+                {
+                    persistedWindowBounds_ = *persistedWindowBounds;
+                    hasPersistedWindowBounds_ = true;
+                }
             }
 
             std::wstring serializedPaths;
@@ -19338,22 +19268,17 @@ namespace hyperbrowse::ui
                 recentDestinationFolders_ = QuickAccessPathList::Deserialize(serializedPaths, kQuickAccessFolderLimit);
             }
 
-            if (TryReadStringValue(key, kRegistryValueFavoriteDestinationFolders, &serializedPaths))
-            {
-                favoriteDestinationFolders_ = QuickAccessPathList::Deserialize(serializedPaths, kFavoriteDestinationLimit);
-            }
-
-            TryReadStringValue(key, kRegistryValueLastQuickSendDestination, &lastQuickSendDestination_);
-
+            const QuickSendPersistedState persistedState = QuickSendPersistence::Load(
+                [&](std::wstring_view valueName, std::wstring* value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadStringValue(key, registryValueName.c_str(), value);
+                },
+                kFavoriteDestinationLimit);
+            favoriteDestinationFolders_ = persistedState.favoriteDestinationFolders;
+            lastQuickSendDestination_ = persistedState.lastQuickSendDestination;
             SyncQuickSendModel();
-            QuickSendModel::ShortcutAssignments shortcutAssignments{};
-            for (std::size_t index = 0; index < shortcutAssignments.size(); ++index)
-            {
-                const std::wstring valueName = std::wstring(kRegistryValueQuickSendShortcutPrefix)
-                    + std::to_wstring(index);
-                TryReadStringValue(key, valueName.c_str(), &shortcutAssignments[index]);
-            }
-            quickSendModel_.SetShortcutAssignments(shortcutAssignments);
+            quickSendModel_.SetShortcutAssignments(persistedState.shortcutAssignments);
             SortFavoriteDestinationsByShortcutInMemory();
 
             if (TryReadDwordValue(key, kRegistryValueSortMode, &value) && value <= static_cast<DWORD>(browser::BrowserSortMode::Tags))
@@ -19551,15 +19476,15 @@ namespace hyperbrowse::ui
             if (hwnd_ && GetWindowPlacement(hwnd_, &placement))
             {
                 const RECT& normalBounds = placement.rcNormalPosition;
-                const LONG width = normalBounds.right - normalBounds.left;
-                const LONG height = normalBounds.bottom - normalBounds.top;
-                if (width >= kMinWindowWidth && height >= kMinWindowHeight)
-                {
-                    WriteDwordValue(key, kRegistryValueWindowLeft, static_cast<DWORD>(normalBounds.left));
-                    WriteDwordValue(key, kRegistryValueWindowTop, static_cast<DWORD>(normalBounds.top));
-                    WriteDwordValue(key, kRegistryValueWindowWidth, static_cast<DWORD>(width));
-                    WriteDwordValue(key, kRegistryValueWindowHeight, static_cast<DWORD>(height));
-                }
+                WindowBoundsPersistence::Save(
+                    normalBounds,
+                    kMinWindowWidth,
+                    kMinWindowHeight,
+                    [&](std::wstring_view valueName, DWORD value)
+                    {
+                        const std::wstring registryValueName(valueName);
+                        WriteDwordValue(key, registryValueName.c_str(), value);
+                    });
             }
 
             WriteDwordValue(key, kRegistryValueLeftPaneWidth, static_cast<DWORD>(std::max(leftPaneWidth_, kMinLeftPaneWidth)));
@@ -19573,18 +19498,18 @@ namespace hyperbrowse::ui
             WriteDwordValue(key, kRegistryValueCompactThumbnailLayout, compactThumbnailLayout_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueThumbnailDetailsVisible, thumbnailDetailsVisible_ ? 1UL : 0UL);
             WriteDwordValue(key, kRegistryValueShowSubfoldersInBrowser, showSubfoldersInBrowser_ ? 1UL : 0UL);
-            if (!selectedFolderPath.empty())
-            {
-                WriteStringValue(key, kRegistryValueSelectedFolderPath, selectedFolderPath);
-            }
-            if (!selectedImagePath.empty())
-            {
-                WriteStringValue(key, kRegistryValueSelectedImagePath, selectedImagePath);
-            }
-            else
-            {
-                RegDeleteValueW(key, kRegistryValueSelectedImagePath);
-            }
+            SelectedPathPersistence::Save(
+                SelectedPathState{selectedFolderPath, selectedImagePath},
+                [&](std::wstring_view valueName, std::wstring_view value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    WriteStringValue(key, registryValueName.c_str(), value);
+                },
+                [&](std::wstring_view valueName)
+                {
+                    const std::wstring registryValueName(valueName);
+                    RegDeleteValueW(key, registryValueName.c_str());
+                });
             WriteStringValue(key, kRegistryValueRecentFolders, QuickAccessPathList::Serialize(recentFolders_));
             WriteStringValue(key, kRegistryValueRecentDestinationFolders, QuickAccessPathList::Serialize(recentDestinationFolders_));
             if (browserPaneController_)

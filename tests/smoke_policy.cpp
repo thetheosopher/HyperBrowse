@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cwchar>
 #include <functional>
+#include <limits>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -27,8 +29,10 @@
 #include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickAccessPathList.h"
 #include "ui/RightPaneHitTester.h"
+#include "ui/SelectedPathPersistence.h"
 #include "ui/ViewCommandController.h"
 #include "ui/WindowAsyncMessageRouter.h"
+#include "ui/WindowBoundsPersistence.h"
 #include "ui/WindowTimerRouter.h"
 #include "util/ResourceSizing.h"
 
@@ -648,6 +652,144 @@ namespace hyperbrowse::tests
                    "Quick Access path serialization changed list order or separators");
         }
 
+        void RunWindowBoundsPersistenceScenario()
+        {
+            using hyperbrowse::ui::WindowBoundsPersistence;
+
+            std::map<std::wstring, DWORD> values;
+            const RECT originalBounds{-100, 50, 900, 750};
+            Expect(WindowBoundsPersistence::Save(
+                       originalBounds,
+                       800,
+                       600,
+                       [&values](std::wstring_view valueName, DWORD value)
+                       {
+                           values[std::wstring(valueName)] = value;
+                       }),
+                   "Window-bounds persistence rejected a valid normal rectangle");
+
+            const std::optional<RECT> restoredBounds = WindowBoundsPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(restoredBounds
+                       && restoredBounds->left == originalBounds.left
+                       && restoredBounds->top == originalBounds.top
+                       && restoredBounds->right == originalBounds.right
+                       && restoredBounds->bottom == originalBounds.bottom,
+                   "Window-bounds persistence did not round-trip signed coordinates and dimensions");
+
+            const RECT workArea{0, 0, 1920, 1080};
+            const RECT visibleBounds{100, 100, 1100, 800};
+            Expect(WindowBoundsPersistence::IsWithinWorkArea(visibleBounds, 800, 600, workArea)
+                       && !WindowBoundsPersistence::IsWithinWorkArea(visibleBounds, 1200, 600, workArea)
+                       && !WindowBoundsPersistence::IsWithinWorkArea(originalBounds, 800, 600, workArea),
+                   "Window-bounds persistence changed minimum-size or work-area validation");
+
+            values[L"WindowWidth"] = 0;
+            Expect(!WindowBoundsPersistence::Load(
+                        [&values](std::wstring_view valueName, DWORD* value)
+                        {
+                            const auto found = values.find(std::wstring(valueName));
+                            if (found == values.end())
+                            {
+                                return false;
+                            }
+
+                            *value = found->second;
+                            return true;
+                        }),
+                   "Window-bounds persistence accepted a non-positive stored width");
+
+            values[L"WindowWidth"] = 100;
+            values[L"WindowLeft"] = static_cast<DWORD>(std::numeric_limits<LONG>::max());
+            Expect(!WindowBoundsPersistence::Load(
+                        [&values](std::wstring_view valueName, DWORD* value)
+                        {
+                            const auto found = values.find(std::wstring(valueName));
+                            if (found == values.end())
+                            {
+                                return false;
+                            }
+
+                            *value = found->second;
+                            return true;
+                        }),
+                   "Window-bounds persistence accepted a rectangle whose right edge overflowed LONG");
+
+            values.clear();
+            Expect(!WindowBoundsPersistence::Save(
+                       RECT{0, 0, 100, 100},
+                       800,
+                       600,
+                       [&values](std::wstring_view valueName, DWORD value)
+                       {
+                           values[std::wstring(valueName)] = value;
+                       })
+                       && values.empty(),
+                   "Window-bounds persistence wrote an undersized rectangle");
+        }
+
+        void RunSelectedPathPersistenceScenario()
+        {
+            using hyperbrowse::ui::SelectedPathPersistence;
+            using hyperbrowse::ui::SelectedPathState;
+
+            std::map<std::wstring, std::wstring> values;
+            const SelectedPathState initialState{
+                L"C:\\Pictures",
+                L"C:\\Pictures\\selected.jpg",
+            };
+            SelectedPathPersistence::Save(
+                initialState,
+                [&values](std::wstring_view valueName, std::wstring_view value)
+                {
+                    values[std::wstring(valueName)] = value;
+                },
+                [&values](std::wstring_view valueName)
+                {
+                    values.erase(std::wstring(valueName));
+                });
+
+            const SelectedPathState restoredState = SelectedPathPersistence::Load(
+                [&values](std::wstring_view valueName, std::wstring* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(restoredState.folderPath == initialState.folderPath
+                       && restoredState.imagePath == initialState.imagePath,
+                   "Selected-path persistence did not restore folder and image paths");
+
+            SelectedPathPersistence::Save(
+                SelectedPathState{},
+                [&values](std::wstring_view valueName, std::wstring_view value)
+                {
+                    values[std::wstring(valueName)] = value;
+                },
+                [&values](std::wstring_view valueName)
+                {
+                    values.erase(std::wstring(valueName));
+                });
+            Expect(values[L"SelectedFolderPath"] == initialState.folderPath
+                       && !values.contains(L"SelectedImagePath"),
+                   "Selected-path persistence overwrote a valid folder or retained a stale image path");
+        }
+
         void RunWindowTimerRouterScenario()
         {
             using hyperbrowse::ui::WindowTimerRouter;
@@ -805,6 +947,8 @@ namespace hyperbrowse::tests
         RunDisplaySurfaceRecoveryPolicyScenario();
         RunClipboardFileTransferScenario();
         RunQuickAccessPathListScenario();
+        RunWindowBoundsPersistenceScenario();
+        RunSelectedPathPersistenceScenario();
         RunWindowTimerRouterScenario();
         RunWindowAsyncMessageRouterScenario();
     }
@@ -842,6 +986,14 @@ namespace hyperbrowse::tests
         else if (scenario == "--quick-access-paths")
         {
             RunQuickAccessPathListScenario();
+        }
+        else if (scenario == "--window-bounds")
+        {
+            RunWindowBoundsPersistenceScenario();
+        }
+        else if (scenario == "--selected-paths")
+        {
+            RunSelectedPathPersistenceScenario();
         }
         else if (scenario == "--timer-router")
         {

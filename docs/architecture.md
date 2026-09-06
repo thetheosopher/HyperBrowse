@@ -92,6 +92,18 @@ controller:
 	Access path-list insertion and registry serialization. MainWindow retains
 	registry handles, Quick Send assignments, menu refresh, and presentation
 	effects.
+- `ui/QuickSendPersistence.*` owns the typed Quick Send registry value codec
+	for favorite folders, the last destination, and shortcut assignments through
+	value callbacks. MainWindow retains registry handles, mutex synchronization,
+	model synchronization, and menu/presentation effects.
+- `ui/WindowBoundsPersistence.*` owns overflow-safe persisted rectangle loading,
+	minimum-size validation, work-area containment checks, and DWORD value
+	mapping through callbacks. MainWindow retains monitor discovery, HWND
+	placement, and registry-handle ownership.
+- `ui/SelectedPathPersistence.*` owns the selected-folder and selected-image
+	registry value codec, including the invariant that an empty transient folder
+	does not overwrite a valid persisted folder. MainWindow retains path
+	normalization, startup validation, and viewer/browser routing.
 - `ui/ExternalDropTarget.*` owns the OLE `IDropTarget` COM lifetime and
 	screen-to-client conversion. It calls synchronous callbacks supplied by
 	`MainWindow` for drag feedback, drop handling, and visual cleanup; it does

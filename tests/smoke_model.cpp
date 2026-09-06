@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
@@ -7,6 +8,7 @@
 
 #include "browser/BrowserModel.h"
 #include "ui/QuickSend.h"
+#include "ui/QuickSendPersistence.h"
 #include "util/PathUtils.h"
 
 #include "smoke_model.h"
@@ -196,11 +198,78 @@ namespace hyperbrowse::tests
             Expect(fullModel.AssignNextAvailableShortcut(L"C:\\Favorites\\New") == std::nullopt,
                    "Quick Send assigned a shortcut when all supported keys were already occupied");
         }
+
+              void RunQuickSendPersistenceScenario()
+              {
+                     using hyperbrowse::ui::QuickSendPersistedState;
+                     using hyperbrowse::ui::QuickSendPersistence;
+
+                     std::map<std::wstring, std::wstring> values;
+                     QuickSendPersistedState state;
+                     state.favoriteDestinationFolders = {
+                            L"C:\\Favorites\\One",
+                            L"D:\\Favorites\\Two",
+                            L"E:\\Favorites\\Three",
+                     };
+                     state.lastQuickSendDestination = L"D:\\Favorites\\Two";
+                     state.shortcutAssignments[3] = L"D:\\Favorites\\Two";
+
+                     QuickSendPersistence::Save(
+                            state,
+                            [&values](std::wstring_view valueName, std::wstring_view value)
+                            {
+                                   values[std::wstring(valueName)] = value;
+                            },
+                            [&values](std::wstring_view valueName)
+                            {
+                                   values.erase(std::wstring(valueName));
+                            });
+
+                     Expect(values[L"FavoriteDestinationFolders"] == L"C:\\Favorites\\One\nD:\\Favorites\\Two\nE:\\Favorites\\Three"
+                                      && values[L"LastQuickSendDestination"] == L"D:\\Favorites\\Two"
+                                      && values[L"QuickSendShortcut3"] == L"D:\\Favorites\\Two",
+                               "Quick Send persistence did not write the expected registry value contract");
+
+                     const QuickSendPersistedState restored = QuickSendPersistence::Load(
+                            [&values](std::wstring_view valueName, std::wstring* value)
+                            {
+                                   const auto found = values.find(std::wstring(valueName));
+                                   if (found == values.end())
+                                   {
+                                          return false;
+                                   }
+
+                                   *value = found->second;
+                                   return true;
+                            },
+                            2);
+                     Expect(restored.favoriteDestinationFolders == std::vector<std::wstring>{
+                                             L"C:\\Favorites\\One",
+                                             L"D:\\Favorites\\Two"}
+                                      && restored.lastQuickSendDestination == L"D:\\Favorites\\Two"
+                                      && restored.shortcutAssignments[3] == L"D:\\Favorites\\Two",
+                               "Quick Send persistence did not restore capped favorites, last destination, and shortcuts");
+
+                     state.lastQuickSendDestination.clear();
+                     QuickSendPersistence::Save(
+                            state,
+                            [&values](std::wstring_view valueName, std::wstring_view value)
+                            {
+                                   values[std::wstring(valueName)] = value;
+                            },
+                            [&values](std::wstring_view valueName)
+                            {
+                                   values.erase(std::wstring(valueName));
+                            });
+                     Expect(!values.contains(L"LastQuickSendDestination"),
+                               "Quick Send persistence did not delete an empty last destination");
+              }
     }
 
     void RunModelScenarios()
     {
         RunBrowserModelBulkRemovalScenario();
         RunQuickSendModelScenario();
+              RunQuickSendPersistenceScenario();
     }
 }
