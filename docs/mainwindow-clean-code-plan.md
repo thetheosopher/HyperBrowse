@@ -1,5 +1,12 @@
 # MainWindow Clean-Code Refactoring Plan
 
+## Status
+
+Complete for this cleanup pass. All implementation items and available
+automated build, smoke-test, diagnostic, whitespace, and binary-freshness
+checks are complete. Native interactive workflows requiring controlled desktop
+input remain documented as not verified below.
+
 ## Goal
 
 Make `MainWindow` a thin Win32 shell and coordination facade through staged,
