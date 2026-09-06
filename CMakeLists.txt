@@ -131,6 +131,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/ClipboardFileTransfer.cpp
     src/ui/BrowserPresentationPersistence.cpp
     src/ui/DetailsPanelHistogram.cpp
+    src/ui/DetailsPanelHistogramPainter.cpp
     src/ui/DetailsPanelLayout.cpp
     src/ui/DisplaySurfaceRecoveryPolicy.cpp
     src/ui/ImageWorkflowPersistence.cpp

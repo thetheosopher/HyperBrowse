@@ -48,6 +48,7 @@
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarPainter.h"
 #include "ui/DetailsPanelHistogram.h"
+#include "ui/DetailsPanelHistogramPainter.h"
 #include "ui/DetailsPanelLayout.h"
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileOperationJournal.h"
@@ -12315,62 +12316,26 @@ namespace hyperbrowse::ui
             if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_)
                 && !IsRectEmpty(&detailsPanelHistogramRect_))
             {
-                const COLORREF histogramBackground = BlendColor(palette.actionFieldBackground,
-                                                                 palette.paneBackground,
-                                                                 themeMode_ == ThemeMode::Dark ? 24 : 12);
-                const auto histogramBrush = createBrush(histogramBackground);
-                if (histogramBrush)
-                {
-                    renderTarget->FillRectangle(hyperbrowse::render::ToD2DRect(detailsPanelHistogramRect_), histogramBrush.Get());
-                }
-                renderTarget->DrawRectangle(hyperbrowse::render::ToD2DRect(detailsPanelHistogramRect_), borderBrush.Get(), 1.0f);
-
-                RECT histogramTextRect = detailsPanelHistogramRect_;
-                InflateRect(&histogramTextRect, -8, -8);
-                if (detailsPanelHistogramLoading_)
-                {
-                    drawText(L"Loading histogram...", summaryFormat.Get(), histogramTextRect, mutedBrush.Get());
-                }
-                else if (!detailsPanelHistogramVisible_ || detailsPanelHistogramPeak_ == 0)
-                {
-                    drawText(L"Histogram unavailable", summaryFormat.Get(), histogramTextRect, mutedBrush.Get());
-                }
-                else
-                {
-                    const int chartLeft = detailsPanelHistogramRect_.left + 6;
-                    const int chartTop = detailsPanelHistogramRect_.top + 6;
-                    const int chartRight = detailsPanelHistogramRect_.right - 6;
-                    const int chartBottom = detailsPanelHistogramRect_.bottom - 6;
-                    const int chartWidth = std::max(1, chartRight - chartLeft);
-                    const int chartHeight = std::max(1, chartBottom - chartTop);
-                    const auto drawChannel = [&](const std::array<std::uint32_t, 64>& values, COLORREF color)
-                    {
-                        const auto channelBrush = createBrush(color);
-                        if (!channelBrush)
-                        {
-                            return;
-                        }
-                        for (int index = 1; index < kDetailsPanelHistogramBins; ++index)
-                        {
-                            const int previousX = chartLeft + MulDiv(index - 1, chartWidth - 1, kDetailsPanelHistogramBins - 1);
-                            const int currentX = chartLeft + MulDiv(index, chartWidth - 1, kDetailsPanelHistogramBins - 1);
-                            const int previousHeight = detailsPanelHistogramPeak_ > 0
-                                ? MulDiv(static_cast<int>(values[static_cast<std::size_t>(index - 1)]), chartHeight - 1, static_cast<int>(detailsPanelHistogramPeak_))
-                                : 0;
-                            const int currentHeight = detailsPanelHistogramPeak_ > 0
-                                ? MulDiv(static_cast<int>(values[static_cast<std::size_t>(index)]), chartHeight - 1, static_cast<int>(detailsPanelHistogramPeak_))
-                                : 0;
-                            renderTarget->DrawLine(
-                                hyperbrowse::render::ToD2DPoint(static_cast<float>(previousX), static_cast<float>(chartBottom - previousHeight)),
-                                hyperbrowse::render::ToD2DPoint(static_cast<float>(currentX), static_cast<float>(chartBottom - currentHeight)),
-                                channelBrush.Get(),
-                                1.0f);
-                        }
-                    };
-                    drawChannel(detailsPanelHistogramRed_, RGB(224, 98, 92));
-                    drawChannel(detailsPanelHistogramGreen_, RGB(112, 188, 102));
-                    drawChannel(detailsPanelHistogramBlue_, RGB(92, 150, 232));
-                }
+                const DetailsPanelHistogramPainter::State histogramState{
+                    detailsPanelHistogramRect_,
+                    detailsPanelHistogramRed_,
+                    detailsPanelHistogramGreen_,
+                    detailsPanelHistogramBlue_,
+                    detailsPanelHistogramPeak_,
+                    detailsPanelHistogramVisible_,
+                    detailsPanelHistogramLoading_};
+                const DetailsPanelHistogramPainter::Palette histogramPalette{
+                    BlendColor(palette.actionFieldBackground,
+                               palette.paneBackground,
+                               themeMode_ == ThemeMode::Dark ? 24 : 12),
+                    palette.actionStripBorder,
+                    palette.mutedText};
+                DetailsPanelHistogramPainter::PaintD2D(renderTarget.Get(),
+                                                        histogramState,
+                                                        histogramPalette,
+                                                        borderBrush.Get(),
+                                                        mutedBrush.Get(),
+                                                        summaryFormat.Get());
             }
         }
 
@@ -12699,82 +12664,25 @@ namespace hyperbrowse::ui
 
             if ((detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_) && !IsRectEmpty(&detailsPanelHistogramRect_))
             {
-                const COLORREF histogramBackground = BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 24 : 12);
-                HBRUSH histogramBrush = CreateSolidBrush(histogramBackground);
-                FillRect(hdc, &detailsPanelHistogramRect_, histogramBrush);
-                DeleteObject(histogramBrush);
-
-                HPEN histogramBorderPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
-                oldPen = SelectObject(hdc, histogramBorderPen);
-                MoveToEx(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.top, nullptr);
-                LineTo(hdc, detailsPanelHistogramRect_.right, detailsPanelHistogramRect_.top);
-                LineTo(hdc, detailsPanelHistogramRect_.right, detailsPanelHistogramRect_.bottom);
-                LineTo(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.bottom);
-                LineTo(hdc, detailsPanelHistogramRect_.left, detailsPanelHistogramRect_.top);
-                SelectObject(hdc, oldPen);
-                DeleteObject(histogramBorderPen);
-
-                RECT histogramTextRect = detailsPanelHistogramRect_;
-                InflateRect(&histogramTextRect, -8, -8);
-                if (detailsPanelHistogramLoading_)
-                {
-                    hyperbrowse::render::DrawGdiText(hdc,
-                                        detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                        L"Loading histogram...",
-                                        -1,
-                                        histogramTextRect,
-                                        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
-                                        palette.mutedText,
-                                        histogramBackground);
-                }
-                else if (!detailsPanelHistogramVisible_ || detailsPanelHistogramPeak_ == 0)
-                {
-                    render::DrawGdiText(hdc,
-                                        detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                                        L"Histogram unavailable",
-                                        -1,
-                                        histogramTextRect,
-                                        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
-                                        palette.mutedText,
-                                        histogramBackground);
-                }
-                else
-                {
-                    const int chartLeft = detailsPanelHistogramRect_.left + 6;
-                    const int chartTop = detailsPanelHistogramRect_.top + 6;
-                    const int chartRight = detailsPanelHistogramRect_.right - 6;
-                    const int chartBottom = detailsPanelHistogramRect_.bottom - 6;
-                    const int chartWidth = std::max(1, chartRight - chartLeft);
-                    const int chartHeight = std::max(1, chartBottom - chartTop);
-
-                    auto drawChannel = [&](const std::array<std::uint32_t, 64>& values, COLORREF color)
-                    {
-                        HPEN channelPen = CreatePen(PS_SOLID, 1, color);
-                        HGDIOBJ oldChannelPen = SelectObject(hdc, channelPen);
-                        for (int index = 0; index < kDetailsPanelHistogramBins; ++index)
-                        {
-                            const int x = chartLeft + MulDiv(index, chartWidth - 1, kDetailsPanelHistogramBins - 1);
-                            const int valueHeight = detailsPanelHistogramPeak_ > 0
-                                ? MulDiv(static_cast<int>(values[static_cast<std::size_t>(index)]), chartHeight - 1, static_cast<int>(detailsPanelHistogramPeak_))
-                                : 0;
-                            const int y = chartBottom - valueHeight;
-                            if (index == 0)
-                            {
-                                MoveToEx(hdc, x, y, nullptr);
-                            }
-                            else
-                            {
-                                LineTo(hdc, x, y);
-                            }
-                        }
-                        SelectObject(hdc, oldChannelPen);
-                        DeleteObject(channelPen);
-                    };
-
-                    drawChannel(detailsPanelHistogramRed_, RGB(224, 98, 92));
-                    drawChannel(detailsPanelHistogramGreen_, RGB(112, 188, 102));
-                    drawChannel(detailsPanelHistogramBlue_, RGB(92, 150, 232));
-                }
+                const DetailsPanelHistogramPainter::State histogramState{
+                    detailsPanelHistogramRect_,
+                    detailsPanelHistogramRed_,
+                    detailsPanelHistogramGreen_,
+                    detailsPanelHistogramBlue_,
+                    detailsPanelHistogramPeak_,
+                    detailsPanelHistogramVisible_,
+                    detailsPanelHistogramLoading_};
+                const DetailsPanelHistogramPainter::Palette histogramPalette{
+                    BlendColor(palette.actionFieldBackground,
+                               palette.paneBackground,
+                               themeMode_ == ThemeMode::Dark ? 24 : 12),
+                    palette.actionStripBorder,
+                    palette.mutedText};
+                DetailsPanelHistogramPainter::PaintGdi(
+                    hdc,
+                    histogramState,
+                    histogramPalette,
+                    detailsPanelSummaryFont_);
             }
         }
 

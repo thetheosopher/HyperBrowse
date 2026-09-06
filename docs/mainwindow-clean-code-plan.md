@@ -343,3 +343,8 @@ ancestor resolution and `LoadFolderAsync` initially remained in `MainWindow`; th
   `src/ui/StatusBarPainter.*`. MainWindow retains status text construction,
   theme-state selection, invalidation, and owner-draw routing while the
   painter consumes explicit colors, font, geometry, and text inputs.
+- [x] Extract details-panel histogram GDI and Direct2D painting into
+  `src/ui/DetailsPanelHistogramPainter.*`. MainWindow retains histogram
+  scheduling, state transitions, panel composition, and backend selection;
+  the painter consumes explicit histogram state, geometry, colors, and text
+  resources.
