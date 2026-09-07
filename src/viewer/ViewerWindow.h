@@ -188,6 +188,12 @@ namespace hyperbrowse::viewer
             Navigation,
         };
 
+        enum class RepaintMode
+        {
+            Full,
+            InfoOverlayOnly,
+        };
+
         struct AsyncState
         {
             std::atomic_uint64_t activeRequestId{0};
@@ -268,6 +274,16 @@ namespace hyperbrowse::viewer
         void StopTransition(bool clearPending = true);
         TransitionStyle ResolveActiveTransitionStyle() noexcept;
         void ResetViewState(bool preserveFitMode = false);
+        RECT InfoOverlayTopPanelRect() const noexcept;
+        void DrawInfoOverlays(ID2D1RenderTarget* renderTarget,
+                      float clientWidth,
+                      float clientHeight,
+                      int rotatedWidth,
+                      int rotatedHeight,
+                      int zoomPercent,
+                      const cache::CachedThumbnail* compareImage,
+                      CompareDirection activeCompareDirection,
+                      bool topOnly) const;
         void CalculatePanLimits(double& maxPanX, double& maxPanY) const;
         void ClampPanOffsets();
         bool CanPanHorizontally() const;
@@ -299,6 +315,7 @@ namespace hyperbrowse::viewer
                              float offsetX,
                              float offsetY) const;
         void RequestRepaint() const;
+                    void RequestInfoOverlayRepaint();
         void NotifyZoomChanged(int zoomPercent);
         void NotifyActivityChanged(bool isActive) const;
         void NotifyCurrentItemChanged() const;
@@ -400,6 +417,7 @@ namespace hyperbrowse::viewer
         bool preserveDisplayedImageWhileLoading_{};
         std::wstring wraparoundMessage_;
         UINT_PTR wraparoundTimerId_{};
+        mutable RepaintMode repaintMode_{RepaintMode::Full};
         std::unique_ptr<hyperbrowse::util::BackgroundExecutor> backgroundExecutor_;
 
         Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget_;

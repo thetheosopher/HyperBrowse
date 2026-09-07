@@ -1623,6 +1623,7 @@ namespace hyperbrowse::viewer
         d2dRenderTarget_ = renderer.CreateHwndRenderTarget(hwnd_);
         if (d2dRenderTarget_)
         {
+            repaintMode_ = RepaintMode::Full;
             util::LogInfo(L"ViewerWindow created D2D render target for HWND " + FormatWindowHandle(hwnd_));
             RebuildD2DBrushes();
             RebuildD2DTextFormats();
@@ -1694,6 +1695,7 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ReleaseD2DResources()
     {
+        repaintMode_ = RepaintMode::Full;
         if (d2dRenderTarget_)
         {
             util::LogInfo(L"ViewerWindow releasing D2D resources for HWND " + FormatWindowHandle(hwnd_));
@@ -1802,6 +1804,10 @@ namespace hyperbrowse::viewer
         preserveDisplayedImageWhileLoading_ = keepDisplayedImage && currentImage_;
         if (preserveDisplayedImageWhileLoading_)
         {
+            if (hwnd_)
+            {
+                RequestInfoOverlayRepaint();
+            }
             return;
         }
 
@@ -3529,6 +3535,169 @@ namespace hyperbrowse::viewer
         return currentIndex_;
     }
 
+    RECT ViewerWindow::InfoOverlayTopPanelRect() const noexcept
+    {
+        RECT clientRect{};
+        if (!hwnd_ || GetClientRect(hwnd_, &clientRect) == FALSE)
+        {
+            return {};
+        }
+
+        const float clientWidth = static_cast<float>(clientRect.right - clientRect.left);
+        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
+        const bool fullMetadataShown = fullMetadataVisible_ && infoOverlaysVisible_;
+        const bool compareLayout = compareMode_ && ActiveCompareIndex() >= 0;
+        const float availablePanelWidth = fullMetadataShown
+            ? std::max(120.0f, (clientWidth * (2.0f / 3.0f)) - 32.0f)
+            : std::max(120.0f, clientWidth - 32.0f);
+        const float topPanelWidth = std::min((compareLayout ? 760.0f : 560.0f) * overlayMetrics.overlayWidthScale,
+                                             availablePanelWidth);
+        const float topPanelHeight = (overlayMetrics.topPanelPaddingY * 2.0f)
+            + overlayMetrics.topNameHeight
+            + overlayMetrics.topInfoHeight;
+
+        return RECT{
+            16,
+            16,
+            16 + static_cast<LONG>(std::lround(topPanelWidth)),
+            16 + static_cast<LONG>(std::lround(topPanelHeight)),
+        };
+    }
+
+    void ViewerWindow::DrawInfoOverlays(ID2D1RenderTarget* renderTarget,
+                                        float clientWidth,
+                                        float clientHeight,
+                                        int rotatedWidth,
+                                        int rotatedHeight,
+                                        int zoomPercent,
+                                        const cache::CachedThumbnail* compareImage,
+                                        CompareDirection activeCompareDirection,
+                                        bool topOnly) const
+    {
+        if (!renderTarget || !infoOverlaysVisible_)
+        {
+            return;
+        }
+
+        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
+        const int compareIndex = compareMode_ ? CompareIndexForDirection(activeCompareDirection) : -1;
+        const browser::BrowserItem* currentItem =
+            (currentIndex_ >= 0 && currentIndex_ < static_cast<int>(items_.size()))
+            ? &items_[static_cast<std::size_t>(currentIndex_)]
+            : nullptr;
+        const browser::BrowserItem* compareItem =
+            (compareIndex >= 0 && compareIndex < static_cast<int>(items_.size()))
+            ? &items_[static_cast<std::size_t>(compareIndex)]
+            : nullptr;
+        const bool compareLayout = compareMode_ && compareItem != nullptr;
+
+        std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
+        if (compareLayout)
+        {
+            fileName.append(L"  <->  ");
+            fileName.append(compareItem->fileName);
+        }
+
+        std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
+            + std::to_wstring(static_cast<int>(items_.size()));
+        if (currentItem)
+        {
+            topLine.append(L"  |  ");
+            topLine.append(currentItem->fileType);
+            topLine.append(L"  |  ");
+            topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
+        }
+        if (compareLayout)
+        {
+            topLine.append(L"  |  Compare ");
+            topLine.append(activeCompareDirection == CompareDirection::Next ? L"next" : L"previous");
+        }
+
+        const RECT topPanelRect = InfoOverlayTopPanelRect();
+        const bool fullMetadataShown = fullMetadataVisible_ && infoOverlaysVisible_;
+        const float availablePanelWidth = fullMetadataShown
+            ? std::max(120.0f, (clientWidth * (2.0f / 3.0f)) - 32.0f)
+            : std::max(120.0f, clientWidth - 32.0f);
+        const float bottomPanelWidth = std::min((compareLayout ? 640.0f : 380.0f) * overlayMetrics.overlayWidthScale,
+                                                availablePanelWidth);
+        const float bottomPanelHeight = (overlayMetrics.bottomPanelPaddingY * 2.0f)
+            + overlayMetrics.bottomInfoHeight;
+        const float bottomPanelLeft = clientWidth - 16.0f - bottomPanelWidth;
+        const float bottomPanelTop = clientHeight - 16.0f - bottomPanelHeight;
+        const D2D1_RECT_F topPanel = D2D1::RectF(
+            static_cast<float>(topPanelRect.left),
+            static_cast<float>(topPanelRect.top),
+            static_cast<float>(topPanelRect.right),
+            static_cast<float>(topPanelRect.bottom));
+        const D2D1_RECT_F bottomPanel = D2D1::RectF(bottomPanelLeft,
+                                                   bottomPanelTop,
+                                                   bottomPanelLeft + bottomPanelWidth,
+                                                   bottomPanelTop + bottomPanelHeight);
+
+        const D2D1_ROUNDED_RECT roundedTop = D2D1::RoundedRect(topPanel, 8.0f, 8.0f);
+        if (d2dPanelFillBrush_) renderTarget->FillRoundedRectangle(roundedTop, d2dPanelFillBrush_.Get());
+        if (d2dPanelBorderBrush_) renderTarget->DrawRoundedRectangle(roundedTop, d2dPanelBorderBrush_.Get(), 1.0f);
+
+        const D2D1_RECT_F nameRect = D2D1::RectF(topPanel.left + overlayMetrics.topPanelPaddingX,
+                                                topPanel.top + overlayMetrics.topPanelPaddingY,
+                                                topPanel.right - overlayMetrics.topPanelPaddingX,
+                                                topPanel.top + overlayMetrics.topPanelPaddingY + overlayMetrics.topNameHeight);
+        const D2D1_RECT_F topInfoRect = D2D1::RectF(topPanel.left + overlayMetrics.topPanelPaddingX,
+                                                   nameRect.bottom,
+                                                   topPanel.right - overlayMetrics.topPanelPaddingX,
+                                                   nameRect.bottom + overlayMetrics.topInfoHeight);
+
+        if (d2dNameFormat_ && d2dTextBrush_)
+        {
+            d2dNameFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            renderTarget->DrawText(fileName.c_str(), static_cast<UINT32>(fileName.size()),
+                                   d2dNameFormat_.Get(), nameRect, d2dTextBrush_.Get());
+        }
+        if (d2dInfoFormat_ && d2dMutedTextBrush_)
+        {
+            d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            renderTarget->DrawText(topLine.c_str(), static_cast<UINT32>(topLine.size()),
+                                   d2dInfoFormat_.Get(), topInfoRect, d2dMutedTextBrush_.Get());
+        }
+
+        if (topOnly)
+        {
+            return;
+        }
+
+        const D2D1_ROUNDED_RECT roundedBottom = D2D1::RoundedRect(bottomPanel, 8.0f, 8.0f);
+        if (d2dPanelFillBrush_) renderTarget->FillRoundedRectangle(roundedBottom, d2dPanelFillBrush_.Get());
+        if (d2dPanelBorderBrush_) renderTarget->DrawRoundedRectangle(roundedBottom, d2dPanelBorderBrush_.Get(), 1.0f);
+
+        std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
+        bottomLine.append(L"  |  ");
+        bottomLine.append(std::to_wstring(zoomPercent));
+        bottomLine.append(L"%");
+        bottomLine.append(L"  |  ");
+        bottomLine.append(zoomMode_ == ZoomMode::Fit
+            ? L"Fit"
+            : (zoomMode_ == ZoomMode::FitHeight
+                ? L"Fit Height"
+                : (zoomMode_ == ZoomMode::FitWidth ? L"Fit Width" : L"Custom")));
+        if (compareLayout)
+        {
+            bottomLine.append(compareImage
+                ? L"  |  Shift+Left/Right change pair  |  C toggle  |  X swap"
+                : L"  |  Loading compare image...");
+        }
+
+        const D2D1_RECT_F bottomInfoRect = D2D1::RectF(bottomPanel.left + overlayMetrics.bottomPanelPaddingX,
+                                                       bottomPanel.top + overlayMetrics.bottomPanelPaddingY,
+                                                       bottomPanel.right - overlayMetrics.bottomPanelPaddingX,
+                                                       bottomPanel.top + overlayMetrics.bottomPanelPaddingY + overlayMetrics.bottomInfoHeight);
+        if (d2dBottomInfoFormat_ && d2dTextBrush_)
+        {
+            d2dBottomInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            renderTarget->DrawText(bottomLine.c_str(), static_cast<UINT32>(bottomLine.size()),
+                                   d2dBottomInfoFormat_.Get(), bottomInfoRect, d2dTextBrush_.Get());
+        }
+    }
+
     void ViewerWindow::QueueTransitionFromCurrent(bool forward, bool slideshowNavigation)
     {
         StopTransition(false);
@@ -3878,10 +4047,32 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::RequestRepaint() const
     {
+        repaintMode_ = RepaintMode::Full;
         if (hwnd_ && IsWindow(hwnd_) != FALSE)
         {
             RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE);
         }
+    }
+
+    void ViewerWindow::RequestInfoOverlayRepaint()
+    {
+        if (!hwnd_ || IsWindow(hwnd_) == FALSE || !currentImage_ || !infoOverlaysVisible_)
+        {
+            RequestRepaint();
+            return;
+        }
+
+        RECT invalidRect = InfoOverlayTopPanelRect();
+        if (invalidRect.right <= invalidRect.left || invalidRect.bottom <= invalidRect.top)
+        {
+            RequestRepaint();
+            return;
+        }
+
+        InflateRect(&invalidRect, 2, 2);
+        repaintMode_ = RepaintMode::InfoOverlayOnly;
+        RedrawWindow(hwnd_, &invalidRect, nullptr,
+                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
 
     void ViewerWindow::NotifyZoomChanged(int zoomPercent)
@@ -4713,13 +4904,67 @@ namespace hyperbrowse::viewer
                 const float clientWidth = size.width;
                 const float clientHeight = size.height;
 
-                d2dRenderTarget_->Clear(render::ToD2DColor(BackgroundColor(darkTheme_)));
+                bool overlayOnly = repaintMode_ == RepaintMode::InfoOverlayOnly
+                    && currentImage_
+                    && infoOverlaysVisible_;
+                repaintMode_ = RepaintMode::Full;
+                if (overlayOnly)
+                {
+                    RECT invalidRect = paintStruct.rcPaint;
+                    RECT overlayRect = InfoOverlayTopPanelRect();
+                    InflateRect(&overlayRect, 2, 2);
+                    RECT intersection{};
+                    if (!IntersectRect(&intersection, &invalidRect, &overlayRect)
+                        || !EqualRect(&intersection, &invalidRect))
+                    {
+                        overlayOnly = false;
+                    }
+                }
 
-                const int displayedImageIndex = DisplayedImageIndex();
-                const browser::BrowserItem* currentItem =
-                    (displayedImageIndex >= 0 && displayedImageIndex < static_cast<int>(items_.size()))
-                    ? &items_[static_cast<std::size_t>(displayedImageIndex)]
-                    : nullptr;
+                if (overlayOnly)
+                {
+                    const RECT clientRect{
+                        0,
+                        0,
+                        static_cast<LONG>(std::lround(clientWidth)),
+                        static_cast<LONG>(std::lround(clientHeight)),
+                    };
+                    const double scale = EffectiveScaleForClient(clientRect);
+                    const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+                    const int rotatedWidth = swapDimensions ? currentImage_->SourceHeight() : currentImage_->SourceWidth();
+                    const int rotatedHeight = swapDimensions ? currentImage_->SourceWidth() : currentImage_->SourceHeight();
+                    const int zoomPercent = std::max(1, static_cast<int>(std::lround(scale * 100.0)));
+                    if (zoomPercent != currentZoomPercent_)
+                    {
+                        NotifyZoomChanged(zoomPercent);
+                    }
+
+                    DrawInfoOverlays(d2dRenderTarget_.Get(),
+                                     clientWidth,
+                                     clientHeight,
+                                     rotatedWidth,
+                                     rotatedHeight,
+                                     zoomPercent,
+                                     nullptr,
+                                     ResolveCompareDirection(compareDirection_),
+                                     true);
+
+                    const HRESULT hr = d2dRenderTarget_->EndDraw();
+                    const bool recreateTarget = hr == D2DERR_RECREATE_TARGET;
+                    if (recreateTarget)
+                    {
+                        ReleaseD2DResources();
+                    }
+
+                    EndPaint(hwnd_, &paintStruct);
+                    if (recreateTarget)
+                    {
+                        RequestRepaint();
+                    }
+                    return 0;
+                }
+
+                d2dRenderTarget_->Clear(render::ToD2DColor(BackgroundColor(darkTheme_)));
 
                 if (!currentImage_)
                 {
@@ -5877,103 +6122,15 @@ namespace hyperbrowse::viewer
                     const bool fullMetadataShown = fullMetadataVisible_ && infoOverlaysVisible_;
                     if (infoOverlaysVisible_)
                     {
-                        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
-                        std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
-                        if (compareLayout && compareItem)
-                        {
-                            fileName.append(L"  <->  ");
-                            fileName.append(compareItem->fileName);
-                        }
-
-                        std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
-                            + std::to_wstring(static_cast<int>(items_.size()));
-                        if (currentItem)
-                        {
-                            topLine.append(L"  |  ");
-                            topLine.append(currentItem->fileType);
-                            topLine.append(L"  |  ");
-                            topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
-                        }
-                        if (compareLayout)
-                        {
-                            topLine.append(L"  |  Compare ");
-                            topLine.append(activeCompareDirection == CompareDirection::Next ? L"next" : L"previous");
-                        }
-
-                        std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
-                        bottomLine.append(L"  |  ");
-                        bottomLine.append(std::to_wstring(zoomPercent));
-                        bottomLine.append(L"%");
-                        bottomLine.append(L"  |  ");
-                        bottomLine.append(zoomMode_ == ZoomMode::Fit
-                            ? L"Fit"
-                            : (zoomMode_ == ZoomMode::FitHeight
-                                ? L"Fit Height"
-                                : (zoomMode_ == ZoomMode::FitWidth ? L"Fit Width" : L"Custom")));
-                        if (compareLayout)
-                        {
-                            bottomLine.append(compareImage
-                                ? L"  |  Shift+Left/Right change pair  |  C toggle  |  X swap"
-                                : L"  |  Loading compare image...");
-                        }
-
-                        const float availablePanelWidth = fullMetadataShown
-                            ? std::max(120.0f, (clientWidth * (2.0f / 3.0f)) - 32.0f)
-                            : std::max(120.0f, clientWidth - 32.0f);
-                        const float topPanelWidth = std::min((compareLayout ? 760.0f : 560.0f) * overlayMetrics.overlayWidthScale, availablePanelWidth);
-                        const float bottomPanelWidth = std::min((compareLayout ? 640.0f : 380.0f) * overlayMetrics.overlayWidthScale, availablePanelWidth);
-                        const float topPanelHeight = (overlayMetrics.topPanelPaddingY * 2.0f)
-                            + overlayMetrics.topNameHeight
-                            + overlayMetrics.topInfoHeight;
-                        const float bottomPanelHeight = (overlayMetrics.bottomPanelPaddingY * 2.0f)
-                            + overlayMetrics.bottomInfoHeight;
-                        const float bottomPanelLeft = clientWidth - 16.0f - bottomPanelWidth;
-                        const float bottomPanelTop = clientHeight - 16.0f - bottomPanelHeight;
-                        D2D1_RECT_F topPanel = D2D1::RectF(16, 16, 16 + topPanelWidth, 16 + topPanelHeight);
-                        D2D1_RECT_F bottomPanel = D2D1::RectF(bottomPanelLeft,
-                                                              bottomPanelTop,
-                                                              bottomPanelLeft + bottomPanelWidth,
-                                                              bottomPanelTop + bottomPanelHeight);
-
-                        const D2D1_ROUNDED_RECT roundedTop = D2D1::RoundedRect(topPanel, 8.0f, 8.0f);
-                        const D2D1_ROUNDED_RECT roundedBottom = D2D1::RoundedRect(bottomPanel, 8.0f, 8.0f);
-
-                        if (d2dPanelFillBrush_) d2dRenderTarget_->FillRoundedRectangle(roundedTop, d2dPanelFillBrush_.Get());
-                        if (d2dPanelBorderBrush_) d2dRenderTarget_->DrawRoundedRectangle(roundedTop, d2dPanelBorderBrush_.Get(), 1.0f);
-                        if (d2dPanelFillBrush_) d2dRenderTarget_->FillRoundedRectangle(roundedBottom, d2dPanelFillBrush_.Get());
-                        if (d2dPanelBorderBrush_) d2dRenderTarget_->DrawRoundedRectangle(roundedBottom, d2dPanelBorderBrush_.Get(), 1.0f);
-
-                        D2D1_RECT_F nameRect = D2D1::RectF(topPanel.left + overlayMetrics.topPanelPaddingX,
-                                                           topPanel.top + overlayMetrics.topPanelPaddingY,
-                                                           topPanel.right - overlayMetrics.topPanelPaddingX,
-                                                           topPanel.top + overlayMetrics.topPanelPaddingY + overlayMetrics.topNameHeight);
-                        D2D1_RECT_F topInfoRect = D2D1::RectF(topPanel.left + overlayMetrics.topPanelPaddingX,
-                                                              nameRect.bottom,
-                                                              topPanel.right - overlayMetrics.topPanelPaddingX,
-                                                              nameRect.bottom + overlayMetrics.topInfoHeight);
-                        D2D1_RECT_F bottomInfoRect = D2D1::RectF(bottomPanel.left + overlayMetrics.bottomPanelPaddingX,
-                                                                 bottomPanel.top + overlayMetrics.bottomPanelPaddingY,
-                                                                 bottomPanel.right - overlayMetrics.bottomPanelPaddingX,
-                                                                 bottomPanel.top + overlayMetrics.bottomPanelPaddingY + overlayMetrics.bottomInfoHeight);
-
-                        if (d2dNameFormat_ && d2dTextBrush_)
-                        {
-                            d2dNameFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-                            d2dRenderTarget_->DrawText(fileName.c_str(), static_cast<UINT32>(fileName.size()),
-                                                       d2dNameFormat_.Get(), nameRect, d2dTextBrush_.Get());
-                        }
-                        if (d2dInfoFormat_ && d2dMutedTextBrush_)
-                        {
-                            d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-                            d2dRenderTarget_->DrawText(topLine.c_str(), static_cast<UINT32>(topLine.size()),
-                                                       d2dInfoFormat_.Get(), topInfoRect, d2dMutedTextBrush_.Get());
-                        }
-                        if (d2dBottomInfoFormat_ && d2dTextBrush_)
-                        {
-                            d2dBottomInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-                            d2dRenderTarget_->DrawText(bottomLine.c_str(), static_cast<UINT32>(bottomLine.size()),
-                                                       d2dBottomInfoFormat_.Get(), bottomInfoRect, d2dTextBrush_.Get());
-                        }
+                        DrawInfoOverlays(d2dRenderTarget_.Get(),
+                                         clientWidth,
+                                         clientHeight,
+                                         rotatedWidth,
+                                         rotatedHeight,
+                                         zoomPercent,
+                                         compareImage,
+                                         activeCompareDirection,
+                                         false);
                     }
 
                     if (fullMetadataShown)
