@@ -3591,6 +3591,32 @@ namespace
                     + std::to_string(escapeBehaviorCombo != nullptr) + ")");
                 return;
             }
+            const HWND comboControls[] = {
+                transitionCombo,
+                overlayTextCombo,
+                appTextCombo,
+                thumbnailCombo,
+                resourceCombo,
+                escapeBehaviorCombo,
+            };
+            for (HWND combo : comboControls)
+            {
+                const LONG_PTR style = GetWindowLongPtrW(combo, GWL_STYLE);
+                if ((style & CBS_DROPDOWNLIST) == 0 || (style & CBS_OWNERDRAWFIXED) == 0 || (style & CBS_HASSTRINGS) == 0)
+                {
+                    failAndClose("Experimental Settings combo box did not retain owner-draw list styles (style="
+                        + std::to_string(static_cast<unsigned long long>(style)) + ")");
+                    return;
+                }
+                MEASUREITEMSTRUCT measureItem{};
+                measureItem.CtlType = ODT_COMBOBOX;
+                SendMessageW(dialog, WM_MEASUREITEM, static_cast<WPARAM>(GetDlgCtrlID(combo)), reinterpret_cast<LPARAM>(&measureItem));
+                if (measureItem.itemHeight == 0)
+                {
+                    failAndClose("Experimental Settings combo box did not provide an owner-draw item height");
+                    return;
+                }
+            }
             SendMessageW(transitionCombo, CB_SHOWDROPDOWN, TRUE, 0);
             if (SendMessageW(transitionCombo, CB_GETDROPPEDSTATE, 0, 0) == FALSE)
             {

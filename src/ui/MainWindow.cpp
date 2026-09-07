@@ -5094,6 +5094,64 @@ namespace
         InvalidateRect(state.dialogWindow, nullptr, FALSE);
     }
 
+    void DrawExperimentalSettingsComboItem(const ExperimentalSettingsDialogState& state,
+                                           const DRAWITEMSTRUCT& drawItem)
+    {
+        if (!state.settings || !drawItem.hDC)
+        {
+            return;
+        }
+
+        const bool editField = (drawItem.itemState & ODS_COMBOBOXEDIT) != 0;
+        const bool selected = (drawItem.itemState & ODS_SELECTED) != 0 && !editField;
+        const bool disabled = (drawItem.itemState & ODS_DISABLED) != 0;
+        const bool dark = state.settings->darkTheme;
+        const COLORREF fieldBackground = dark ? RGB(45, 51, 59) : RGB(247, 249, 252);
+        const COLORREF selectedBackground = dark ? RGB(47, 68, 92) : RGB(220, 233, 247);
+        const COLORREF text = disabled
+            ? dark ? RGB(157, 167, 179) : RGB(105, 116, 131)
+            : dark ? RGB(235, 239, 244) : RGB(30, 36, 44);
+        const COLORREF border = dark ? RGB(78, 87, 98) : RGB(215, 221, 229);
+        const RECT itemRect = drawItem.rcItem;
+        HBRUSH backgroundBrush = CreateSolidBrush(selected ? selectedBackground : fieldBackground);
+        if (backgroundBrush)
+        {
+            FillRect(drawItem.hDC, &itemRect, backgroundBrush);
+            DeleteObject(backgroundBrush);
+        }
+
+        wchar_t itemText[256]{};
+        if (drawItem.itemID != static_cast<UINT>(-1))
+        {
+            SendMessageW(drawItem.hwndItem,
+                         CB_GETLBTEXT,
+                         drawItem.itemID,
+                         reinterpret_cast<LPARAM>(itemText));
+        }
+        RECT textRect = itemRect;
+        textRect.left += 8;
+        textRect.right -= 8;
+        SetBkMode(drawItem.hDC, TRANSPARENT);
+        SetTextColor(drawItem.hDC, text);
+        DrawTextW(drawItem.hDC,
+                  itemText,
+                  -1,
+                  &textRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+        if (editField && (drawItem.itemState & ODS_FOCUS) != 0)
+        {
+            HBRUSH borderBrush = CreateSolidBrush(border);
+            if (borderBrush)
+            {
+                RECT focusRect = itemRect;
+                InflateRect(&focusRect, -1, -1);
+                FrameRect(drawItem.hDC, &focusRect, borderBrush);
+                DeleteObject(borderBrush);
+            }
+        }
+    }
+
     LRESULT CALLBACK ExperimentalSettingsDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         auto* state = reinterpret_cast<ExperimentalSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -5172,7 +5230,7 @@ namespace
                     0,
                     WC_COMBOBOXW,
                     nullptr,
-                    WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL,
+                    WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL,
                     0,
                     0,
                     0,
@@ -5351,6 +5409,28 @@ namespace
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
+        case WM_MEASUREITEM:
+            if (state)
+            {
+                auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
+                if (measureItem && measureItem->CtlType == ODT_COMBOBOX)
+                {
+                    measureItem->itemHeight = static_cast<UINT>(std::max(24, GetSystemMetrics(SM_CYMENU)));
+                    return TRUE;
+                }
+            }
+            break;
+        case WM_DRAWITEM:
+            if (state)
+            {
+                const auto* drawItem = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+                if (drawItem && drawItem->CtlType == ODT_COMBOBOX)
+                {
+                    DrawExperimentalSettingsComboItem(*state, *drawItem);
+                    return TRUE;
+                }
+            }
+            break;
         case WM_LBUTTONDOWN:
             if (state)
             {
