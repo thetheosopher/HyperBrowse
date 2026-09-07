@@ -130,6 +130,12 @@ namespace
                               hyperbrowse::services::FileConflictPolicy conflictPolicy)
     {
         DWORD flags = FOFX_SHOWELEVATIONPROMPT | FOF_NOCONFIRMMKDIR | FOFX_NOCOPYHOOKS;
+        if (type == hyperbrowse::services::FileOperationType::Copy
+            || type == hyperbrowse::services::FileOperationType::Move)
+        {
+            flags |= FOF_SILENT;
+        }
+
         if (conflictPolicy == hyperbrowse::services::FileConflictPolicy::OverwriteExisting
             && (type == hyperbrowse::services::FileOperationType::Copy
                 || type == hyperbrowse::services::FileOperationType::Move))
