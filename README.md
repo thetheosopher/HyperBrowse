@@ -146,7 +146,7 @@ The current implementation combines a Win32 shell with Direct2D and DirectWrite 
 
 - Windows 10 or Windows 11, x64.
 - Visual Studio 2026 Build Tools or Visual Studio 2026 with Desktop development for C++.
-- CMake 4.2 or newer for the bundled Visual Studio 2026 presets.
+- CMake 4.2 or newer for the bundled Visual Studio 2026 presets. The CMake bundled with Visual Studio or the Visual Studio Build Tools is supported; it does not need to be on `PATH`.
 - PowerShell and Inno Setup 6 for release packaging.
 - Optional internet access when `HYPERBROWSE_BUNDLE_CUDA_REDIST=ON`, because CMake downloads NVIDIA redistributables for packaging.
 
@@ -250,6 +250,8 @@ If you prefer the standalone packaging script, point it at the dedicated packagi
 ```powershell
 powershell -ExecutionPolicy Bypass -NoProfile -File .\tools\PackageRelease.ps1 -BuildDir .\build-release-package
 ```
+
+The packaging script can use the CMake and CTest bundled with Visual Studio or the Visual Studio Build Tools. It checks `PATH`, the CMake recorded in the selected build tree, Visual Studio installations discovered with `vswhere.exe`, and known standalone installation locations.
 
 The dedicated release-packaging configure preset keeps the static MSVC runtime enabled, keeps LibRaw linked statically, and keeps CUDA redistributable bundling enabled so the portable zip and installer carry the RAW helper executable plus the nvJPEG runtime DLLs they need. The packaging target runs the release smoke tests, stages both install components under `build-release-package/dist/`, creates `HyperBrowse-<version>-portable-win64.zip`, and compiles `HyperBrowse-<version>-installer.exe` with Inno Setup 6.
 

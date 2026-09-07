@@ -76,7 +76,10 @@ function Resolve-InnoSetupCompiler {
 }
 
 function Resolve-CMakeTool {
-    param([string]$ToolName)
+    param(
+        [string]$ToolName,
+        [string]$BuildDirectory
+    )
 
     $toolExecutable = if ($ToolName.EndsWith('.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
         $ToolName
@@ -103,6 +106,49 @@ function Resolve-CMakeTool {
         }
     }
 
+    $cmakeCachePath = if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
+        $null
+    } else {
+        Join-Path $BuildDirectory 'CMakeCache.txt'
+    }
+    if ($cmakeCachePath -and (Test-Path -LiteralPath $cmakeCachePath -PathType Leaf)) {
+        $cmakeCacheMatch = Select-String -LiteralPath $cmakeCachePath -Pattern '^CMAKE_COMMAND:[^=]*=(.+)$' | Select-Object -First 1
+        if ($cmakeCacheMatch) {
+            $configuredCMake = $cmakeCacheMatch.Matches[0].Groups[1].Value.Trim()
+            if (Test-Path -LiteralPath $configuredCMake -PathType Leaf) {
+                if ($ToolName -ieq 'cmake') {
+                    return (Resolve-Path $configuredCMake).Path
+                }
+
+                $siblingTool = Join-Path (Split-Path -Parent $configuredCMake) $toolExecutable
+                if (Test-Path $siblingTool) {
+                    return (Resolve-Path $siblingTool).Path
+                }
+            }
+        }
+    }
+
+    $vswhereCandidates = @(
+        $(Get-Command 'vswhere.exe' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1),
+        $(if (${env:ProgramFiles(x86)}) {
+            Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        })
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    foreach ($vswherePath in $vswhereCandidates) {
+        if (-not (Test-Path -LiteralPath $vswherePath -PathType Leaf)) {
+            continue
+        }
+
+        $visualStudioInstallations = @(& $vswherePath -all -products * -requires Microsoft.VisualStudio.Component.VC.CMake.Project -property installationPath 2>$null)
+        foreach ($installationPath in $visualStudioInstallations) {
+            $candidate = Join-Path $installationPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\$toolExecutable"
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                return (Resolve-Path $candidate).Path
+            }
+        }
+    }
+
     $candidates = @(
         $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "CMake\bin\$toolExecutable" }),
         $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} "CMake\bin\$toolExecutable" }),
@@ -115,7 +161,7 @@ function Resolve-CMakeTool {
         }
     }
 
-    throw "Failed to locate $toolExecutable. Install CMake or add it to PATH."
+    throw "Failed to locate $toolExecutable. Install CMake or the Visual Studio CMake component, or add it to PATH."
 }
 
 function Remove-PathWithRetry {
@@ -193,8 +239,8 @@ if (-not (Test-Path $buildDir)) {
 
 $projectRoot = (Resolve-Path $projectRoot).Path
 $buildDir = (Resolve-Path $buildDir).Path
-$cmakeExecutable = Resolve-CMakeTool -ToolName 'cmake'
-$ctestExecutable = if ($SkipTests) { $null } else { Resolve-CMakeTool -ToolName 'ctest' }
+$cmakeExecutable = Resolve-CMakeTool -ToolName 'cmake' -BuildDirectory $buildDir
+$ctestExecutable = if ($SkipTests) { $null } else { Resolve-CMakeTool -ToolName 'ctest' -BuildDirectory $buildDir }
 $innoSetupCompiler = Resolve-InnoSetupCompiler -RequestedPath $InnoSetupCompiler
 $version = Get-ProjectVersion -CMakeListsPath (Join-Path $projectRoot 'CMakeLists.txt')
 $installerScript = Join-Path $buildDir 'HyperBrowseInstaller.iss'
