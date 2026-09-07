@@ -103,6 +103,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Ctrl+Home` / `Ctrl+End` | Go to the first / last image |
 | `Ctrl+Shift+F` | Start a slideshow from the current folder |
 | `F7` / `F8` | Move / copy the displayed image to a Quick Actions destination |
+| `Ctrl+I` | Show image information |
 | `Ctrl+Shift+I` | Copy the displayed image |
 | `Tab` | Toggle image information overlays |
 | `+` / `=` / Numpad `+` | Zoom in |

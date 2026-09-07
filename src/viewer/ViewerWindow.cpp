@@ -4177,6 +4177,18 @@ namespace hyperbrowse::viewer
 
             if (wParam == static_cast<WPARAM>('I')
                 && (GetKeyState(VK_CONTROL) & 0x8000) != 0
+                && (GetKeyState(VK_SHIFT) & 0x8000) == 0
+                && (GetKeyState(VK_MENU) & 0x8000) == 0)
+            {
+                if (owner_ && IsWindow(owner_) != FALSE)
+                {
+                    PostMessageW(owner_, kContextMenuCommandMessage, kContextMenuImageInformation, 0);
+                }
+                return 0;
+            }
+
+            if (wParam == static_cast<WPARAM>('I')
+                && (GetKeyState(VK_CONTROL) & 0x8000) != 0
                 && (GetKeyState(VK_SHIFT) & 0x8000) != 0)
             {
                 if (owner_ && IsWindow(owner_) != FALSE)
