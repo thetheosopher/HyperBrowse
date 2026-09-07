@@ -42,6 +42,7 @@ namespace hyperbrowse::ui
             CommandHandler onToggleCloseMainWindowOnEscape;
             CommandHandler onRefreshTree;
             CommandHandler onOpenSelected;
+            CommandHandler onOpenSelectedInNewViewerWindow;
             CommandHandler onCompareSelected;
             CommandHandler onViewOnSecondaryMonitor;
             CommandHandler onImageInformation;

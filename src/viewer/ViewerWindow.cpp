@@ -3089,7 +3089,7 @@ namespace hyperbrowse::viewer
             if (owner_ && IsWindow(owner_))
             {
                 const WPARAM flags = commandId == kContextMenuDeletePermanently ? kDeleteRequestPermanent : 0;
-                SendMessageW(owner_, kDeleteRequestedMessage, flags, 0);
+                SendMessageW(owner_, kDeleteRequestedMessage, flags, reinterpret_cast<LPARAM>(hwnd_));
             }
             return;
         }
@@ -3353,7 +3353,9 @@ namespace hyperbrowse::viewer
             {
                 // Defer to the main window so metadata dialogs and the wallpaper
                 // operation reuse the same code paths as the browser.
-                PostMessageW(owner_, kContextMenuCommandMessage, static_cast<WPARAM>(commandId), 0);
+                PostMessageW(owner_, kContextMenuCommandMessage,
+                             static_cast<WPARAM>(commandId),
+                             reinterpret_cast<LPARAM>(hwnd_));
             }
             return;
         default:
@@ -4430,7 +4432,9 @@ namespace hyperbrowse::viewer
             {
                 if (owner_ && IsWindow(owner_) != FALSE)
                 {
-                    PostMessageW(owner_, kContextMenuCommandMessage, kContextMenuImageInformation, 0);
+                    PostMessageW(owner_, kContextMenuCommandMessage,
+                                 kContextMenuImageInformation,
+                                 reinterpret_cast<LPARAM>(hwnd_));
                 }
                 return 0;
             }
@@ -4441,7 +4445,9 @@ namespace hyperbrowse::viewer
             {
                 if (owner_ && IsWindow(owner_) != FALSE)
                 {
-                    PostMessageW(owner_, kContextMenuCommandMessage, kContextMenuCopyImage, 0);
+                    PostMessageW(owner_, kContextMenuCommandMessage,
+                                 kContextMenuCopyImage,
+                                 reinterpret_cast<LPARAM>(hwnd_));
                 }
                 return 0;
             }
@@ -4495,7 +4501,9 @@ namespace hyperbrowse::viewer
                     util::LogInfo(L"ViewerWindow VK_DELETE dispatch starting, currentIndex=" + std::to_wstring(currentIndex_));
                     {
                         util::ScopedTimer timer(L"ViewerWindow VK_DELETE SendMessageW round-trip");
-                        SendMessageW(owner_, kDeleteRequestedMessage, deleteRequestFlags, 0);
+                        SendMessageW(owner_, kDeleteRequestedMessage,
+                                     deleteRequestFlags,
+                                     reinterpret_cast<LPARAM>(hwnd_));
                     }
                     util::LogInfo(L"ViewerWindow VK_DELETE dispatch returned, currentIndex=" + std::to_wstring(currentIndex_));
                 }

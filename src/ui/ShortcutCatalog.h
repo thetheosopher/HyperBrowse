@@ -83,6 +83,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_MINIMIZE, static_cast<WORD>('W'), FCONTROL, L"Ctrl+W", L"Minimize the main window", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_REFRESH_TREE, VK_F5, 0, L"F5", L"Refresh the folder tree", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_RENAME_SELECTED, VK_F2, 0, L"F2", L"Rename the selected item", L"File and selection actions"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, VK_RETURN, FCONTROL | FSHIFT, L"Ctrl+Shift+Enter", L"Open the selected image in a new viewer window", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_QUICK_SEND_MOVE, VK_F7, 0, L"F7", L"Move selection to a quick action destination", L"Quick Actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_QUICK_SEND_COPY, VK_F8, 0, L"F8", L"Copy selection to a quick action destination", L"Quick Actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_RESUME_FILING, VK_F4, 0, L"F4", L"Resume filing in the current folder", L"Quick Actions"},

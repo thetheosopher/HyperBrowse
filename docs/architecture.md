@@ -68,6 +68,15 @@ Workers return results through the existing window-message or callback contracts
 4. The current image and adjacent prefetch slots are updated when decode results arrive.
 5. Delete and other list mutations explicitly invalidate index-keyed render resources before an index can refer to a different file.
 
+`MainWindow` owns a designated viewer reuse slot plus a collection of additional
+`ViewerWindow` instances. Normal Open targets the reuse slot; Open in New Viewer
+Window creates an independent viewer in the same process. Each viewer is
+identified by its HWND, and viewer-originated commands and asynchronous file
+operation completion retain that identity so Delete, Quick Actions, context-menu
+commands, focus restoration, and close handling affect only the originating
+window. Shared preferences are applied to every open viewer, while image and
+navigation state remains per window.
+
 ### File operations
 
 `FileOperationService` performs native shell operations asynchronously and reports completion/progress to `MainWindow`. Browser and viewer workflows share operation types, so operation origin must be tracked separately from the operation type. Completion logic must also account for folder-watch echoes, optimistic viewer state, selection/focus restoration, and shell-dialog foreground activation.

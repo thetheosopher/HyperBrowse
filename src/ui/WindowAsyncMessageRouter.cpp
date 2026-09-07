@@ -85,23 +85,23 @@ namespace hyperbrowse::ui
         case services::ThumbnailScheduler::kMessageId:
             return Invoke(handlers_.onDetailsPanelThumbnail, lParam);
         case viewer::ViewerWindow::kZoomChangedMessage:
-            return Invoke(handlers_.onViewerZoom, lParam);
+            return Invoke(handlers_.onViewerZoom, wParam, lParam);
         case viewer::ViewerWindow::kActivityChangedMessage:
-            return Invoke(handlers_.onViewerActivity, lParam);
+            return Invoke(handlers_.onViewerActivity, wParam, lParam);
         case viewer::ViewerWindow::kCurrentItemChangedMessage:
             return Invoke(handlers_.onViewerCurrentItemChanged, wParam);
         case viewer::ViewerWindow::kDeleteRequestedMessage:
-            return Invoke(handlers_.onViewerDeleteRequested, wParam);
+            return Invoke(handlers_.onViewerDeleteRequested, wParam, lParam);
         case viewer::ViewerWindow::kQuickSendRequestedMessage:
             return Invoke(handlers_.onViewerQuickSendRequest, wParam, lParam);
         case viewer::ViewerWindow::kStartFolderSlideshowMessage:
             return Invoke(handlers_.onViewerStartFolderSlideshow, wParam);
         case viewer::ViewerWindow::kContextMenuCommandMessage:
-            return Invoke(handlers_.onViewerContextMenuCommand, wParam);
+            return Invoke(handlers_.onViewerContextMenuCommand, wParam, lParam);
         case viewer::ViewerWindow::kDroppedFileMessage:
             return Invoke(handlers_.onViewerDroppedFile, lParam);
         case viewer::ViewerWindow::kClosedMessage:
-            return Invoke(handlers_.onViewerClosed);
+            return Invoke(handlers_.onViewerClosed, wParam);
         default:
             return std::nullopt;
         }

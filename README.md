@@ -22,7 +22,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
 - WIC baseline decode path, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
-- Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
+- Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
 - Quick Actions with saved destinations, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy for the currently displayed image or selected browser files.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
@@ -42,7 +42,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 | Area | Included today |
 | --- | --- |
 | Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
-| Viewer | Separate viewer window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
+| Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, folder watch refresh, and optional GPU-assisted JPEG decode |
@@ -53,6 +53,10 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 Quick Actions supports saved destinations with one-character shortcuts from digits, letters, and supported printable punctuation. Each newly added destination is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`, followed by punctuation; its key field accepts one supported character and can be edited later. Assignments persist by folder path and remain associated with the same destination when the list is reordered. Recent folders are not included.
 
 In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed. Press `F4` in the main window to restore the most recently recorded filing position for the current folder. Positions follow renamed or moved folders and keep up to 64 folders; the target must still be present in the current view.
+
+### Multiple viewer windows
+
+Opening an image normally reuses the existing viewer window, replacing its image collection. To compare unrelated images or keep separate reviews open side by side, select an image and choose **File > Open in New Viewer Window**, use the same command from the browser context menu, or press `Ctrl+Shift+Enter`. All viewer windows belong to the same HyperBrowse instance, so they share browser state and Quick Actions destinations. Viewer commands such as Delete, Quick Actions, image information, and context-menu actions apply to the window that received the input.
 
 ## Keyboard shortcuts
 
@@ -70,6 +74,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Ctrl+W` | Minimize the main window |
 | `F5` | Refresh the folder tree |
 | `F2` | Rename the selected item |
+| `Ctrl+Shift+Enter` | Open the selected image in a new viewer window |
 | `F7` / `F8` | Move / copy the selection to a Quick Actions destination |
 | `F4` | Resume the saved filing position in the current folder |
 | `Ctrl+I` | Show image information |

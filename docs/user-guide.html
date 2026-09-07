@@ -214,7 +214,7 @@
             <ol>
                 <li>Choose <strong>File &gt; Open Folder</strong>, or press <kbd>Ctrl</kbd> + <kbd>O</kbd>.</li>
                 <li>Select a folder in the tree. HyperBrowse shows a loading state immediately, then fills the browser as images are found.</li>
-                <li>Double-click an image, or select it and choose <strong>File &gt; Open</strong>, to open the separate viewer.</li>
+                <li>Double-click an image, or select it and choose <strong>File &gt; Open</strong>, to open or replace the existing viewer. Choose <strong>File &gt; Open in New Viewer Window</strong> when the image should remain in its own viewer window.</li>
                 <li>Use the <strong>Help &gt; User Guide</strong> command or press <kbd>F1</kbd> whenever you need this guide again.</li>
             </ol>
             <div class="callout"><strong>Keep the layout together.</strong> Portable builds locate the guide beside the application. Do not separate the <code>docs</code> folder from the executable.</div>
@@ -253,7 +253,7 @@
 
         <section id="viewer">
             <h2>Review images in the viewer</h2>
-            <p>The viewer is a separate window so the browser remains available while you review images. Use the left and right arrow keys, the toolbar, or the edge navigation controls to move through the current collection.</p>
+            <p>Viewer windows are separate from the browser, and one HyperBrowse instance can keep multiple independent viewer windows open. <strong>File &gt; Open</strong> reuses the existing viewer and replaces its collection; <strong>File &gt; Open in New Viewer Window</strong> creates another viewer without closing the others. The same command is available from the browser context menu and uses <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd>. All viewer windows share the instance's browser state and Quick Actions destinations, while image navigation and displayed-file commands stay scoped to the window that received input. Use the left and right arrow keys, the toolbar, or the edge navigation controls to move through the current collection.</p>
             <div class="columns">
                 <div>
                     <h3>View controls</h3>
@@ -355,6 +355,7 @@
                     <tr><td>File</td><td><kbd>F1</kbd></td><td>Open this user guide</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open a folder</td></tr>
                     <tr><td>File</td><td><kbd>F2</kbd></td><td>Rename the selected item</td></tr>
+                    <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>Open the selected image in a new viewer window</td></tr>
                     <tr><td>File</td><td><kbd>F5</kbd></td><td>Refresh the folder tree</td></tr>
                     <tr><td>File</td><td><kbd>Esc</kbd></td><td>Minimize, or close when enabled in Settings</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td>Minimize the main window</td></tr>

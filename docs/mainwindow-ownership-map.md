@@ -22,10 +22,12 @@ boundaries. Source code and `docs/architecture.md` remain authoritative.
 ## Windows and HWNDs
 
 - `MainWindow`: owns the main HWND, child control HWNDs, shell resources,
-  focus/activation capture, and message entry through `WindowProc` and
-  `HandleMessage`.
-- `BrowserPane`, `ViewerWindow`, and tree/tooltip/edit controls own their
-  control-specific HWND behavior and input/rendering state.
+  focus/activation capture, viewer-window collection, and message entry through
+  `WindowProc` and `HandleMessage`.
+- `BrowserPane`, each `ViewerWindow`, and tree/tooltip/edit controls own their
+  control-specific HWND behavior and input/rendering state. MainWindow keeps one
+  designated viewer reuse slot plus additional viewer instances; viewer HWNDs
+  identify the source of input and asynchronous completion effects.
 - `ExternalDropTarget`: owns the OLE drop-target COM lifetime and invokes
   callback contracts supplied by MainWindow.
 - Viewer close invalidates saved viewer focus/activation targets before a later
@@ -79,8 +81,9 @@ boundaries. Source code and `docs/architecture.md` remain authoritative.
 - `ViewerItemSelectionPolicy` chooses ordered model items and the active index.
 - `ViewerSynchronizer` builds replacement items, selected-index state, paired
   RAW/JPEG payloads, and empty-model close decisions.
-- MainWindow owns viewer opening, HWND close posting, browser/model snapshots,
-  and calls to `ViewerWindow::ReplaceItems`.
+- MainWindow owns viewer opening, the normal reuse-versus-new-window policy, HWND
+  close posting, browser/model snapshots, and calls to
+  `ViewerWindow::ReplaceItems`.
 - `ViewerPendingOperationState` prevents queued deletes or Quick Send effects
   from being applied to a newly opened viewer after the original viewer closes.
 

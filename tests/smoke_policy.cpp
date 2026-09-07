@@ -1738,12 +1738,14 @@ namespace hyperbrowse::tests
 
              ViewerPendingOperationState state;
              ViewerPendingOperationState::DeleteRequest firstDelete;
+             firstDelete.viewerHwnd = reinterpret_cast<HWND>(0x101);
              firstDelete.sourcePath = L"C:\\images\\first.jpg";
              firstDelete.sourcePaths = {firstDelete.sourcePath};
              firstDelete.preferredFocusPath = firstDelete.sourcePath;
              state.SetActiveDelete(std::move(firstDelete));
 
              ViewerPendingOperationState::DeleteRequest queuedDelete;
+             queuedDelete.viewerHwnd = reinterpret_cast<HWND>(0x202);
              queuedDelete.sourcePath = L"C:\\images\\second.jpg";
              queuedDelete.sourcePaths = {queuedDelete.sourcePath};
              queuedDelete.permanent = true;
@@ -1753,19 +1755,23 @@ namespace hyperbrowse::tests
                  "Viewer pending-operation state did not retain active and queued deletes");
              const auto activeDelete = state.TakeActiveDelete();
              Expect(activeDelete && activeDelete->sourcePath == L"C:\\images\\first.jpg"
+                   && activeDelete->viewerHwnd == reinterpret_cast<HWND>(0x101)
                   && !state.HasActiveDelete() && state.HasQueuedDeletes(),
                  "Viewer pending-operation state changed active delete order");
              const auto nextDelete = state.TakeNextDelete();
              Expect(nextDelete && nextDelete->sourcePath == L"C:\\images\\second.jpg"
+                   && nextDelete->viewerHwnd == reinterpret_cast<HWND>(0x202)
                   && nextDelete->permanent && !state.HasQueuedDeletes(),
                  "Viewer pending-operation state did not dequeue the next delete");
 
              ViewerPendingOperationState::QuickSendRequest quickSend;
+             quickSend.viewerHwnd = reinterpret_cast<HWND>(0x303);
              quickSend.type = FileOperationType::Copy;
              quickSend.sourcePath = L"C:\\images\\first.jpg";
              quickSend.sourcePaths = {quickSend.sourcePath};
              state.SetQuickSend(std::move(quickSend));
-             Expect(state.HasActiveQuickSend() && state.ActiveQuickSend()->active,
+               Expect(state.HasActiveQuickSend() && state.ActiveQuickSend()->active
+                   && state.ActiveQuickSend()->viewerHwnd == reinterpret_cast<HWND>(0x303),
                  "Viewer pending-operation state did not activate Quick Send");
              Expect(state.TakeQuickSend() && !state.HasActiveQuickSend(),
                  "Viewer pending-operation state did not consume Quick Send");

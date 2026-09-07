@@ -1,5 +1,7 @@
 #pragma once
 
+#include <windows.h>
+
 #include <deque>
 #include <optional>
 #include <string>
@@ -19,6 +21,7 @@ namespace hyperbrowse::ui
     public:
         struct DeleteRequest
         {
+            HWND viewerHwnd{};
             std::wstring sourcePath;
             std::vector<std::wstring> sourcePaths;
             std::wstring preferredFocusPath;
@@ -27,6 +30,7 @@ namespace hyperbrowse::ui
 
         struct QuickSendRequest
         {
+            HWND viewerHwnd{};
             services::FileOperationType type{static_cast<services::FileOperationType>(0)};
             std::wstring sourcePath;
             std::vector<std::wstring> sourcePaths;

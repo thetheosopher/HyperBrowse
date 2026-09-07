@@ -217,16 +217,26 @@ namespace hyperbrowse::ui
         void RefreshBrowserPane();
         void PromptForBrowserItemNumber();
         void OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor = false);
+        void OpenItemInNewViewerWindow(int modelIndex, bool preferSecondaryMonitor = false);
         bool OpenItemsInViewer(std::vector<browser::BrowserItem> items,
                        int selectedIndex,
                        bool startSlideshow,
                        bool preferSecondaryMonitor = false,
                        bool resolvePairedRawJpegItems = true);
+        bool OpenItemsInNewViewerWindow(std::vector<browser::BrowserItem> items,
+                        int selectedIndex,
+                        bool startSlideshow,
+                        bool preferSecondaryMonitor = false,
+                        bool resolvePairedRawJpegItems = true);
+        std::vector<viewer::ViewerWindow*> OpenViewerWindows() const;
+        viewer::ViewerWindow* FindViewerByHwnd(HWND viewerHwnd) const;
+        viewer::ViewerWindow* ActiveViewer() const;
         bool ShouldDefaultViewerToSecondaryMonitor() const;
         std::vector<browser::BrowserItem> ResolvePairedRawJpegViewerItems(
             std::vector<browser::BrowserItem> items,
             bool startSlideshow) const;
         bool SyncViewerToBrowserModel(std::wstring_view preferredPath = {});
+        bool SyncViewerToBrowserModel(viewer::ViewerWindow& viewer, std::wstring_view preferredPath = {});
         void RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top);
         void UpdateQuickAccessSortTooltip();
         void UpdateQuickAccessShortcutEditControls();
@@ -291,7 +301,9 @@ namespace hyperbrowse::ui
                          HWND dialogOwner,
                          std::wstring* destinationFolder);
         void StartQuickSendForSelection(services::FileOperationType type);
-        bool StartViewerQuickSendOperation(services::FileOperationType type, std::wstring destinationFolder);
+        bool StartViewerQuickSendOperation(viewer::ViewerWindow& viewer,
+                            services::FileOperationType type,
+                            std::wstring destinationFolder);
         void ResumeFilingPosition();
         void RecordFilingResume(const FilingResumeRecord& record);
         bool StartFileOperation(services::FileOperationType type,
@@ -387,15 +399,15 @@ namespace hyperbrowse::ui
         LRESULT OnFileOperationMessage(LPARAM lParam);
         LRESULT OnFileOperationProgressMessage(LPARAM lParam);
         LRESULT OnDetailsPanelThumbnailMessage(LPARAM lParam);
-        LRESULT OnViewerZoomMessage(LPARAM lParam);
-        LRESULT OnViewerActivityMessage(LPARAM lParam);
+        LRESULT OnViewerZoomMessage(WPARAM wParam, LPARAM lParam);
+        LRESULT OnViewerActivityMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnViewerCurrentItemChangedMessage(WPARAM wParam);
-        LRESULT OnViewerDeleteRequested(WPARAM wParam);
+        LRESULT OnViewerDeleteRequested(WPARAM wParam, LPARAM lParam);
         LRESULT OnViewerQuickSendRequest(WPARAM wParam, LPARAM lParam);
         LRESULT OnViewerStartFolderSlideshowMessage(WPARAM wParam);
-        LRESULT OnViewerContextMenuCommand(WPARAM wParam);
+        LRESULT OnViewerContextMenuCommand(WPARAM wParam, LPARAM lParam);
         LRESULT OnViewerDroppedFileMessage(LPARAM lParam);
-        LRESULT OnViewerClosedMessage();
+        LRESULT OnViewerClosedMessage(WPARAM wParam);
         LRESULT OnMemoryPressureSampleMessage(LPARAM lParam);
         LRESULT OnPersistentThumbnailCacheMaintenanceMessage(WPARAM wParam);
 
@@ -590,6 +602,8 @@ namespace hyperbrowse::ui
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
+        std::vector<std::unique_ptr<viewer::ViewerWindow>> additionalViewerWindows_;
+        HWND activeViewerWindow_{};
         std::unique_ptr<util::BackgroundExecutor> memoryPressureExecutor_;
         std::unique_ptr<util::BackgroundExecutor> cacheMaintenanceExecutor_;
         std::shared_ptr<struct PersistentThumbnailCacheMaintenanceState> cacheMaintenanceState_;
@@ -671,6 +685,7 @@ namespace hyperbrowse::ui
         };
         struct FileOperationViewerContext
         {
+            HWND viewerHwnd{};
             std::wstring viewerDeleteSourcePath;
             std::vector<std::wstring> viewerDeleteSourcePaths;
             std::wstring viewerDeletePreferredFocusPath;

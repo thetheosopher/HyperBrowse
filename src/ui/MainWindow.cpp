@@ -8819,6 +8819,11 @@ namespace hyperbrowse::ui
             OpenItemInViewer(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1,
                              ShouldDefaultViewerToSecondaryMonitor());
         };
+        fileCommandHandlers.onOpenSelectedInNewViewerWindow = [this]
+        {
+            OpenItemInNewViewerWindow(browserPaneController_ ? browserPaneController_->PrimarySelectedModelIndex() : -1,
+                                      ShouldDefaultViewerToSecondaryMonitor());
+        };
         fileCommandHandlers.onCompareSelected = std::bind_front(&MainWindow::StartCompareSelected, this);
         fileCommandHandlers.onViewOnSecondaryMonitor = [this]
         {
@@ -8905,9 +8910,9 @@ namespace hyperbrowse::ui
         };
         viewCommandHandlers.onViewerOverlayTextSize = [this](UINT commandId)
         {
-            if (viewerWindow_)
+            if (viewer::ViewerWindow* viewer = ActiveViewer())
             {
-                viewerWindow_->SetOverlayTextSize(ViewerOverlayTextSizeFromCommandId(commandId));
+                viewer->SetOverlayTextSize(ViewerOverlayTextSizeFromCommandId(commandId));
                 UpdateMenuState();
             }
         };
@@ -9068,17 +9073,17 @@ namespace hyperbrowse::ui
         };
         viewCommandHandlers.onViewerDetailOverlays = [this]
         {
-            if (viewerWindow_)
+            if (viewer::ViewerWindow* viewer = ActiveViewer())
             {
-                viewerWindow_->SetInfoOverlaysVisible(!viewerWindow_->AreInfoOverlaysVisible());
+                viewer->SetInfoOverlaysVisible(!viewer->AreInfoOverlaysVisible());
                 UpdateMenuState();
             }
         };
         viewCommandHandlers.onViewerFullMetadata = [this]
         {
-            if (viewerWindow_)
+            if (viewer::ViewerWindow* viewer = ActiveViewer())
             {
-                viewerWindow_->SetFullMetadataVisible(!viewerWindow_->IsFullMetadataVisible());
+                viewer->SetFullMetadataVisible(!viewer->IsFullMetadataVisible());
                 UpdateMenuState();
             }
         };
@@ -9421,9 +9426,9 @@ namespace hyperbrowse::ui
         // window or one of its descendants. The viewer has its own keyboard handling
         // (notably for VK_DELETE) and must not be pre-empted by the main window's
         // browser-pane accelerators.
-        if (viewerWindow_ && viewerWindow_->IsOpen())
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            const HWND viewerHwnd = viewerWindow_->Hwnd();
+            const HWND viewerHwnd = viewer->Hwnd();
             if (viewerHwnd && message->hwnd
                 && (message->hwnd == viewerHwnd || IsChild(viewerHwnd, message->hwnd)))
             {
@@ -9500,9 +9505,9 @@ namespace hyperbrowse::ui
             && message->wParam == VK_ESCAPE
             && message->hwnd
             && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
-            && viewerWindow_)
+            && FindViewerByHwnd(activeViewerWindow_))
         {
-            const HWND viewerHwnd = viewerWindow_->Hwnd();
+            const HWND viewerHwnd = activeViewerWindow_;
             if (viewerHwnd && IsWindow(viewerHwnd) != FALSE
                 && SendMessageW(viewerHwnd, WM_KEYDOWN, VK_ESCAPE, message->lParam) == 0)
             {
@@ -9622,6 +9627,7 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_CLEAR_FAVORITE_DESTINATIONS, L"&Clear All Quick Actions");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, L"Open in New Viewer &Window\tCtrl+Shift+Enter");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_COMPARE_SELECTED, L"Compare &Selected");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_IMAGE_INFORMATION, L"Image &Information\tCtrl+I");
@@ -12644,6 +12650,93 @@ namespace hyperbrowse::ui
             preferSecondaryMonitor);
     }
 
+    void MainWindow::OpenItemInNewViewerWindow(int modelIndex, bool preferSecondaryMonitor)
+    {
+        if (!browserModel_ || !browserPaneController_)
+        {
+            return;
+        }
+
+        const auto& modelItems = browserModel_->Items();
+        if (modelIndex < 0 || modelIndex >= static_cast<int>(modelItems.size()))
+        {
+            return;
+        }
+
+        const browser::BrowserItem& selectedItem = modelItems[static_cast<std::size_t>(modelIndex)];
+        if (selectedItem.isDirectory)
+        {
+            LoadFolderAsync(selectedItem.filePath);
+            return;
+        }
+
+        const std::vector<int> orderedModelIndices = browserPaneController_->OrderedModelIndicesSnapshot();
+        ViewerItemSelectionPolicy::Result viewerSelection = ViewerItemSelectionPolicy::Build({
+            modelItems,
+            orderedModelIndices,
+            modelIndex,
+            {},
+            {},
+            -1});
+        if (viewerSelection.selectedIndex < 0)
+        {
+            return;
+        }
+
+        OpenItemsInNewViewerWindow(
+            std::move(viewerSelection.items),
+            viewerSelection.selectedIndex,
+            false,
+            preferSecondaryMonitor);
+    }
+
+    std::vector<viewer::ViewerWindow*> MainWindow::OpenViewerWindows() const
+    {
+        std::vector<viewer::ViewerWindow*> viewers;
+        if (viewerWindow_ && viewerWindow_->IsOpen())
+        {
+            viewers.push_back(viewerWindow_.get());
+        }
+        for (const std::unique_ptr<viewer::ViewerWindow>& viewer : additionalViewerWindows_)
+        {
+            if (viewer && viewer->IsOpen())
+            {
+                viewers.push_back(viewer.get());
+            }
+        }
+        return viewers;
+    }
+
+    viewer::ViewerWindow* MainWindow::FindViewerByHwnd(HWND viewerHwnd) const
+    {
+        if (!viewerHwnd)
+        {
+            return nullptr;
+        }
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
+        {
+            if (viewer->Hwnd() == viewerHwnd)
+            {
+                return viewer;
+            }
+        }
+        return nullptr;
+    }
+
+    viewer::ViewerWindow* MainWindow::ActiveViewer() const
+    {
+        if (viewer::ViewerWindow* viewer = FindViewerByHwnd(activeViewerWindow_))
+        {
+            return viewer;
+        }
+        if (viewerWindow_ && viewerWindow_->IsOpen())
+        {
+            return viewerWindow_.get();
+        }
+        const std::vector<viewer::ViewerWindow*> viewers = OpenViewerWindows();
+        return viewers.empty() ? nullptr : viewers.back();
+    }
+
     bool MainWindow::OpenItemsInViewer(std::vector<browser::BrowserItem> items,
                                        int selectedIndex,
                                        bool startSlideshow,
@@ -12708,6 +12801,7 @@ namespace hyperbrowse::ui
             {
                 viewerWindow_->StartSlideshow(slideshowIntervalMs_);
             }
+            activeViewerWindow_ = viewerWindow_->Hwnd();
             viewerWindowActive_ = true;
             UpdateStatusText();
             return true;
@@ -12716,9 +12810,102 @@ namespace hyperbrowse::ui
         return false;
     }
 
+    bool MainWindow::OpenItemsInNewViewerWindow(std::vector<browser::BrowserItem> items,
+                                                int selectedIndex,
+                                                bool startSlideshow,
+                                                bool preferSecondaryMonitor,
+                                                bool resolvePairedRawJpegItems)
+    {
+        if (std::any_of(items.begin(), items.end(), [](const browser::BrowserItem& item)
+        {
+            return item.isDirectory;
+        }))
+        {
+            std::vector<browser::BrowserItem> imageItems;
+            imageItems.reserve(items.size());
+            int imageSelectedIndex = -1;
+            for (int index = 0; index < static_cast<int>(items.size()); ++index)
+            {
+                if (items[static_cast<std::size_t>(index)].isDirectory)
+                {
+                    continue;
+                }
+
+                if (index == selectedIndex)
+                {
+                    imageSelectedIndex = static_cast<int>(imageItems.size());
+                }
+                imageItems.push_back(std::move(items[static_cast<std::size_t>(index)]));
+            }
+            items = std::move(imageItems);
+            selectedIndex = imageSelectedIndex;
+        }
+
+        if (items.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(items.size()))
+        {
+            return false;
+        }
+
+        if (resolvePairedRawJpegItems)
+        {
+            items = ResolvePairedRawJpegViewerItems(std::move(items), startSlideshow);
+        }
+
+        const HMONITOR targetMonitor = ResolveViewerMonitor(hwnd_, preferSecondaryMonitor);
+        if (preferSecondaryMonitor && !targetMonitor)
+        {
+            MessageBoxW(hwnd_,
+                        L"A secondary monitor is not currently available.",
+                        L"View on Secondary Monitor",
+                        MB_OK | MB_ICONINFORMATION);
+            return false;
+        }
+
+        auto viewer = std::make_unique<viewer::ViewerWindow>(instance_);
+        ApplyViewerMouseWheelSetting();
+        ApplyViewerTransitionSettings();
+        viewer->SetAppTextSize(appTextSize_);
+        viewer->SetResourceProfile(resourceProfile_);
+        viewer->SetPrefetchDepthOverride(prefetchDepthOverride_);
+        viewer->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
+        viewer->SetEscapeKeyBehavior(viewerEscapeKeyBehavior_);
+        viewer->SetMouseWheelBehavior(viewerMouseWheelBehavior_);
+        viewer->SetKeyboardPanningInverted(invertKeyboardPanning_);
+        viewer->SetTransitionSettings(slideshowTransitionStyle_, slideshowTransitionDurationMs_);
+        viewer->SetManualTransitionEnabled(useSlideshowTransition_);
+        viewer->SetDarkTheme(themeMode_ == ThemeMode::Dark);
+        if (!viewer->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
+        {
+            return false;
+        }
+
+        if (startSlideshow)
+        {
+            viewer->StartSlideshow(slideshowIntervalMs_);
+        }
+
+        const HWND viewerHwnd = viewer->Hwnd();
+        additionalViewerWindows_.push_back(std::move(viewer));
+        activeViewerWindow_ = viewerHwnd;
+        viewerWindowActive_ = true;
+        SetForegroundWindow(viewerHwnd);
+        SetFocus(viewerHwnd);
+        UpdateStatusText();
+        return true;
+    }
+
     bool MainWindow::SyncViewerToBrowserModel(std::wstring_view preferredPath)
     {
-        if (!viewerWindow_ || !viewerWindow_->IsOpen() || !browserModel_)
+        if (!viewerWindow_)
+        {
+            return false;
+        }
+        return SyncViewerToBrowserModel(*viewerWindow_, preferredPath);
+    }
+
+    bool MainWindow::SyncViewerToBrowserModel(viewer::ViewerWindow& viewer, std::wstring_view preferredPath)
+    {
+        if (!viewer.IsOpen() || !browserModel_)
         {
             return false;
         }
@@ -12730,16 +12917,16 @@ namespace hyperbrowse::ui
             browserModel_->Items(),
             orderedModelIndices,
             preferredPath,
-            viewerWindow_->CurrentFilePath(),
-            viewerWindow_->CurrentIndex(),
-            viewerWindow_->IsSlideshowActive(),
+            viewer.CurrentFilePath(),
+            viewer.CurrentIndex(),
+            viewer.IsSlideshowActive(),
             [this](std::vector<browser::BrowserItem> items, bool startSlideshow)
             {
                 return ResolvePairedRawJpegViewerItems(std::move(items), startSlideshow);
             });
         if (synchronization.closeRequested)
         {
-            const HWND viewerHwnd = viewerWindow_->Hwnd();
+            const HWND viewerHwnd = viewer.Hwnd();
             if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
             {
                 PostMessageW(viewerHwnd, WM_CLOSE, 0, 0);
@@ -12747,7 +12934,7 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        return viewerWindow_->ReplaceItems(
+        return viewer.ReplaceItems(
             std::move(synchronization.items),
             synchronization.selectedIndex);
     }
@@ -13817,6 +14004,7 @@ namespace hyperbrowse::ui
         if (hasSelection)
         {
             AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+            AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, L"Open in New Viewer &Window\tCtrl+Shift+Enter");
             AppendMenuW(menu, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
             AppendMenuW(menu, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
             AppendMenuW(menu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"Slideshow from &Selection");
@@ -13850,6 +14038,7 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_STRING, ID_FILE_ROTATE_JPEG_RIGHT, L"Adjust JPEG Orientation &Right");
 
             EnableMenuItem(menu, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | MF_ENABLED);
+            EnableMenuItem(menu, ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, MF_BYCOMMAND | MF_ENABLED);
             EnableMenuItem(menu, ID_FILE_COMPARE_SELECTED,
                            MF_BYCOMMAND | ((browserPaneController_ && browserPaneController_->SelectedCount() == 2) ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
@@ -15694,20 +15883,28 @@ namespace hyperbrowse::ui
         // activation back when the operation was initiated from the viewer.
         foregroundWindowAtFileOperationStart_ = GetForegroundWindow();
         const HWND currentFocusWindow = GetFocus();
-        const bool viewerOperationOrigin = viewerWindow_
-            && viewerWindow_->IsOpen()
-            && ((currentFocusWindow
-                 && (currentFocusWindow == viewerWindow_->Hwnd()
-                     || IsChild(viewerWindow_->Hwnd(), currentFocusWindow)))
-                || viewerPendingOperations_.HasActiveDelete()
-                || viewerPendingOperations_.HasActiveQuickSend());
+        HWND pendingViewerHwnd = nullptr;
+        if (const PendingViewerDelete* activeDelete = viewerPendingOperations_.ActiveDelete())
+        {
+            pendingViewerHwnd = activeDelete->viewerHwnd;
+        }
+        else if (const PendingViewerQuickSend* activeQuickSend = viewerPendingOperations_.ActiveQuickSend())
+        {
+            pendingViewerHwnd = activeQuickSend->viewerHwnd;
+        }
+        viewer::ViewerWindow* focusedViewer = FindViewerByHwnd(pendingViewerHwnd);
+        if (!focusedViewer && currentFocusWindow)
+        {
+            focusedViewer = FindViewerByHwnd(currentFocusWindow);
+        }
+        const bool viewerOperationOrigin = focusedViewer != nullptr;
         if (viewerOperationOrigin)
         {
             focusWindowAtFileOperationStart_ = currentFocusWindow
-                && (currentFocusWindow == viewerWindow_->Hwnd()
-                    || IsChild(viewerWindow_->Hwnd(), currentFocusWindow))
+                && (currentFocusWindow == focusedViewer->Hwnd()
+                    || IsChild(focusedViewer->Hwnd(), currentFocusWindow))
                 ? currentFocusWindow
-                : viewerWindow_->Hwnd();
+                : focusedViewer->Hwnd();
         }
         else if (!activeTreeFolderOperationPath_.empty() && treePane_)
         {
@@ -16686,12 +16883,14 @@ namespace hyperbrowse::ui
 
         if (const std::optional<PendingViewerDelete> activeDelete = viewerPendingOperations_.TakeActiveDelete())
         {
+            context.viewer.viewerHwnd = activeDelete->viewerHwnd;
             context.viewer.viewerDeleteSourcePath = activeDelete->sourcePath;
             context.viewer.viewerDeleteSourcePaths = activeDelete->sourcePaths;
             context.viewer.viewerDeletePreferredFocusPath = activeDelete->preferredFocusPath;
         }
         if (const std::optional<PendingViewerQuickSend> quickSend = viewerPendingOperations_.TakeQuickSend())
         {
+            context.viewer.viewerHwnd = quickSend->viewerHwnd;
             context.viewer.viewerQuickSend = *quickSend;
         }
 
@@ -16774,11 +16973,12 @@ namespace hyperbrowse::ui
                 UpdateWindowTitle();
             }
 
-            if (viewerWindow_ && viewerWindow_->IsOpen())
+            viewer::ViewerWindow* originViewer = FindViewerByHwnd(viewerContext.viewerHwnd);
+            if (originViewer && originViewer->IsOpen())
             {
                 if (viewerDeleteSucceeded && viewerDeletePreferredFocusPath.empty())
                 {
-                    const HWND viewerHwnd = viewerWindow_->Hwnd();
+                    const HWND viewerHwnd = originViewer->Hwnd();
                     if (viewerHwnd && IsWindow(viewerHwnd) != FALSE)
                     {
                         viewerCloseRequested = true;
@@ -16791,7 +16991,7 @@ namespace hyperbrowse::ui
                     // reason); resync the viewer to the actual model state since
                     // AdvanceAfterDeleteCurrent optimistically advanced past an item
                     // that, in fact, was never removed.
-                    SyncViewerToBrowserModel(viewerDeleteSourcePath);
+                    SyncViewerToBrowserModel(*originViewer, viewerDeleteSourcePath);
                 }
                 // else: the delete succeeded and the viewer already advanced past the
                 // deleted item locally (see AdvanceAfterDeleteCurrent, called at
@@ -16833,9 +17033,10 @@ namespace hyperbrowse::ui
 
             if (!viewerQuickSendSucceeded)
             {
-                if (viewerWindow_ && viewerWindow_->IsOpen())
+                viewer::ViewerWindow* originViewer = FindViewerByHwnd(viewerQuickSend.viewerHwnd);
+                if (originViewer && originViewer->IsOpen())
                 {
-                    SyncViewerToBrowserModel(viewerQuickSend.sourcePath);
+                    SyncViewerToBrowserModel(*originViewer, viewerQuickSend.sourcePath);
                 }
                 else if (browserModel_)
                 {
@@ -17272,8 +17473,9 @@ namespace hyperbrowse::ui
         else if (const std::optional<PendingViewerDelete> nextRequest = viewerPendingOperations_.TakeNextDelete())
         {
             PendingViewerDelete next = *nextRequest;
-            next.preferredFocusPath = viewerWindow_ && viewerWindow_->IsOpen()
-                ? viewerWindow_->CurrentFilePath()
+            viewer::ViewerWindow* nextViewer = FindViewerByHwnd(next.viewerHwnd);
+            next.preferredFocusPath = nextViewer && nextViewer->IsOpen()
+                ? nextViewer->CurrentFilePath()
                 : next.preferredFocusPath;
             std::vector<std::wstring> sourcePaths = next.sourcePaths;
             viewerPendingOperations_.SetActiveDelete(std::move(next));
@@ -17366,6 +17568,7 @@ namespace hyperbrowse::ui
             && !folderEnumerationActive;
 
         EnableMenuItem(menu_, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COMPARE_SELECTED, MF_BYCOMMAND | (hasCompareSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
                    MF_BYCOMMAND | ((hasSelection && hasSecondaryMonitor) ? MF_ENABLED : MF_GRAYED));
@@ -17533,8 +17736,9 @@ namespace hyperbrowse::ui
             ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE,
             CommandIdFromViewerMouseWheelBehavior(viewerMouseWheelBehavior_),
             MF_BYCOMMAND);
-        const viewer::InfoOverlayTextSize overlayTextSize = viewerWindow_ && viewerWindow_->IsOpen()
-            ? viewerWindow_->OverlayTextSize()
+        const viewer::ViewerWindow* activeViewer = ActiveViewer();
+        const viewer::InfoOverlayTextSize overlayTextSize = activeViewer
+            ? activeViewer->OverlayTextSize()
             : viewer::ViewerWindow::DefaultOverlayTextSize();
         CheckMenuRadioItem(
             menu_,
@@ -17545,11 +17749,11 @@ namespace hyperbrowse::ui
         CheckMenuItem(
             menu_,
             ID_VIEW_VIEWER_DETAIL_OVERLAYS,
-            MF_BYCOMMAND | ((viewerWindow_ && viewerWindow_->AreInfoOverlaysVisible()) ? MF_CHECKED : MF_UNCHECKED));
+            MF_BYCOMMAND | ((activeViewer && activeViewer->AreInfoOverlaysVisible()) ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(
             menu_,
             ID_VIEW_VIEWER_FULL_METADATA,
-            MF_BYCOMMAND | ((viewerWindow_ && viewerWindow_->IsFullMetadataVisible()) ? MF_CHECKED : MF_UNCHECKED));
+            MF_BYCOMMAND | ((activeViewer && activeViewer->IsFullMetadataVisible()) ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(
             menu_,
             ID_VIEW_PRESSURE_STATE_STATUS,
@@ -17656,9 +17860,9 @@ namespace hyperbrowse::ui
             browserPaneController_->RecoverDisplaySurface();
         }
 
-        if (viewerWindow_ && viewerWindow_->IsOpen())
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            viewerWindow_->RecoverDisplaySurface();
+            viewer->RecoverDisplaySurface();
         }
 
         if (diagnosticsWindow_ && diagnosticsWindow_->IsOpen())
@@ -17785,9 +17989,9 @@ namespace hyperbrowse::ui
         {
             diagnosticsWindow_->SetAppTextSize(appTextSize_);
         }
-        if (viewerWindow_)
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            viewerWindow_->SetAppTextSize(appTextSize_);
+            viewer->SetAppTextSize(appTextSize_);
         }
         if (menu_)
         {
@@ -17876,9 +18080,9 @@ namespace hyperbrowse::ui
             browserPaneController_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
         }
 
-        if (viewerWindow_)
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            viewerWindow_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
+            viewer->SetDarkTheme(themeMode_ == ThemeMode::Dark);
         }
 
         if (diagnosticsWindow_)
@@ -17904,29 +18108,29 @@ namespace hyperbrowse::ui
 
     void MainWindow::ApplyViewerMouseWheelSetting()
     {
-        if (viewerWindow_)
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            viewerWindow_->SetMouseWheelBehavior(viewerMouseWheelBehavior_);
-                viewerWindow_->SetKeyboardPanningInverted(invertKeyboardPanning_);
+            viewer->SetMouseWheelBehavior(viewerMouseWheelBehavior_);
+            viewer->SetKeyboardPanningInverted(invertKeyboardPanning_);
         }
     }
 
     void MainWindow::ApplyViewerEscapeKeyBehavior()
     {
-        if (viewerWindow_)
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            viewerWindow_->SetEscapeKeyBehavior(viewerEscapeKeyBehavior_);
+            viewer->SetEscapeKeyBehavior(viewerEscapeKeyBehavior_);
         }
     }
 
     void MainWindow::ApplyViewerTransitionSettings()
     {
-        if (viewerWindow_)
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            viewerWindow_->SetTransitionSettings(
+            viewer->SetTransitionSettings(
                 slideshowTransitionStyle_,
                 slideshowTransitionDurationMs_);
-            viewerWindow_->SetManualTransitionEnabled(useSlideshowTransition_);
+            viewer->SetManualTransitionEnabled(useSlideshowTransition_);
         }
     }
 
@@ -17937,9 +18141,9 @@ namespace hyperbrowse::ui
             browserPaneController_->SetThumbnailMemoryPressureActive(thumbnailMemoryPressureActive_);
         }
 
-        if (viewerWindow_)
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            viewerWindow_->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
+            viewer->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
         }
 
         if (detailsPanelThumbnailScheduler_)
@@ -17962,10 +18166,10 @@ namespace hyperbrowse::ui
             browserPaneController_->SetPrefetchDepthOverride(prefetchDepthOverride_);
         }
 
-        if (viewerWindow_)
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
-            viewerWindow_->SetResourceProfile(resourceProfile_);
-            viewerWindow_->SetPrefetchDepthOverride(prefetchDepthOverride_);
+            viewer->SetResourceProfile(resourceProfile_);
+            viewer->SetPrefetchDepthOverride(prefetchDepthOverride_);
         }
 
         RecreateDetailsPanelThumbnailScheduler();
@@ -19228,15 +19432,27 @@ namespace hyperbrowse::ui
         return 0;
     }
 
-    LRESULT MainWindow::OnViewerZoomMessage(LPARAM lParam)
+    LRESULT MainWindow::OnViewerZoomMessage(WPARAM wParam, LPARAM lParam)
     {
+        if (!FindViewerByHwnd(reinterpret_cast<HWND>(wParam)))
+        {
+            return 0;
+        }
+
+        activeViewerWindow_ = reinterpret_cast<HWND>(wParam);
         viewerZoomPercent_ = static_cast<int>(lParam);
         UpdateStatusText();
         return 0;
     }
 
-    LRESULT MainWindow::OnViewerActivityMessage(LPARAM lParam)
+    LRESULT MainWindow::OnViewerActivityMessage(WPARAM wParam, LPARAM lParam)
     {
+        if (!FindViewerByHwnd(reinterpret_cast<HWND>(wParam)))
+        {
+            return 0;
+        }
+
+        activeViewerWindow_ = reinterpret_cast<HWND>(wParam);
         viewerWindowActive_ = lParam != 0;
         UpdateStatusText();
         return 0;
@@ -19244,15 +19460,14 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnViewerCurrentItemChangedMessage(WPARAM wParam)
     {
-        if (!viewerWindow_
-            || !viewerWindow_->IsOpen()
-            || reinterpret_cast<HWND>(wParam) != viewerWindow_->Hwnd()
-            || !browserPaneController_)
+        viewer::ViewerWindow* viewer = FindViewerByHwnd(reinterpret_cast<HWND>(wParam));
+        if (!viewer || !browserPaneController_)
         {
             return 0;
         }
 
-        const std::wstring currentPath = viewerWindow_->CurrentFilePath();
+        activeViewerWindow_ = viewer->Hwnd();
+        const std::wstring currentPath = viewer->CurrentFilePath();
         if (currentPath.empty())
         {
             return 0;
@@ -19414,14 +19629,14 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnViewerQuickSendRequest(WPARAM wParam, LPARAM lParam)
     {
-        if (!viewerWindow_
-            || !viewerWindow_->IsOpen()
-            || reinterpret_cast<HWND>(lParam) != viewerWindow_->Hwnd()
-            || fileOperationActive_
+        viewer::ViewerWindow* viewer = FindViewerByHwnd(reinterpret_cast<HWND>(lParam));
+        if (!viewer || fileOperationActive_
             || quickSendPopupActive_)
         {
             return 0;
         }
+
+        activeViewerWindow_ = viewer->Hwnd();
 
         services::FileOperationType operationType{};
         if (wParam == static_cast<WPARAM>(viewer::QuickSendOperation::Move))
@@ -19437,41 +19652,42 @@ namespace hyperbrowse::ui
             return 0;
         }
 
-        const std::wstring sourcePath = viewerWindow_->CurrentFilePath();
+        const std::wstring sourcePath = viewer->CurrentFilePath();
         if (sourcePath.empty())
         {
             return 0;
         }
 
         RECT viewerRect{};
-        GetClientRect(viewerWindow_->Hwnd(), &viewerRect);
+        GetClientRect(viewer->Hwnd(), &viewerRect);
         POINT popupPoint{
             (viewerRect.left + viewerRect.right) / 2,
             (viewerRect.top + viewerRect.bottom) / 2,
         };
-        ClientToScreen(viewerWindow_->Hwnd(), &popupPoint);
+        ClientToScreen(viewer->Hwnd(), &popupPoint);
 
         std::wstring destinationFolder;
         if (ChooseQuickSendDestination(operationType,
                                        popupPoint,
-                                       viewerWindow_->Hwnd(),
+                                       viewer->Hwnd(),
                                        &destinationFolder))
         {
-            StartViewerQuickSendOperation(operationType, std::move(destinationFolder));
+            StartViewerQuickSendOperation(*viewer, operationType, std::move(destinationFolder));
         }
         return 0;
     }
 
-    bool MainWindow::StartViewerQuickSendOperation(services::FileOperationType type,
+    bool MainWindow::StartViewerQuickSendOperation(viewer::ViewerWindow& viewer,
+                                                    services::FileOperationType type,
                                                     std::wstring destinationFolder)
     {
-        if (!viewerWindow_ || !viewerWindow_->IsOpen() || fileOperationActive_)
+        if (!viewer.IsOpen() || fileOperationActive_)
         {
             return false;
         }
 
-        const HWND viewerHwnd = viewerWindow_->Hwnd();
-        const std::wstring sourcePath = NormalizeFolderPath(viewerWindow_->CurrentFilePath());
+        const HWND viewerHwnd = viewer.Hwnd();
+        const std::wstring sourcePath = NormalizeFolderPath(viewer.CurrentFilePath());
         if (sourcePath.empty())
         {
             return false;
@@ -19504,7 +19720,7 @@ namespace hyperbrowse::ui
         }
 
         const std::wstring resumeTargetPath = type == services::FileOperationType::Move
-            ? viewerWindow_->FilingResumeTargetPathForMove()
+            ? viewer.FilingResumeTargetPathForMove()
             : sourcePath;
         FilingResumeFileIdentity resumeFolderIdentity;
         FilingResumeFileIdentity resumeTargetIdentity;
@@ -19534,6 +19750,7 @@ namespace hyperbrowse::ui
         }
 
         PendingViewerQuickSend pending;
+        pending.viewerHwnd = viewerHwnd;
         pending.type = type;
         pending.sourcePath = sourcePath;
         pending.sourcePaths = sourcePaths;
@@ -19564,7 +19781,7 @@ namespace hyperbrowse::ui
         {
             if (PendingViewerQuickSend* activeQuickSend = viewerPendingOperations_.ActiveQuickSend())
             {
-                activeQuickSend->viewerAdvanced = viewerWindow_->AdvanceAfterDeleteCurrent();
+                activeQuickSend->viewerAdvanced = viewer.AdvanceAfterDeleteCurrent();
             }
         }
         return true;
@@ -19668,14 +19885,17 @@ namespace hyperbrowse::ui
         browserPaneController_->EnsureFocusedItemVisible();
     }
 
-    LRESULT MainWindow::OnViewerDeleteRequested(WPARAM wParam)
+    LRESULT MainWindow::OnViewerDeleteRequested(WPARAM wParam, LPARAM lParam)
     {
         util::LogInfo(L"MainWindow::OnViewerDeleteRequested entered");
         util::ScopedTimer functionTimer(L"MainWindow::OnViewerDeleteRequested");
-        if (!viewerWindow_ || !viewerWindow_->IsOpen() || !fileOperationService_)
+        viewer::ViewerWindow* viewer = FindViewerByHwnd(reinterpret_cast<HWND>(lParam));
+        if (!viewer || !fileOperationService_)
         {
             return 0;
         }
+
+        activeViewerWindow_ = viewer->Hwnd();
 
         std::wstring sourcePath;
         std::wstring preferredFocusPath;
@@ -19706,7 +19926,7 @@ namespace hyperbrowse::ui
 
         // Advance the viewer immediately so the next image is visible at once,
         // regardless of how long the file operation takes.
-        viewerWindow_->AdvanceAfterDeleteCurrent();
+        viewer->AdvanceAfterDeleteCurrent();
 
         if (fileOperationActive_)
         {
@@ -19714,6 +19934,7 @@ namespace hyperbrowse::ui
             // A file operation is already running. Queue this delete so it is
             // dispatched as soon as the current operation completes.
             PendingViewerDelete queued;
+            queued.viewerHwnd = viewer->Hwnd();
             queued.sourcePath = sourcePath;
             queued.sourcePaths = sourcePaths;
             queued.preferredFocusPath = preferredFocusPath;
@@ -19723,6 +19944,7 @@ namespace hyperbrowse::ui
         }
 
         PendingViewerDelete active;
+        active.viewerHwnd = viewer->Hwnd();
         active.sourcePath = std::move(sourcePath);
         active.sourcePaths = sourcePaths;
         active.preferredFocusPath = std::move(preferredFocusPath);
@@ -19736,19 +19958,22 @@ namespace hyperbrowse::ui
                 sourcePaths,
                 {},
                 services::FileConflictPolicy::PromptShell,
-                {});
+                {},
+                viewer->Hwnd());
         }
         return 0;
     }
 
-    LRESULT MainWindow::OnViewerContextMenuCommand(WPARAM wParam)
+    LRESULT MainWindow::OnViewerContextMenuCommand(WPARAM wParam, LPARAM lParam)
     {
-        if (!viewerWindow_ || !viewerWindow_->IsOpen())
+        viewer::ViewerWindow* viewer = FindViewerByHwnd(reinterpret_cast<HWND>(lParam));
+        if (!viewer)
         {
             return 0;
         }
 
-        const std::wstring currentPath = viewerWindow_->CurrentFilePath();
+        activeViewerWindow_ = viewer->Hwnd();
+        const std::wstring currentPath = viewer->CurrentFilePath();
         if (currentPath.empty())
         {
             return 0;
@@ -19760,7 +19985,7 @@ namespace hyperbrowse::ui
             CopySelectedImagePixelsToClipboard(currentPath);
             break;
         case viewer::ViewerWindow::kContextMenuImageInformation:
-            ShowImageInformationForPath(currentPath, viewerWindow_->Hwnd());
+            ShowImageInformationForPath(currentPath, viewer->Hwnd());
             break;
         case viewer::ViewerWindow::kContextMenuSetWallpaper:
             SetDesktopWallpaperFromImageFile(currentPath);
@@ -19800,23 +20025,55 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnViewerStartFolderSlideshowMessage(WPARAM wParam)
     {
-        if (!viewerWindow_ || !viewerWindow_->IsOpen())
+        viewer::ViewerWindow* viewer = FindViewerByHwnd(reinterpret_cast<HWND>(wParam));
+        if (!viewer)
         {
             return 0;
         }
 
-        if (reinterpret_cast<HWND>(wParam) != viewerWindow_->Hwnd())
-        {
-            return 0;
-        }
-
-        StartFolderSlideshow(viewerWindow_->CurrentFilePath());
+        activeViewerWindow_ = viewer->Hwnd();
+        StartFolderSlideshow(viewer->CurrentFilePath());
         return 0;
     }
 
-    LRESULT MainWindow::OnViewerClosedMessage()
+    LRESULT MainWindow::OnViewerClosedMessage(WPARAM wParam)
     {
-        const HWND closingViewerHwnd = viewerWindow_ ? viewerWindow_->Hwnd() : nullptr;
+        const HWND closingViewerHwnd = reinterpret_cast<HWND>(wParam);
+        if (closingViewerHwnd && (!viewerWindow_ || closingViewerHwnd != viewerWindow_->Hwnd()))
+        {
+            const auto additionalViewer = std::find_if(
+                additionalViewerWindows_.begin(),
+                additionalViewerWindows_.end(),
+                [closingViewerHwnd](const std::unique_ptr<viewer::ViewerWindow>& viewer)
+                {
+                    return viewer && viewer->Hwnd() == closingViewerHwnd;
+                });
+            if (additionalViewer != additionalViewerWindows_.end())
+            {
+                const std::wstring viewerPath = NormalizeFolderPath((*additionalViewer)->CurrentFilePath());
+                additionalViewerWindows_.erase(additionalViewer);
+                if (activeViewerWindow_ == closingViewerHwnd)
+                {
+                    activeViewerWindow_ = viewerWindow_ && viewerWindow_->IsOpen()
+                        ? viewerWindow_->Hwnd()
+                        : (additionalViewerWindows_.empty() ? nullptr : additionalViewerWindows_.back()->Hwnd());
+                }
+                if (!viewerPath.empty() && browserPaneController_)
+                {
+                    browserPaneController_->RestoreSelectionByFilePaths({viewerPath}, viewerPath);
+                    browserPaneController_->EnsureFocusedItemVisible();
+                }
+                UpdateStatusText();
+                UpdateMenuState();
+                return 0;
+            }
+        }
+
+        const HWND primaryViewerHwnd = viewerWindow_ ? viewerWindow_->Hwnd() : nullptr;
+        if (!viewerWindow_ || (closingViewerHwnd && closingViewerHwnd != primaryViewerHwnd))
+        {
+            return 0;
+        }
         const std::wstring viewerPath = viewerWindow_ ? NormalizeFolderPath(viewerWindow_->CurrentFilePath()) : std::wstring{};
         viewerPendingOperations_.Clear();
         if (focusWindowAtFileOperationStart_ == closingViewerHwnd)
@@ -19838,6 +20095,9 @@ namespace hyperbrowse::ui
         }
 
         viewerWindowActive_ = false;
+        activeViewerWindow_ = additionalViewerWindows_.empty()
+            ? nullptr
+            : additionalViewerWindows_.back()->Hwnd();
         viewerZoomPercent_ = 0;
         UpdateStatusText();
         UpdateMenuState();

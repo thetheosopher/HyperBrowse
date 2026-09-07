@@ -38,6 +38,7 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_FILE_CLEAR_RECENT_FOLDERS = 1029;
     inline constexpr UINT ID_FILE_CLEAR_RECENT_DESTINATIONS = 1038;
     inline constexpr UINT ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER = 1039;
+    inline constexpr UINT ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW = 1042;
     inline constexpr UINT ID_VIEW_NAVIGATE_BACK_FOLDER = 1049;
     inline constexpr UINT ID_VIEW_NAVIGATE_FORWARD_FOLDER = 1050;
 

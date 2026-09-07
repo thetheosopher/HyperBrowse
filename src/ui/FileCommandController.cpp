@@ -89,6 +89,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onRefreshTree);
         case ID_FILE_OPEN_SELECTED:
             return Invoke(handlers_.onOpenSelected);
+        case ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW:
+            return Invoke(handlers_.onOpenSelectedInNewViewerWindow);
         case ID_FILE_COMPARE_SELECTED:
             return Invoke(handlers_.onCompareSelected);
         case ID_FILE_VIEW_ON_SECONDARY_MONITOR:
