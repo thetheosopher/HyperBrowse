@@ -74,6 +74,8 @@ namespace hyperbrowse::tests
                    "Escape is not owned by the dedicated Escape command");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, 'W', FCONTROL),
                    "Ctrl+W no longer owns the main-window minimize command");
+            Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, 0, 'G', FCONTROL),
+                   "Main-window Ctrl+G item navigation shortcut is missing from the shared catalog");
             Expect(!hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, VK_ESCAPE, 0),
                    "Escape still shares the Ctrl+W minimize command");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_EDIT_CUT, 'X', FCONTROL),
@@ -134,6 +136,8 @@ namespace hyperbrowse::tests
                    "Viewer Page Up shortcut is missing from the shared catalog");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_NEXT, 0),
                    "Viewer Page Down shortcut is missing from the shared catalog");
+            Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, 'G', FCONTROL),
+                   "Viewer Ctrl+G item navigation shortcut is missing from the shared catalog");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_RETURN, 0),
                    "Viewer Enter fit-toggle shortcut is missing from the shared catalog");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_OEM_PLUS, 0),

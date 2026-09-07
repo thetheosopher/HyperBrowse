@@ -51,6 +51,7 @@ add_test(NAME HyperBrowseThumbnailFailureSmoke COMMAND HyperBrowseTests --thumbn
 add_test(NAME HyperBrowseFileRenameSmoke COMMAND HyperBrowseTests --file-rename)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)
 add_test(NAME HyperBrowseSettingsSmoke COMMAND HyperBrowseTests --settings)
+add_test(NAME HyperBrowseItemNumberNavigationSmoke COMMAND HyperBrowseTests --item-number-navigation)
 
 if(HYPERBROWSE_BUILD_FUZZ_TESTS)
     add_executable(HyperBrowseBoundaryFuzz

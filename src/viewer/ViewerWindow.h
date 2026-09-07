@@ -219,6 +219,7 @@ namespace hyperbrowse::viewer
         void UpdateWindowTitle() const;
         void LoadCurrentImageAsync(LoadReason reason);
         void Navigate(int delta);
+        void PromptForItemNumber();
         void NavigateToIndex(int targetIndex, bool forward, bool slideshowNavigation = false);
         int NavigationDeltaForPoint(POINT point) const noexcept;
         bool SetNavigationCursorForPoint(POINT point);

@@ -215,6 +215,7 @@ namespace hyperbrowse::ui
         void OpenFolder();
         void LoadFolderAsync(std::wstring folderPath, bool historyNavigation = false);
         void RefreshBrowserPane();
+        void PromptForBrowserItemNumber();
         void OpenItemInViewer(int modelIndex, bool preferSecondaryMonitor = false);
         bool OpenItemsInViewer(std::vector<browser::BrowserItem> items,
                        int selectedIndex,

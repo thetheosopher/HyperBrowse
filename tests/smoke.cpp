@@ -2505,6 +2505,10 @@ namespace
                "Thumbnail navigation did not return keyboard focus to the browser pane");
         Expect(browserPane.FocusedFilePathSnapshot() == L"C:\\Alpha\\delta.nef",
                "Arrow navigation from main window focus did not advance the focused thumbnail");
+         Expect(browserPane.GoToItemNumber(2) && browserPane.CurrentItemNumber() == 2,
+             "Browser item-number navigation did not select the requested visible item");
+         Expect(!browserPane.GoToItemNumber(5) && browserPane.CurrentItemNumber() == 2,
+             "Browser item-number navigation changed selection for an out-of-range item");
         SendMessageW(browserPane.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(50, 50));
         SendMessageW(browserPane.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(50, 50));
 

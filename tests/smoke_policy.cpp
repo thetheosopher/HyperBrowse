@@ -32,6 +32,7 @@
 #include "ui/FolderTreeDropPolicy.h"
 #include "ui/FolderHistory.h"
 #include "ui/ImageWorkflowPersistence.h"
+#include "ui/ItemNumberNavigationPolicy.h"
 #include "ui/PairedRawJpegResolver.h"
 #include "ui/QuickAccessDestinationBuilder.h"
 #include "ui/QuickAccessLayout.h"
@@ -1714,6 +1715,22 @@ namespace hyperbrowse::tests
                    "Viewer item selection policy changed index fallback behavior");
         }
 
+        void RunItemNumberNavigationPolicyScenario()
+        {
+            int zeroBasedIndex = -1;
+            Expect(hyperbrowse::ui::TryParseItemNumber(L"1", 4, &zeroBasedIndex)
+                       && zeroBasedIndex == 0,
+                   "Item-number navigation did not map the first item");
+            Expect(hyperbrowse::ui::TryParseItemNumber(L"004", 4, &zeroBasedIndex)
+                       && zeroBasedIndex == 3,
+                   "Item-number navigation did not accept a zero-padded last item");
+            Expect(!hyperbrowse::ui::TryParseItemNumber(L"0", 4, &zeroBasedIndex)
+                       && !hyperbrowse::ui::TryParseItemNumber(L"5", 4, &zeroBasedIndex)
+                       && !hyperbrowse::ui::TryParseItemNumber(L"abc", 4, &zeroBasedIndex)
+                       && !hyperbrowse::ui::TryParseItemNumber(L"999999999999999999999", 4, &zeroBasedIndex),
+                   "Item-number navigation accepted invalid or out-of-range input");
+        }
+
          void RunViewerPendingOperationStateScenario()
          {
              using hyperbrowse::services::FileOperationType;
@@ -1865,6 +1882,7 @@ namespace hyperbrowse::tests
         RunFolderTreeDropPolicyScenario();
         RunSelectionRatingPolicyScenario();
         RunViewerItemSelectionPolicyScenario();
+        RunItemNumberNavigationPolicyScenario();
         RunViewerPendingOperationStateScenario();
         RunViewerSynchronizerScenario();
         RunQuickAccessShortcutEditPolicyScenario();
@@ -1929,6 +1947,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--viewer-item-selection")
         {
             RunViewerItemSelectionPolicyScenario();
+        }
+        else if (scenario == "--item-number-navigation")
+        {
+            RunItemNumberNavigationPolicyScenario();
         }
         else if (scenario == "--viewer-pending-operations")
         {

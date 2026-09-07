@@ -79,6 +79,7 @@
 #include "ui/WindowBoundsPersistence.h"
 #include "ui/BrowserPresentationPersistence.h"
 #include "ui/ImageWorkflowPersistence.h"
+#include "ui/ItemNumberNavigationPolicy.h"
 #include "ui/PerformanceSettingsPersistence.h"
 #include "ui/PairedRawJpegResolver.h"
 #include "ui/ViewerSettingsPersistence.h"
@@ -9390,6 +9391,20 @@ namespace hyperbrowse::ui
         }
 
         if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
+            && message->wParam == static_cast<WPARAM>('G')
+            && (GetKeyState(VK_CONTROL) & 0x8000) != 0
+            && (GetKeyState(VK_SHIFT) & 0x8000) == 0
+            && (GetKeyState(VK_MENU) & 0x8000) == 0
+            && (message->lParam & (1LL << 30)) == 0
+            && message->hwnd
+            && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
+            && !IsTextInputControlWindow(message->hwnd))
+        {
+            PromptForBrowserItemNumber();
+            return true;
+        }
+
+        if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
             && message->hwnd
             && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
             && browserPaneController_
@@ -11005,6 +11020,16 @@ namespace hyperbrowse::ui
             + (hasActiveFilter ? L" of " + std::to_wstring(folderCount) : L"")
             + (showSubfoldersInBrowser_ ? L" items | " : L" files | ")
             + browser::FormatByteSize(folderBytes);
+        const std::uint64_t navigationCount = browserPaneController_
+            ? browserPaneController_->DisplayedItemCount()
+            : 0;
+        if (browserPaneController_ && navigationCount > 0)
+        {
+            statusPrimaryText_.append(L"  |  Item: ");
+            statusPrimaryText_.append(std::to_wstring(browserPaneController_->CurrentItemNumber()));
+            statusPrimaryText_.append(L" / ");
+            statusPrimaryText_.append(std::to_wstring(navigationCount));
+        }
 
         if (fileOperationActive_ && !activeFileOperationLabel_.empty())
         {
@@ -12425,6 +12450,49 @@ namespace hyperbrowse::ui
         ApplyRawJpegPairingSettings();
         browserPaneController_->RefreshFromModel();
         UpdateDetailsPanel();
+    }
+
+    void MainWindow::PromptForBrowserItemNumber()
+    {
+        if (!browserPaneController_)
+        {
+            return;
+        }
+
+        const int itemCount = static_cast<int>(browserPaneController_->DisplayedItemCount());
+        if (itemCount <= 0)
+        {
+            MessageBeep(MB_ICONWARNING);
+            return;
+        }
+
+        const std::wstring title = L"Go to File";
+        const std::wstring instruction = L"Enter a file number from 1 to " + std::to_wstring(itemCount) + L".";
+        std::wstring candidate = std::to_wstring(browserPaneController_->CurrentItemNumber());
+        while (PromptForSingleLineText(hwnd_,
+                                       instance_,
+                                       appTextSize_,
+                                       themeMode_ == ThemeMode::Dark,
+                                       title,
+                                       instruction,
+                                       L"Go",
+                                       candidate,
+                                       0,
+                                       -1,
+                                       &candidate))
+        {
+            int targetIndex = -1;
+            if (!TryParseItemNumber(candidate, itemCount, &targetIndex))
+            {
+                MessageBeep(MB_ICONWARNING);
+                MessageBoxW(hwnd_, instruction.c_str(), title.c_str(), MB_OK | MB_ICONWARNING);
+                continue;
+            }
+
+            browserPaneController_->GoToItemNumber(targetIndex + 1);
+            UpdateStatusText();
+            return;
+        }
     }
 
     bool MainWindow::ShouldDefaultViewerToSecondaryMonitor() const

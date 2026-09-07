@@ -922,6 +922,33 @@ namespace hyperbrowse::browser
         return static_cast<std::uint64_t>(orderedModelIndices_.size());
     }
 
+    int BrowserPane::CurrentItemNumber() const noexcept
+    {
+        const int currentViewIndex = PrimarySelectedViewIndex();
+        return currentViewIndex < 0 ? 0 : currentViewIndex + 1;
+    }
+
+    bool BrowserPane::GoToItemNumber(int itemNumber)
+    {
+        if (itemNumber < 1 || itemNumber > static_cast<int>(orderedModelIndices_.size()))
+        {
+            return false;
+        }
+
+        const int viewIndex = itemNumber - 1;
+        SelectSingleViewIndex(viewIndex);
+        EnsureFocusedItemVisible();
+        if (viewMode_ == BrowserViewMode::Thumbnails)
+        {
+            SetFocus(hwnd_);
+        }
+        else if (detailsList_)
+        {
+            SetFocus(detailsList_);
+        }
+        return true;
+    }
+
     void BrowserPane::SetRawJpegStackingEnabled(bool enabled)
     {
         if (rawJpegStackingEnabled_ == enabled)

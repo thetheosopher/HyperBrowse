@@ -79,6 +79,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Ctrl+V` | Paste files into the current folder |
 | `Ctrl+A` | Select all items |
 | `Ctrl+D` | Duplicate selected files |
+| `Ctrl+G` | Go to a file by its number |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo the last supported file operation |
 | `Ctrl+E` | Reveal the selection in Explorer |
 | `Alt+Enter` | Show file properties |
@@ -102,6 +103,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Shift` + Arrow keys | Navigate the comparison pair |
 | `Page Up` / `Page Down` | Navigate to the previous / next image |
 | `Ctrl+Home` / `Ctrl+End` | Go to the first / last image |
+| `Ctrl+G` | Go to an image by its number |
 | `Ctrl+Shift+F` | Start a slideshow from the current folder |
 | `F7` / `F8` | Move / copy the displayed image to a Quick Actions destination |
 | `Ctrl+I` | Show image information |

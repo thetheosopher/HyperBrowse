@@ -25,6 +25,8 @@
 #include "render/D2DRenderer.h"
 #include "render/GdiText.h"
 #include "services/ImageMetadataService.h"
+#include "ui/ItemNumberNavigationPolicy.h"
+#include "ui/MainWindowDialogs.h"
 #include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
@@ -2141,6 +2143,43 @@ namespace hyperbrowse::viewer
         }
 
         NavigateToIndex(nextIndex, delta > 0);
+    }
+
+    void ViewerWindow::PromptForItemNumber()
+    {
+        if (items_.empty())
+        {
+            MessageBeep(MB_ICONWARNING);
+            return;
+        }
+
+        const int itemCount = static_cast<int>(items_.size());
+        const std::wstring title = L"Go to File";
+        const std::wstring instruction = L"Enter a file number from 1 to " + std::to_wstring(itemCount) + L".";
+        std::wstring candidate = std::to_wstring(currentIndex_ + 1);
+        while (ui::PromptForSingleLineText(hwnd_,
+                                           instance_,
+                                           appTextSize_,
+                                           darkTheme_,
+                                           title,
+                                           instruction,
+                                           L"Go",
+                                           candidate,
+                                           0,
+                                           -1,
+                                           &candidate))
+        {
+            int targetIndex = -1;
+            if (!ui::TryParseItemNumber(candidate, itemCount, &targetIndex))
+            {
+                MessageBeep(MB_ICONWARNING);
+                MessageBoxW(hwnd_, instruction.c_str(), title.c_str(), MB_OK | MB_ICONWARNING);
+                continue;
+            }
+
+            NavigateToIndex(targetIndex, targetIndex > currentIndex_);
+            return;
+        }
     }
 
     void ViewerWindow::NavigateToIndex(int targetIndex, bool forward, bool slideshowNavigation)
@@ -4404,6 +4443,16 @@ namespace hyperbrowse::viewer
                 {
                     PostMessageW(owner_, kContextMenuCommandMessage, kContextMenuCopyImage, 0);
                 }
+                return 0;
+            }
+
+            if (wParam == static_cast<WPARAM>('G')
+                && (GetKeyState(VK_CONTROL) & 0x8000) != 0
+                && (GetKeyState(VK_SHIFT) & 0x8000) == 0
+                && (GetKeyState(VK_MENU) & 0x8000) == 0
+                && (lParam & (1LL << 30)) == 0)
+            {
+                PromptForItemNumber();
                 return 0;
             }
 

@@ -150,6 +150,8 @@ namespace hyperbrowse::browser
         void SelectAll();
         std::uint64_t SelectedCount() const noexcept;
         std::uint64_t SelectedBytes() const noexcept;
+        int CurrentItemNumber() const noexcept;
+        bool GoToItemNumber(int itemNumber);
         int PrimarySelectedModelIndex() const noexcept;
         std::vector<int> OrderedModelIndicesSnapshot() const;
         std::vector<int> OrderedSelectedModelIndicesSnapshot() const;
