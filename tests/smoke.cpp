@@ -4063,6 +4063,7 @@ int main(int argc, char* argv[])
         Expect(hwnd != nullptr, "Failed to create the hidden test window");
 
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
+        const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
         const std::string_view selectedScenario = argc > 1 ? std::string_view(argv[1]) : std::string_view{};
@@ -4073,6 +4074,10 @@ int main(int argc, char* argv[])
         else if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
+        }
+        else if (fileRenameOnly)
+        {
+            RunFileRenameOperationScenario(hwnd, &state);
         }
         else if (appTextSizeOnly)
         {

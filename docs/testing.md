@@ -32,6 +32,7 @@ The current test target registers:
 
 - `HyperBrowseSmoke`
 - `HyperBrowseViewerFitSmoke`
+- `HyperBrowseFileRenameSmoke`
 - `HyperBrowseAppTextSizeSmoke`
 - `HyperBrowseSettingsSmoke`
 

@@ -230,11 +230,11 @@ namespace
 
         HRESULT STDMETHODCALLTYPE PostRenameItem(DWORD,
                                                  IShellItem* item,
-                                                 LPCWSTR,
+                                                 LPCWSTR newName,
                                                  HRESULT result,
                                                  IShellItem* newlyCreated) override
         {
-            RecordResult(item, result, newlyCreated);
+            RecordResult(item, result, newlyCreated, {}, newName);
             return S_OK;
         }
 
@@ -362,7 +362,8 @@ namespace
         void RecordResult(IShellItem* sourceItem,
                           HRESULT result,
                           IShellItem* newlyCreated,
-                          std::wstring_view fallbackSourcePath = {})
+                          std::wstring_view fallbackSourcePath = {},
+                          LPCWSTR renameName = nullptr)
         {
             if (SUCCEEDED(result))
             {
@@ -376,7 +377,15 @@ namespace
                     succeededSourcePaths_.push_back(sourcePath);
                 }
 
-                const std::wstring createdPath = PathFromShellItem(newlyCreated);
+                std::wstring createdPath = PathFromShellItem(newlyCreated);
+                if (createdPath.empty() && renameName && !sourcePath.empty())
+                {
+                    const fs::path sourceFilePath(sourcePath);
+                    if (!sourceFilePath.parent_path().empty())
+                    {
+                        createdPath = (sourceFilePath.parent_path() / renameName).wstring();
+                    }
+                }
                 if (!createdPath.empty())
                 {
                     createdPaths_.push_back(createdPath);
