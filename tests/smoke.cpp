@@ -1225,6 +1225,12 @@ namespace
              "Folder-tree enumeration did not preserve the expected alphabetical order");
          Expect(fs::path(state->folderTreeEnumerationResult.childFolders[2].path).filename().wstring() == L"gamma",
              "Folder-tree enumeration omitted the last child folder");
+         if (showHiddenFolders)
+         {
+             Expect(state->folderTreeEnumerationResult.childFolders.size() > 3
+                        && fs::path(state->folderTreeEnumerationResult.childFolders[3].path).filename().wstring() == L"hidden",
+                 "Folder-tree enumeration omitted a visible hidden child folder");
+         }
          ResetFolderTreeEnumerationResult(state);
          std::vector<std::wstring> childPresencePaths = {
              (root.Root() / L"alpha").wstring(),
@@ -1249,11 +1255,6 @@ namespace
              "Folder-tree child-presence query did not detect a nested child folder");
          Expect(!state->folderTreeEnumerationResult.childPresenceResults[2].hasChildren,
              "Folder-tree child-presence query incorrectly marked an empty folder as expandable");
-         if (showHiddenFolders)
-         {
-             Expect(fs::path(state->folderTreeEnumerationResult.childFolders[3].path).filename().wstring() == L"hidden",
-                 "Folder-tree enumeration omitted a visible hidden child folder");
-         }
          Expect(SetFileAttributesW(hiddenFolder.c_str(), FILE_ATTRIBUTE_NORMAL) != FALSE,
              "Folder-tree enumeration test could not restore the hidden directory attributes");
 
