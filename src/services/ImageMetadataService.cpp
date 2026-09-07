@@ -426,6 +426,48 @@ namespace
         return TrimWhitespace(value);
     }
 
+    std::wstring DecodeJsonString(std::wstring_view value)
+    {
+        std::wstring decoded;
+        bool escaped = false;
+        for (const wchar_t character : value)
+        {
+            if (escaped)
+            {
+                switch (character)
+                {
+                case L'n':
+                    decoded.push_back(L'\n');
+                    break;
+                case L'r':
+                    decoded.push_back(L'\r');
+                    break;
+                case L't':
+                    decoded.push_back(L'\t');
+                    break;
+                default:
+                    decoded.push_back(character);
+                    break;
+                }
+                escaped = false;
+            }
+            else if (character == L'\\')
+            {
+                escaped = true;
+            }
+            else
+            {
+                decoded.push_back(character);
+            }
+        }
+
+        if (escaped)
+        {
+            decoded.push_back(L'\\');
+        }
+        return decoded;
+    }
+
     std::wstring WidenMetadataText(std::string_view text)
     {
         if (text.empty())
@@ -629,18 +671,36 @@ namespace
             ++index;
         }
 
-        const std::size_t keyStart = index;
-        while (index < text.size()
-               && (iswalnum(text[index]) != 0 || text[index] == L'_' || text[index] == L'-'))
+        std::size_t keyStart = index;
+        const bool quotedKey = index < text.size() && text[index] == L'"';
+        if (quotedKey)
+        {
+            ++index;
+            keyStart = index;
+            while (index < text.size() && text[index] != L'"')
+            {
+                ++index;
+            }
+        }
+        else
+        {
+            while (index < text.size()
+                   && (iswalnum(text[index]) != 0 || text[index] == L'_' || text[index] == L'-'))
+            {
+                ++index;
+            }
+        }
+        const std::size_t keyEnd = index;
+        if (quotedKey && index < text.size() && text[index] == L'"')
         {
             ++index;
         }
-        if (keyStart == index)
+        if (keyStart == keyEnd)
         {
             return false;
         }
 
-        const std::wstring key = StripMatchingQuotes(std::wstring(text.substr(keyStart, index - keyStart)));
+        const std::wstring key = StripMatchingQuotes(std::wstring(text.substr(keyStart, keyEnd - keyStart)));
         while (index < text.size() && iswspace(text[index]) != 0)
         {
             ++index;
@@ -705,12 +765,36 @@ namespace
             }
 
             const std::size_t valueStart = index;
+            const bool quotedValue = index < payload.size() && payload[index] == L'"';
             int braceDepth = 0;
             int bracketDepth = 0;
             int parenDepth = 0;
             bool inSingleQuote = false;
             bool inDoubleQuote = false;
             bool escaped = false;
+            if (quotedValue)
+            {
+                ++index;
+                bool escapedJsonValue = false;
+                while (index < payload.size())
+                {
+                    if (escapedJsonValue)
+                    {
+                        escapedJsonValue = false;
+                    }
+                    else if (payload[index] == L'\\')
+                    {
+                        escapedJsonValue = true;
+                    }
+                    else if (payload[index] == L'"')
+                    {
+                        ++index;
+                        break;
+                    }
+                    ++index;
+                }
+                goto SwarmValueDone;
+            }
             while (index < payload.size())
             {
                 const wchar_t current = payload[index];
@@ -794,7 +878,11 @@ namespace
 SwarmValueDone:
             if (const SwarmUiFieldDefinition* field = FindSwarmUiFieldDefinition(key))
             {
-                const std::wstring value = StripMatchingQuotes(payload.substr(valueStart, index - valueStart));
+                std::wstring value = StripMatchingQuotes(payload.substr(valueStart, index - valueStart));
+                if (quotedValue)
+                {
+                    value = DecodeJsonString(value);
+                }
                 if (!value.empty())
                 {
                     UpsertMetadataProperty(metadata,
@@ -1154,6 +1242,424 @@ SwarmValueDone:
     }
 #endif
 
+    class JsonDisplayFormatter
+    {
+    public:
+        explicit JsonDisplayFormatter(std::wstring_view text)
+            : text_(text)
+        {
+        }
+
+        bool Format(std::wstring* result)
+        {
+            if (!result || !ParseValue(0))
+            {
+                return false;
+            }
+
+            SkipWhitespace();
+            if (position_ != text_.size())
+            {
+                return false;
+            }
+
+            *result = std::move(output_);
+            return true;
+        }
+
+    private:
+        void SkipWhitespace()
+        {
+            while (position_ < text_.size() && iswspace(text_[position_]) != 0)
+            {
+                ++position_;
+            }
+        }
+
+        void AppendIndent(int level)
+        {
+            output_.append(static_cast<std::size_t>(level) * 2, L' ');
+        }
+
+        bool ParseValue(int level)
+        {
+            SkipWhitespace();
+            if (position_ >= text_.size())
+            {
+                return false;
+            }
+
+            switch (text_[position_])
+            {
+            case L'{':
+                return ParseObject(level);
+            case L'[':
+                return ParseArray(level);
+            case L'"':
+                return ParseString();
+            default:
+                return ParsePrimitive();
+            }
+        }
+
+        bool ParseString()
+        {
+            if (position_ >= text_.size() || text_[position_] != L'"')
+            {
+                return false;
+            }
+
+            const std::size_t start = position_++;
+            bool escaped = false;
+            while (position_ < text_.size())
+            {
+                const wchar_t character = text_[position_++];
+                if (escaped)
+                {
+                    if (character == L'u')
+                    {
+                        if (position_ + 4 > text_.size())
+                        {
+                            return false;
+                        }
+                        for (int index = 0; index < 4; ++index)
+                        {
+                            if (iswxdigit(text_[position_++]) == 0)
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                    else if (character != L'"' && character != L'\\' && character != L'/'
+                             && character != L'b' && character != L'f' && character != L'n'
+                             && character != L'r' && character != L't')
+                    {
+                        return false;
+                    }
+                    escaped = false;
+                    continue;
+                }
+
+                if (character == L'\\')
+                {
+                    escaped = true;
+                }
+                else if (character == L'"')
+                {
+                    output_.append(text_.substr(start, position_ - start));
+                    return true;
+                }
+                else if (character < 0x20)
+                {
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
+        bool ParseObject(int level)
+        {
+            output_.push_back(text_[position_++]);
+            SkipWhitespace();
+            if (position_ < text_.size() && text_[position_] == L'}')
+            {
+                output_.push_back(text_[position_++]);
+                return true;
+            }
+
+            output_.append(L"\r\n");
+            while (position_ < text_.size())
+            {
+                AppendIndent(level + 1);
+                if (!ParseString())
+                {
+                    return false;
+                }
+                SkipWhitespace();
+                if (position_ >= text_.size() || text_[position_] != L':')
+                {
+                    return false;
+                }
+                output_.append(L": ");
+                ++position_;
+                if (!ParseValue(level + 1))
+                {
+                    return false;
+                }
+                SkipWhitespace();
+                if (position_ >= text_.size())
+                {
+                    return false;
+                }
+                if (text_[position_] == L',')
+                {
+                    output_.append(L",\r\n");
+                    ++position_;
+                    SkipWhitespace();
+                    continue;
+                }
+                if (text_[position_] == L'}')
+                {
+                    output_.append(L"\r\n");
+                    AppendIndent(level);
+                    output_.push_back(text_[position_++]);
+                    return true;
+                }
+                return false;
+            }
+
+            return false;
+        }
+
+        bool ParseArray(int level)
+        {
+            output_.push_back(text_[position_++]);
+            SkipWhitespace();
+            if (position_ < text_.size() && text_[position_] == L']')
+            {
+                output_.push_back(text_[position_++]);
+                return true;
+            }
+
+            output_.append(L"\r\n");
+            while (position_ < text_.size())
+            {
+                AppendIndent(level + 1);
+                if (!ParseValue(level + 1))
+                {
+                    return false;
+                }
+                SkipWhitespace();
+                if (position_ >= text_.size())
+                {
+                    return false;
+                }
+                if (text_[position_] == L',')
+                {
+                    output_.append(L",\r\n");
+                    ++position_;
+                    SkipWhitespace();
+                    continue;
+                }
+                if (text_[position_] == L']')
+                {
+                    output_.append(L"\r\n");
+                    AppendIndent(level);
+                    output_.push_back(text_[position_++]);
+                    return true;
+                }
+                return false;
+            }
+
+            return false;
+        }
+
+        bool ParsePrimitive()
+        {
+            const std::size_t start = position_;
+            while (position_ < text_.size()
+                   && text_[position_] != L','
+                   && text_[position_] != L'}'
+                   && text_[position_] != L']'
+                   && iswspace(text_[position_]) == 0)
+            {
+                ++position_;
+            }
+
+            const std::wstring_view token = text_.substr(start, position_ - start);
+            if (token != L"true" && token != L"false" && token != L"null" && !IsJsonNumber(token))
+            {
+                return false;
+            }
+
+            output_.append(token);
+            return true;
+        }
+
+        static bool IsJsonNumber(std::wstring_view token)
+        {
+            if (token.empty())
+            {
+                return false;
+            }
+
+            std::size_t index = 0;
+            if (token[index] == L'-')
+            {
+                if (++index == token.size())
+                {
+                    return false;
+                }
+            }
+
+            if (token[index] == L'0')
+            {
+                ++index;
+            }
+            else if (token[index] >= L'1' && token[index] <= L'9')
+            {
+                while (++index < token.size() && token[index] >= L'0' && token[index] <= L'9')
+                {
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            if (index < token.size() && token[index] == L'.')
+            {
+                if (++index == token.size() || token[index] < L'0' || token[index] > L'9')
+                {
+                    return false;
+                }
+                while (++index < token.size() && token[index] >= L'0' && token[index] <= L'9')
+                {
+                }
+            }
+
+            if (index < token.size() && (token[index] == L'e' || token[index] == L'E'))
+            {
+                ++index;
+                if (index < token.size() && (token[index] == L'+' || token[index] == L'-'))
+                {
+                    ++index;
+                }
+                if (index == token.size() || token[index] < L'0' || token[index] > L'9')
+                {
+                    return false;
+                }
+                while (++index < token.size() && token[index] >= L'0' && token[index] <= L'9')
+                {
+                }
+            }
+
+            return index == token.size();
+        }
+
+        std::wstring_view text_;
+        std::size_t position_{};
+        std::wstring output_;
+    };
+
+    std::wstring FormatJsonForDisplay(std::wstring_view value)
+    {
+        const std::wstring trimmed = TrimWhitespace(value);
+        if (trimmed.empty() || (trimmed.front() != L'{' && trimmed.front() != L'['))
+        {
+            return std::wstring(value);
+        }
+
+        std::wstring formatted;
+        JsonDisplayFormatter formatter(trimmed);
+        return formatter.Format(&formatted) ? formatted : std::wstring(value);
+    }
+
+    std::wstring ExtractPromptFromJson(std::wstring_view value)
+    {
+        const std::wstring_view key = L"\"prompt\"";
+        std::size_t searchStart = 0;
+        while (searchStart < value.size())
+        {
+            const std::size_t keyPosition = FindInsensitive(value.substr(searchStart), key);
+            if (keyPosition == std::wstring_view::npos)
+            {
+                return {};
+            }
+            const std::size_t absoluteKeyPosition = searchStart + keyPosition;
+            std::size_t valueStart = absoluteKeyPosition + key.size();
+            while (valueStart < value.size() && iswspace(value[valueStart]) != 0)
+            {
+                ++valueStart;
+            }
+            if (valueStart < value.size() && value[valueStart] == L':')
+            {
+                ++valueStart;
+                while (valueStart < value.size() && iswspace(value[valueStart]) != 0)
+                {
+                    ++valueStart;
+                }
+                if (valueStart < value.size() && value[valueStart] == L'"')
+                {
+                    ++valueStart;
+                    std::wstring prompt;
+                    bool escaped = false;
+                    for (std::size_t index = valueStart; index < value.size(); ++index)
+                    {
+                        const wchar_t character = value[index];
+                        if (escaped)
+                        {
+                            prompt.push_back(character == L'n' ? L'\n' : character);
+                            escaped = false;
+                        }
+                        else if (character == L'\\')
+                        {
+                            escaped = true;
+                        }
+                        else if (character == L'"')
+                        {
+                            return TrimWhitespace(prompt);
+                        }
+                        else
+                        {
+                            prompt.push_back(character);
+                        }
+                    }
+                    return {};
+                }
+            }
+            searchStart = absoluteKeyPosition + key.size();
+        }
+
+        return {};
+    }
+
+    std::wstring ExtractPromptFromLabeledText(std::wstring_view value)
+    {
+        std::size_t searchStart = 0;
+        std::size_t labelPosition = std::wstring_view::npos;
+        while (searchStart < value.size())
+        {
+            const std::size_t relativePosition = FindInsensitive(value.substr(searchStart), L"prompt:");
+            if (relativePosition == std::wstring_view::npos)
+            {
+                break;
+            }
+
+            labelPosition = searchStart + relativePosition;
+            if (labelPosition < 9
+                || !hyperbrowse::util::EqualsIgnoreCaseOrdinal(value.substr(labelPosition - 9, 9), L"negative "))
+            {
+                break;
+            }
+            const std::size_t skippedPosition = labelPosition;
+            labelPosition = std::wstring_view::npos;
+            searchStart = skippedPosition + std::size(L"prompt:") - 1;
+        }
+        if (labelPosition == std::wstring_view::npos)
+        {
+            return {};
+        }
+
+        std::size_t valueStart = labelPosition + std::size(L"prompt:") - 1;
+        while (valueStart < value.size() && iswspace(value[valueStart]) != 0)
+        {
+            ++valueStart;
+        }
+        std::size_t valueEnd = value.find_first_of(L"\r\n", valueStart);
+        const std::size_t negativePromptPosition = FindInsensitive(value.substr(valueStart), L"negative prompt:");
+        if (negativePromptPosition != std::wstring_view::npos)
+        {
+            valueEnd = std::min(valueEnd, valueStart + negativePromptPosition);
+        }
+        if (valueEnd == std::wstring_view::npos)
+        {
+            valueEnd = value.size();
+        }
+        return TrimWhitespace(value.substr(valueStart, valueEnd - valueStart));
+    }
+
     std::wstring JoinLine(std::wstring label, const std::wstring& value)
     {
         if (value.empty())
@@ -1161,7 +1667,7 @@ SwarmValueDone:
             return {};
         }
 
-        label.append(value);
+        label.append(FormatJsonForDisplay(value));
         label.append(L"\r\n");
         return label;
     }
@@ -1296,6 +1802,40 @@ namespace hyperbrowse::services
         }
 
         return metadata;
+    }
+
+    std::wstring ExtractImagePrompt(const ImageMetadata& metadata)
+    {
+        for (const MetadataPropertyEntry& property : metadata.properties)
+        {
+            const std::size_t separator = property.canonicalName.find_last_of(L'.');
+            const std::wstring_view fieldName = separator == std::wstring::npos
+                ? std::wstring_view(property.canonicalName)
+                : std::wstring_view(property.canonicalName).substr(separator + 1);
+            if (util::EqualsIgnoreCaseOrdinal(fieldName, L"prompt")
+                && !util::EqualsIgnoreCaseOrdinal(fieldName, L"negativeprompt"))
+            {
+                const std::wstring jsonPrompt = ExtractPromptFromJson(property.value);
+                return jsonPrompt.empty() ? TrimWhitespace(property.value) : jsonPrompt;
+            }
+        }
+
+        for (const MetadataPropertyEntry& property : metadata.properties)
+        {
+            const std::wstring prompt = ExtractPromptFromJson(property.value);
+            if (!prompt.empty())
+            {
+                return prompt;
+            }
+
+            const std::wstring labeledPrompt = ExtractPromptFromLabeledText(property.value);
+            if (!labeledPrompt.empty())
+            {
+                return labeledPrompt;
+            }
+        }
+
+        return {};
     }
 
     std::wstring FormatImageMetadataReport(const browser::BrowserItem& item, const ImageMetadata& metadata)

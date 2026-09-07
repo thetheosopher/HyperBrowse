@@ -189,6 +189,7 @@ namespace
     constexpr int kDetailsPanelHistogramHeight = 88;
     constexpr int kDetailsPanelSectionGap = 12;
     constexpr int kDetailsPanelTextTopGap = 14;
+    constexpr UINT kDetailsPanelCopyPromptCommandId = 5705;
     constexpr int kDetailsPanelHistogramBins = 64;
     constexpr int kQuickAccessPanelHeaderHeight = 18;
     constexpr int kQuickAccessPanelTopGap = 12;
@@ -9782,7 +9783,7 @@ namespace hyperbrowse::ui
             detailsPanelRichEditModule_ = LoadLibraryW(L"Msftedit.dll");
         }
 
-        const DWORD detailsPanelTextStyle = WS_CHILD | (detailsStripVisible_ ? WS_VISIBLE : 0) | WS_VSCROLL
+        const DWORD detailsPanelTextStyle = WS_CHILD | WS_CLIPSIBLINGS | (detailsStripVisible_ ? WS_VISIBLE : 0) | WS_VSCROLL
             | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_NOHIDESEL;
         detailsPanelText_ = CreateWindowExW(
             0,
@@ -9809,6 +9810,14 @@ namespace hyperbrowse::ui
                 nullptr,
                 instance_,
                 nullptr);
+        }
+
+        if (detailsPanelText_)
+        {
+            SetWindowSubclass(detailsPanelText_,
+                              &MainWindow::DetailsPanelTextSubclassProc,
+                              1,
+                              reinterpret_cast<DWORD_PTR>(this));
         }
 
             quickAccessScrollBar_ = CreateWindowExW(
@@ -10382,6 +10391,33 @@ namespace hyperbrowse::ui
         return result;
     }
 
+    LRESULT CALLBACK MainWindow::DetailsPanelTextSubclassProc(HWND hwnd,
+                                                               UINT message,
+                                                               WPARAM wParam,
+                                                               LPARAM lParam,
+                                                               UINT_PTR,
+                                                               DWORD_PTR refData)
+    {
+        auto* window = reinterpret_cast<MainWindow*>(refData);
+        if (window && message == WM_CONTEXTMENU && !window->detailsPanelPromptText_.empty())
+        {
+            POINT screenPoint{};
+            if (lParam == static_cast<LPARAM>(-1))
+            {
+                GetCursorPos(&screenPoint);
+            }
+            else
+            {
+                screenPoint.x = GET_X_LPARAM(lParam);
+                screenPoint.y = GET_Y_LPARAM(lParam);
+            }
+            window->ShowDetailsPanelContextMenu(screenPoint);
+            return 0;
+        }
+
+        return DefSubclassProc(hwnd, message, wParam, lParam);
+    }
+
     LRESULT MainWindow::OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView)
     {
         if (suppressTreeSelectionChange_)
@@ -10862,6 +10898,7 @@ namespace hyperbrowse::ui
                                    layout.textRect.bottom - layout.textRect.top,
                                    TRUE);
                         ShowWindow(detailsPanelText_, SW_SHOW);
+
                     }
                     else
                     {
@@ -11484,6 +11521,7 @@ namespace hyperbrowse::ui
             }
         }
 
+
         if (hwnd_ && !IsRectEmpty(&detailsPanelRect_))
         {
             InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
@@ -11668,6 +11706,8 @@ namespace hyperbrowse::ui
 
     void MainWindow::UpdateDetailsPanel()
     {
+        detailsPanelPromptText_.clear();
+
         if (!detailsStripVisible_)
         {
             ResetDetailsPanelHistogram();
@@ -11739,6 +11779,11 @@ namespace hyperbrowse::ui
         {
             const browser::BrowserItem& item = selectedItems.front();
             const auto metadata = metadataList.front();
+
+            if (metadata && !item.isDirectory)
+            {
+                detailsPanelPromptText_ = services::ExtractImagePrompt(*metadata);
+            }
 
             const std::wstring summary = BuildSingleSelectionSummary(item);
 
@@ -13501,6 +13546,41 @@ namespace hyperbrowse::ui
         return true;
     }
 
+    void MainWindow::ShowDetailsPanelContextMenu(POINT screenPoint)
+    {
+        if (!hwnd_ || detailsPanelPromptText_.empty())
+        {
+            return;
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        AppendMenuW(menu, MF_STRING, kDetailsPanelCopyPromptCommandId, L"Copy Prompt");
+        SetForegroundWindow(hwnd_);
+        const UINT commandId = TrackPopupMenuEx(menu,
+                                                TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                                screenPoint.x,
+                                                screenPoint.y,
+                                                hwnd_,
+                                                nullptr);
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+
+        if (commandId == kDetailsPanelCopyPromptCommandId
+            && !CopyTextToClipboard(hwnd_, detailsPanelPromptText_))
+        {
+            MessageBoxW(hwnd_,
+                        L"Failed to copy the image prompt to the clipboard.",
+                        L"Copy Prompt",
+                        MB_OK | MB_ICONERROR);
+        }
+
+        DestroyMenu(menu);
+    }
+
     void MainWindow::ShowBrowserContextMenu(POINT screenPoint)
     {
         if (!hwnd_)
@@ -14371,13 +14451,49 @@ namespace hyperbrowse::ui
     constexpr wchar_t kImageInformationDialogClassName[] = L"HyperBrowseImageInformationDialog";
     constexpr int kImageInformationDialogWidth = 640;
     constexpr int kImageInformationDialogCollapsedHeight = 370;
-    constexpr int kImageInformationDialogExpandedHeight = 570;
     constexpr int kImageInformationDialogMargin = 18;
     constexpr int kImageInformationDialogButtonHeight = 30;
     constexpr int kImageInformationDialogButtonWidth = 96;
+    constexpr int kImageInformationDialogCopyPromptWidth = 120;
     constexpr int kImageInformationDialogToggleWidth = 230;
     constexpr int kImageInformationDialogToggleId = 5703;
+    constexpr int kImageInformationDialogCopyPromptId = 5704;
     constexpr int kImageInformationDialogGap = 10;
+
+    RECT ImageInformationDialogWorkArea(HWND ownerWindow)
+    {
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        const HMONITOR monitor = MonitorFromWindow(ownerWindow ? ownerWindow : GetDesktopWindow(),
+                                                   MONITOR_DEFAULTTONEAREST);
+        if (monitor && GetMonitorInfoW(monitor, &monitorInfo) != FALSE)
+        {
+            return monitorInfo.rcWork;
+        }
+
+        RECT workArea{};
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
+        return workArea;
+    }
+
+    void CenterImageInformationDialogOnWorkArea(HWND hwnd, const ImageInformationDialogState& state)
+    {
+        RECT dialogRect{};
+        GetWindowRect(hwnd, &dialogRect);
+        const int width = dialogRect.right - dialogRect.left;
+        const int height = dialogRect.bottom - dialogRect.top;
+        const int workWidth = state.workArea.right - state.workArea.left;
+        const int workHeight = state.workArea.bottom - state.workArea.top;
+        const int x = state.workArea.left + std::max(0, (workWidth - width) / 2);
+        const int y = state.workArea.top + std::max(0, (workHeight - height) / 2);
+        SetWindowPos(hwnd,
+                     nullptr,
+                     x,
+                     y,
+                     0,
+                     0,
+                     SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 
     void LayoutImageInformationDialog(HWND hwnd, ImageInformationDialogState& state)
     {
@@ -14392,10 +14508,13 @@ namespace hyperbrowse::ui
             - kImageInformationDialogButtonHeight;
         const int toggleTop = buttonsTop - kImageInformationDialogGap - kImageInformationDialogButtonHeight;
         const int contentTop = kImageInformationDialogMargin + 34;
-        const int metadataHeight = state.expanded ? 160 : 0;
+        const int availableReportHeight = std::max(1, toggleTop - kImageInformationDialogGap - contentTop);
+        const int metadataHeight = state.expanded
+            ? std::min(state.metadataHeight, std::max(1, availableReportHeight - 40))
+            : 0;
         const int metadataTop = toggleTop - kImageInformationDialogGap - metadataHeight;
         const int contentBottom = metadataTop - (state.expanded ? kImageInformationDialogGap : 0);
-        const int contentHeight = std::max(40, contentBottom - contentTop);
+        const int contentHeight = std::min(state.contentHeight, std::max(1, contentBottom - contentTop));
 
         if (state.filenameWindow)
         {
@@ -14416,6 +14535,7 @@ namespace hyperbrowse::ui
                          contentWidth,
                          contentHeight,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+            ShowScrollBar(state.contentWindow, SB_VERT, state.contentHeight > contentHeight);
         }
         if (state.metadataWindow)
         {
@@ -14426,6 +14546,9 @@ namespace hyperbrowse::ui
                          contentWidth,
                          metadataHeight,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+            ShowScrollBar(state.metadataWindow,
+                          SB_VERT,
+                          state.expanded && state.metadataHeight > metadataHeight);
         }
         if (state.metadataToggleButton)
         {
@@ -14434,6 +14557,19 @@ namespace hyperbrowse::ui
                          contentLeft,
                          toggleTop,
                          kImageInformationDialogToggleWidth,
+                         kImageInformationDialogButtonHeight,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (state.copyPromptButton)
+        {
+            SetWindowPos(state.copyPromptButton,
+                         nullptr,
+                         clientWidth - kImageInformationDialogMargin
+                             - kImageInformationDialogButtonWidth
+                             - kImageInformationDialogGap
+                             - kImageInformationDialogCopyPromptWidth,
+                         buttonsTop,
+                         kImageInformationDialogCopyPromptWidth,
                          kImageInformationDialogButtonHeight,
                          SWP_NOZORDER | SWP_NOACTIVATE);
         }
@@ -14451,12 +14587,14 @@ namespace hyperbrowse::ui
 
     void ResizeImageInformationDialog(HWND hwnd, ImageInformationDialogState& state)
     {
+        const int clientHeight = std::min(state.expanded
+                                              ? state.expandedWindowHeight
+                                              : kImageInformationDialogCollapsedHeight,
+                                          state.maximumWindowHeight);
         RECT windowRect{0,
                         0,
                         kImageInformationDialogWidth,
-                        state.expanded
-                            ? kImageInformationDialogExpandedHeight
-                            : kImageInformationDialogCollapsedHeight};
+                        clientHeight};
         AdjustWindowRectEx(&windowRect,
                            WS_CAPTION | WS_SYSMENU | WS_POPUP,
                            FALSE,
@@ -14468,7 +14606,7 @@ namespace hyperbrowse::ui
                      windowRect.right - windowRect.left,
                      windowRect.bottom - windowRect.top,
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        CenterWindowOnOwner(hwnd, state.ownerWindow);
+        CenterImageInformationDialogOnWorkArea(hwnd, state);
         LayoutImageInformationDialog(hwnd, state);
     }
 
@@ -14536,7 +14674,7 @@ namespace hyperbrowse::ui
             state->metadataToggleButton = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Show Metadata Details",
+                state->expanded ? L"Collapse Metadata Details" : L"Show Metadata Details",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                 0,
                 0,
@@ -14546,6 +14684,28 @@ namespace hyperbrowse::ui
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kImageInformationDialogToggleId)),
                 state->instance,
                 nullptr);
+            state->copyPromptButton = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Copy Prompt",
+                WS_CHILD | WS_TABSTOP,
+                0,
+                0,
+                kImageInformationDialogCopyPromptWidth,
+                kImageInformationDialogButtonHeight,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kImageInformationDialogCopyPromptId)),
+                state->instance,
+                nullptr);
+            if (state->copyPromptButton && state->prompt.empty())
+            {
+                ShowWindow(state->copyPromptButton, SW_HIDE);
+            }
+            else if (state->copyPromptButton)
+            {
+                ShowWindow(state->copyPromptButton, SW_SHOW);
+            }
+            ShowWindow(state->metadataWindow, state->expanded ? SW_SHOW : SW_HIDE);
             state->okButton = CreateWindowExW(
                 0,
                 L"BUTTON",
@@ -14565,6 +14725,7 @@ namespace hyperbrowse::ui
                 state->contentWindow,
                 state->metadataWindow,
                 state->metadataToggleButton,
+                state->copyPromptButton,
                 state->okButton,
             };
             for (HWND window : windows)
@@ -14588,7 +14749,7 @@ namespace hyperbrowse::ui
             }
 
             LayoutImageInformationDialog(hwnd, *state);
-            CenterWindowOnOwner(hwnd, state->ownerWindow);
+            CenterImageInformationDialogOnWorkArea(hwnd, *state);
             SetFocus(state->okButton);
             return 0;
         }
@@ -14650,9 +14811,20 @@ namespace hyperbrowse::ui
             {
                 state->expanded = !state->expanded;
                 SetWindowTextW(state->metadataToggleButton,
-                               state->expanded ? L"Hide Metadata Details" : L"Show Metadata Details");
+                               state->expanded ? L"Collapse Metadata Details" : L"Show Metadata Details");
                 ShowWindow(state->metadataWindow, state->expanded ? SW_SHOW : SW_HIDE);
                 ResizeImageInformationDialog(hwnd, *state);
+                return 0;
+            }
+            if (LOWORD(wParam) == kImageInformationDialogCopyPromptId && HIWORD(wParam) == BN_CLICKED)
+            {
+                if (!CopyTextToClipboard(hwnd, state->prompt))
+                {
+                    MessageBoxW(hwnd,
+                                L"Failed to copy the image prompt to the clipboard.",
+                                L"Copy Prompt",
+                                MB_OK | MB_ICONERROR);
+                }
                 return 0;
             }
             if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
@@ -14693,7 +14865,8 @@ namespace hyperbrowse::ui
                                     hyperbrowse::util::AppTextSize appTextSize,
                                     std::wstring filename,
                                     std::wstring content,
-                                    std::wstring metadata)
+                                    std::wstring metadata,
+                                    std::wstring prompt)
     {
         WNDCLASSEXW windowClass{};
         if (GetClassInfoExW(instance, kImageInformationDialogClassName, &windowClass) == FALSE)
@@ -14716,18 +14889,53 @@ namespace hyperbrowse::ui
         state.ownerWindow = ownerWindow;
         state.instance = instance;
         state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
+        state.workArea = ImageInformationDialogWorkArea(ownerWindow);
+        RECT frameRect{0, 0, 0, 0};
+        AdjustWindowRectEx(&frameRect,
+                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                           FALSE,
+                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        const LONG frameHeight = frameRect.bottom - frameRect.top;
+        state.maximumWindowHeight = static_cast<int>(std::max<LONG>(1L,
+                                                                     state.workArea.bottom
+                                                                         - state.workArea.top
+                                                                         - frameHeight));
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
         state.titleFont = CreateDialogUiFont(12, FW_BOLD, state.appTextSize);
         state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
         state.filename = std::move(filename);
         state.content = std::move(content);
         state.metadata = std::move(metadata);
+        state.prompt = std::move(prompt);
         if (!state.bodyFont)
         {
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
 
-        RECT windowRect{0, 0, kImageInformationDialogWidth, kImageInformationDialogCollapsedHeight};
+        const int contentWidth = kImageInformationDialogWidth - (kImageInformationDialogMargin * 2);
+        state.contentHeight = MeasureTextBlockHeight(state.bodyFont,
+                                                     state.content,
+                                                     contentWidth,
+                                                     DT_WORDBREAK | DT_EDITCONTROL,
+                                                     40);
+        state.metadataHeight = MeasureTextBlockHeight(state.bodyFont,
+                                                      state.metadata,
+                                                      contentWidth,
+                                                      DT_WORDBREAK | DT_EDITCONTROL,
+                                                      56);
+        state.expandedWindowHeight = kImageInformationDialogMargin
+            + 34
+            + state.contentHeight
+            + kImageInformationDialogGap
+            + state.metadataHeight
+            + kImageInformationDialogGap
+            + kImageInformationDialogButtonHeight
+            + kImageInformationDialogGap
+            + kImageInformationDialogButtonHeight
+            + kImageInformationDialogMargin;
+        state.expandedWindowHeight = std::min(state.expandedWindowHeight, state.maximumWindowHeight);
+
+        RECT windowRect{0, 0, kImageInformationDialogWidth, state.expandedWindowHeight};
         AdjustWindowRectEx(&windowRect,
                            WS_CAPTION | WS_SYSMENU | WS_POPUP,
                            FALSE,
@@ -14819,6 +15027,10 @@ namespace hyperbrowse::ui
 
         const std::wstring content = services::FormatImageInfoContent(item);
         const std::wstring expanded = services::FormatImageInfoExpanded(*metadata);
+        const std::wstring metadataContent = expanded.empty()
+            ? L"No embedded EXIF, IPTC, XMP, or other metadata is available."
+            : expanded;
+        const std::wstring prompt = services::ExtractImagePrompt(*metadata);
         std::wstring diagnostic = browserPaneController_->ThumbnailDecodeFailureMessageForModelIndex(modelIndex);
         if (!diagnostic.empty())
         {
@@ -14834,7 +15046,8 @@ namespace hyperbrowse::ui
                        appTextSize_,
                        item.fileName,
                        contentWithDiagnostic,
-                       expanded);
+                       metadataContent,
+                       prompt);
     }
 
     void MainWindow::StartCopySelection()

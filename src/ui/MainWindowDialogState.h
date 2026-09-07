@@ -446,6 +446,7 @@ namespace hyperbrowse::ui::dialog_detail
         HWND contentWindow{};
         HWND metadataWindow{};
         HWND metadataToggleButton{};
+        HWND copyPromptButton{};
         HWND okButton{};
         HFONT titleFont{};
         HFONT bodyFont{};
@@ -456,7 +457,13 @@ namespace hyperbrowse::ui::dialog_detail
         std::wstring filename;
         std::wstring content;
         std::wstring metadata;
-        bool expanded{};
+        std::wstring prompt;
+        int contentHeight{};
+        int metadataHeight{};
+        int expandedWindowHeight{};
+        int maximumWindowHeight{};
+        RECT workArea{};
+        bool expanded{true};
         bool done{};
     };
 }

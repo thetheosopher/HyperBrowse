@@ -249,6 +249,7 @@ namespace hyperbrowse::ui
         bool ChooseFolder(std::wstring* folderPath, HWND ownerWindow = nullptr) const;
         bool HasSelectedJpegItems() const;
         void ShowBrowserContextMenu(POINT screenPoint);
+        void ShowDetailsPanelContextMenu(POINT screenPoint);
         bool ShowShellContextMenuForSelection(POINT screenPoint);
         void ShowFolderTreeContextMenu(POINT screenPoint, HTREEITEM item);
         void ShowUserGuide() const;
@@ -347,6 +348,12 @@ namespace hyperbrowse::ui
                            LPARAM lParam,
                            UINT_PTR subclassId,
                            DWORD_PTR refData);
+        static LRESULT CALLBACK DetailsPanelTextSubclassProc(HWND hwnd,
+                                      UINT message,
+                                      WPARAM wParam,
+                                      LPARAM lParam,
+                                      UINT_PTR subclassId,
+                                      DWORD_PTR refData);
         static LRESULT CALLBACK CommandBarMenuFilterProc(int code, WPARAM wParam, LPARAM lParam);
         LRESULT OnFolderTreeSelectionChanged(const NMTREEVIEWW& treeView);
         LRESULT OnFolderTreeItemExpanding(const NMTREEVIEWW& treeView);
@@ -596,6 +603,7 @@ namespace hyperbrowse::ui
         std::wstring detailsPanelTitleText_;
         std::wstring detailsPanelSummaryText_;
         std::wstring detailsPanelBodyText_;
+        std::wstring detailsPanelPromptText_;
         std::wstring detailsPanelHistogramPath_;
         std::vector<QuickAccessDestinationRow> quickAccessDestinationRows_;
         std::uint64_t detailsPanelHistogramModifiedTimestampUtc_{};

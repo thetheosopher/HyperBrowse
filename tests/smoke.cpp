@@ -2359,6 +2359,61 @@ namespace
                "Expanded image information did not surface the extracted SwarmUI prompt");
         Expect(expanded.find(L"Negative prompt: low quality, deformed hands, text") != std::wstring::npos,
                "Expanded image information did not surface the extracted SwarmUI negative prompt");
+         Expect(hyperbrowse::services::ExtractImagePrompt(*metadata)
+                 == L"cinematic portrait, volumetric lighting, sharp focus",
+             "Image prompt extraction returned more than the positive prompt");
+
+         hyperbrowse::services::ImageMetadata jsonMetadata;
+         jsonMetadata.properties.push_back({
+             L"PNG.Text.parameters",
+             L"Parameters",
+             L"{\"prompt\":\"a quiet forest\",\"steps\":30,\"sampler\":\"Euler\"}"});
+         const std::wstring formattedJson = hyperbrowse::services::FormatImageInfoExpanded(jsonMetadata);
+         Expect(formattedJson.find(L"{\r\n  \"prompt\": \"a quiet forest\",") != std::wstring::npos,
+             "JSON metadata was not formatted as an indented object");
+         Expect(hyperbrowse::services::ExtractImagePrompt(jsonMetadata) == L"a quiet forest",
+             "JSON metadata prompt extraction did not return only the prompt value");
+
+        hyperbrowse::services::ImageMetadata comfyPromptMetadata;
+        comfyPromptMetadata.properties.push_back({
+            L"PNG.Text.prompt",
+            L"Prompt",
+            L"{\"prompt\":\"a mountain observatory at dawn\",\"model\":\"example-model\",\"steps\":30}"});
+        Expect(hyperbrowse::services::ExtractImagePrompt(comfyPromptMetadata)
+                   == L"a mountain observatory at dawn",
+               "JSON-valued prompt metadata returned the complete ComfyUI chunk");
+
+        const std::string quotedParameters =
+            R"({"prompt":"photo of a refinery at sunset\nwith dramatic smoke","model":"Flux Diffusion/pixelwave_flux1_dev_Q6_K_03.gguf","steps":50,"negativeprompt":""})";
+        WriteTestImage(pngPath,
+                       TestImageFormat::Png,
+                       96,
+                       48,
+                       1,
+                       L"parameters",
+                       quotedParameters);
+        const auto quotedMetadata = hyperbrowse::services::ExtractImageMetadata(item, &errorMessage);
+        Expect(quotedMetadata != nullptr, "Quoted SwarmUI metadata extraction returned a null result");
+        const auto quotedPrompt = std::find_if(quotedMetadata->properties.begin(),
+                                               quotedMetadata->properties.end(),
+                                               [](const hyperbrowse::services::MetadataPropertyEntry& property)
+                                               {
+                                                   return property.canonicalName == L"SwarmUI.prompt";
+                                               });
+        Expect(quotedPrompt != quotedMetadata->properties.end()
+                   && quotedPrompt->value == L"photo of a refinery at sunset\nwith dramatic smoke",
+               "Quoted SwarmUI metadata included following JSON fields in the prompt");
+        Expect(hyperbrowse::services::ExtractImagePrompt(*quotedMetadata)
+                   == L"photo of a refinery at sunset\nwith dramatic smoke",
+               "Quoted SwarmUI prompt extraction returned following JSON fields");
+
+         hyperbrowse::services::ImageMetadata negativeOnlyMetadata;
+         negativeOnlyMetadata.properties.push_back({
+             L"PNG.Text.parameters",
+             L"Parameters",
+             L"Negative prompt: low quality"});
+         Expect(hyperbrowse::services::ExtractImagePrompt(negativeOnlyMetadata).empty(),
+             "Negative prompt metadata was incorrectly exposed as the image prompt");
     }
 
     void RunRawDecoderScenario()
