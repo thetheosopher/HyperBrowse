@@ -708,11 +708,6 @@ namespace hyperbrowse::ui
         }
 
         const std::wstring normalizedPath = NormalizeFolderPath(std::move(folderPath));
-        if (FindItemByPath(normalizedPath))
-        {
-            return;
-        }
-
         const std::wstring parentPath = NormalizeFolderPath(fs::path(normalizedPath).parent_path().wstring());
         if (parentPath.empty())
         {
@@ -722,6 +717,11 @@ namespace hyperbrowse::ui
         const HTREEITEM parentItem = FindItemByPath(parentPath);
         NodeData* parentNodeData = GetNodeData(parentItem);
         if (!parentNodeData || !parentNodeData->childrenLoaded)
+        {
+            return;
+        }
+
+        if (FindChildItem(parentItem, normalizedPath))
         {
             return;
         }
