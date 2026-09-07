@@ -4543,6 +4543,17 @@ namespace hyperbrowse::viewer
 
             if (currentImage_)
             {
+                if (smoothZoomTimerId_)
+                {
+                    smoothZoomCurrent_ = smoothZoomTarget_;
+                    customZoomScale_ = smoothZoomTarget_;
+                    panOffsetX_ = smoothZoomTargetPanX_;
+                    panOffsetY_ = smoothZoomTargetPanY_;
+                    KillTimer(hwnd_, kSmoothZoomTimerId);
+                    smoothZoomTimerId_ = 0;
+                    ClampPanOffsets();
+                }
+
                 panning_ = true;
                 lastPanPoint_ = clickPoint;
                 SetCapture(hwnd_);

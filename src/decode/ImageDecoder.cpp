@@ -1556,6 +1556,20 @@ namespace hyperbrowse::decode
 
         if (IsRawFileType(fileType))
         {
+            std::error_code fileError;
+            if (!fs::is_regular_file(fs::path(key.filePath), fileError) || fileError)
+            {
+                if (errorMessage)
+                {
+                    *errorMessage = L"The RAW image file is not available.";
+                }
+                if (failureKind)
+                {
+                    *failureKind = ThumbnailDecodeFailureKind::DecodeFailed;
+                }
+                return {};
+            }
+
             std::wstring wicError;
             if (auto thumbnail = TryDecodeRawThumbnailWithWic(key, &wicError))
             {

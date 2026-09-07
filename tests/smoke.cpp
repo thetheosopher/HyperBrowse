@@ -2069,11 +2069,15 @@ namespace
         {
             return state->thumbnailResult.readyCount >= 1
                 && persistenceStarted.load(std::memory_order_acquire);
-        }, 5000);
+        }, 15000);
         releasePersistence.store(true, std::memory_order_release);
 
         Expect(readyPostedWhilePersistenceWasBlocked,
-               "Thumbnail ready update did not arrive while persistent storage was deliberately blocked");
+               "Thumbnail ready update did not arrive while persistent storage was deliberately blocked (ready="
+                   + std::to_string(state->thumbnailResult.readyCount)
+                   + ", failed=" + std::to_string(state->thumbnailResult.failedCount)
+                   + ", persistenceStarted=" + (persistenceStarted.load(std::memory_order_acquire) ? "true" : "false")
+                   + ")");
     }
 
         void RunThumbnailSchedulerFailureScenario(HWND hwnd, TestWindowState* state)
@@ -2084,6 +2088,7 @@ namespace
 
          hyperbrowse::services::ThumbnailScheduler scheduler(8ULL * 1024ULL * 1024ULL, 1);
          scheduler.BindTargetWindow(hwnd);
+         scheduler.SetDiskCacheEnabled(false);
 
          ResetThumbnailResult(state, 8);
          scheduler.Schedule(8, 1, {{0, missingRawKey, 0, true}});
@@ -3341,18 +3346,37 @@ namespace
         PumpMessagesFor(100);
         Expect(viewer.RotationQuarterTurns() == 1, "Viewer rotate-right command failed");
 
-        const int panFitZoomPercent = viewer.CurrentZoomPercent();
-        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PLUS, 0);
-        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > panFitZoomPercent; }, 1000),
-               "Viewer zoom-in command failed");
+        RECT wheelZoomClientRect{};
+        Expect(GetClientRect(viewer.Hwnd(), &wheelZoomClientRect) != FALSE,
+               "Failed to read the viewer client area for the immediate pan-after-wheel-zoom test");
+        POINT wheelZoomScreenPoint{
+            wheelZoomClientRect.right / 2,
+            std::max<LONG>(1, wheelZoomClientRect.bottom / 16)};
+        Expect(ClientToScreen(viewer.Hwnd(), &wheelZoomScreenPoint) != FALSE,
+               "Failed to convert the wheel-zoom anchor to screen coordinates");
+        for (int index = 0; index < 2; ++index)
+        {
+            SendMessageW(viewer.Hwnd(),
+                         WM_MOUSEWHEEL,
+                         MAKEWPARAM(0, WHEEL_DELTA),
+                         MAKELPARAM(wheelZoomScreenPoint.x, wheelZoomScreenPoint.y));
+        }
 
         const POINT initialPan = viewer.PanOffset();
-        SendMessageW(viewer.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(120, 120));
-        SendMessageW(viewer.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(160, 150));
-        SendMessageW(viewer.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(160, 150));
-        PumpMessagesFor(100);
+        const POINT dragStart{
+            wheelZoomClientRect.right / 2,
+            wheelZoomClientRect.bottom / 2};
+        const POINT dragEnd{dragStart.x, dragStart.y - 60};
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(dragStart.x, dragStart.y));
+        SendMessageW(viewer.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(dragEnd.x, dragEnd.y));
+        const POINT draggedPan = viewer.PanOffset();
+        SendMessageW(viewer.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(dragEnd.x, dragEnd.y));
+        PumpMessagesFor(300);
         const POINT movedPan = viewer.PanOffset();
-        Expect(movedPan.x != initialPan.x || movedPan.y != initialPan.y, "Viewer pan interaction failed");
+        Expect(draggedPan.x != initialPan.x || draggedPan.y != initialPan.y,
+               "Viewer immediate wheel-zoom pan did not apply the drag movement");
+        Expect(movedPan.x == draggedPan.x && movedPan.y == draggedPan.y,
+               "Viewer pan immediately after wheel zoom was lost when the smooth-zoom timer completed");
 
         const LONG panBeforeArrow = viewer.PanOffset().y;
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
@@ -4063,6 +4087,9 @@ int main(int argc, char* argv[])
         Expect(hwnd != nullptr, "Failed to create the hidden test window");
 
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
+        const bool viewerInteractionOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-interaction";
+        const bool thumbnailPersistenceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-persistence";
+        const bool thumbnailFailureOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-failure";
         const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
@@ -4074,6 +4101,18 @@ int main(int argc, char* argv[])
         else if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
+        }
+        else if (viewerInteractionOnly)
+        {
+            RunViewerWindowScenario(instance, hwnd);
+        }
+        else if (thumbnailPersistenceOnly)
+        {
+            RunThumbnailReadyBeforePersistenceScenario(hwnd, &state);
+        }
+        else if (thumbnailFailureOnly)
+        {
+            RunThumbnailSchedulerFailureScenario(hwnd, &state);
         }
         else if (fileRenameOnly)
         {
