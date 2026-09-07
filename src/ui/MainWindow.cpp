@@ -8699,6 +8699,13 @@ namespace hyperbrowse::ui
             }
         };
         fileCommandHandlers.onOpenFolder = std::bind_front(&MainWindow::OpenFolder, this);
+        fileCommandHandlers.onNewFolder = [this]
+        {
+            if (browserModel_ && !browserModel_->FolderPath().empty())
+            {
+                StartCreateNewFolder(browserModel_->FolderPath());
+            }
+        };
         fileCommandHandlers.onNavigateBackFolder = std::bind_front(&MainWindow::NavigateBackToLastOpenedFolder, this);
         fileCommandHandlers.onNavigateForwardFolder = std::bind_front(&MainWindow::NavigateForwardToLastOpenedFolder, this);
         fileCommandHandlers.onToggleCurrentFolderFavorite = std::bind_front(&MainWindow::ToggleCurrentFolderFavoriteDestination, this);
@@ -9545,6 +9552,7 @@ namespace hyperbrowse::ui
         }
 
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_FOLDER, L"Open &Folder...\tCtrl+O");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_NEW_FOLDER, L"New &Folder...\tCtrl+Shift+N");
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(openRecentFolderMenu_), L"Open &Recent Folder");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
@@ -13738,6 +13746,9 @@ namespace hyperbrowse::ui
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_560, L"5&60 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"6&40 px");
 
+        AppendMenuW(menu, MF_STRING, ID_FILE_NEW_FOLDER, L"New &Folder...\tCtrl+Shift+N");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
         if (hasSelection)
         {
             AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
@@ -13862,6 +13873,7 @@ namespace hyperbrowse::ui
             }
         }
 
+        EnableMenuItem(menu, ID_FILE_NEW_FOLDER, MF_BYCOMMAND | (hasFolder && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         for (UINT ratingCommandId = ID_FILE_SET_RATING_0; ratingCommandId <= ID_FILE_SET_RATING_5; ++ratingCommandId)
         {
             EnableMenuItem(ratingMenu, ratingCommandId, MF_BYCOMMAND | (allowMutatingFileCommands ? MF_ENABLED : MF_GRAYED));
@@ -14084,7 +14096,7 @@ namespace hyperbrowse::ui
         switch (commandId)
         {
         case kNewFolderCommandId:
-            StartFolderTreeCreateNewFolder(folderPath);
+            StartCreateNewFolder(folderPath);
             break;
         case kRenameFolderCommandId:
             if (!BeginFolderTreeInlineRename(folderPath))
@@ -15473,7 +15485,7 @@ namespace hyperbrowse::ui
                            {});
     }
 
-    void MainWindow::StartFolderTreeCreateNewFolder(std::wstring parentPath)
+    void MainWindow::StartCreateNewFolder(std::wstring parentPath)
     {
         if (parentPath.empty() || fileOperationActive_)
         {
@@ -15532,6 +15544,10 @@ namespace hyperbrowse::ui
                 && FolderPathsEqual(browserModel_->FolderPath(), parentPath))
             {
                 LoadFolderAsync(parentPath);
+            }
+            if (folderTreeController_)
+            {
+                folderTreeController_->SelectFolder(newFolderPath);
             }
             break;
         }
@@ -17295,6 +17311,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_FILE_COPY_FILES_TO_CLIPBOARD, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_EDIT_CUT, MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_COPY_IMAGE_PIXELS, MF_BYCOMMAND | (hasSingleSelection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_FILE_NEW_FOLDER, MF_BYCOMMAND | (hasFolder && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_PASTE_FILES, MF_BYCOMMAND | (hasFolder && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_DUPLICATE_SELECTION, MF_BYCOMMAND | (hasSelection && !fileOperationActive_ ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_FILE_SELECT_ALL, MF_BYCOMMAND | (hasFolder ? MF_ENABLED : MF_GRAYED));

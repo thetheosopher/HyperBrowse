@@ -72,6 +72,12 @@ namespace hyperbrowse::tests
             const auto mainShortcuts = hyperbrowse::ui::MainWindowShortcuts();
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_ESCAPE, VK_ESCAPE, 0),
                    "Escape is not owned by the dedicated Escape command");
+            Expect(hasShortcut(mainShortcuts,
+                               ShortcutContext::MainWindow,
+                               ID_FILE_NEW_FOLDER,
+                               'N',
+                               FCONTROL | FSHIFT),
+                   "Ctrl+Shift+N is missing from the new-folder shortcut catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, 'W', FCONTROL),
                    "Ctrl+W no longer owns the main-window minimize command");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, 0, 'G', FCONTROL),

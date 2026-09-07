@@ -74,6 +74,7 @@ namespace hyperbrowse::ui
 
     inline constexpr std::array kMainWindowShortcutCatalog{
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_OPEN_FOLDER, static_cast<WORD>('O'), FCONTROL, L"Ctrl+O", L"Open folder", L"File"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_NEW_FOLDER, static_cast<WORD>('N'), FCONTROL | FSHIFT, L"Ctrl+Shift+N", L"Create a folder in the current folder", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_HELP_USER_GUIDE, VK_F1, 0, L"F1", L"Open user guide", L"Help"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_BACK_FOLDER, VK_BACK, 0, L"Backspace", L"Navigate to the previous folder", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_BACK_FOLDER, VK_LEFT, FALT, L"Alt+Left", L"Navigate to the previous folder", L"View and navigation"},

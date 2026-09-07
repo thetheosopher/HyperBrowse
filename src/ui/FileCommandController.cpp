@@ -63,6 +63,8 @@ namespace hyperbrowse::ui
         {
         case ID_FILE_OPEN_FOLDER:
             return Invoke(handlers_.onOpenFolder);
+        case ID_FILE_NEW_FOLDER:
+            return Invoke(handlers_.onNewFolder);
         case ID_VIEW_NAVIGATE_BACK_FOLDER:
             return Invoke(handlers_.onNavigateBackFolder);
         case ID_VIEW_NAVIGATE_FORWARD_FOLDER:

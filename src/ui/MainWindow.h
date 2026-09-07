@@ -284,7 +284,7 @@ namespace hyperbrowse::ui
         bool BeginFolderTreeInlineRename(const std::wstring& folderPath);
         void StartFolderTreeDelete(std::wstring folderPath, bool permanent);
         void StartFolderTreeMoveToDestination(std::wstring folderPath, std::wstring destinationFolder);
-        void StartFolderTreeCreateNewFolder(std::wstring parentPath);
+        void StartCreateNewFolder(std::wstring parentPath);
         void StartSelectionFileOperationToDestination(services::FileOperationType type, std::wstring destinationFolder);
         bool ChooseQuickSendDestination(services::FileOperationType operationType,
                          POINT popupPoint,

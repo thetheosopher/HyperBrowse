@@ -29,6 +29,7 @@ namespace hyperbrowse::ui
             IndexHandler onMoveSelectionToFavorite;
             IndexHandler onMoveSelectionToRecent;
             CommandHandler onOpenFolder;
+            CommandHandler onNewFolder;
             CommandHandler onNavigateBackFolder;
             CommandHandler onNavigateForwardFolder;
             CommandHandler onToggleCurrentFolderFavorite;

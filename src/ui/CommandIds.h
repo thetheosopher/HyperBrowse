@@ -73,6 +73,7 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_BASE = 1030;
     inline constexpr UINT ID_FILE_OPEN_RECENT_FOLDER_LAST = 1037;
     inline constexpr UINT ID_FILE_COPY_SELECTION_BROWSE = 1040;
+    inline constexpr UINT ID_FILE_NEW_FOLDER = 1041;
     inline constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_BASE = 1100;
     inline constexpr UINT ID_FILE_COPY_SELECTION_FAVORITE_LAST = ID_FILE_COPY_SELECTION_FAVORITE_BASE
         + static_cast<UINT>(kQuickSendShortcutCount) - 1;
