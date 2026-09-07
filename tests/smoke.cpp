@@ -2892,6 +2892,46 @@ namespace
         Expect(workAreaWidthRect.left == monitorInfo.rcWork.left
                 && workAreaWidthRect.right == monitorInfo.rcWork.right,
             "Ctrl+Shift+W did not size the window to the monitor work-area width");
+        RECT fitWidthClientRect{};
+        Expect(GetClientRect(viewer.Hwnd(), &fitWidthClientRect) != FALSE,
+            "Failed to read the client area after Ctrl+Shift+W");
+        const DWORD fitWidthStyle = static_cast<DWORD>(GetWindowLongPtrW(viewer.Hwnd(), GWL_STYLE))
+            & ~(WS_MAXIMIZE | WS_MINIMIZE);
+        const DWORD fitWidthExStyle = static_cast<DWORD>(GetWindowLongPtrW(viewer.Hwnd(), GWL_EXSTYLE));
+        RECT fitWidthFrameRect{0, 0, 0, 0};
+        Expect(AdjustWindowRectEx(&fitWidthFrameRect, fitWidthStyle, FALSE, fitWidthExStyle) != FALSE,
+            "Failed to calculate the viewer frame for Ctrl+Shift+W");
+        const LONG fitWidthFrameHeight = fitWidthFrameRect.bottom - fitWidthFrameRect.top;
+        const LONG workAreaHeight = monitorInfo.rcWork.bottom - monitorInfo.rcWork.top;
+        const LONG availableFitWidthClientHeight = std::max<LONG>(1, workAreaHeight - fitWidthFrameHeight);
+        const auto expectedFitWidthClientHeight = [&](int imageWidth, int imageHeight) {
+            return std::min(
+                availableFitWidthClientHeight,
+                std::max<LONG>(1, static_cast<LONG>(std::lround(
+                    static_cast<double>(fitWidthClientRect.right) * imageHeight
+                    / std::max(1, imageWidth)))));
+        };
+        Expect(fitWidthClientRect.bottom == expectedFitWidthClientHeight(currentImageWidth, currentImageHeight),
+            "Ctrl+Shift+W did not preserve the image aspect within the monitor work area");
+
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_NEXT, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 2 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer window FitWidth navigation failed");
+        RECT nextFitWidthRect{};
+        RECT nextFitWidthClientRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &nextFitWidthRect) != FALSE
+                && GetClientRect(viewer.Hwnd(), &nextFitWidthClientRect) != FALSE,
+            "Failed to read the viewer bounds after window FitWidth navigation");
+        Expect(nextFitWidthRect.left == monitorInfo.rcWork.left
+                && nextFitWidthRect.right == monitorInfo.rcWork.right
+                && nextFitWidthClientRect.bottom == std::min(
+                    availableFitWidthClientHeight,
+                    std::max<LONG>(1, static_cast<LONG>(std::lround(
+                        static_cast<double>(nextFitWidthClientRect.right) * 16.0 / 40.0)))),
+            "Viewer window FitWidth navigation did not apply the monitor-bounded image aspect");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_PRIOR, 0);
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer window FitWidth navigation did not restore the source image");
         Expect(SetKeyboardState(originalKeyboardState) != FALSE,
             "Failed to restore the keyboard state after testing window geometry shortcuts");
 
