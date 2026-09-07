@@ -9358,6 +9358,18 @@ namespace hyperbrowse::ui
             }
         }
 
+        if (message->message == WM_XBUTTONDOWN
+            && message->hwnd
+            && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd)))
+        {
+            const UINT commandId = command_ids::CommandIdFromXButton(GET_XBUTTON_WPARAM(message->wParam));
+            if (commandId != 0)
+            {
+                HandleCommand(commandId);
+                return true;
+            }
+        }
+
         if (shortcutReferenceWindow_ && IsWindow(shortcutReferenceWindow_)
             && message->hwnd
             && (message->hwnd == shortcutReferenceWindow_ || IsChild(shortcutReferenceWindow_, message->hwnd))
@@ -20652,6 +20664,16 @@ namespace hyperbrowse::ui
         case WM_LBUTTONDOWN:
             OnLButtonDown(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             return 0;
+        case WM_XBUTTONDOWN:
+        {
+            const UINT commandId = command_ids::CommandIdFromXButton(GET_XBUTTON_WPARAM(wParam));
+            if (commandId != 0)
+            {
+                HandleCommand(commandId);
+                return 0;
+            }
+            return std::nullopt;
+        }
         case WM_PARENTNOTIFY:
             if (commandBarKeyboardActive_)
             {
@@ -21004,6 +21026,7 @@ namespace hyperbrowse::ui
         {
         case WM_PARENTNOTIFY:
         case WM_LBUTTONDOWN:
+        case WM_XBUTTONDOWN:
         case WM_LBUTTONDBLCLK:
         case WM_LBUTTONUP:
         case WM_MOUSEMOVE:

@@ -64,8 +64,8 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | --- | --- |
 | `F1` | Open the user guide |
 | `Ctrl+O` | Open a folder |
-| `Backspace` / `Alt+Left` | Navigate to the previous folder |
-| `Alt+Right` | Navigate to the next folder |
+| Mouse Back button / `Backspace` / `Alt+Left` | Navigate to the previous folder |
+| Mouse Forward button / `Alt+Right` | Navigate to the next folder |
 | `Esc` | Close the main window when enabled in Settings; otherwise do nothing |
 | `Ctrl+W` | Minimize the main window |
 | `F5` | Refresh the folder tree |

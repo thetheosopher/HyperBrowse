@@ -40,6 +40,14 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_FILE_MOVE_SELECTION_TO_NEW_CHILD_FOLDER = 1039;
     inline constexpr UINT ID_VIEW_NAVIGATE_BACK_FOLDER = 1049;
     inline constexpr UINT ID_VIEW_NAVIGATE_FORWARD_FOLDER = 1050;
+
+    inline constexpr UINT CommandIdFromXButton(UINT xButton) noexcept
+    {
+        return xButton == XBUTTON1 ? ID_VIEW_NAVIGATE_BACK_FOLDER
+            : xButton == XBUTTON2 ? ID_VIEW_NAVIGATE_FORWARD_FOLDER
+            : 0;
+    }
+
     inline constexpr UINT ID_FILE_COPY_FILES_TO_CLIPBOARD = 1087;
     inline constexpr UINT ID_FILE_PASTE_FILES = 1088;
     inline constexpr UINT ID_FILE_SELECT_ALL = 1089;

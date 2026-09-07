@@ -90,6 +90,14 @@ namespace hyperbrowse::tests
         {
             using hyperbrowse::ui::FolderHistory;
             using hyperbrowse::ui::FolderHistoryNavigationDirection;
+                 using namespace hyperbrowse::ui::command_ids;
+
+                 Expect(CommandIdFromXButton(XBUTTON1) == ID_VIEW_NAVIGATE_BACK_FOLDER,
+                     "Mouse back button did not map to folder back navigation");
+                 Expect(CommandIdFromXButton(XBUTTON2) == ID_VIEW_NAVIGATE_FORWARD_FOLDER,
+                     "Mouse forward button did not map to folder forward navigation");
+                 Expect(CommandIdFromXButton(0) == 0,
+                     "Unknown mouse button unexpectedly mapped to folder navigation");
 
             FolderHistory history(4);
             history.RecordOpenedFolder(L"C:\\one");
@@ -1756,7 +1764,11 @@ namespace hyperbrowse::tests
 
     bool RunFocusedPolicyScenario(std::string_view scenario)
     {
-        if (scenario == "--quick-access")
+        if (scenario == "--folder-history")
+        {
+            RunFolderHistoryScenario();
+        }
+        else if (scenario == "--quick-access")
         {
             RunQuickAccessMenuBuilderScenario();
         }
