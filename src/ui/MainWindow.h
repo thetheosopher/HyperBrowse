@@ -203,6 +203,7 @@ namespace hyperbrowse::ui
         void ApplyRawJpegPairingSettings();
         void ApplyAppTextSize();
         void RebuildAppTextFonts();
+        void RebuildThemeBrushes();
         void ApplyTheme();
         void QueueMemoryPressureSample();
         void LoadWindowState();

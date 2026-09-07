@@ -9144,6 +9144,7 @@ namespace hyperbrowse::ui
         }
 
         LoadWindowState();
+        RebuildThemeBrushes();
         ApplyStartupLaunchPathOverride();
         ApplyResourceProfileSetting();
         ApplyCacheCapacityOverrideSettings();
@@ -9450,7 +9451,7 @@ namespace hyperbrowse::ui
         wc.hInstance = instance_;
         wc.lpszClassName = kWindowClassName;
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        wc.hbrBackground = nullptr;
         wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
         wc.hIcon = LoadIconW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE));
         wc.hIconSm = static_cast<HICON>(
@@ -17626,7 +17627,7 @@ namespace hyperbrowse::ui
         }
     }
 
-    void MainWindow::ApplyTheme()
+    void MainWindow::RebuildThemeBrushes()
     {
         const ThemePalette palette = GetThemePalette();
 
@@ -17651,6 +17652,12 @@ namespace hyperbrowse::ui
         backgroundBrush_ = CreateSolidBrush(palette.windowBackground);
         actionFieldBrush_ = CreateSolidBrush(palette.actionFieldBackground);
         detailsPanelBrush_ = CreateSolidBrush(palette.paneBackground);
+    }
+
+    void MainWindow::ApplyTheme()
+    {
+        const ThemePalette palette = GetThemePalette();
+        RebuildThemeBrushes();
 
         if (menuBackgroundBrush_)
         {
