@@ -11,6 +11,7 @@ namespace hyperbrowse::ui
         constexpr std::wstring_view kFavoriteDestinationFoldersValue = L"FavoriteDestinationFolders";
         constexpr std::wstring_view kLastQuickSendDestinationValue = L"LastQuickSendDestination";
         constexpr std::wstring_view kQuickSendShortcutPrefix = L"QuickSendShortcut";
+        constexpr std::wstring_view kQuickSendShortcutOrderValue = L"QuickSendShortcutOrder";
     }
 
     QuickSendPersistedState QuickSendPersistence::Load(const ReadValue& readValue,
@@ -31,6 +32,16 @@ namespace hyperbrowse::ui
         {
             const std::wstring valueName = std::wstring(kQuickSendShortcutPrefix) + std::to_wstring(index);
             readValue(valueName, &state.shortcutAssignments[index]);
+        }
+
+        std::wstring shortcutOrder;
+        if (readValue(kQuickSendShortcutOrderValue, &shortcutOrder))
+        {
+            std::wstring normalizedShortcutOrder;
+            if (QuickSendModel::TryNormalizeShortcutOrder(shortcutOrder, &normalizedShortcutOrder))
+            {
+                state.shortcutAssignmentOrder = std::move(normalizedShortcutOrder);
+            }
         }
 
         return state;
@@ -56,5 +67,6 @@ namespace hyperbrowse::ui
             const std::wstring valueName = std::wstring(kQuickSendShortcutPrefix) + std::to_wstring(index);
             writeValue(valueName, state.shortcutAssignments[index]);
         }
+        writeValue(kQuickSendShortcutOrderValue, state.shortcutAssignmentOrder);
     }
 }

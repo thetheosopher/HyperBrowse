@@ -115,9 +115,9 @@ namespace hyperbrowse::tests
                    "Quick Send allowed two favorite destinations to claim one digit");
             Expect(model.ShortcutForDestination(L"C:\\Favorites\\One") == 2,
                    "Quick Send duplicate rejection disturbed the existing assignment");
-            Expect(model.AssignNextAvailableShortcut(L"D:\\Favorites\\Two") == 0,
-                   "Quick Send did not assign the lowest available shortcut");
-            Expect(model.AssignNextAvailableShortcut(L"D:\\Favorites\\Two") == 0,
+            Expect(model.AssignNextAvailableShortcut(L"D:\\Favorites\\Two") == 7,
+                   "Quick Send did not assign the first available shortcut in the preferred order");
+            Expect(model.AssignNextAvailableShortcut(L"D:\\Favorites\\Two") == 7,
                    "Quick Send changed an existing automatic shortcut assignment");
             Expect(model.SetShortcutForDestination(L"D:\\Favorites\\Two", L"12")
                        == QuickSendAssignmentResult::InvalidShortcut,
@@ -161,6 +161,49 @@ namespace hyperbrowse::tests
             Expect(restoredModel.ShortcutForDestination(L"C:\\Favorites\\One") == 1,
                    "Quick Send assignment changed when favorite ordering changed");
 
+                     QuickSendModel orderedModel;
+                     orderedModel.SetFavoriteDestinations({
+                            L"C:\\Favorites\\First",
+                            L"C:\\Favorites\\Second",
+                            L"C:\\Favorites\\Third",
+                            L"C:\\Favorites\\Fourth",
+                     });
+                     Expect(orderedModel.SetShortcutAssignmentOrder(L"987")
+                                      && orderedModel.ShortcutAssignmentOrder() == L"987",
+                               "Quick Send did not accept and normalize a custom shortcut order");
+                     Expect(orderedModel.AssignNextAvailableShortcut(L"C:\\Favorites\\First") == 9
+                                      && orderedModel.AssignNextAvailableShortcut(L"C:\\Favorites\\Second") == 8
+                                      && orderedModel.AssignNextAvailableShortcut(L"C:\\Favorites\\Third") == 7
+                                      && orderedModel.AssignNextAvailableShortcut(L"C:\\Favorites\\Fourth") == 0,
+                               "Quick Send did not assign omitted supported keys after the custom order");
+                     Expect(!orderedModel.SetShortcutAssignmentOrder(L"99")
+                                      && !orderedModel.SetShortcutAssignmentOrder(L" ")
+                                      && orderedModel.ShortcutAssignmentOrder() == L"987",
+                               "Quick Send accepted an invalid or duplicate custom shortcut order");
+
+                     QuickSendModel defaultOrderModel;
+                     defaultOrderModel.SetFavoriteDestinations({
+                            L"C:\\Favorites\\Default1",
+                            L"C:\\Favorites\\Default2",
+                            L"C:\\Favorites\\Default3",
+                            L"C:\\Favorites\\Default4",
+                            L"C:\\Favorites\\Default5",
+                            L"C:\\Favorites\\Default6",
+                            L"C:\\Favorites\\Default7",
+                            L"C:\\Favorites\\Default8",
+                            L"C:\\Favorites\\Default9",
+                            L"C:\\Favorites\\Default10",
+                            L"C:\\Favorites\\Default11",
+                            L"C:\\Favorites\\Default12",
+                     });
+                     for (std::size_t index = 0; index < hyperbrowse::ui::kDefaultQuickSendShortcutOrder.size(); ++index)
+                     {
+                            const std::wstring path = L"C:\\Favorites\\Default" + std::to_wstring(index + 1);
+                            const std::wstring shortcutText(1, hyperbrowse::ui::kDefaultQuickSendShortcutOrder[index]);
+                            Expect(defaultOrderModel.AssignNextAvailableShortcut(path) == QuickSendModel::ShortcutIndexFromText(shortcutText),
+                                      "Quick Send did not use the default keyboard-near shortcut order");
+                     }
+
             QuickSendModel sortedModel;
             sortedModel.SetFavoriteDestinations({
                 L"C:\\Favorites\\Unassigned",
@@ -186,13 +229,25 @@ namespace hyperbrowse::tests
                 fullFavorites.push_back(L"C:\\Favorites\\Shortcut" + std::to_wstring(index));
             }
             fullModel.SetFavoriteDestinations(fullFavorites);
+                     std::vector<int> expectedShortcutOrder;
+                     for (const wchar_t character : hyperbrowse::ui::kDefaultQuickSendShortcutOrder)
+                     {
+                            expectedShortcutOrder.push_back(*QuickSendModel::ShortcutIndexFromText(std::wstring_view(&character, 1)));
+                     }
+                     for (std::size_t index = 0; index < hyperbrowse::ui::kQuickSendShortcutCount; ++index)
+                     {
+                            if (std::ranges::find(expectedShortcutOrder, static_cast<int>(index)) == expectedShortcutOrder.end())
+                            {
+                                   expectedShortcutOrder.push_back(static_cast<int>(index));
+                            }
+                     }
             for (std::size_t index = 0; index < hyperbrowse::ui::kQuickSendShortcutCount; ++index)
             {
-                Expect(fullModel.AssignNextAvailableShortcut(fullFavorites[index]) == static_cast<int>(index),
-                       "Quick Send did not consume shortcuts in digit-then-letter order");
+                            Expect(fullModel.AssignNextAvailableShortcut(fullFavorites[index]) == expectedShortcutOrder[index],
+                                      "Quick Send did not consume shortcuts in the configured order");
             }
-            Expect(fullModel.ShortcutForDestination(L"C:\\Favorites\\Shortcut10") == 10,
-                   "Quick Send did not assign A after the digit shortcuts");
+                     Expect(fullModel.ShortcutForDestination(L"C:\\Favorites\\Shortcut10") == expectedShortcutOrder[10],
+                               "Quick Send did not assign the eleventh shortcut in the configured order");
             fullFavorites.push_back(L"C:\\Favorites\\New");
             fullModel.SetFavoriteDestinations(fullFavorites);
             Expect(fullModel.AssignNextAvailableShortcut(L"C:\\Favorites\\New") == std::nullopt,
@@ -213,6 +268,7 @@ namespace hyperbrowse::tests
                      };
                      state.lastQuickSendDestination = L"D:\\Favorites\\Two";
                      state.shortcutAssignments[3] = L"D:\\Favorites\\Two";
+                     state.shortcutAssignmentOrder = L"987";
 
                      QuickSendPersistence::Save(
                             state,
@@ -227,6 +283,7 @@ namespace hyperbrowse::tests
 
                      Expect(values[L"FavoriteDestinationFolders"] == L"C:\\Favorites\\One\nD:\\Favorites\\Two\nE:\\Favorites\\Three"
                                       && values[L"LastQuickSendDestination"] == L"D:\\Favorites\\Two"
+                                      && values[L"QuickSendShortcutOrder"] == L"987"
                                       && values[L"QuickSendShortcut3"] == L"D:\\Favorites\\Two",
                                "Quick Send persistence did not write the expected registry value contract");
 
@@ -247,6 +304,7 @@ namespace hyperbrowse::tests
                                              L"C:\\Favorites\\One",
                                              L"D:\\Favorites\\Two"}
                                       && restored.lastQuickSendDestination == L"D:\\Favorites\\Two"
+                                      && restored.shortcutAssignmentOrder == L"987"
                                       && restored.shortcutAssignments[3] == L"D:\\Favorites\\Two",
                                "Quick Send persistence did not restore capped favorites, last destination, and shortcuts");
 

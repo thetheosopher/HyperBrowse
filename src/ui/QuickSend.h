@@ -12,6 +12,7 @@ namespace hyperbrowse::ui
     inline constexpr std::size_t kQuickSendDigitShortcutCount = 10;
     inline constexpr std::size_t kQuickSendLetterShortcutCount = 26;
     inline constexpr std::wstring_view kQuickSendPunctuationShortcuts = L"`~!@#$%^&*()-_=+[{]}\\|;:'\",<.>/?";
+    inline constexpr std::wstring_view kDefaultQuickSendShortcutOrder = L"7890-=123456";
     inline constexpr std::size_t kQuickSendShortcutCount = kQuickSendDigitShortcutCount
         + kQuickSendLetterShortcutCount
         + kQuickSendPunctuationShortcuts.size();
@@ -41,6 +42,11 @@ namespace hyperbrowse::ui
 
         static std::optional<int> ShortcutIndexFromText(std::wstring_view shortcutText);
         static wchar_t ShortcutCharacter(int shortcut);
+        static bool TryNormalizeShortcutOrder(std::wstring_view shortcutOrder,
+                                              std::wstring* normalizedOrder);
+
+        bool SetShortcutAssignmentOrder(std::wstring_view shortcutOrder);
+        const std::wstring& ShortcutAssignmentOrder() const noexcept;
 
         QuickSendAssignmentResult SetShortcutForDestination(
             std::wstring_view destinationPath,
@@ -57,5 +63,6 @@ namespace hyperbrowse::ui
 
         std::vector<std::wstring> favoriteDestinations_;
         ShortcutAssignments shortcutAssignments_{};
+        std::wstring shortcutAssignmentOrder_{kDefaultQuickSendShortcutOrder};
     };
 }

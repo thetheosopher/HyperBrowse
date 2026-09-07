@@ -3,6 +3,7 @@
 #include "util/PathUtils.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace hyperbrowse::ui
 {
@@ -139,6 +140,50 @@ namespace hyperbrowse::ui
             static_cast<std::size_t>(shortcut - static_cast<int>(kQuickSendDigitShortcutCount + kQuickSendLetterShortcutCount))];
     }
 
+    bool QuickSendModel::TryNormalizeShortcutOrder(std::wstring_view shortcutOrder,
+                                                   std::wstring* normalizedOrder)
+    {
+        if (!normalizedOrder)
+        {
+            return false;
+        }
+
+        std::array<bool, kQuickSendShortcutCount> seen{};
+        std::wstring normalized;
+        normalized.reserve(shortcutOrder.size());
+        for (const wchar_t character : shortcutOrder)
+        {
+            const std::optional<int> shortcut = ShortcutIndexFromText(std::wstring_view(&character, 1));
+            if (!shortcut || seen[static_cast<std::size_t>(*shortcut)])
+            {
+                return false;
+            }
+
+            seen[static_cast<std::size_t>(*shortcut)] = true;
+            normalized.push_back(ShortcutCharacter(*shortcut));
+        }
+
+        *normalizedOrder = std::move(normalized);
+        return true;
+    }
+
+    bool QuickSendModel::SetShortcutAssignmentOrder(std::wstring_view shortcutOrder)
+    {
+        std::wstring normalizedOrder;
+        if (!TryNormalizeShortcutOrder(shortcutOrder, &normalizedOrder))
+        {
+            return false;
+        }
+
+        shortcutAssignmentOrder_ = std::move(normalizedOrder);
+        return true;
+    }
+
+    const std::wstring& QuickSendModel::ShortcutAssignmentOrder() const noexcept
+    {
+        return shortcutAssignmentOrder_;
+    }
+
     QuickSendAssignmentResult QuickSendModel::SetShortcutForDestination(
         std::wstring_view destinationPath,
         std::wstring_view shortcutText)
@@ -198,12 +243,34 @@ namespace hyperbrowse::ui
         }
 
         const std::wstring normalizedDestination = NormalizeStoredPath(destinationPath);
-        for (std::size_t index = 0; index < shortcutAssignments_.size(); ++index)
+        const auto assignIfAvailable = [&](int shortcut) -> std::optional<int>
         {
+            const std::size_t index = static_cast<std::size_t>(shortcut);
             if (shortcutAssignments_[index].empty())
             {
                 shortcutAssignments_[index] = normalizedDestination;
-                return static_cast<int>(index);
+                return shortcut;
+            }
+            return std::nullopt;
+        };
+
+        for (const wchar_t character : shortcutAssignmentOrder_)
+        {
+            const std::optional<int> shortcut = ShortcutIndexFromText(std::wstring_view(&character, 1));
+            if (shortcut)
+            {
+                if (const std::optional<int> assignedShortcut = assignIfAvailable(*shortcut))
+                {
+                    return assignedShortcut;
+                }
+            }
+        }
+
+        for (std::size_t index = 0; index < shortcutAssignments_.size(); ++index)
+        {
+            if (const std::optional<int> assignedShortcut = assignIfAvailable(static_cast<int>(index)))
+            {
+                return assignedShortcut;
             }
         }
 

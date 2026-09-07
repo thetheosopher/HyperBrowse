@@ -3596,6 +3596,19 @@ namespace
             return false;
         }
 
+        std::wstring normalizedQuickSendShortcutOrder;
+        if (!hyperbrowse::ui::QuickSendModel::TryNormalizeShortcutOrder(
+                ReadWindowText(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::QuickSendShortcutOrder)),
+                &normalizedQuickSendShortcutOrder))
+        {
+            MessageBoxW(hwnd,
+                        L"Enter each supported Quick Send key at most once; unsupported characters are not allowed.",
+                        state->title.c_str(),
+                        MB_OK | MB_ICONWARNING);
+            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::QuickSendShortcutOrder));
+            return false;
+        }
+
         const int wheelIndex = isChecked(ConsolidatedSettingsControl::ViewerWheelNavigate) ? 1 : 0;
         const int overlaySizeIndex = comboIndex(ConsolidatedSettingsControl::OverlayTextSize);
         const int escapeKeyBehaviorIndex = comboIndex(ConsolidatedSettingsControl::EscapeKeyBehavior);
@@ -3643,6 +3656,7 @@ namespace
         state->prefetchDepthOverride = prefetchAutomatic
             ? hyperbrowse::util::kAutomaticPrefetchDepth
             : static_cast<int>(prefetchDepth);
+        state->quickSendShortcutOrder = std::move(normalizedQuickSendShortcutOrder);
         state->showPressureStateInStatusBar = isChecked(ConsolidatedSettingsControl::PressureStatus);
         state->nvJpegEnabled = isChecked(ConsolidatedSettingsControl::NvJpeg);
         state->libRawOutOfProcessEnabled = isChecked(ConsolidatedSettingsControl::LibRawOutOfProcess);
@@ -3747,7 +3761,8 @@ namespace
                 L"Resource profile",
                 L"Thumbnail cache cap (MB)",
                 L"Metadata cache cap (entries)",
-                L"Prefetch depth (items)"};
+                L"Prefetch depth (items)",
+                L"New Quick Send shortcut order"};
             const std::array checkboxTexts{
                 L"Use slideshow transitions",
                 L"Treat paired RAW+JPEG files as one operation",
@@ -3933,6 +3948,12 @@ namespace
             check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when ESC is pressed", y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
+            y += rowHeight + rowGap;
+            label(ConsolidatedSettingsPage::Behavior, L"New Quick Send shortcut order", y);
+            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Behavior, L"EDIT", nullptr,
+                                              WS_TABSTOP | ES_AUTOHSCROLL, valueLeft, y, valueWidth, rowHeight,
+                                              ConsolidatedSettingsControlId(ConsolidatedSettingsControl::QuickSendShortcutOrder),
+                                              ConsolidatedSettingsControl::QuickSendShortcutOrder);
 
             for (HWND control : state->controls)
             {
@@ -3994,6 +4015,8 @@ namespace
                 : state->prefetchDepthOverride;
             SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::PrefetchDepth),
                            std::to_wstring(prefetchDepth).c_str());
+            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::QuickSendShortcutOrder),
+                           state->quickSendShortcutOrder.c_str());
             SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin), UDM_SETBUDDY,
                          reinterpret_cast<WPARAM>(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration)), 0);
             SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin), UDM_SETRANGE32,
@@ -4620,6 +4643,8 @@ namespace
             check(ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when ESC is pressed", y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
+            y += rowHeight + rowGap;
+            labelValue(L"New Quick Send shortcut order", ConsolidatedSettingsControl::QuickSendShortcutOrder, y);
             break;
         default:
             break;
@@ -4678,6 +4703,7 @@ namespace
         setChoiceVisibility(ConsolidatedSettingsControl::AppTextSize, ConsolidatedSettingsPage::Appearance);
         setChoiceVisibility(ConsolidatedSettingsControl::ThumbnailSize, ConsolidatedSettingsPage::Appearance);
         setChoiceVisibility(ConsolidatedSettingsControl::ResourceProfile, ConsolidatedSettingsPage::Performance);
+        setChoiceVisibility(ConsolidatedSettingsControl::QuickSendShortcutOrder, ConsolidatedSettingsPage::Behavior);
         const auto positionChoice = [&](ConsolidatedSettingsControl control)
         {
             if (const HWND choice = state.nativeControls[static_cast<std::size_t>(control)])
@@ -4693,6 +4719,7 @@ namespace
         positionChoice(ConsolidatedSettingsControl::AppTextSize);
         positionChoice(ConsolidatedSettingsControl::ThumbnailSize);
         positionChoice(ConsolidatedSettingsControl::ResourceProfile);
+        positionChoice(ConsolidatedSettingsControl::QuickSendShortcutOrder);
         InvalidateRect(state.dialogWindow, nullptr, FALSE);
     }
 
@@ -5015,6 +5042,19 @@ namespace
 
     bool CollectExperimentalSettings(HWND hwnd, ExperimentalSettingsDialogState& state)
     {
+        std::wstring normalizedQuickSendShortcutOrder;
+        if (!hyperbrowse::ui::QuickSendModel::TryNormalizeShortcutOrder(
+                ReadWindowText(state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)]),
+                &normalizedQuickSendShortcutOrder))
+        {
+            MessageBoxW(hwnd,
+                        L"Enter each supported Quick Send key at most once; unsupported characters are not allowed.",
+                        state.settings->title.c_str(),
+                        MB_OK | MB_ICONWARNING);
+            SetFocus(state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)]);
+            return false;
+        }
+
         UINT slideshowDuration = 0;
         if (!TryReadDialogUInt(state.numericEdits[0], kSlideshowMinimumDurationMs, kSlideshowMaximumDurationMs, &slideshowDuration))
         {
@@ -5065,6 +5105,7 @@ namespace
         state.settings->prefetchDepthOverride = prefetchAutomatic
             ? hyperbrowse::util::kAutomaticPrefetchDepth
             : static_cast<int>(prefetchDepth);
+        state.settings->quickSendShortcutOrder = std::move(normalizedQuickSendShortcutOrder);
         return true;
     }
 
@@ -5222,6 +5263,23 @@ namespace
                 {
                     SendMessageW(state->numericEdits[index], WM_SETFONT, reinterpret_cast<WPARAM>(state->controlFont), TRUE);
                 }
+            }
+            state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)] = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"EDIT",
+                state->settings->quickSendShortcutOrder.c_str(),
+                WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
+                0,
+                0,
+                0,
+                0,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(5900)),
+                state->instance,
+                nullptr);
+            if (const HWND shortcutOrderEdit = state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)])
+            {
+                SendMessageW(shortcutOrderEdit, WM_SETFONT, reinterpret_cast<WPARAM>(state->controlFont), TRUE);
             }
             const auto createChoice = [&](ConsolidatedSettingsControl control,
                                           const std::vector<std::wstring>& values,
@@ -5652,6 +5710,10 @@ namespace
                     {
                         DestroyWindow(edit);
                     }
+                }
+                if (const HWND shortcutOrderEdit = state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)])
+                {
+                    DestroyWindow(shortcutOrderEdit);
                 }
                 if (state->editBackgroundBrush)
                 {
@@ -11404,6 +11466,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::SyncQuickSendModel()
     {
+        quickSendModel_.SetShortcutAssignmentOrder(quickSendShortcutOrder_);
         quickSendModel_.SetFavoriteDestinations(favoriteDestinationFolders_);
     }
 
@@ -11450,6 +11513,7 @@ namespace hyperbrowse::ui
             kFavoriteDestinationLimit);
         favoriteDestinationFolders_ = persistedState.favoriteDestinationFolders;
         lastQuickSendDestination_ = persistedState.lastQuickSendDestination;
+        quickSendShortcutOrder_ = persistedState.shortcutAssignmentOrder;
         SyncQuickSendModel();
         quickSendModel_.SetShortcutAssignments(persistedState.shortcutAssignments);
         SortFavoriteDestinationsByShortcutInMemory();
@@ -11468,6 +11532,7 @@ namespace hyperbrowse::ui
         state.favoriteDestinationFolders = favoriteDestinationFolders_;
         state.lastQuickSendDestination = lastQuickSendDestination_;
         state.shortcutAssignments = quickSendModel_.ShortcutAssignmentsByKey();
+        state.shortcutAssignmentOrder = quickSendShortcutOrder_;
         QuickSendPersistence::Save(
             state,
             [&](std::wstring_view valueName, std::wstring_view value)
@@ -18297,6 +18362,7 @@ namespace hyperbrowse::ui
         state.libRawOutOfProcessEnabled = libRawOutOfProcessEnabled_;
         state.closeMainWindowOnEscape = closeMainWindowOnEscape_;
         state.singleInstanceEnabled = app::Application::IsSingleInstanceEnabled();
+        state.quickSendShortcutOrder = quickSendShortcutOrder_;
         state.secondaryMonitorAvailable = FindAlternateMonitorForWindow(hwnd_) != nullptr;
         state.nvJpegAvailable = HasNvJpegCapability();
         state.libRawAvailable = decode::IsLibRawBuildEnabled();
@@ -18343,6 +18409,7 @@ namespace hyperbrowse::ui
                 || viewerWindow_->OverlayTextSize() != draft.overlayTextSize
                 || viewer::ViewerWindow::DefaultWindowedFullMetadataVisible() != draft.windowedFullMetadataVisible
                 || viewer::ViewerWindow::DefaultFullScreenFullMetadataVisible() != draft.fullScreenFullMetadataVisible;
+            const bool quickSendShortcutOrderChanged = quickSendShortcutOrder_ != draft.quickSendShortcutOrder;
 
             slideshowIntervalMs_ = NormalizeSlideshowDuration(draft.slideshowIntervalMs);
             slideshowTransitionStyle_ = draft.slideshowTransitionStyle;
@@ -18373,6 +18440,12 @@ namespace hyperbrowse::ui
             recursiveBrowsingEnabled_ = draft.recursiveBrowsingEnabled;
             showSubfoldersInBrowser_ = draft.showSubfoldersInBrowser;
             closeMainWindowOnEscape_ = draft.closeMainWindowOnEscape;
+            if (quickSendShortcutOrderChanged)
+            {
+                quickSendShortcutOrder_ = draft.quickSendShortcutOrder;
+                quickSendModel_.SetShortcutAssignmentOrder(quickSendShortcutOrder_);
+                SaveQuickSendStateToRegistry();
+            }
 
             app::Application::SetSingleInstanceEnabled(draft.singleInstanceEnabled);
             decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_ && HasNvJpegCapability());

@@ -570,6 +570,7 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
         std::wstring lastQuickSendDestination_;
+        std::wstring quickSendShortcutOrder_{kDefaultQuickSendShortcutOrder};
         FilingResumePersistedState filingResumeState_;
         QuickSendModel quickSendModel_;
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems_;

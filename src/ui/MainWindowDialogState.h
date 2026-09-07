@@ -83,6 +83,7 @@ namespace hyperbrowse::ui::dialog_detail
         FullScreenFullMetadata,
         PrefetchDepth,
         PrefetchDepthAutomatic,
+        QuickSendShortcutOrder,
         Count,
     };
 
@@ -357,6 +358,7 @@ namespace hyperbrowse::ui::dialog_detail
         bool secondaryMonitorAvailable{true};
         bool nvJpegAvailable{};
         bool libRawAvailable{};
+        std::wstring quickSendShortcutOrder;
         std::function<void(const ConsolidatedSettingsDialogState&)> apply;
         bool accepted{};
         bool done{};

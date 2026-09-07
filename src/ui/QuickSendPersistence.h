@@ -15,6 +15,7 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> favoriteDestinationFolders;
         std::wstring lastQuickSendDestination;
         QuickSendModel::ShortcutAssignments shortcutAssignments{};
+        std::wstring shortcutAssignmentOrder{kDefaultQuickSendShortcutOrder};
     };
 
     class QuickSendPersistence
