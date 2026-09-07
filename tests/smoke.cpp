@@ -149,6 +149,23 @@ namespace
         HWND lastViewerQuickSendSource{};
     };
 
+    std::vector<HWND> FindOpenViewerWindowHandles()
+    {
+        std::vector<HWND> handles;
+        EnumWindows([](HWND window, LPARAM parameter) -> BOOL
+        {
+            wchar_t className[64]{};
+            if (GetClassNameW(window, className, static_cast<int>(std::size(className))) > 0
+                && std::wstring_view(className) == L"HyperBrowseViewerWindow"
+                && IsWindow(window) != FALSE)
+            {
+                static_cast<std::vector<HWND>*>(reinterpret_cast<void*>(parameter))->push_back(window);
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&handles));
+        return handles;
+    }
+
     class ComScope
     {
     public:
@@ -3936,6 +3953,181 @@ namespace
         }
     }
 
+    void RunMultiViewerSettingsScenario(HINSTANCE instance)
+    {
+        using hyperbrowse::ui::command_ids::ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW;
+        using hyperbrowse::ui::command_ids::ID_VIEW_SETTINGS;
+        using hyperbrowse::viewer::InfoOverlayTextSize;
+
+        constexpr wchar_t kDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
+        constexpr wchar_t kSettingsUiEnvironment[] = L"HYPERBROWSE_SETTINGS_UI";
+        constexpr int kInfoOverlaysControlId = 5013;
+        constexpr int kOverlayTextSizeControlId = 5015;
+        constexpr int kWindowedFullMetadataControlId = 5037;
+        constexpr int kFullScreenFullMetadataControlId = 5038;
+        constexpr int kApplyButtonId = 5500;
+        ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
+        ScopedRegistryDwordBackup overlayTextSizeBackup(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
+        ScopedRegistryDwordBackup windowedFullMetadataBackup(kRegistryPath, kRegistryValueViewerWindowedFullMetadataVisible);
+        ScopedRegistryDwordBackup fullScreenFullMetadataBackup(kRegistryPath, kRegistryValueViewerFullScreenFullMetadataVisible);
+        ScopedRegistryDwordBackup fullMetadataBackup(kRegistryPath, kRegistryValueViewerFullMetadataVisible);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueViewerWindowedFullMetadataVisible);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueViewerFullScreenFullMetadataVisible);
+        DeleteRegistryValue(kRegistryPath, kRegistryValueViewerFullMetadataVisible);
+
+        wchar_t previousValue[64]{};
+        const DWORD previousLength = GetEnvironmentVariableW(
+            kSettingsUiEnvironment,
+            previousValue,
+            static_cast<DWORD>(std::size(previousValue)));
+        SetEnvironmentVariableW(kSettingsUiEnvironment, L"legacy");
+
+        TempFolder root(L"HyperBrowseMultiViewerSettings");
+        const fs::path firstPath = root.Root() / L"first.png";
+        const fs::path secondPath = root.Root() / L"second.png";
+        WriteTestImage(firstPath, TestImageFormat::Png, 64, 32);
+        WriteTestImage(secondPath, TestImageFormat::Png, 32, 64);
+
+        hyperbrowse::ui::MainWindow mainWindow(instance);
+        Expect(mainWindow.Create(), "Failed to create MainWindow for multi-viewer settings smoke coverage");
+        mainWindow.OpenViewerAtPath(firstPath.wstring());
+        Expect(PumpMessagesUntil([]()
+        {
+            return FindOpenViewerWindowHandles().size() >= 1;
+        }, 10000), "Primary viewer did not open for multi-viewer settings smoke coverage");
+
+        SendMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, 0), 0);
+        Expect(PumpMessagesUntil([]()
+        {
+            return FindOpenViewerWindowHandles().size() >= 2;
+        }, 10000), "Additional viewer did not open for multi-viewer settings smoke coverage");
+
+        const std::vector<HWND> viewerHandles = FindOpenViewerWindowHandles();
+        std::vector<hyperbrowse::viewer::ViewerWindow*> viewers;
+        viewers.reserve(viewerHandles.size());
+        for (HWND viewerHandle : viewerHandles)
+        {
+            auto* viewer = reinterpret_cast<hyperbrowse::viewer::ViewerWindow*>(
+                GetWindowLongPtrW(viewerHandle, GWLP_USERDATA));
+            Expect(viewer != nullptr, "Could not recover a ViewerWindow for multi-viewer settings smoke coverage");
+            viewers.push_back(viewer);
+            SendMessageW(viewerHandle, WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        }
+        PumpMessagesFor(100);
+        for (const auto* viewer : viewers)
+        {
+            Expect(!viewer->IsFullScreen(), "Viewer did not enter windowed mode for multi-viewer settings smoke coverage");
+        }
+
+        std::atomic_bool done{false};
+        std::string failure;
+        std::thread worker([&]()
+        {
+            if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
+            {
+                failure = "Failed to post the legacy Settings command";
+                done.store(true, std::memory_order_release);
+                return;
+            }
+
+            HWND dialog = nullptr;
+            const ULONGLONG deadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < deadline && !(dialog = FindWindowW(kDialogClassName, nullptr)))
+            {
+                Sleep(10);
+            }
+            if (!dialog)
+            {
+                failure = "Legacy Settings dialog did not open";
+                done.store(true, std::memory_order_release);
+                return;
+            }
+
+            const auto failAndClose = [&](std::string message)
+            {
+                failure = std::move(message);
+                SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
+                done.store(true, std::memory_order_release);
+            };
+            const HWND infoOverlays = GetDlgItem(dialog, kInfoOverlaysControlId);
+            const HWND overlayTextSize = GetDlgItem(dialog, kOverlayTextSizeControlId);
+            const HWND windowedFullMetadata = GetDlgItem(dialog, kWindowedFullMetadataControlId);
+            const HWND fullScreenFullMetadata = GetDlgItem(dialog, kFullScreenFullMetadataControlId);
+            if (!infoOverlays || !overlayTextSize || !windowedFullMetadata || !fullScreenFullMetadata)
+            {
+                failAndClose("Legacy Settings did not create the Viewer overlay controls");
+                return;
+            }
+
+            SendMessageW(infoOverlays, BM_SETCHECK, BST_UNCHECKED, 0);
+            SendMessageW(windowedFullMetadata, BM_SETCHECK, BST_CHECKED, 0);
+            SendMessageW(fullScreenFullMetadata, BM_SETCHECK, BST_UNCHECKED, 0);
+            SendMessageW(overlayTextSize, CB_SETCURSEL, static_cast<WPARAM>(InfoOverlayTextSize::Large), 0);
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(kApplyButtonId, BN_CLICKED), 0);
+
+            for (const auto* viewer : viewers)
+            {
+                if (viewer->AreInfoOverlaysVisible()
+                    || viewer->OverlayTextSize() != InfoOverlayTextSize::Large
+                    || !viewer->IsFullMetadataVisible())
+                {
+                    failAndClose("Legacy Settings did not update every open viewer");
+                    return;
+                }
+            }
+
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDOK, 0), 0);
+            const ULONGLONG closeDeadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < closeDeadline && FindWindowW(kDialogClassName, nullptr))
+            {
+                Sleep(10);
+            }
+            if (FindWindowW(kDialogClassName, nullptr))
+            {
+                failure = "Legacy Settings did not close after applying multi-viewer settings";
+            }
+            done.store(true, std::memory_order_release);
+        });
+
+        Expect(PumpMessagesUntil([&]() { return done.load(std::memory_order_acquire); }, 15000),
+               "Multi-viewer Settings interaction timed out");
+        worker.join();
+        Expect(failure.empty(), failure.empty() ? "Multi-viewer Settings interaction failed" : failure.c_str());
+
+        for (HWND viewerHandle : viewerHandles)
+        {
+            SendMessageW(viewerHandle, WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+        }
+        PumpMessagesFor(100);
+        for (const auto* viewer : viewers)
+        {
+            Expect(viewer->IsFullScreen(), "Viewer did not return to full-screen mode after Settings Apply");
+            Expect(!viewer->AreInfoOverlaysVisible()
+                       && viewer->OverlayTextSize() == InfoOverlayTextSize::Large
+                       && !viewer->IsFullMetadataVisible(),
+                   "Legacy Settings did not apply the full-screen metadata preference to every viewer");
+        }
+
+        for (HWND viewerHandle : viewerHandles)
+        {
+            SendMessageW(viewerHandle, WM_CLOSE, 0, 0);
+        }
+        PumpMessagesFor(100);
+        DestroyWindow(mainWindow.Hwnd());
+        PumpMessagesFor(100);
+
+        if (previousLength > 0)
+        {
+            SetEnvironmentVariableW(kSettingsUiEnvironment, previousValue);
+        }
+        else
+        {
+            SetEnvironmentVariableW(kSettingsUiEnvironment, nullptr);
+        }
+    }
+
     void RunMainWindowFolderTreeScenario(HINSTANCE instance)
     {
          const std::vector<std::wstring> expectedSpecialRoots = ExpectedSpecialFolderRootTexts();
@@ -4097,6 +4289,7 @@ int main(int argc, char* argv[])
         const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
+        const bool multiViewerSettingsOnly = argc > 1 && std::string_view(argv[1]) == "--multi-viewer-settings";
         const std::string_view selectedScenario = argc > 1 ? std::string_view(argv[1]) : std::string_view{};
         const bool policyOnly = hyperbrowse::tests::RunFocusedPolicyScenario(selectedScenario);
         if (policyOnly)
@@ -4129,6 +4322,10 @@ int main(int argc, char* argv[])
         else if (settingsOnly)
         {
             RunDefaultSettingsScenario(instance);
+        }
+        else if (multiViewerSettingsOnly)
+        {
+            RunMultiViewerSettingsScenario(instance);
         }
         else
         {

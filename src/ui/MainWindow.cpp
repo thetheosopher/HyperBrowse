@@ -18598,6 +18598,7 @@ namespace hyperbrowse::ui
 
         state.apply = [this](const ConsolidatedSettingsDialogState& draft)
         {
+            const std::vector<viewer::ViewerWindow*> openViewerWindows = OpenViewerWindows();
             const bool slideshowDurationChanged = slideshowIntervalMs_ != draft.slideshowIntervalMs;
             const bool slideshowTransitionChanged = slideshowTransitionStyle_ != draft.slideshowTransitionStyle
                 || slideshowTransitionDurationMs_ != draft.slideshowTransitionDurationMs
@@ -18608,9 +18609,16 @@ namespace hyperbrowse::ui
                 || appTextSize_ != draft.appTextSize;
             const bool folderScopeChanged = recursiveBrowsingEnabled_ != draft.recursiveBrowsingEnabled
                 || showSubfoldersInBrowser_ != draft.showSubfoldersInBrowser;
-            const bool viewerOverlayChanged = !viewerWindow_ || !viewerWindow_->IsOpen()
-                || viewerWindow_->AreInfoOverlaysVisible() != draft.infoOverlaysVisible
-                || viewerWindow_->OverlayTextSize() != draft.overlayTextSize
+            const bool viewerOverlayChanged = openViewerWindows.empty()
+                || std::any_of(openViewerWindows.begin(), openViewerWindows.end(), [&draft](const viewer::ViewerWindow* viewer)
+                {
+                    const bool expectedFullMetadataVisible = viewer->IsFullScreen()
+                        ? draft.fullScreenFullMetadataVisible
+                        : draft.windowedFullMetadataVisible;
+                    return viewer->AreInfoOverlaysVisible() != draft.infoOverlaysVisible
+                        || viewer->OverlayTextSize() != draft.overlayTextSize
+                        || viewer->IsFullMetadataVisible() != expectedFullMetadataVisible;
+                })
                 || viewer::ViewerWindow::DefaultWindowedFullMetadataVisible() != draft.windowedFullMetadataVisible
                 || viewer::ViewerWindow::DefaultFullScreenFullMetadataVisible() != draft.fullScreenFullMetadataVisible;
             const bool quickSendShortcutOrderChanged = quickSendShortcutOrder_ != draft.quickSendShortcutOrder;
@@ -18663,18 +18671,18 @@ namespace hyperbrowse::ui
             {
                 viewer::ViewerWindow::SetDefaultWindowedFullMetadataVisible(draft.windowedFullMetadataVisible);
                 viewer::ViewerWindow::SetDefaultFullScreenFullMetadataVisible(draft.fullScreenFullMetadataVisible);
-                if (viewerWindow_ && viewerWindow_->IsOpen())
-                {
-                    viewerWindow_->SetInfoOverlaysVisible(draft.infoOverlaysVisible);
-                    viewerWindow_->SetOverlayTextSize(draft.overlayTextSize);
-                    viewerWindow_->SetFullMetadataVisible(viewerWindow_->IsFullScreen()
-                        ? draft.fullScreenFullMetadataVisible
-                        : draft.windowedFullMetadataVisible);
-                }
-                else
+                if (!viewerWindow_ || !viewerWindow_->IsOpen())
                 {
                     viewer::ViewerWindow::SetDefaultInfoOverlaysVisible(draft.infoOverlaysVisible);
                     viewer::ViewerWindow::SetDefaultOverlayTextSize(draft.overlayTextSize);
+                }
+                for (viewer::ViewerWindow* viewer : openViewerWindows)
+                {
+                    viewer->SetInfoOverlaysVisible(draft.infoOverlaysVisible);
+                    viewer->SetOverlayTextSize(draft.overlayTextSize);
+                    viewer->SetFullMetadataVisible(viewer->IsFullScreen()
+                        ? draft.fullScreenFullMetadataVisible
+                        : draft.windowedFullMetadataVisible);
                 }
             }
             ApplyViewerMouseWheelSetting();
