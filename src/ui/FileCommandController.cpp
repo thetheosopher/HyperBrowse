@@ -97,6 +97,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onQuickSendMove);
         case ID_FILE_QUICK_SEND_COPY:
             return Invoke(handlers_.onQuickSendCopy);
+        case ID_FILE_RESUME_FILING:
+            return Invoke(handlers_.onResumeFiling);
         case ID_FILE_COPY_SELECTION:
         case ID_FILE_COPY_SELECTION_BROWSE:
             return Invoke(handlers_.onCopySelection);

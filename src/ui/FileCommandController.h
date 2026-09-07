@@ -46,6 +46,7 @@ namespace hyperbrowse::ui
             CommandHandler onImageInformation;
             CommandHandler onQuickSendMove;
             CommandHandler onQuickSendCopy;
+            CommandHandler onResumeFiling;
             CommandHandler onCopySelection;
             CommandHandler onRenameSelected;
             CommandHandler onBatchRenameSelection;

@@ -8766,6 +8766,7 @@ namespace hyperbrowse::ui
         {
             StartQuickSendForSelection(services::FileOperationType::Copy);
         };
+        fileCommandHandlers.onResumeFiling = std::bind_front(&MainWindow::ResumeFilingPosition, this);
         fileCommandHandlers.onCopySelection = std::bind_front(&MainWindow::StartCopySelection, this);
         fileCommandHandlers.onRenameSelected = std::bind_front(&MainWindow::StartRenameSelectedImage, this);
         fileCommandHandlers.onBatchRenameSelection = std::bind_front(&MainWindow::StartBatchRenameSelection, this);
@@ -9554,6 +9555,7 @@ namespace hyperbrowse::ui
         AppendMenuW(editMenu, MF_STRING, ID_FILE_SELECT_ALL, L"Select &All\tCtrl+A");
         AppendMenuW(editMenu, MF_STRING, ID_FILE_QUICK_SEND_MOVE, L"Quick Actions &Move\tF7");
         AppendMenuW(editMenu, MF_STRING, ID_FILE_QUICK_SEND_COPY, L"Quick Actions &Copy\tF8");
+        AppendMenuW(editMenu, MF_STRING, ID_FILE_RESUME_FILING, L"&Resume Filing Position\tF4");
         AppendMenuW(editMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_0, L"&Clear Rating");
         AppendMenuW(ratingMenu, MF_STRING, ID_FILE_SET_RATING_1, L"&1 Star");
@@ -17013,6 +17015,25 @@ namespace hyperbrowse::ui
             viewerDeleteOperation,
             viewerQuickSendOperation);
 
+        if (viewerQuickSendOperation
+            && !update.aborted
+            && update.failedCount == 0
+            && std::any_of(
+                update.succeededSourcePaths.begin(),
+                update.succeededSourcePaths.end(),
+                [&](const std::wstring& succeededPath)
+                {
+                    return browser::FilePathsEqual(succeededPath, viewerQuickSend.sourcePath);
+                }))
+        {
+            RecordFilingResume(FilingResumeRecord{
+                viewerQuickSend.resumeFolderPath,
+                viewerQuickSend.resumeFolderIdentity,
+                viewerQuickSend.resumeTargetPath,
+                viewerQuickSend.resumeTargetIdentity,
+                static_cast<int>(viewerQuickSend.type)});
+        }
+
         if (refreshFolderTree || deferredFolderWatchTreeRefresh)
         {
             RefreshFolderTree();
@@ -18553,6 +18574,13 @@ namespace hyperbrowse::ui
             quickSendModel_.SetShortcutAssignments(persistedState.shortcutAssignments);
             SortFavoriteDestinationsByShortcutInMemory();
 
+            filingResumeState_ = FilingResumePersistence::Load(
+                [&](std::wstring_view valueName, std::wstring* value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    return TryReadStringValue(key, registryValueName.c_str(), value);
+                });
+
             ViewerSettingsState viewerSettings = ViewerSettingsPersistence::Load(
                 [&](std::wstring_view valueName, DWORD* persistedValue)
                 {
@@ -18775,8 +18803,43 @@ namespace hyperbrowse::ui
                     const std::wstring registryValueName(valueName);
                     WriteQwordValue(key, registryValueName.c_str(), value);
                 });
+            FilingResumePersistence::Save(
+                filingResumeState_,
+                [&](std::wstring_view valueName, std::wstring_view value)
+                {
+                    const std::wstring registryValueName(valueName);
+                    WriteStringValue(key, registryValueName.c_str(), value);
+                },
+                [&](std::wstring_view valueName)
+                {
+                    const std::wstring registryValueName(valueName);
+                    RegDeleteValueW(key, registryValueName.c_str());
+                });
             RegCloseKey(key);
         }
+    }
+
+    void MainWindow::SaveFilingResumeStateToRegistry() const
+    {
+        HKEY key{};
+        if (hyperbrowse::util::CreateSettingsRegistryKey(KEY_WRITE, &key) != ERROR_SUCCESS)
+        {
+            return;
+        }
+
+        FilingResumePersistence::Save(
+            filingResumeState_,
+            [&](std::wstring_view valueName, std::wstring_view value)
+            {
+                const std::wstring registryValueName(valueName);
+                WriteStringValue(key, registryValueName.c_str(), value);
+            },
+            [&](std::wstring_view valueName)
+            {
+                const std::wstring registryValueName(valueName);
+                RegDeleteValueW(key, registryValueName.c_str());
+            });
+        RegCloseKey(key);
     }
 
     void MainWindow::LoadFolderAsync(std::wstring folderPath, bool historyNavigation)
@@ -19282,6 +19345,17 @@ namespace hyperbrowse::ui
             return false;
         }
 
+        const std::wstring resumeTargetPath = type == services::FileOperationType::Move
+            ? viewerWindow_->FilingResumeTargetPathForMove()
+            : sourcePath;
+        FilingResumeFileIdentity resumeFolderIdentity;
+        FilingResumeFileIdentity resumeTargetIdentity;
+        FilingResumePersistence::TryGetFileIdentity(sourceParent, &resumeFolderIdentity);
+        if (!resumeTargetPath.empty())
+        {
+            FilingResumePersistence::TryGetFileIdentity(resumeTargetPath, &resumeTargetIdentity);
+        }
+
         const services::FileConflictPlan conflictPlan = services::PlanDestinationConflicts(
             sourcePaths,
             destinationFolder,
@@ -19306,6 +19380,10 @@ namespace hyperbrowse::ui
         pending.sourcePath = sourcePath;
         pending.sourcePaths = sourcePaths;
         pending.destinationFolder = destinationFolder;
+        pending.resumeFolderPath = sourceParent;
+        pending.resumeTargetPath = resumeTargetPath;
+        pending.resumeFolderIdentity = resumeFolderIdentity;
+        pending.resumeTargetIdentity = resumeTargetIdentity;
         viewerPendingOperations_.SetQuickSend(std::move(pending));
 
         const std::wstring quickSendDestination = destinationFolder;
@@ -19332,6 +19410,104 @@ namespace hyperbrowse::ui
             }
         }
         return true;
+    }
+
+    void MainWindow::RecordFilingResume(const FilingResumeRecord& record)
+    {
+        auto sameFolder = [&](const FilingResumeRecord& existing)
+        {
+            return (record.folderIdentity.IsValid()
+                    && existing.folderIdentity.IsValid()
+                    && record.folderIdentity.volumeSerial == existing.folderIdentity.volumeSerial
+                    && record.folderIdentity.fileIndex == existing.folderIdentity.fileIndex)
+                || FolderPathsEqual(record.folderPath, existing.folderPath);
+        };
+        filingResumeState_.records.erase(
+            std::remove_if(filingResumeState_.records.begin(), filingResumeState_.records.end(), sameFolder),
+            filingResumeState_.records.end());
+        filingResumeState_.records.insert(filingResumeState_.records.begin(), record);
+        if (filingResumeState_.records.size() > FilingResumePersistence::kMaxRecordCount)
+        {
+            filingResumeState_.records.resize(FilingResumePersistence::kMaxRecordCount);
+        }
+        SaveFilingResumeStateToRegistry();
+    }
+
+    void MainWindow::ResumeFilingPosition()
+    {
+        if (!browserModel_ || !browserPaneController_ || browserModel_->FolderPath().empty())
+        {
+            MessageBoxW(hwnd_,
+                        L"Open a folder before resuming a filing position.",
+                        L"Resume Filing",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const std::wstring currentFolder = NormalizeFolderPath(browserModel_->FolderPath());
+        FilingResumeFileIdentity currentFolderIdentity;
+        FilingResumePersistence::TryGetFileIdentity(currentFolder, &currentFolderIdentity);
+
+        const FilingResumeRecord* matchingRecord = nullptr;
+        for (const FilingResumeRecord& record : filingResumeState_.records)
+        {
+            const bool sameIdentity = currentFolderIdentity.IsValid()
+                && record.folderIdentity.IsValid()
+                && currentFolderIdentity.volumeSerial == record.folderIdentity.volumeSerial
+                && currentFolderIdentity.fileIndex == record.folderIdentity.fileIndex;
+            if (sameIdentity || FolderPathsEqual(currentFolder, record.folderPath))
+            {
+                matchingRecord = &record;
+                break;
+            }
+        }
+
+        if (!matchingRecord)
+        {
+            MessageBoxW(hwnd_,
+                        L"There is no saved filing position for the current folder.",
+                        L"Resume Filing",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        if (matchingRecord->targetPath.empty() && !matchingRecord->targetIdentity.IsValid())
+        {
+            MessageBoxW(hwnd_,
+                        L"The saved filing position has no target image.",
+                        L"Resume Filing",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        std::wstring targetPath;
+        for (const browser::BrowserItem& item : browserModel_->Items())
+        {
+            const bool samePath = !matchingRecord->targetPath.empty()
+                && browser::FilePathsEqual(item.filePath, matchingRecord->targetPath);
+            FilingResumeFileIdentity itemIdentity;
+            const bool sameIdentity = matchingRecord->targetIdentity.IsValid()
+                && FilingResumePersistence::TryGetFileIdentity(item.filePath, &itemIdentity)
+                && itemIdentity.volumeSerial == matchingRecord->targetIdentity.volumeSerial
+                && itemIdentity.fileIndex == matchingRecord->targetIdentity.fileIndex;
+            if (samePath || sameIdentity)
+            {
+                targetPath = item.filePath;
+                break;
+            }
+        }
+
+        if (targetPath.empty())
+        {
+            MessageBoxW(hwnd_,
+                        L"The saved filing image is not available in the current view.",
+                        L"Resume Filing",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        browserPaneController_->RestoreSelectionByFilePaths({targetPath}, targetPath);
+        browserPaneController_->EnsureFocusedItemVisible();
     }
 
     LRESULT MainWindow::OnViewerDeleteRequested(WPARAM wParam)

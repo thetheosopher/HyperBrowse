@@ -24,7 +24,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, and adjacent-image prefetch.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
-- Quick Actions with saved destinations, persistent key assignments, F7 move, and F8 copy for the currently displayed image or selected browser files.
+- Quick Actions with saved destinations, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy for the currently displayed image or selected browser files.
 - Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
 - Consolidated tabbed Settings dialog covering slideshow, viewer, appearance, performance, and behavior preferences with Apply, OK, and Cancel workflow; open it with Ctrl+Shift+T.
@@ -52,7 +52,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 
 Quick Actions supports saved destinations with one-character shortcuts from digits, letters, and supported printable punctuation. Each newly added destination is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`, followed by punctuation; its key field accepts one supported character and can be edited later. Assignments persist by folder path and remain associated with the same destination when the list is reordered. Recent folders are not included.
 
-In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed.
+In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed. Press `F4` in the main window to restore the most recently recorded filing position for the current folder. Positions follow renamed or moved folders and keep up to 64 folders; the target must still be present in the current view.
 
 ## Keyboard shortcuts
 
@@ -71,6 +71,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `F5` | Refresh the folder tree |
 | `F2` | Rename the selected item |
 | `F7` / `F8` | Move / copy the selection to a Quick Actions destination |
+| `F4` | Resume the saved filing position in the current folder |
 | `Ctrl+I` | Show image information |
 | `Ctrl+C` / `Ctrl+X` | Copy / cut selected files |
 | `Ctrl+Shift+C` | Copy selected paths |

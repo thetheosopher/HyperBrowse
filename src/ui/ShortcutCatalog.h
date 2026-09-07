@@ -84,6 +84,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_RENAME_SELECTED, VK_F2, 0, L"F2", L"Rename the selected item", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_QUICK_SEND_MOVE, VK_F7, 0, L"F7", L"Move selection to a quick action destination", L"Quick Actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_QUICK_SEND_COPY, VK_F8, 0, L"F8", L"Copy selection to a quick action destination", L"Quick Actions"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_RESUME_FILING, VK_F4, 0, L"F4", L"Resume filing in the current folder", L"Quick Actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_IMAGE_INFORMATION, static_cast<WORD>('I'), FCONTROL, L"Ctrl+I", L"Show image information", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_COPY_PATH, static_cast<WORD>('C'), FCONTROL | FSHIFT, L"Ctrl+Shift+C", L"Copy selected paths", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_COPY_FILES_TO_CLIPBOARD, static_cast<WORD>('C'), FCONTROL, L"Ctrl+C", L"Copy selected files", L"File and selection actions"},

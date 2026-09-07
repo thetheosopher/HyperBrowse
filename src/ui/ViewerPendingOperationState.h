@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "ui/FilingResumePersistence.h"
+
 namespace hyperbrowse::services
 {
     enum class FileOperationType : int;
@@ -29,6 +31,10 @@ namespace hyperbrowse::ui
             std::wstring sourcePath;
             std::vector<std::wstring> sourcePaths;
             std::wstring destinationFolder;
+            std::wstring resumeFolderPath;
+            std::wstring resumeTargetPath;
+            FilingResumeFileIdentity resumeFolderIdentity;
+            FilingResumeFileIdentity resumeTargetIdentity;
             bool viewerAdvanced{};
             bool active{};
         };

@@ -23,6 +23,7 @@
 #include "util/UiTextSize.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FileOperationReconciler.h"
+#include "ui/FilingResumePersistence.h"
 #include "ui/FolderTreeDragController.h"
 #include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
@@ -209,6 +210,7 @@ namespace hyperbrowse::ui
         void LoadWindowState();
         void ApplyStartupLaunchPathOverride();
         void SaveWindowState() const;
+        void SaveFilingResumeStateToRegistry() const;
         bool HandleCommand(UINT commandId);
         void OpenFolder();
         void LoadFolderAsync(std::wstring folderPath, bool historyNavigation = false);
@@ -289,6 +291,8 @@ namespace hyperbrowse::ui
                          std::wstring* destinationFolder);
         void StartQuickSendForSelection(services::FileOperationType type);
         bool StartViewerQuickSendOperation(services::FileOperationType type, std::wstring destinationFolder);
+        void ResumeFilingPosition();
+        void RecordFilingResume(const FilingResumeRecord& record);
         bool StartFileOperation(services::FileOperationType type,
                     std::vector<std::wstring> sourcePaths,
                     std::wstring destinationFolder,
@@ -565,6 +569,7 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
         std::wstring lastQuickSendDestination_;
+        FilingResumePersistedState filingResumeState_;
         QuickSendModel quickSendModel_;
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems_;
         std::unique_ptr<browser::BrowserModel> browserModel_;

@@ -155,6 +155,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/FileCommandController.cpp
     src/ui/FileOperationJournal.cpp
     src/ui/FileOperationReconciler.cpp
+    src/ui/FilingResumePersistence.cpp
     src/ui/FolderEnumerationCoordinator.cpp
     src/ui/FolderLoadCoordinator.cpp
     src/ui/FolderTreeDropPolicy.cpp

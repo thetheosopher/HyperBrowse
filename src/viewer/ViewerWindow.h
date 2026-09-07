@@ -157,6 +157,7 @@ namespace hyperbrowse::viewer
         void SetDarkTheme(bool enabled);
         bool ReplaceItems(std::vector<browser::BrowserItem> items, int selectedIndex);
         bool GetDeleteCurrentPaths(std::wstring* sourcePath, std::wstring* preferredFocusPath) const;
+        std::wstring FilingResumeTargetPathForMove() const;
         bool AdvanceAfterDeleteCurrent();
         void RecoverDisplaySurface();
 

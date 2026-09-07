@@ -58,6 +58,7 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_EDIT_REDO = 1094;
     inline constexpr UINT ID_FILE_QUICK_SEND_MOVE = 1095;
     inline constexpr UINT ID_FILE_QUICK_SEND_COPY = 1096;
+    inline constexpr UINT ID_FILE_RESUME_FILING = 1300;
     inline constexpr UINT ID_FILE_ASSOCIATIONS = 1097;
     inline constexpr UINT ID_EDIT_CUT = 1098;
     inline constexpr UINT ID_EDIT_CLOSE_MAIN_WINDOW_ON_ESCAPE = 1099;

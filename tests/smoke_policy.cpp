@@ -28,6 +28,7 @@
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FileOperationReconciler.h"
+#include "ui/FilingResumePersistence.h"
 #include "ui/FolderTreeDropPolicy.h"
 #include "ui/FolderHistory.h"
 #include "ui/ImageWorkflowPersistence.h"
@@ -243,6 +244,7 @@ namespace hyperbrowse::tests
             BatchConvertFormat batchFormat = BatchConvertFormat::Jpeg;
             std::size_t recentFolderIndex = 0;
             std::size_t favoriteIndex = 0;
+            bool resumeFilingCalled = false;
 
             FileCommandController::Handlers handlers;
             handlers.onCopySelection = [&copyCallCount]
@@ -270,6 +272,10 @@ namespace hyperbrowse::tests
             {
                 recentFolderIndex = index;
             };
+            handlers.onResumeFiling = [&resumeFilingCalled]
+            {
+                resumeFilingCalled = true;
+            };
             controller.Configure(std::move(handlers));
 
                  Expect(controller.Handle(ID_FILE_COPY_SELECTION),
@@ -288,6 +294,8 @@ namespace hyperbrowse::tests
                    "File command controller did not decode favorite destination index");
             Expect(controller.Handle(ID_FILE_OPEN_RECENT_FOLDER_BASE + 3) && recentFolderIndex == 3,
                    "File command controller did not decode recent-folder index");
+                 Expect(controller.Handle(ID_FILE_RESUME_FILING) && resumeFilingCalled,
+                     "File command controller did not forward resume filing");
             Expect(!controller.Handle(ID_VIEW_THUMBNAILS),
                    "File command controller claimed a view command outside its ownership");
         }
@@ -859,6 +867,70 @@ namespace hyperbrowse::tests
             Expect(values[L"SelectedFolderPath"] == initialState.folderPath
                        && !values.contains(L"SelectedImagePath"),
                    "Selected-path persistence overwrote a valid folder or retained a stale image path");
+        }
+
+        void RunFilingResumePersistenceScenario()
+        {
+            using hyperbrowse::ui::FilingResumePersistence;
+            using hyperbrowse::ui::FilingResumePersistedState;
+            using hyperbrowse::ui::FilingResumeRecord;
+
+            std::map<std::wstring, std::wstring> values;
+            FilingResumePersistedState state;
+            for (int index = 0; index < 70; ++index)
+            {
+                state.records.push_back(FilingResumeRecord{
+                    L"C:\\Pictures\\Folder" + std::to_wstring(index),
+                    {7, static_cast<std::uint64_t>(index + 1)},
+                    L"C:\\Pictures\\Folder" + std::to_wstring(index) + L"\\image.jpg",
+                    {7, static_cast<std::uint64_t>(index + 100)},
+                    index % 2});
+            }
+
+            FilingResumePersistence::Save(
+                state,
+                [&](std::wstring_view name, std::wstring_view value)
+                {
+                    values[std::wstring(name)] = std::wstring(value);
+                },
+                [&](std::wstring_view name)
+                {
+                    values.erase(std::wstring(name));
+                });
+            const FilingResumePersistedState loaded = FilingResumePersistence::Load(
+                [&](std::wstring_view name, std::wstring* value)
+                {
+                    const auto found = values.find(std::wstring(name));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+                    *value = found->second;
+                    return true;
+                });
+
+            Expect(loaded.records.size() == FilingResumePersistence::kMaxRecordCount,
+                   "Filing resume persistence did not enforce the 64-record cap");
+            Expect(loaded.records.front().folderPath == L"C:\\Pictures\\Folder0"
+                       && loaded.records.front().operationType == 0,
+                   "Filing resume persistence did not round-trip the newest record");
+            Expect(loaded.records[1].folderPath == L"C:\\Pictures\\Folder1"
+                       && loaded.records[1].targetIdentity.fileIndex == 101,
+                   "Filing resume persistence did not preserve target identity data");
+
+            values[L"FilingResumeCount"] = L"not-a-number";
+            Expect(FilingResumePersistence::Load(
+                       [&](std::wstring_view name, std::wstring* value)
+                       {
+                           const auto found = values.find(std::wstring(name));
+                           if (found == values.end())
+                           {
+                               return false;
+                           }
+                           *value = found->second;
+                           return true;
+                       }).records.empty(),
+                   "Filing resume persistence accepted an invalid record count");
         }
 
         void RunViewerSettingsPersistenceScenario()
@@ -1802,6 +1874,7 @@ namespace hyperbrowse::tests
         RunQuickAccessPathListScenario();
         RunWindowBoundsPersistenceScenario();
         RunSelectedPathPersistenceScenario();
+        RunFilingResumePersistenceScenario();
         RunViewerSettingsPersistenceScenario();
         RunBrowserPresentationPersistenceScenario();
         RunImageWorkflowPersistenceScenario();

@@ -1458,6 +1458,24 @@ namespace hyperbrowse::viewer
         return true;
     }
 
+    std::wstring ViewerWindow::FilingResumeTargetPathForMove() const
+    {
+        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        {
+            return {};
+        }
+
+        const int targetIndex = currentIndex_ > 0
+            ? currentIndex_ - 1
+            : currentIndex_ + 1;
+        if (targetIndex < 0 || targetIndex >= static_cast<int>(items_.size()))
+        {
+            return {};
+        }
+
+        return items_[static_cast<std::size_t>(targetIndex)].filePath;
+    }
+
     bool ViewerWindow::AdvanceAfterDeleteCurrent()
     {
         util::ScopedTimer functionTimer(L"ViewerWindow::AdvanceAfterDeleteCurrent");
