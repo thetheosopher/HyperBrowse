@@ -9519,6 +9519,8 @@ namespace hyperbrowse::ui
         if (message->message == WM_KEYDOWN
             && IsTextInputControlWindow(message->hwnd)
             && (message->wParam == VK_BACK || message->wParam == VK_DELETE
+                || message->wParam == VK_OEM_MINUS
+                || message->wParam == VK_OEM_PLUS
                 || ((message->wParam == static_cast<WPARAM>('A')
                      || message->wParam == static_cast<WPARAM>('C')
                      || message->wParam == static_cast<WPARAM>('V')

@@ -4199,6 +4199,45 @@ namespace
          }
     }
 
+    void RunMainWindowTextInputAcceleratorScenario(HINSTANCE instance)
+    {
+        hyperbrowse::ui::MainWindow mainWindow(instance);
+        Expect(mainWindow.Create(), "Failed to create the MainWindow for text-input accelerator coverage");
+
+        HWND edit = CreateWindowExW(
+            0,
+            L"EDIT",
+            L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+            0,
+            0,
+            240,
+            24,
+            mainWindow.Hwnd(),
+            nullptr,
+            instance,
+            nullptr);
+        Expect(edit != nullptr, "Failed to create the text-input accelerator test edit control");
+
+        constexpr std::array<WPARAM, 4> oemSizeKeys{
+            VK_OEM_MINUS,
+            VK_OEM_PLUS,
+            VK_OEM_MINUS,
+            VK_OEM_PLUS};
+        for (const WPARAM key : oemSizeKeys)
+        {
+            MSG message{};
+            message.hwnd = edit;
+            message.message = WM_KEYDOWN;
+            message.wParam = key;
+            Expect(!mainWindow.TranslateAcceleratorMessage(&message),
+                   "MainWindow consumed an OEM size key before the focused edit control could receive it");
+        }
+
+        DestroyWindow(mainWindow.Hwnd());
+        PumpMessagesFor(100);
+    }
+
     void RunStartupViewerEnumerationScenario(HINSTANCE instance)
     {
         TempFolder root(L"HyperBrowseStartupViewerEnumeration");
@@ -4360,6 +4399,7 @@ int main(int argc, char* argv[])
             RunMainWindowCascadeScenario(instance);
             RunStartupViewerEnumerationScenario(instance);
             RunMainWindowFolderTreeScenario(instance);
+            RunMainWindowTextInputAcceleratorScenario(instance);
         }
 
         DestroyWindow(hwnd);
