@@ -16844,8 +16844,13 @@ namespace hyperbrowse::ui
                 break;
             }
 
-            std::vector<std::wstring> affectedPaths = update.succeededSourcePaths;
-            affectedPaths.insert(affectedPaths.end(), update.createdPaths.begin(), update.createdPaths.end());
+            const std::vector<std::wstring> affectedPaths = BuildMediaCacheInvalidationPaths(
+                update,
+                browserModel_->FolderPath(),
+                [this](std::wstring_view path)
+                {
+                    return IsPathInCurrentScope(path);
+                });
             if (!affectedPaths.empty())
             {
                 util::ScopedTimer invalidateTimer(L"ApplyCompletedFileOperation InvalidateMediaCacheForPaths");

@@ -3,6 +3,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace hyperbrowse::browser
 {
@@ -38,6 +39,11 @@ namespace hyperbrowse::ui
         std::wstring_view treeFolderMoveSourcePath,
         std::wstring_view treeFolderMoveDestinationFolder,
         const browser::BrowserModel* browserModel);
+
+    std::vector<std::wstring> BuildMediaCacheInvalidationPaths(
+        const services::FileOperationUpdate& update,
+        std::wstring_view currentFolderPath,
+        const std::function<bool(std::wstring_view)>& isPathInCurrentScope);
 
     bool ShouldReloadCurrentFolderForFileOperation(
         const services::FileOperationUpdate& update,

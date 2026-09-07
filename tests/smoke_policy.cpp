@@ -27,6 +27,7 @@
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
+#include "ui/FileOperationReconciler.h"
 #include "ui/FolderTreeDropPolicy.h"
 #include "ui/FolderHistory.h"
 #include "ui/ImageWorkflowPersistence.h"
@@ -84,6 +85,53 @@ namespace hyperbrowse::tests
                    "Prefetch depth did not clamp below the supported range");
             Expect(hyperbrowse::util::ResolvePrefetchDepth(ResourceProfile::Balanced, 99) == 16,
                    "Prefetch depth did not clamp above the supported range");
+        }
+
+        void RunFileOperationMediaCacheInvalidationScenario()
+        {
+            using hyperbrowse::services::FileOperationType;
+            using hyperbrowse::services::FileOperationUpdate;
+
+            const auto isInCurrentScope = [](std::wstring_view path)
+            {
+                return path == L"C:\\Images\\source.jpg"
+                    || path == L"C:\\Images\\created.jpg"
+                    || path == L"C:\\Images\\renamed.jpg";
+            };
+
+            FileOperationUpdate copyOutside;
+            copyOutside.type = FileOperationType::Copy;
+            copyOutside.succeededSourcePaths = {L"C:\\Images\\source.jpg"};
+            copyOutside.createdPaths = {L"D:\\Favorites\\source.jpg"};
+            Expect(hyperbrowse::ui::BuildMediaCacheInvalidationPaths(
+                       copyOutside, L"C:\\Images", isInCurrentScope).empty(),
+                   "Copying an image outside the current folder invalidated visible media caches");
+
+            FileOperationUpdate copyInside;
+            copyInside.type = FileOperationType::Copy;
+            copyInside.succeededSourcePaths = {L"D:\\Incoming\\source.jpg"};
+            copyInside.createdPaths = {L"C:\\Images\\created.jpg"};
+            const std::vector<std::wstring> copyInsidePaths = hyperbrowse::ui::BuildMediaCacheInvalidationPaths(
+                copyInside, L"C:\\Images", isInCurrentScope);
+            Expect(copyInsidePaths == std::vector<std::wstring>{L"C:\\Images\\created.jpg"},
+                   "Copying an image into the current folder did not invalidate the created path");
+
+            FileOperationUpdate moveOutside;
+            moveOutside.type = FileOperationType::Move;
+            moveOutside.succeededSourcePaths = {L"C:\\Images\\source.jpg"};
+            moveOutside.createdPaths = {L"D:\\Favorites\\source.jpg"};
+            const std::vector<std::wstring> moveOutsidePaths = hyperbrowse::ui::BuildMediaCacheInvalidationPaths(
+                moveOutside, L"C:\\Images", isInCurrentScope);
+            Expect(moveOutsidePaths == std::vector<std::wstring>{L"C:\\Images\\source.jpg"},
+                   "Moving an image out of the current folder did not preserve source invalidation");
+
+            FileOperationUpdate deleteInside;
+            deleteInside.type = FileOperationType::DeleteRecycleBin;
+            deleteInside.succeededSourcePaths = {L"C:\\Images\\source.jpg"};
+            const std::vector<std::wstring> deleteInsidePaths = hyperbrowse::ui::BuildMediaCacheInvalidationPaths(
+                deleteInside, L"C:\\Images", isInCurrentScope);
+            Expect(deleteInsidePaths == std::vector<std::wstring>{L"C:\\Images\\source.jpg"},
+                   "Deleting an image from the current folder did not invalidate its media cache");
         }
 
         void RunFolderHistoryScenario()
@@ -1730,6 +1778,7 @@ namespace hyperbrowse::tests
     void RunPolicyScenarios()
     {
         RunPrefetchSizingScenario();
+        RunFileOperationMediaCacheInvalidationScenario();
         RunFolderHistoryScenario();
         RunFileOperationJournalScenario();
         RunFileCommandControllerScenario();
@@ -1767,6 +1816,10 @@ namespace hyperbrowse::tests
         if (scenario == "--folder-history")
         {
             RunFolderHistoryScenario();
+        }
+        else if (scenario == "--file-operation-media-cache")
+        {
+            RunFileOperationMediaCacheInvalidationScenario();
         }
         else if (scenario == "--quick-access")
         {

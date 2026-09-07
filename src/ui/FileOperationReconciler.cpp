@@ -180,6 +180,45 @@ namespace hyperbrowse::ui
         return effects;
     }
 
+    std::vector<std::wstring> BuildMediaCacheInvalidationPaths(
+        const services::FileOperationUpdate& update,
+        std::wstring_view currentFolderPath,
+        const std::function<bool(std::wstring_view)>& isPathInCurrentScope)
+    {
+        if (currentFolderPath.empty() || !isPathInCurrentScope)
+        {
+            return {};
+        }
+
+        std::vector<std::wstring> candidatePaths;
+        switch (update.type)
+        {
+        case services::FileOperationType::Copy:
+            candidatePaths = update.createdPaths;
+            break;
+        case services::FileOperationType::DeleteRecycleBin:
+        case services::FileOperationType::DeletePermanent:
+            candidatePaths = update.succeededSourcePaths;
+            break;
+        case services::FileOperationType::Move:
+        case services::FileOperationType::Rename:
+            candidatePaths = update.succeededSourcePaths;
+            candidatePaths.insert(candidatePaths.end(), update.createdPaths.begin(), update.createdPaths.end());
+            break;
+        }
+
+        std::vector<std::wstring> affectedPaths;
+        affectedPaths.reserve(candidatePaths.size());
+        for (const std::wstring& path : candidatePaths)
+        {
+            if (isPathInCurrentScope(path) || browser::PathHasPrefix(currentFolderPath, path))
+            {
+                affectedPaths.push_back(path);
+            }
+        }
+        return affectedPaths;
+    }
+
     bool ShouldReloadCurrentFolderForFileOperation(
         const services::FileOperationUpdate& update,
         const browser::BrowserModel* browserModel,

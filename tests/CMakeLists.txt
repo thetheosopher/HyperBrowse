@@ -43,6 +43,7 @@ add_custom_command(TARGET HyperBrowseTests POST_BUILD
 
 add_test(NAME HyperBrowseSmoke COMMAND HyperBrowseTests)
 add_test(NAME HyperBrowseFolderHistorySmoke COMMAND HyperBrowseTests --folder-history)
+add_test(NAME HyperBrowseFileOperationMediaCacheSmoke COMMAND HyperBrowseTests --file-operation-media-cache)
 add_test(NAME HyperBrowseViewerFitSmoke COMMAND HyperBrowseTests --viewer-fit)
 add_test(NAME HyperBrowseFileRenameSmoke COMMAND HyperBrowseTests --file-rename)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)
