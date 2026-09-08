@@ -32,6 +32,7 @@ namespace hyperbrowse::ui
         int pressedMenuIndex{-1};
         int hotToolbarIndex{-1};
         int pressedToolbarIndex{-1};
+        int focusedToolbarIndex{-1};
         bool keyboardActive{};
         bool filterEditPresent{};
         bool filterFocused{};

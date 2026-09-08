@@ -130,6 +130,17 @@ namespace hyperbrowse::ui
                 renderTarget->DrawRoundedRectangle(&roundedRect, buttonBorderBrush.Get(), 1.0f);
             }
         };
+        const auto drawFocusRing = [&](const RECT& sourceRect)
+        {
+            RECT focusRect = sourceRect;
+            InflateRect(&focusRect, -1, -1);
+            const auto focusBrush = createBrush(palette.accent);
+            if (focusBrush)
+            {
+                const auto roundedRect = hyperbrowse::render::ToD2DRoundedRect(focusRect, 10.0f, 10.0f);
+                renderTarget->DrawRoundedRectangle(&roundedRect, focusBrush.Get(), 2.0f);
+            }
+        };
 
         for (int index = 0; index < static_cast<int>(menuButtons.size()); ++index)
         {
@@ -264,6 +275,7 @@ namespace hyperbrowse::ui
 
             const bool isHot = index == state.hotToolbarIndex;
             const bool isPressed = index == state.pressedToolbarIndex;
+            const bool isFocused = index == state.focusedToolbarIndex;
             const bool isChecked = item.checked;
             const bool isEnabled = item.enabled;
             COLORREF iconColor = palette.mutedText;
@@ -352,6 +364,11 @@ namespace hyperbrowse::ui
                         1.5f);
                 }
             }
+
+            if (isEnabled && isFocused)
+            {
+                drawFocusRing(item.rect);
+            }
         }
     }
 
@@ -377,6 +394,19 @@ namespace hyperbrowse::ui
         LineTo(hdc, stripRect.right, stripRect.bottom - 1);
         SelectObject(hdc, oldPen);
         DeleteObject(borderPen);
+
+        const auto drawFocusRing = [&](const RECT& sourceRect)
+        {
+            RECT focusRect = sourceRect;
+            InflateRect(&focusRect, -1, -1);
+            const HPEN focusPen = CreatePen(PS_SOLID, 2, palette.accent);
+            const HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            const HGDIOBJ oldPen = SelectObject(hdc, focusPen);
+            RoundRect(hdc, focusRect.left, focusRect.top, focusRect.right, focusRect.bottom, 10, 10);
+            SelectObject(hdc, oldPen);
+            SelectObject(hdc, oldBrush);
+            DeleteObject(focusPen);
+        };
 
         for (int index = 0; index < static_cast<int>(menuButtons.size()); ++index)
         {
@@ -491,6 +521,7 @@ namespace hyperbrowse::ui
 
             const bool isHot = index == state.hotToolbarIndex;
             const bool isPressed = index == state.pressedToolbarIndex;
+            const bool isFocused = index == state.focusedToolbarIndex;
             const bool isChecked = item.checked;
             const bool isEnabled = item.enabled;
 
@@ -570,6 +601,11 @@ namespace hyperbrowse::ui
                                  chevronY,
                                  kToolbarDropdownChevronSize,
                                  kToolbarDropdownChevronSize);
+            }
+
+            if (isEnabled && isFocused)
+            {
+                drawFocusRing(item.rect);
             }
         }
 

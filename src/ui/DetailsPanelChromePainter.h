@@ -19,9 +19,11 @@ namespace hyperbrowse::ui
             int activeTabIndex{-1};
             int hotTabIndex{-1};
             int pressedTabIndex{-1};
+            int focusedTabIndex{-1};
             RECT closeButtonRect{};
             bool closeButtonHot{};
             bool closeButtonPressed{};
+            bool closeButtonFocused{};
         };
 
         struct Palette

@@ -115,6 +115,8 @@ namespace
     using hyperbrowse::ui::dialog_detail::EscapeKeyBehaviorOption;
     using hyperbrowse::ui::dialog_detail::ExperimentalSettingsDialogResult;
     using hyperbrowse::ui::dialog_detail::ExperimentalSettingsDialogState;
+    using hyperbrowse::ui::dialog_detail::ExperimentalSettingsFocusTarget;
+    using hyperbrowse::ui::dialog_detail::ExperimentalSettingsFocusTargetKind;
     using hyperbrowse::ui::dialog_detail::ExperimentalSettingsLabel;
     using hyperbrowse::ui::dialog_detail::FileAssociationsDialogLayoutMetrics;
     using hyperbrowse::ui::dialog_detail::FileAssociationsDialogState;
@@ -371,6 +373,31 @@ namespace
     constexpr int ConsolidatedSettingsControlId(ConsolidatedSettingsControl control)
     {
         return kConsolidatedSettingsFirstControlId + static_cast<int>(control);
+    }
+
+    wchar_t ExperimentalSettingsPageMnemonic(ConsolidatedSettingsPage page);
+    wchar_t ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl control);
+    int ExperimentalSettingsMnemonicIndex(std::wstring_view text, wchar_t mnemonic);
+    std::vector<ConsolidatedSettingsControl> ExperimentalSettingsPageControlOrder(ConsolidatedSettingsPage page);
+
+    std::wstring AddConsolidatedSettingsMnemonicMarker(const wchar_t* text, wchar_t mnemonic)
+    {
+        std::wstring markedText = text ? text : L"";
+        if (mnemonic == 0)
+        {
+            return markedText;
+        }
+
+        const wchar_t normalized = static_cast<wchar_t>(towupper(mnemonic));
+        for (std::size_t index = 0; index < markedText.size(); ++index)
+        {
+            if (static_cast<wchar_t>(towupper(markedText[index])) == normalized)
+            {
+                markedText.insert(index, 1, L'&');
+                break;
+            }
+        }
+        return markedText;
     }
 
     constexpr wchar_t kFileAssociationsDialogClassName[] = L"HyperBrowseFileAssociationsDialog";
@@ -3515,6 +3542,87 @@ namespace
         }
     }
 
+    void FocusConsolidatedSettingsPage(ConsolidatedSettingsDialogState& state,
+                                       ConsolidatedSettingsPage page)
+    {
+        if (state.tabWindow)
+        {
+            TabCtrl_SetCurSel(state.tabWindow, static_cast<int>(page));
+        }
+        ShowConsolidatedSettingsPage(state, page);
+        for (const ConsolidatedSettingsControl control : ExperimentalSettingsPageControlOrder(page))
+        {
+            const HWND window = ConsolidatedSettingsControlHandle(state, control);
+            if (window && IsWindowVisible(window) != FALSE && IsWindowEnabled(window) != FALSE)
+            {
+                SetFocus(window);
+                return;
+            }
+        }
+        if (state.tabWindow)
+        {
+            SetFocus(state.tabWindow);
+        }
+    }
+
+    bool HandleConsolidatedSettingsMnemonic(ConsolidatedSettingsDialogState& state,
+                                            WPARAM wParam)
+    {
+        wchar_t mnemonic = static_cast<wchar_t>(wParam);
+        if (mnemonic >= L'a' && mnemonic <= L'z')
+        {
+            mnemonic = static_cast<wchar_t>(mnemonic - (L'a' - L'A'));
+        }
+
+        for (int index = 0; index < static_cast<int>(ConsolidatedSettingsPage::Count); ++index)
+        {
+            const auto page = static_cast<ConsolidatedSettingsPage>(index);
+            if (ExperimentalSettingsPageMnemonic(page) == mnemonic)
+            {
+                FocusConsolidatedSettingsPage(state, page);
+                return true;
+            }
+        }
+
+        int selectedPage = state.tabWindow ? TabCtrl_GetCurSel(state.tabWindow) : 0;
+        if (selectedPage < 0 || selectedPage >= static_cast<int>(ConsolidatedSettingsPage::Count))
+        {
+            selectedPage = 0;
+        }
+        for (const ConsolidatedSettingsControl control : ExperimentalSettingsPageControlOrder(
+                 static_cast<ConsolidatedSettingsPage>(selectedPage)))
+        {
+            if (ExperimentalSettingsControlMnemonic(control) != mnemonic)
+            {
+                continue;
+            }
+
+            const HWND window = ConsolidatedSettingsControlHandle(state, control);
+            if (window && IsWindowVisible(window) != FALSE && IsWindowEnabled(window) != FALSE)
+            {
+                SetFocus(window);
+                return true;
+            }
+        }
+
+        if (mnemonic == L'A')
+        {
+            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(5500, BN_CLICKED), 0);
+            return true;
+        }
+        if (mnemonic == L'O')
+        {
+            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+            return true;
+        }
+        if (mnemonic == L'C')
+        {
+            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+            return true;
+        }
+        return false;
+    }
+
     bool CollectConsolidatedSettings(HWND hwnd, ConsolidatedSettingsDialogState* state)
     {
         if (!hwnd || !state)
@@ -3824,14 +3932,23 @@ namespace
             const int rowHeight = std::max(32, static_cast<int>(textMetrics.tmHeight) + 12);
             const int rowGap = std::max(10, rowHeight / 3);
             const int checkboxWidth = std::max(measuredCheckboxWidth + 38, pageContentRight - pageContentLeft);
-            auto label = [&](ConsolidatedSettingsPage page, const wchar_t* text, int y)
+            auto label = [&](ConsolidatedSettingsPage page,
+                             ConsolidatedSettingsControl control,
+                             const wchar_t* text,
+                             int y)
             {
-                return CreateConsolidatedSettingsControl(*state, page, L"STATIC", text, SS_LEFT | SS_CENTERIMAGE | SS_NOPREFIX,
+                const std::wstring markedText = AddConsolidatedSettingsMnemonicMarker(
+                    text,
+                    ExperimentalSettingsControlMnemonic(control));
+                return CreateConsolidatedSettingsControl(*state, page, L"STATIC", markedText.c_str(), SS_LEFT | SS_CENTERIMAGE,
                                                           pageContentLeft, y, labelWidth - 12, rowHeight, 0);
             };
             auto check = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int y, DWORD extraStyle = 0)
             {
-                return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", text, BS_AUTOCHECKBOX | WS_TABSTOP | extraStyle,
+                const std::wstring markedText = AddConsolidatedSettingsMnemonicMarker(
+                    text,
+                    ExperimentalSettingsControlMnemonic(control));
+                return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", markedText.c_str(), BS_AUTOCHECKBOX | WS_TABSTOP | extraStyle,
                                                           pageContentLeft, y, checkboxWidth, rowHeight, ConsolidatedSettingsControlId(control), control);
             };
             auto combo = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, int y)
@@ -3851,30 +3968,33 @@ namespace
             };
             auto radio = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int x, int y, DWORD extraStyle = 0)
             {
-                return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", text, BS_AUTORADIOBUTTON | WS_TABSTOP | extraStyle,
+                const std::wstring markedText = AddConsolidatedSettingsMnemonicMarker(
+                    text,
+                    ExperimentalSettingsControlMnemonic(control));
+                return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", markedText.c_str(), BS_AUTORADIOBUTTON | WS_TABSTOP | extraStyle,
                                                           x, y, radioColumnWidth, rowHeight, ConsolidatedSettingsControlId(control), control);
             };
 
             int y = pageTop + 16;
-            label(ConsolidatedSettingsPage::Slideshow, L"Transition style", y);
+            label(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionStyle, L"Transition style", y);
             combo(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionStyle, y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Slideshow, L"Slide duration (milliseconds)", y);
+            label(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::SlideshowDuration, L"Slide duration (milliseconds)", y);
             edit(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::SlideshowDuration, y);
             spin(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::SlideshowDurationSpin, y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Slideshow, L"Transition duration (milliseconds)", y);
+            label(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionDuration, L"Transition duration (milliseconds)", y);
             edit(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionDuration, y);
             spin(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionDurationSpin, y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Slideshow, L"Timing bounds", y);
+            label(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::Count, L"Timing bounds", y);
             CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Slideshow, L"STATIC", L"250-60000 ms slides; 100-5000 ms transitions",
                                               SS_LEFT | SS_NOPREFIX, valueLeft, y + 4, valueWidth, rowHeight, 0);
 
             y = pageTop + 16;
             check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::TransitionEnabled, L"Use slideshow transitions", y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Viewer, L"Mouse wheel", y);
+            label(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::Count, L"Mouse wheel", y);
             radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelZoom, L"Zoom", valueLeft, y, WS_GROUP);
             radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelNavigate, L"Navigate", valueLeft + radioColumnWidth, y);
             y += rowHeight + rowGap;
@@ -3882,7 +4002,7 @@ namespace
                 y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPairingEnabled, L"Treat paired RAW+JPEG files as one operation", y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Viewer, L"Paired viewer preference", y);
+            label(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::Count, L"Paired viewer preference", y);
             radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferRaw, L"Prefer RAW", valueLeft, y, WS_GROUP);
             radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferJpeg, L"Prefer JPEG", valueLeft + radioColumnWidth, y);
             y += rowHeight + rowGap;
@@ -3894,21 +4014,21 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::FullScreenFullMetadata, L"Show full metadata in full-screen mode", y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Viewer, L"Overlay text size", y);
+            label(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::OverlayTextSize, L"Overlay text size", y);
             combo(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::OverlayTextSize, y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Viewer, L"ESC key behavior in full screen", y);
+            label(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::EscapeKeyBehavior, L"ESC key behavior in full screen", y);
             combo(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::EscapeKeyBehavior, y);
 
             y = pageTop + 16;
-            label(ConsolidatedSettingsPage::Appearance, L"Theme", y);
+            label(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::Count, L"Theme", y);
             radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeLight, L"Light", valueLeft, y, WS_GROUP);
             radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeDark, L"Dark", valueLeft + radioColumnWidth, y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Appearance, L"Application text size", y);
+            label(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::AppTextSize, L"Application text size", y);
             combo(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::AppTextSize, y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Appearance, L"Thumbnail size", y);
+            label(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThumbnailSize, L"Thumbnail size", y);
             combo(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThumbnailSize, y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThumbnailDetails, L"Show thumbnail details", y);
@@ -3918,20 +4038,20 @@ namespace
             check(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::DetailsPanel, L"Show the details panel", y);
 
             y = pageTop + 16;
-            label(ConsolidatedSettingsPage::Performance, L"Resource profile", y);
+            label(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ResourceProfile, L"Resource profile", y);
             combo(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ResourceProfile, y);
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PersistentCache, L"Keep the persistent thumbnail cache enabled", y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Performance, L"Thumbnail cache cap (MB)", y);
+            label(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ThumbnailCache, L"Thumbnail cache cap (MB)", y);
             edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ThumbnailCache, y);
             check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ThumbnailCacheAutomatic, L"Follow profile", y + 30);
             y += rowHeight + rowGap + 34;
-            label(ConsolidatedSettingsPage::Performance, L"Metadata cache cap (entries)", y);
+            label(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCache, L"Metadata cache cap (entries)", y);
             edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCache, y);
             check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y + 30);
             y += rowHeight + rowGap + 34;
-            label(ConsolidatedSettingsPage::Performance, L"Prefetch depth (items)", y);
+            label(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PrefetchDepth, L"Prefetch depth (items)", y);
             edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PrefetchDepth, y);
             check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PrefetchDepthAutomatic, L"Follow profile", y + 30);
             y += rowHeight + rowGap + 34;
@@ -3950,7 +4070,7 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Behavior, L"New Quick Send shortcut order", y);
+            label(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::QuickSendShortcutOrder, L"New Quick Send shortcut order", y);
             CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Behavior, L"EDIT", nullptr,
                                               WS_TABSTOP | ES_AUTOHSCROLL, valueLeft, y, valueWidth, rowHeight,
                                               ConsolidatedSettingsControlId(ConsolidatedSettingsControl::QuickSendShortcutOrder),
@@ -4070,13 +4190,13 @@ namespace
             const int applyButtonLeft = okButtonLeft
                 - kConsolidatedSettingsButtonGap
                 - kConsolidatedSettingsButtonWidth;
-            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"Apply",
+            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"&Apply",
                                               BS_DEFPUSHBUTTON | WS_TABSTOP, applyButtonLeft, buttonTop,
                                               kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, 5500);
-            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"OK",
+            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"&OK",
                                               BS_DEFPUSHBUTTON | WS_TABSTOP, okButtonLeft, buttonTop,
                                               kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, IDOK);
-            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"Cancel",
+            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"&Cancel",
                                               WS_TABSTOP, cancelButtonLeft, buttonTop,
                                               kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, IDCANCEL);
             const HWND applyButton = GetDlgItem(hwnd, 5500);
@@ -4183,17 +4303,43 @@ namespace
                         accentBrush.GetAddressOf());
                     if (backgroundBrush && textBrush && accentBrush)
                     {
+                        const auto page = static_cast<ConsolidatedSettingsPage>(drawItem->itemID);
+                        const int mnemonicIndex = ExperimentalSettingsMnemonicIndex(
+                            tabText,
+                            ExperimentalSettingsPageMnemonic(page));
                         renderTarget->BeginDraw();
                         renderTarget->Clear(hyperbrowse::render::ToD2DColor(state->theme.surfaceBackground));
                         renderTarget->FillRectangle(
                             D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
                             backgroundBrush.Get());
-                        renderTarget->DrawText(
-                            tabText,
-                            static_cast<UINT32>(wcslen(tabText)),
-                            textFormat.Get(),
-                            D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
-                            textBrush.Get());
+                        bool drewMnemonicText = false;
+                        if (mnemonicIndex >= 0)
+                        {
+                            const auto textLayout = renderer.CreateTextLayout(
+                                tabText,
+                                textFormat.Get(),
+                                static_cast<float>(width),
+                                static_cast<float>(height));
+                            if (textLayout)
+                            {
+                                textLayout->SetUnderline(TRUE, DWRITE_TEXT_RANGE{
+                                    static_cast<UINT32>(mnemonicIndex), 1});
+                                renderTarget->DrawTextLayout(
+                                    D2D1::Point2F(0.0f, 0.0f),
+                                    textLayout.Get(),
+                                    textBrush.Get());
+                                drewMnemonicText = true;
+                            }
+                        }
+                        if (!drewMnemonicText)
+                        {
+                            renderTarget->DrawText(
+                                tabText,
+                                static_cast<UINT32>(wcslen(tabText)),
+                                textFormat.Get(),
+                                D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
+                                textBrush.Get());
+                        }
                         if ((drawItem->itemState & ODS_SELECTED) != 0)
                         {
                             renderTarget->FillRectangle(
@@ -4217,7 +4363,10 @@ namespace
                     }
                     SetBkMode(drawItem->hDC, TRANSPARENT);
                     SetTextColor(drawItem->hDC, state->theme.text);
-                    DrawTextW(drawItem->hDC, tabText, -1, &itemRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                    const std::wstring markedTabText = AddConsolidatedSettingsMnemonicMarker(
+                        tabText,
+                        ExperimentalSettingsPageMnemonic(static_cast<ConsolidatedSettingsPage>(drawItem->itemID)));
+                    DrawTextW(drawItem->hDC, markedTabText.c_str(), -1, &itemRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 }
                 return TRUE;
             }
@@ -4267,6 +4416,12 @@ namespace
                     }
                     return 0;
                 }
+            }
+            break;
+        case WM_SYSKEYDOWN:
+            if (state && HandleConsolidatedSettingsMnemonic(*state, wParam))
+            {
+                return 0;
             }
             break;
         case WM_COMMAND:
@@ -4401,6 +4556,12 @@ namespace
         MSG message{};
         while (!state->done && GetMessageW(&message, nullptr, 0, 0) > 0)
         {
+            if (message.message == WM_SYSKEYDOWN
+                && (message.hwnd == dialogWindow || IsChild(dialogWindow, message.hwnd) != FALSE)
+                && HandleConsolidatedSettingsMnemonic(*state, message.wParam))
+            {
+                continue;
+            }
             if (!IsDialogMessageW(dialogWindow, &message))
             {
                 TranslateMessage(&message);
@@ -4429,6 +4590,84 @@ namespace
         constexpr const wchar_t* titles[] = {L"Slideshow", L"Viewer", L"Appearance", L"Performance", L"Behavior"};
         const std::size_t index = static_cast<std::size_t>(page);
         return index < std::size(titles) ? titles[index] : L"Settings";
+    }
+
+    wchar_t ExperimentalSettingsPageMnemonic(ConsolidatedSettingsPage page)
+    {
+        switch (page)
+        {
+        case ConsolidatedSettingsPage::Slideshow: return L'S';
+        case ConsolidatedSettingsPage::Viewer: return L'V';
+        case ConsolidatedSettingsPage::Appearance: return L'E';
+        case ConsolidatedSettingsPage::Performance: return L'P';
+        case ConsolidatedSettingsPage::Behavior: return L'B';
+        default: return 0;
+        }
+    }
+
+    wchar_t ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl control)
+    {
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::TransitionStyle: return L'T';
+        case ConsolidatedSettingsControl::SlideshowDuration: return L'D';
+        case ConsolidatedSettingsControl::TransitionDuration: return L'R';
+        case ConsolidatedSettingsControl::TransitionEnabled: return L'U';
+        case ConsolidatedSettingsControl::ViewerWheelZoom: return L'Z';
+        case ConsolidatedSettingsControl::ViewerWheelNavigate: return L'N';
+        case ConsolidatedSettingsControl::InvertKeyboardPanning: return L'I';
+        case ConsolidatedSettingsControl::RawPairingEnabled: return L'R';
+        case ConsolidatedSettingsControl::RawPreferRaw: return L'W';
+        case ConsolidatedSettingsControl::RawPreferJpeg: return L'J';
+        case ConsolidatedSettingsControl::SecondaryMonitor: return L'M';
+        case ConsolidatedSettingsControl::InfoOverlays: return L'D';
+        case ConsolidatedSettingsControl::WindowedFullMetadata: return L'G';
+        case ConsolidatedSettingsControl::FullScreenFullMetadata: return L'F';
+        case ConsolidatedSettingsControl::OverlayTextSize: return L'X';
+        case ConsolidatedSettingsControl::EscapeKeyBehavior: return L'K';
+        case ConsolidatedSettingsControl::ThemeLight: return L'L';
+        case ConsolidatedSettingsControl::ThemeDark: return L'K';
+        case ConsolidatedSettingsControl::AppTextSize: return L'X';
+        case ConsolidatedSettingsControl::ThumbnailSize: return L'H';
+        case ConsolidatedSettingsControl::ThumbnailDetails: return L'T';
+        case ConsolidatedSettingsControl::CompactLayout: return L'M';
+        case ConsolidatedSettingsControl::DetailsPanel: return L'D';
+        case ConsolidatedSettingsControl::ResourceProfile: return L'R';
+        case ConsolidatedSettingsControl::PersistentCache: return L'K';
+        case ConsolidatedSettingsControl::ThumbnailCache: return L'T';
+        case ConsolidatedSettingsControl::ThumbnailCacheAutomatic: return L'F';
+        case ConsolidatedSettingsControl::MetadataCache: return L'M';
+        case ConsolidatedSettingsControl::MetadataCacheAutomatic: return L'L';
+        case ConsolidatedSettingsControl::PrefetchDepth: return L'D';
+        case ConsolidatedSettingsControl::PrefetchDepthAutomatic: return L'I';
+        case ConsolidatedSettingsControl::PressureStatus: return L'Y';
+        case ConsolidatedSettingsControl::NvJpeg: return L'N';
+        case ConsolidatedSettingsControl::LibRawOutOfProcess: return L'U';
+        case ConsolidatedSettingsControl::RecursiveBrowsing: return L'R';
+        case ConsolidatedSettingsControl::ShowSubfolders: return L'F';
+        case ConsolidatedSettingsControl::CloseOnEscape: return L'L';
+        case ConsolidatedSettingsControl::SingleInstance: return L'I';
+        case ConsolidatedSettingsControl::QuickSendShortcutOrder: return L'Q';
+        default: return 0;
+        }
+    }
+
+    int ExperimentalSettingsMnemonicIndex(std::wstring_view text, wchar_t mnemonic)
+    {
+        if (mnemonic == 0)
+        {
+            return -1;
+        }
+
+        const wchar_t normalized = static_cast<wchar_t>(towupper(mnemonic));
+        for (std::size_t index = 0; index < text.size(); ++index)
+        {
+            if (static_cast<wchar_t>(towupper(text[index])) == normalized)
+            {
+                return static_cast<int>(index);
+            }
+        }
+        return -1;
     }
 
     bool ExperimentalSettingsControlIsChoice(ConsolidatedSettingsControl control)
@@ -4491,9 +4730,10 @@ namespace
                                       int right,
                                       int bottom,
                                       const wchar_t* text,
-                                      bool muted = false)
+                                      bool muted = false,
+                                      wchar_t mnemonic = 0)
     {
-        state.labels.push_back(ExperimentalSettingsLabel{{left, top, right, bottom}, text ? text : L"", muted});
+        state.labels.push_back(ExperimentalSettingsLabel{{left, top, right, bottom}, text ? text : L"", muted, mnemonic});
     }
 
     void ExperimentalSettingsSetControlRect(ExperimentalSettingsDialogState& state,
@@ -4545,18 +4785,21 @@ namespace
 
         auto labelValue = [&](const wchar_t* labelText, ConsolidatedSettingsControl control, int y)
         {
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, labelText);
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, labelText, false,
+                                         ExperimentalSettingsControlMnemonic(control));
             ExperimentalSettingsSetControlRect(state, control, valueLeft, y, valueRight, y + rowHeight);
         };
         auto check = [&](ConsolidatedSettingsControl control, const wchar_t* text, int y)
         {
             ExperimentalSettingsSetControlRect(state, control, left, y, right, y + rowHeight);
-            ExperimentalSettingsAddLabel(state, left + 34, y, right, y + rowHeight, text);
+            ExperimentalSettingsAddLabel(state, left + 34, y, right, y + rowHeight, text, false,
+                                         ExperimentalSettingsControlMnemonic(control));
         };
         auto radio = [&](ConsolidatedSettingsControl control, const wchar_t* text, int x, int y)
         {
             ExperimentalSettingsSetControlRect(state, control, x, y, x + 190, y + rowHeight);
-            ExperimentalSettingsAddLabel(state, x + 34, y, x + 190, y + rowHeight, text);
+            ExperimentalSettingsAddLabel(state, x + 34, y, x + 190, y + rowHeight, text, false,
+                                         ExperimentalSettingsControlMnemonic(control));
         };
 
         int y = contentTop;
@@ -4565,9 +4808,13 @@ namespace
         case ConsolidatedSettingsPage::Slideshow:
             labelValue(L"Transition style", ConsolidatedSettingsControl::TransitionStyle, y);
             y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Slide duration (milliseconds)");
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
+                                         L"Slide duration (milliseconds)", false,
+                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::SlideshowDuration));
             y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Transition duration (milliseconds)");
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
+                                         L"Transition duration (milliseconds)", false,
+                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::TransitionDuration));
             y += rowHeight + rowGap;
             ExperimentalSettingsAddLabel(state, left, y, right, y + rowHeight, L"Slides: 250-60000 ms   |   Transitions: 100-5000 ms");
             break;
@@ -4618,15 +4865,21 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::PersistentCache, L"Keep the persistent thumbnail cache enabled", y);
             y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Thumbnail cache cap (MB)");
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
+                                         L"Thumbnail cache cap (MB)", false,
+                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::ThumbnailCache));
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::ThumbnailCacheAutomatic, L"Follow profile", y);
             y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Metadata cache cap (entries)");
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
+                                         L"Metadata cache cap (entries)", false,
+                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::MetadataCache));
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y);
             y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Prefetch depth (items)");
+            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
+                                         L"Prefetch depth (items)", false,
+                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::PrefetchDepth));
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::PrefetchDepthAutomatic, L"Follow profile", y);
             y += rowHeight + rowGap;
@@ -4864,14 +5117,573 @@ namespace
         }
     }
 
+    void UpdateExperimentalSettingsCacheValues(ExperimentalSettingsDialogState& state);
+    void ApplyExperimentalSettingsTheme(ExperimentalSettingsDialogState& state);
+
+    HWND ExperimentalSettingsNativeWindow(const ExperimentalSettingsDialogState& state,
+                                          ConsolidatedSettingsControl control)
+    {
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::SlideshowDuration: return state.numericEdits[0];
+        case ConsolidatedSettingsControl::SlideshowDurationSpin: return state.numericSpins[0];
+        case ConsolidatedSettingsControl::TransitionDuration: return state.numericEdits[1];
+        case ConsolidatedSettingsControl::TransitionDurationSpin: return state.numericSpins[1];
+        case ConsolidatedSettingsControl::ThumbnailCache: return state.numericEdits[2];
+        case ConsolidatedSettingsControl::MetadataCache: return state.numericEdits[3];
+        case ConsolidatedSettingsControl::PrefetchDepth: return state.numericEdits[4];
+        default:
+            break;
+        }
+
+        const std::size_t index = static_cast<std::size_t>(control);
+        return index < state.nativeControls.size() ? state.nativeControls[index] : nullptr;
+    }
+
+    bool ExperimentalSettingsCustomControlEnabled(const ExperimentalSettingsDialogState& state,
+                                                  ConsolidatedSettingsControl control)
+    {
+        if (!state.settings)
+        {
+            return false;
+        }
+
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::RawPreferRaw:
+        case ConsolidatedSettingsControl::RawPreferJpeg:
+            return state.settings->rawJpegPairedOperationsEnabled;
+        case ConsolidatedSettingsControl::SecondaryMonitor:
+            return state.settings->secondaryMonitorAvailable;
+        case ConsolidatedSettingsControl::NvJpeg:
+            return state.settings->nvJpegAvailable;
+        case ConsolidatedSettingsControl::LibRawOutOfProcess:
+            return state.settings->libRawAvailable;
+        default:
+            return true;
+        }
+    }
+
+    bool ExperimentalSettingsControlAvailable(const ExperimentalSettingsDialogState& state,
+                                              ConsolidatedSettingsControl control)
+    {
+        const std::size_t index = static_cast<std::size_t>(control);
+        if (index >= state.controlRects.size())
+        {
+            return false;
+        }
+
+        if (const HWND nativeWindow = ExperimentalSettingsNativeWindow(state, control))
+        {
+            return IsWindow(nativeWindow) != FALSE
+                && IsWindowVisible(nativeWindow) != FALSE
+                && IsWindowEnabled(nativeWindow) != FALSE;
+        }
+
+        const RECT& bounds = state.controlRects[index];
+        return bounds.right > bounds.left
+            && bounds.bottom > bounds.top
+            && ExperimentalSettingsCustomControlEnabled(state, control);
+    }
+
+    std::vector<ConsolidatedSettingsControl> ExperimentalSettingsPageControlOrder(ConsolidatedSettingsPage page)
+    {
+        switch (page)
+        {
+        case ConsolidatedSettingsPage::Slideshow:
+            return {
+                ConsolidatedSettingsControl::TransitionStyle,
+                ConsolidatedSettingsControl::SlideshowDuration,
+                ConsolidatedSettingsControl::TransitionDuration};
+        case ConsolidatedSettingsPage::Viewer:
+            return {
+                ConsolidatedSettingsControl::TransitionEnabled,
+                ConsolidatedSettingsControl::ViewerWheelZoom,
+                ConsolidatedSettingsControl::ViewerWheelNavigate,
+                ConsolidatedSettingsControl::InvertKeyboardPanning,
+                ConsolidatedSettingsControl::RawPairingEnabled,
+                ConsolidatedSettingsControl::RawPreferRaw,
+                ConsolidatedSettingsControl::RawPreferJpeg,
+                ConsolidatedSettingsControl::SecondaryMonitor,
+                ConsolidatedSettingsControl::InfoOverlays,
+                ConsolidatedSettingsControl::WindowedFullMetadata,
+                ConsolidatedSettingsControl::FullScreenFullMetadata,
+                ConsolidatedSettingsControl::OverlayTextSize,
+                ConsolidatedSettingsControl::EscapeKeyBehavior};
+        case ConsolidatedSettingsPage::Appearance:
+            return {
+                ConsolidatedSettingsControl::ThemeLight,
+                ConsolidatedSettingsControl::ThemeDark,
+                ConsolidatedSettingsControl::AppTextSize,
+                ConsolidatedSettingsControl::ThumbnailSize,
+                ConsolidatedSettingsControl::ThumbnailDetails,
+                ConsolidatedSettingsControl::CompactLayout,
+                ConsolidatedSettingsControl::DetailsPanel};
+        case ConsolidatedSettingsPage::Performance:
+            return {
+                ConsolidatedSettingsControl::ResourceProfile,
+                ConsolidatedSettingsControl::PersistentCache,
+                ConsolidatedSettingsControl::ThumbnailCache,
+                ConsolidatedSettingsControl::ThumbnailCacheAutomatic,
+                ConsolidatedSettingsControl::MetadataCache,
+                ConsolidatedSettingsControl::MetadataCacheAutomatic,
+                ConsolidatedSettingsControl::PrefetchDepth,
+                ConsolidatedSettingsControl::PrefetchDepthAutomatic,
+                ConsolidatedSettingsControl::PressureStatus,
+                ConsolidatedSettingsControl::NvJpeg,
+                ConsolidatedSettingsControl::LibRawOutOfProcess};
+        case ConsolidatedSettingsPage::Behavior:
+            return {
+                ConsolidatedSettingsControl::RecursiveBrowsing,
+                ConsolidatedSettingsControl::ShowSubfolders,
+                ConsolidatedSettingsControl::CloseOnEscape,
+                ConsolidatedSettingsControl::SingleInstance,
+                ConsolidatedSettingsControl::QuickSendShortcutOrder};
+        default:
+            return {};
+        }
+    }
+
+    bool ExperimentalSettingsFocusTargetAvailable(const ExperimentalSettingsDialogState& state,
+                                                  const ExperimentalSettingsFocusTarget& target)
+    {
+        switch (target.kind)
+        {
+        case ExperimentalSettingsFocusTargetKind::Tab:
+            return target.index >= 0 && target.index < static_cast<int>(state.tabRects.size());
+        case ExperimentalSettingsFocusTargetKind::CustomControl:
+        {
+            if (target.index < 0 || target.index >= static_cast<int>(ConsolidatedSettingsControl::Count))
+            {
+                return false;
+            }
+            const auto control = static_cast<ConsolidatedSettingsControl>(target.index);
+            return ExperimentalSettingsNativeWindow(state, control) == nullptr
+                && ExperimentalSettingsControlAvailable(state, control);
+        }
+        case ExperimentalSettingsFocusTargetKind::NativeControl:
+        {
+            if (target.index < 0 || target.index >= static_cast<int>(ConsolidatedSettingsControl::Count))
+            {
+                return false;
+            }
+            const HWND nativeWindow = ExperimentalSettingsNativeWindow(
+                state,
+                static_cast<ConsolidatedSettingsControl>(target.index));
+            return nativeWindow
+                && IsWindow(nativeWindow) != FALSE
+                && IsWindowVisible(nativeWindow) != FALSE
+                && IsWindowEnabled(nativeWindow) != FALSE;
+        }
+        case ExperimentalSettingsFocusTargetKind::ApplyButton:
+        case ExperimentalSettingsFocusTargetKind::OkButton:
+        case ExperimentalSettingsFocusTargetKind::CancelButton:
+            return true;
+        case ExperimentalSettingsFocusTargetKind::None:
+        default:
+            return false;
+        }
+    }
+
+    std::vector<ExperimentalSettingsFocusTarget> ExperimentalSettingsFocusSequence(
+        const ExperimentalSettingsDialogState& state)
+    {
+        std::vector<ExperimentalSettingsFocusTarget> sequence;
+        for (int index = 0; index < static_cast<int>(state.tabRects.size()); ++index)
+        {
+            sequence.push_back({ExperimentalSettingsFocusTargetKind::Tab, index});
+        }
+
+        for (const auto control : ExperimentalSettingsPageControlOrder(state.page))
+        {
+            if (!ExperimentalSettingsControlAvailable(state, control))
+            {
+                continue;
+            }
+
+            const auto kind = ExperimentalSettingsNativeWindow(state, control)
+                ? ExperimentalSettingsFocusTargetKind::NativeControl
+                : ExperimentalSettingsFocusTargetKind::CustomControl;
+            sequence.push_back({kind, static_cast<int>(control)});
+        }
+
+        sequence.push_back({ExperimentalSettingsFocusTargetKind::ApplyButton});
+        sequence.push_back({ExperimentalSettingsFocusTargetKind::OkButton});
+        sequence.push_back({ExperimentalSettingsFocusTargetKind::CancelButton});
+        return sequence;
+    }
+
+    ExperimentalSettingsFocusTarget ExperimentalSettingsCurrentFocusTarget(
+        const ExperimentalSettingsDialogState& state)
+    {
+        const HWND focus = GetFocus();
+        if (focus == state.dialogWindow
+            && ExperimentalSettingsFocusTargetAvailable(state, state.focusedTarget))
+        {
+            return state.focusedTarget;
+        }
+
+        for (const auto& target : ExperimentalSettingsFocusSequence(state))
+        {
+            if (target.kind == ExperimentalSettingsFocusTargetKind::NativeControl
+                && ExperimentalSettingsNativeWindow(
+                       state,
+                       static_cast<ConsolidatedSettingsControl>(target.index)) == focus)
+            {
+                return target;
+            }
+        }
+        return {};
+    }
+
+    bool ExperimentalSettingsChoiceDropped(const ExperimentalSettingsDialogState& state)
+    {
+        const HWND focus = GetFocus();
+        for (const HWND choice : state.nativeControls)
+        {
+            if (choice == focus && SendMessageW(choice, CB_GETDROPPEDSTATE, 0, 0) != FALSE)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool FocusExperimentalSettingsTarget(ExperimentalSettingsDialogState& state,
+                                         const ExperimentalSettingsFocusTarget& target)
+    {
+        if (!ExperimentalSettingsFocusTargetAvailable(state, target))
+        {
+            return false;
+        }
+
+        HWND focusWindow = state.dialogWindow;
+        if (target.kind == ExperimentalSettingsFocusTargetKind::NativeControl)
+        {
+            focusWindow = ExperimentalSettingsNativeWindow(
+                state,
+                static_cast<ConsolidatedSettingsControl>(target.index));
+        }
+
+        const ExperimentalSettingsFocusTarget previousTarget = state.focusedTarget;
+        state.focusedTarget = target;
+        if (GetFocus() != focusWindow)
+        {
+            SetFocus(focusWindow);
+        }
+
+        if (GetFocus() != focusWindow)
+        {
+            state.focusedTarget = previousTarget;
+            return false;
+        }
+
+        InvalidateRect(state.dialogWindow, nullptr, FALSE);
+        return true;
+    }
+
+    bool FocusFirstExperimentalSettingsPageControl(ExperimentalSettingsDialogState& state)
+    {
+        for (const auto& target : ExperimentalSettingsFocusSequence(state))
+        {
+            if (target.kind != ExperimentalSettingsFocusTargetKind::Tab
+                && target.kind != ExperimentalSettingsFocusTargetKind::ApplyButton
+                && target.kind != ExperimentalSettingsFocusTargetKind::OkButton
+                && target.kind != ExperimentalSettingsFocusTargetKind::CancelButton)
+            {
+                return FocusExperimentalSettingsTarget(state, target);
+            }
+        }
+        return FocusExperimentalSettingsTarget(state, {ExperimentalSettingsFocusTargetKind::ApplyButton});
+    }
+
+    void UpdateExperimentalSettingsCustomControlState(ExperimentalSettingsDialogState& state,
+                                                      ConsolidatedSettingsControl control)
+    {
+        if (control == ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
+        {
+            const bool enabled = !ExperimentalSettingsChecked(*state.settings, control);
+            EnableWindow(state.numericEdits[2], enabled ? TRUE : FALSE);
+            EnableWindow(state.numericSpins[2], enabled ? TRUE : FALSE);
+        }
+        else if (control == ConsolidatedSettingsControl::MetadataCacheAutomatic)
+        {
+            const bool enabled = !ExperimentalSettingsChecked(*state.settings, control);
+            EnableWindow(state.numericEdits[3], enabled ? TRUE : FALSE);
+            EnableWindow(state.numericSpins[3], enabled ? TRUE : FALSE);
+        }
+        else if (control == ConsolidatedSettingsControl::PrefetchDepthAutomatic)
+        {
+            const bool enabled = !ExperimentalSettingsChecked(*state.settings, control);
+            EnableWindow(state.numericEdits[4], enabled ? TRUE : FALSE);
+            EnableWindow(state.numericSpins[4], enabled ? TRUE : FALSE);
+        }
+
+        if (control == ConsolidatedSettingsControl::ThemeLight
+            || control == ConsolidatedSettingsControl::ThemeDark)
+        {
+            ApplyExperimentalSettingsTheme(state);
+        }
+        if (control == ConsolidatedSettingsControl::ThumbnailCacheAutomatic
+            || control == ConsolidatedSettingsControl::MetadataCacheAutomatic
+            || control == ConsolidatedSettingsControl::PrefetchDepthAutomatic)
+        {
+            UpdateExperimentalSettingsCacheValues(state);
+        }
+        InvalidateRect(state.dialogWindow, nullptr, FALSE);
+    }
+
+    void ActivateExperimentalSettingsTarget(ExperimentalSettingsDialogState& state,
+                                            const ExperimentalSettingsFocusTarget& target)
+    {
+        if (!ExperimentalSettingsFocusTargetAvailable(state, target))
+        {
+            return;
+        }
+
+        switch (target.kind)
+        {
+        case ExperimentalSettingsFocusTargetKind::Tab:
+            state.page = static_cast<ConsolidatedSettingsPage>(target.index);
+            LayoutExperimentalSettings(state);
+            FocusFirstExperimentalSettingsPageControl(state);
+            return;
+        case ExperimentalSettingsFocusTargetKind::CustomControl:
+            ExperimentalSettingsToggle(
+                state,
+                static_cast<ConsolidatedSettingsControl>(target.index));
+            UpdateExperimentalSettingsCustomControlState(
+                state,
+                static_cast<ConsolidatedSettingsControl>(target.index));
+            return;
+        case ExperimentalSettingsFocusTargetKind::ApplyButton:
+            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(kExperimentalSettingsApplyId, BN_CLICKED), 0);
+            return;
+        case ExperimentalSettingsFocusTargetKind::OkButton:
+            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(kExperimentalSettingsOkId, BN_CLICKED), 0);
+            return;
+        case ExperimentalSettingsFocusTargetKind::CancelButton:
+            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(kExperimentalSettingsCancelId, BN_CLICKED), 0);
+            return;
+        case ExperimentalSettingsFocusTargetKind::NativeControl:
+        case ExperimentalSettingsFocusTargetKind::None:
+        default:
+            return;
+        }
+    }
+
+    bool TryGetAdjacentExperimentalSettingsRadioControl(ConsolidatedSettingsControl control,
+                                                        ConsolidatedSettingsControl* adjacent)
+    {
+        if (!adjacent)
+        {
+            return false;
+        }
+
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::ViewerWheelZoom:
+        case ConsolidatedSettingsControl::ViewerWheelNavigate:
+            *adjacent = control == ConsolidatedSettingsControl::ViewerWheelZoom
+                ? ConsolidatedSettingsControl::ViewerWheelNavigate
+                : ConsolidatedSettingsControl::ViewerWheelZoom;
+            return true;
+        case ConsolidatedSettingsControl::RawPreferRaw:
+        case ConsolidatedSettingsControl::RawPreferJpeg:
+            *adjacent = control == ConsolidatedSettingsControl::RawPreferRaw
+                ? ConsolidatedSettingsControl::RawPreferJpeg
+                : ConsolidatedSettingsControl::RawPreferRaw;
+            return true;
+        case ConsolidatedSettingsControl::ThemeLight:
+        case ConsolidatedSettingsControl::ThemeDark:
+            *adjacent = control == ConsolidatedSettingsControl::ThemeLight
+                ? ConsolidatedSettingsControl::ThemeDark
+                : ConsolidatedSettingsControl::ThemeLight;
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool HandleExperimentalSettingsMnemonic(ExperimentalSettingsDialogState& state,
+                                             WPARAM wParam)
+    {
+        wchar_t mnemonic = static_cast<wchar_t>(wParam);
+        if (mnemonic >= L'a' && mnemonic <= L'z')
+        {
+            mnemonic = static_cast<wchar_t>(mnemonic - (L'a' - L'A'));
+        }
+
+        for (int index = 0; index < static_cast<int>(state.tabRects.size()); ++index)
+        {
+            if (ExperimentalSettingsPageMnemonic(static_cast<ConsolidatedSettingsPage>(index)) == mnemonic)
+            {
+                ActivateExperimentalSettingsTarget(
+                    state,
+                    {ExperimentalSettingsFocusTargetKind::Tab, index});
+                return true;
+            }
+        }
+
+        for (const auto control : ExperimentalSettingsPageControlOrder(state.page))
+        {
+            if (ExperimentalSettingsControlMnemonic(control) != mnemonic
+                || !ExperimentalSettingsControlAvailable(state, control))
+            {
+                continue;
+            }
+
+            const auto kind = ExperimentalSettingsNativeWindow(state, control)
+                ? ExperimentalSettingsFocusTargetKind::NativeControl
+                : ExperimentalSettingsFocusTargetKind::CustomControl;
+            return FocusExperimentalSettingsTarget(
+                state,
+                {kind, static_cast<int>(control)});
+        }
+
+        if (mnemonic == L'A')
+        {
+            ActivateExperimentalSettingsTarget(state, {ExperimentalSettingsFocusTargetKind::ApplyButton});
+            return true;
+        }
+        if (mnemonic == L'O')
+        {
+            ActivateExperimentalSettingsTarget(state, {ExperimentalSettingsFocusTargetKind::OkButton});
+            return true;
+        }
+        if (mnemonic == L'C')
+        {
+            ActivateExperimentalSettingsTarget(state, {ExperimentalSettingsFocusTargetKind::CancelButton});
+            return true;
+        }
+        return false;
+    }
+
+    bool HandleExperimentalSettingsKeyboardInput(ExperimentalSettingsDialogState& state,
+                                                 UINT message,
+                                                 WPARAM wParam)
+    {
+        if ((message != WM_KEYDOWN && message != WM_SYSKEYDOWN)
+            || (wParam == VK_TAB && (GetKeyState(VK_CONTROL) & 0x8000) != 0))
+        {
+            return false;
+        }
+
+        if (message == WM_SYSKEYDOWN)
+        {
+            if (wParam == VK_F10)
+            {
+                return false;
+            }
+            return HandleExperimentalSettingsMnemonic(state, wParam);
+        }
+
+        if (wParam == VK_TAB && ExperimentalSettingsChoiceDropped(state))
+        {
+            return false;
+        }
+
+        const ExperimentalSettingsFocusTarget current = ExperimentalSettingsCurrentFocusTarget(state);
+        const auto sequence = ExperimentalSettingsFocusSequence(state);
+        if (wParam == VK_TAB)
+        {
+            if (sequence.empty())
+            {
+                return false;
+            }
+
+            const bool reverse = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            const auto currentIterator = std::find(sequence.begin(), sequence.end(), current);
+            const int currentIndex = currentIterator == sequence.end()
+                ? (reverse ? 0 : static_cast<int>(sequence.size()) - 1)
+                : static_cast<int>(std::distance(sequence.begin(), currentIterator));
+            const int direction = reverse ? -1 : 1;
+            const int nextIndex = (currentIndex + direction + static_cast<int>(sequence.size()))
+                % static_cast<int>(sequence.size());
+            return FocusExperimentalSettingsTarget(state, sequence[static_cast<std::size_t>(nextIndex)]);
+        }
+
+        if (current.kind == ExperimentalSettingsFocusTargetKind::Tab
+            && (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_UP || wParam == VK_DOWN))
+        {
+            const int direction = (wParam == VK_LEFT || wParam == VK_UP) ? -1 : 1;
+            const int pageCount = static_cast<int>(state.tabRects.size());
+            const int nextPage = (current.index + direction + pageCount) % pageCount;
+            state.page = static_cast<ConsolidatedSettingsPage>(nextPage);
+            LayoutExperimentalSettings(state);
+            FocusFirstExperimentalSettingsPageControl(state);
+            return true;
+        }
+
+        if (current.kind == ExperimentalSettingsFocusTargetKind::CustomControl
+            && (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_UP || wParam == VK_DOWN))
+        {
+            ConsolidatedSettingsControl adjacent{};
+            if (TryGetAdjacentExperimentalSettingsRadioControl(
+                    static_cast<ConsolidatedSettingsControl>(current.index),
+                    &adjacent)
+                && ExperimentalSettingsControlAvailable(state, adjacent))
+            {
+                ActivateExperimentalSettingsTarget(
+                    state,
+                    {ExperimentalSettingsFocusTargetKind::CustomControl, static_cast<int>(adjacent)});
+                FocusExperimentalSettingsTarget(
+                    state,
+                    {ExperimentalSettingsFocusTargetKind::CustomControl, static_cast<int>(adjacent)});
+                return true;
+            }
+        }
+
+        if (wParam != VK_RETURN && wParam != VK_SPACE)
+        {
+            return false;
+        }
+
+        switch (current.kind)
+        {
+        case ExperimentalSettingsFocusTargetKind::Tab:
+        case ExperimentalSettingsFocusTargetKind::CustomControl:
+        case ExperimentalSettingsFocusTargetKind::ApplyButton:
+        case ExperimentalSettingsFocusTargetKind::OkButton:
+        case ExperimentalSettingsFocusTargetKind::CancelButton:
+            ActivateExperimentalSettingsTarget(state, current);
+            return true;
+        case ExperimentalSettingsFocusTargetKind::NativeControl:
+        case ExperimentalSettingsFocusTargetKind::None:
+        default:
+            return false;
+        }
+    }
+
     void DrawExperimentalSettingsText(ID2D1RenderTarget* target,
                                       IDWriteTextFormat* format,
                                       const std::wstring& text,
                                       const RECT& bounds,
-                                      ID2D1Brush* brush)
+                                      ID2D1Brush* brush,
+                                      wchar_t mnemonic = 0)
     {
         if (target && format && brush && !text.empty())
         {
+            auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+            const int mnemonicIndex = ExperimentalSettingsMnemonicIndex(text, mnemonic);
+            if (mnemonicIndex >= 0)
+            {
+                const auto layout = renderer.CreateTextLayout(
+                    text,
+                    format,
+                    static_cast<float>(std::max<LONG>(1, bounds.right - bounds.left)),
+                    static_cast<float>(std::max<LONG>(1, bounds.bottom - bounds.top)));
+                if (layout)
+                {
+                    layout->SetUnderline(TRUE, DWRITE_TEXT_RANGE{
+                        static_cast<UINT32>(mnemonicIndex), 1});
+                    target->DrawTextLayout(
+                        D2D1::Point2F(static_cast<float>(bounds.left), static_cast<float>(bounds.top)),
+                        layout.Get(),
+                        brush);
+                    return;
+                }
+            }
             target->DrawText(text.c_str(), static_cast<UINT32>(text.size()), format,
                              hyperbrowse::render::ToD2DRect(bounds), brush);
         }
@@ -4937,6 +5749,13 @@ namespace
         GetClientRect(state.dialogWindow, &client);
         const bool dark = state.settings->darkTheme;
         const COLORREF windowColor = dark ? RGB(24, 28, 32) : RGB(244, 246, 249);
+        const bool dialogHasSemanticFocus = GetFocus() == state.dialogWindow;
+        const auto customTargetFocused = [&](ExperimentalSettingsFocusTargetKind kind, int index)
+        {
+            return dialogHasSemanticFocus
+                && state.focusedTarget.kind == kind
+                && state.focusedTarget.index == index;
+        };
         state.renderTarget->BeginDraw();
         state.renderTarget->Clear(hyperbrowse::render::ToD2DColor(windowColor));
         state.renderTarget->FillRectangle(D2D1::RectF(20.0f, 14.0f, static_cast<float>(client.right - 20), 60.0f), state.panelBrush.Get());
@@ -4959,19 +5778,29 @@ namespace
                 state.renderTarget->FillRoundedRectangle(
                     hyperbrowse::render::ToD2DRoundedRect(tab, 6.0f, 6.0f), state.accentFillBrush.Get());
             }
+            if (customTargetFocused(ExperimentalSettingsFocusTargetKind::Tab, static_cast<int>(index)))
+            {
+                RECT focusBounds = tab;
+                InflateRect(&focusBounds, -2, -2);
+                state.renderTarget->DrawRoundedRectangle(
+                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, 5.0f, 5.0f),
+                    state.accentBrush.Get(),
+                    2.0f);
+            }
             RECT textBounds = tab;
             textBounds.left += 12;
             textBounds.right -= 10;
             DrawExperimentalSettingsText(state.renderTarget.Get(), state.bodyFormat.Get(),
                                          ExperimentalSettingsPageTitle(static_cast<ConsolidatedSettingsPage>(index)), textBounds,
-                                         selected ? state.accentBrush.Get() : state.mutedTextBrush.Get());
+                                         selected ? state.accentBrush.Get() : state.mutedTextBrush.Get(),
+                                         ExperimentalSettingsPageMnemonic(static_cast<ConsolidatedSettingsPage>(index)));
         }
 
         for (std::size_t index = 0; index < state.labels.size(); ++index)
         {
             const ExperimentalSettingsLabel& label = state.labels[index];
             DrawExperimentalSettingsText(state.renderTarget.Get(), label.muted ? state.smallFormat.Get() : state.bodyFormat.Get(), label.text, label.bounds,
-                                         label.muted ? state.mutedTextBrush.Get() : state.textBrush.Get());
+                                         label.muted ? state.mutedTextBrush.Get() : state.textBrush.Get(), label.mnemonic);
         }
 
         for (std::size_t index = 0; index < state.controlRects.size(); ++index)
@@ -5018,8 +5847,21 @@ namespace
                     }
                 }
             }
+            if (customTargetFocused(ExperimentalSettingsFocusTargetKind::CustomControl, static_cast<int>(index)))
+            {
+                RECT focusBounds = bounds;
+                InflateRect(&focusBounds, -2, -2);
+                state.renderTarget->DrawRoundedRectangle(
+                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, 5.0f, 5.0f),
+                    state.accentBrush.Get(),
+                    2.0f);
+            }
         }
-        const auto drawButton = [&](const RECT& bounds, const wchar_t* text, bool primary, int hoverId)
+        const auto drawButton = [&](const RECT& bounds,
+                                    const wchar_t* text,
+                                    bool primary,
+                                    int hoverId,
+                                    ExperimentalSettingsFocusTargetKind focusKind)
         {
             const bool hovered = state.hoveredControl == hoverId;
             state.renderTarget->FillRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f),
@@ -5033,11 +5875,21 @@ namespace
             textBounds.left += 12;
             textBounds.right -= 10;
             DrawExperimentalSettingsText(state.renderTarget.Get(), state.buttonFormat.Get(), text, textBounds,
-                                         primary ? state.buttonTextBrush.Get() : state.textBrush.Get());
+                                         primary ? state.buttonTextBrush.Get() : state.textBrush.Get(),
+                                         text[0] == L'A' ? L'A' : text[0] == L'O' ? L'O' : L'C');
+            if (customTargetFocused(focusKind, -1))
+            {
+                RECT focusBounds = bounds;
+                InflateRect(&focusBounds, -2, -2);
+                state.renderTarget->DrawRoundedRectangle(
+                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, 5.0f, 5.0f),
+                    state.accentBrush.Get(),
+                    2.0f);
+            }
         };
-        drawButton(state.applyButtonRect, L"Apply", false, -10);
-        drawButton(state.okButtonRect, L"OK", true, -11);
-        drawButton(state.cancelButtonRect, L"Cancel", false, -12);
+        drawButton(state.applyButtonRect, L"Apply", false, -10, ExperimentalSettingsFocusTargetKind::ApplyButton);
+        drawButton(state.okButtonRect, L"OK", true, -11, ExperimentalSettingsFocusTargetKind::OkButton);
+        drawButton(state.cancelButtonRect, L"Cancel", false, -12, ExperimentalSettingsFocusTargetKind::CancelButton);
         state.renderTarget->EndDraw();
     }
 
@@ -5499,18 +6351,21 @@ namespace
                 SetFocus(hwnd);
                 if (PtInRect(&state->applyButtonRect, point))
                 {
+                    FocusExperimentalSettingsTarget(*state, {ExperimentalSettingsFocusTargetKind::ApplyButton});
                     state->pressedControl = -10;
                     SetCapture(hwnd);
                     return 0;
                 }
                 if (PtInRect(&state->okButtonRect, point))
                 {
+                    FocusExperimentalSettingsTarget(*state, {ExperimentalSettingsFocusTargetKind::OkButton});
                     state->pressedControl = -11;
                     SetCapture(hwnd);
                     return 0;
                 }
                 if (PtInRect(&state->cancelButtonRect, point))
                 {
+                    FocusExperimentalSettingsTarget(*state, {ExperimentalSettingsFocusTargetKind::CancelButton});
                     state->pressedControl = -12;
                     SetCapture(hwnd);
                     return 0;
@@ -5521,6 +6376,9 @@ namespace
                     {
                         state->page = static_cast<ConsolidatedSettingsPage>(index);
                         LayoutExperimentalSettings(*state);
+                        FocusExperimentalSettingsTarget(
+                            *state,
+                            {ExperimentalSettingsFocusTargetKind::Tab, static_cast<int>(index)});
                         return 0;
                     }
                 }
@@ -5528,8 +6386,17 @@ namespace
                 {
                     if (PtInRect(&state->controlRects[index], point))
                     {
+                        const auto control = static_cast<ConsolidatedSettingsControl>(index);
+                        if (!ExperimentalSettingsControlAvailable(*state, control))
+                        {
+                            continue;
+                        }
+                        state->focusedTarget = {
+                            ExperimentalSettingsFocusTargetKind::CustomControl,
+                            static_cast<int>(index)};
                         state->pressedControl = static_cast<int>(index);
                         SetCapture(hwnd);
+                        InvalidateRect(hwnd, nullptr, FALSE);
                         return 0;
                     }
                 }
@@ -5547,35 +6414,7 @@ namespace
                 {
                     const auto control = static_cast<ConsolidatedSettingsControl>(pressed);
                     ExperimentalSettingsToggle(*state, control);
-                    if (control == ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
-                    {
-                        const bool enabled = !ExperimentalSettingsChecked(*state->settings, control);
-                        EnableWindow(state->numericEdits[2], enabled ? TRUE : FALSE);
-                        EnableWindow(state->numericSpins[2], enabled ? TRUE : FALSE);
-                    }
-                    else if (control == ConsolidatedSettingsControl::MetadataCacheAutomatic)
-                    {
-                        const bool enabled = !ExperimentalSettingsChecked(*state->settings, control);
-                        EnableWindow(state->numericEdits[3], enabled ? TRUE : FALSE);
-                        EnableWindow(state->numericSpins[3], enabled ? TRUE : FALSE);
-                    }
-                    else if (control == ConsolidatedSettingsControl::PrefetchDepthAutomatic)
-                    {
-                        const bool enabled = !ExperimentalSettingsChecked(*state->settings, control);
-                        EnableWindow(state->numericEdits[4], enabled ? TRUE : FALSE);
-                        EnableWindow(state->numericSpins[4], enabled ? TRUE : FALSE);
-                    }
-                    if (control == ConsolidatedSettingsControl::ThemeLight
-                        || control == ConsolidatedSettingsControl::ThemeDark)
-                    {
-                        ApplyExperimentalSettingsTheme(*state);
-                    }
-                    if (control == ConsolidatedSettingsControl::ThumbnailCacheAutomatic
-                        || control == ConsolidatedSettingsControl::MetadataCacheAutomatic
-                        || control == ConsolidatedSettingsControl::PrefetchDepthAutomatic)
-                    {
-                        UpdateExperimentalSettingsCacheValues(*state);
-                    }
+                    UpdateExperimentalSettingsCustomControlState(*state, control);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
             }
@@ -5608,6 +6447,11 @@ namespace
             }
             return 0;
         case WM_KEYDOWN:
+        case WM_SYSKEYDOWN:
+            if (state && HandleExperimentalSettingsKeyboardInput(*state, message, wParam))
+            {
+                return 0;
+            }
             if (state && wParam == VK_ESCAPE)
             {
                 DestroyWindow(hwnd);
@@ -5790,46 +6634,30 @@ namespace
         ShowWindow(dialogWindow, SW_SHOWNORMAL);
         UpdateWindow(dialogWindow);
         const HWND initialFocus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::TransitionStyle)];
-        SetFocus(initialFocus ? initialFocus : dialogWindow);
-        const auto isChoiceDropped = [&state]()
+        if (initialFocus)
         {
-            const HWND focus = GetFocus();
-            for (const HWND choice : state.nativeControls)
-            {
-                if (choice == focus && SendMessageW(choice, CB_GETDROPPEDSTATE, 0, 0) != FALSE)
-                {
-                    return true;
-                }
-            }
-            return false;
-        };
-        const auto focusFirstControlOnPage = [&state, dialogWindow]()
+            FocusExperimentalSettingsTarget(
+                state,
+                {ExperimentalSettingsFocusTargetKind::NativeControl,
+                 static_cast<int>(ConsolidatedSettingsControl::TransitionStyle)});
+        }
+        else
         {
-            HWND focus = nullptr;
-            switch (state.page)
-            {
-            case ConsolidatedSettingsPage::Slideshow:
-                focus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::TransitionStyle)];
-                break;
-            case ConsolidatedSettingsPage::Viewer:
-                focus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::OverlayTextSize)];
-                break;
-            case ConsolidatedSettingsPage::Appearance:
-                focus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::AppTextSize)];
-                break;
-            case ConsolidatedSettingsPage::Performance:
-                focus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::ResourceProfile)];
-                break;
-            case ConsolidatedSettingsPage::Behavior:
-            default:
-                break;
-            }
-            SetFocus(focus ? focus : dialogWindow);
+            FocusFirstExperimentalSettingsPageControl(state);
+        }
+        const auto focusFirstControlOnPage = [&state]()
+        {
+            FocusFirstExperimentalSettingsPageControl(state);
         };
         MSG message{};
         while (!state.done && GetMessageW(&message, nullptr, 0, 0) > 0)
         {
             const bool keyMessage = message.message == WM_KEYDOWN || message.message == WM_SYSKEYDOWN;
+            const bool dialogMessage = message.hwnd == dialogWindow || IsChild(dialogWindow, message.hwnd) != FALSE;
+            if (keyMessage && dialogMessage && HandleExperimentalSettingsKeyboardInput(state, message.message, message.wParam))
+            {
+                continue;
+            }
             if (keyMessage && message.wParam == VK_TAB && (GetKeyState(VK_CONTROL) & 0x8000) != 0)
             {
                 const int pageCount = static_cast<int>(ConsolidatedSettingsPage::Count);
@@ -5841,12 +6669,12 @@ namespace
                 focusFirstControlOnPage();
                 continue;
             }
-            if (keyMessage && message.wParam == VK_ESCAPE && !isChoiceDropped())
+            if (keyMessage && message.wParam == VK_ESCAPE && !ExperimentalSettingsChoiceDropped(state))
             {
                 SendMessageW(dialogWindow, WM_CLOSE, 0, 0);
                 continue;
             }
-            if (keyMessage && message.wParam == VK_RETURN && !isChoiceDropped())
+            if (keyMessage && message.wParam == VK_RETURN && !ExperimentalSettingsChoiceDropped(state))
             {
                 SendMessageW(dialogWindow, WM_COMMAND, MAKEWPARAM(kExperimentalSettingsOkId, BN_CLICKED), 0);
                 continue;
@@ -9145,6 +9973,7 @@ namespace hyperbrowse::ui
 
     MainWindow::~MainWindow()
     {
+        accessibility_.reset();
         cacheMaintenanceExecutor_.reset();
 
         if (shortcutReferenceWindow_ && IsWindow(shortcutReferenceWindow_))
@@ -9301,6 +10130,25 @@ namespace hyperbrowse::ui
         {
             return false;
         }
+
+        accessibility_ = std::make_unique<MainWindowAccessibility>(
+            hwnd_,
+            [this]
+            {
+                return BuildAccessibilityItems();
+            },
+            [this]
+            {
+                return AccessibilityFocusedChildId();
+            },
+            [this](long childId)
+            {
+                return FocusAccessibilityChild(childId);
+            },
+            [this](long childId)
+            {
+                return ActivateAccessibilityChild(childId);
+            });
 
         ApplyAppTextSize();
 
@@ -9486,6 +10334,14 @@ namespace hyperbrowse::ui
             && message->hwnd
             && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
             && HandleCommandBarKeyboardInput(message->message, message->wParam, message->lParam))
+        {
+            return true;
+        }
+
+        if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
+            && message->hwnd
+            && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
+            && HandleKeyboardFocusInput(message->message, message->wParam, message->lParam))
         {
             return true;
         }
@@ -9909,7 +10765,7 @@ namespace hyperbrowse::ui
             detailsPanelRichEditModule_ = LoadLibraryW(L"Msftedit.dll");
         }
 
-        const DWORD detailsPanelTextStyle = WS_CHILD | WS_CLIPSIBLINGS | (detailsStripVisible_ ? WS_VISIBLE : 0) | WS_VSCROLL
+        const DWORD detailsPanelTextStyle = WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | (detailsStripVisible_ ? WS_VISIBLE : 0) | WS_VSCROLL
             | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_NOHIDESEL;
         detailsPanelText_ = CreateWindowExW(
             0,
@@ -11105,6 +11961,10 @@ namespace hyperbrowse::ui
         }
 
         UpdateStatusText();
+        if (accessibility_)
+        {
+            accessibility_->NotifyStateChanged(CHILDID_SELF);
+        }
     }
 
     void MainWindow::UpdateStatusText()
@@ -11325,6 +12185,10 @@ namespace hyperbrowse::ui
         {
             SetFocus(hwnd_);
         }
+        if (accessibility_)
+        {
+            accessibility_->NotifyFocusChanged();
+        }
     }
 
     void MainWindow::DeactivateCommandBarKeyboardMode(bool restoreFocus)
@@ -11346,6 +12210,10 @@ namespace hyperbrowse::ui
             && (restoreWindow == hwnd_ || IsChild(hwnd_, restoreWindow)))
         {
             SetFocus(restoreWindow);
+        }
+        if (accessibility_)
+        {
+            accessibility_->NotifyFocusChanged();
         }
     }
 
@@ -11384,6 +12252,797 @@ namespace hyperbrowse::ui
         }
 
         return true;
+    }
+
+    std::vector<MainWindow::KeyboardFocusTarget> MainWindow::BuildKeyboardFocusSequence() const
+    {
+        std::vector<KeyboardFocusTarget> sequence;
+        const auto addTarget = [this, &sequence](KeyboardFocusTarget target)
+        {
+            if (IsKeyboardFocusTargetAvailable(target))
+            {
+                sequence.push_back(target);
+            }
+        };
+
+        addTarget({KeyboardFocusTargetKind::FilterEdit});
+        for (int index = 0; index < static_cast<int>(toolbarItems_.size()); ++index)
+        {
+            addTarget({KeyboardFocusTargetKind::ToolbarItem, index});
+        }
+
+        addTarget({KeyboardFocusTargetKind::FolderTree});
+        addTarget({KeyboardFocusTargetKind::BrowserPane});
+
+        if (detailsStripVisible_)
+        {
+            for (int index = 0; index < static_cast<int>(detailsPanelTabRects_.size()); ++index)
+            {
+                addTarget({KeyboardFocusTargetKind::DetailsTab, index});
+            }
+            addTarget({KeyboardFocusTargetKind::DetailsCloseButton});
+
+            if (activeRightPaneTab_ == RightPaneTab::FileDetails)
+            {
+                addTarget({KeyboardFocusTargetKind::DetailsText});
+            }
+            else if (activeRightPaneTab_ == RightPaneTab::QuickSend)
+            {
+                addTarget({KeyboardFocusTargetKind::QuickAccessSortButton});
+                for (int rowIndex = 0; rowIndex < static_cast<int>(quickAccessDestinationRows_.size()); ++rowIndex)
+                {
+                    addTarget({KeyboardFocusTargetKind::QuickAccessShortcutEdit, rowIndex});
+                    addTarget({KeyboardFocusTargetKind::QuickAccessRow, rowIndex});
+                    addTarget({KeyboardFocusTargetKind::QuickAccessButton, rowIndex * 3});
+                    addTarget({KeyboardFocusTargetKind::QuickAccessButton, rowIndex * 3 + 1});
+                    addTarget({KeyboardFocusTargetKind::QuickAccessButton, rowIndex * 3 + 2});
+                }
+                addTarget({KeyboardFocusTargetKind::QuickAccessScrollBar});
+            }
+        }
+
+        return sequence;
+    }
+
+    std::vector<MainWindow::AccessibilityTarget> MainWindow::BuildAccessibilityTargets() const
+    {
+        std::vector<AccessibilityTarget> targets;
+        const auto addKeyboardTarget = [&targets](KeyboardFocusTarget target)
+        {
+            targets.push_back({AccessibilityTargetKind::KeyboardFocus, -1, target});
+        };
+
+        for (int index = 0; index < static_cast<int>(commandBarMenuButtons_.size()); ++index)
+        {
+            const auto& button = commandBarMenuButtons_[static_cast<std::size_t>(index)];
+            if (!button.label.empty() && !IsRectEmpty(&button.rect))
+            {
+                targets.push_back({AccessibilityTargetKind::CommandBarMenu, index, {}});
+            }
+        }
+
+        for (int index = 0; index < static_cast<int>(toolbarItems_.size()); ++index)
+        {
+            const auto& item = toolbarItems_[static_cast<std::size_t>(index)];
+            if (item.kind != ToolbarItemKind::Separator
+                && item.kind != ToolbarItemKind::FilterEdit
+                && !IsRectEmpty(&item.rect))
+            {
+                addKeyboardTarget({KeyboardFocusTargetKind::ToolbarItem, index});
+            }
+        }
+
+        if (browserPane_ && IsWindowVisible(browserPane_) != FALSE)
+        {
+            addKeyboardTarget({KeyboardFocusTargetKind::BrowserPane});
+        }
+
+        if (!detailsStripVisible_)
+        {
+            return targets;
+        }
+
+        for (int index = 0; index < static_cast<int>(detailsPanelTabRects_.size()); ++index)
+        {
+            if (!IsRectEmpty(&detailsPanelTabRects_[static_cast<std::size_t>(index)]))
+            {
+                addKeyboardTarget({KeyboardFocusTargetKind::DetailsTab, index});
+            }
+        }
+        if (!IsRectEmpty(&detailsPanelCloseButtonRect_))
+        {
+            addKeyboardTarget({KeyboardFocusTargetKind::DetailsCloseButton});
+        }
+
+        if (activeRightPaneTab_ == RightPaneTab::QuickSend)
+        {
+            if (!IsRectEmpty(&quickAccessSortButtonRect_))
+            {
+                addKeyboardTarget({KeyboardFocusTargetKind::QuickAccessSortButton});
+            }
+            for (int rowIndex = 0; rowIndex < static_cast<int>(quickAccessDestinationRows_.size()); ++rowIndex)
+            {
+                const auto& row = quickAccessDestinationRows_[static_cast<std::size_t>(rowIndex)];
+                if (!IsRectEmpty(&row.rowRect))
+                {
+                    addKeyboardTarget({KeyboardFocusTargetKind::QuickAccessRow, rowIndex});
+                }
+                if (!IsRectEmpty(&row.copyRect))
+                {
+                    addKeyboardTarget({KeyboardFocusTargetKind::QuickAccessButton, rowIndex * 3});
+                }
+                if (!IsRectEmpty(&row.moveRect))
+                {
+                    addKeyboardTarget({KeyboardFocusTargetKind::QuickAccessButton, rowIndex * 3 + 1});
+                }
+                if (!IsRectEmpty(&row.removeRect))
+                {
+                    addKeyboardTarget({KeyboardFocusTargetKind::QuickAccessButton, rowIndex * 3 + 2});
+                }
+            }
+        }
+
+        return targets;
+    }
+
+    std::vector<MainWindowAccessibility::Item> MainWindow::BuildAccessibilityItems() const
+    {
+        const auto targets = BuildAccessibilityTargets();
+        std::vector<MainWindowAccessibility::Item> items;
+        items.reserve(targets.size());
+
+        const auto addState = [](long state, DWORD flag)
+        {
+            return static_cast<long>(static_cast<unsigned long>(state) | static_cast<unsigned long>(flag));
+        };
+        const auto clientToScreenRect = [this](RECT bounds)
+        {
+            if (!hwnd_ || IsRectEmpty(&bounds))
+            {
+                return RECT{};
+            }
+            const POINT topLeft{bounds.left, bounds.top};
+            POINT screenTopLeft = topLeft;
+            if (!ClientToScreen(hwnd_, &screenTopLeft))
+            {
+                return RECT{};
+            }
+            OffsetRect(&bounds, screenTopLeft.x - topLeft.x, screenTopLeft.y - topLeft.y);
+            return bounds;
+        };
+        const auto quickAccessLabel = [](const QuickAccessDestinationRow& row)
+        {
+            return row.displayLabel.empty() ? row.destinationPath : row.displayLabel;
+        };
+        const auto addItem = [&items](MainWindowAccessibility::Item item)
+        {
+            if (!item.name.empty() && !IsRectEmpty(&item.bounds))
+            {
+                items.push_back(std::move(item));
+            }
+        };
+
+        for (const auto& target : targets)
+        {
+            if (target.kind == AccessibilityTargetKind::CommandBarMenu)
+            {
+                const auto& button = commandBarMenuButtons_[static_cast<std::size_t>(target.index)];
+                MainWindowAccessibility::Item item;
+                item.name = button.label;
+                item.description = L"Open the " + button.label + L" menu";
+                item.defaultAction = L"Open menu";
+                item.bounds = clientToScreenRect(button.rect);
+                item.role = ROLE_SYSTEM_MENUITEM;
+                addItem(std::move(item));
+                continue;
+            }
+
+            const KeyboardFocusTarget& focusTarget = target.keyboardFocus;
+            MainWindowAccessibility::Item item;
+            item.state = STATE_SYSTEM_FOCUSABLE;
+            switch (focusTarget.kind)
+            {
+            case KeyboardFocusTargetKind::ToolbarItem:
+            {
+                const auto& toolbarItem = toolbarItems_[static_cast<std::size_t>(focusTarget.index)];
+                item.name = toolbarItem.tooltip.empty() ? L"Toolbar action" : toolbarItem.tooltip;
+                item.description = item.name;
+                item.defaultAction = toolbarItem.kind == ToolbarItemKind::IconDropdown
+                    ? L"Open menu"
+                    : L"Activate";
+                item.bounds = clientToScreenRect(toolbarItem.rect);
+                item.role = toolbarItem.kind == ToolbarItemKind::IconDropdown
+                    ? ROLE_SYSTEM_BUTTONDROPDOWN
+                    : toolbarItem.kind == ToolbarItemKind::IconToggle
+                        ? ROLE_SYSTEM_CHECKBUTTON
+                        : ROLE_SYSTEM_PUSHBUTTON;
+                if (!toolbarItem.enabled)
+                {
+                    item.state = addState(item.state, STATE_SYSTEM_UNAVAILABLE);
+                }
+                if (toolbarItem.checked)
+                {
+                    item.state = addState(item.state, STATE_SYSTEM_CHECKED);
+                    item.value = L"On";
+                }
+                else if (toolbarItem.kind == ToolbarItemKind::IconToggle)
+                {
+                    item.value = L"Off";
+                }
+                break;
+            }
+            case KeyboardFocusTargetKind::BrowserPane:
+                item.name = L"Image browser";
+                item.description = L"Browse and select images";
+                item.defaultAction = L"Focus image browser";
+                item.role = ROLE_SYSTEM_LIST;
+                GetWindowRect(browserPane_, &item.bounds);
+                break;
+            case KeyboardFocusTargetKind::DetailsTab:
+                item.name = focusTarget.index == static_cast<int>(RightPaneTab::QuickSend)
+                    ? L"Quick Actions"
+                    : L"File Details";
+                item.description = L"Select details panel view";
+                item.defaultAction = L"Select tab";
+                item.bounds = clientToScreenRect(detailsPanelTabRects_[static_cast<std::size_t>(focusTarget.index)]);
+                item.role = ROLE_SYSTEM_PAGETAB;
+                if (focusTarget.index == static_cast<int>(activeRightPaneTab_))
+                {
+                    item.state = addState(item.state, STATE_SYSTEM_SELECTED);
+                    item.value = L"Selected";
+                }
+                else
+                {
+                    item.value = L"Not selected";
+                }
+                break;
+            case KeyboardFocusTargetKind::DetailsCloseButton:
+                item.name = L"Close details panel";
+                item.description = item.name;
+                item.defaultAction = L"Close";
+                item.bounds = clientToScreenRect(detailsPanelCloseButtonRect_);
+                item.role = ROLE_SYSTEM_PUSHBUTTON;
+                break;
+            case KeyboardFocusTargetKind::QuickAccessSortButton:
+                item.name = L"Sort Quick Actions by shortcut";
+                item.description = item.name;
+                item.defaultAction = L"Sort";
+                item.bounds = clientToScreenRect(quickAccessSortButtonRect_);
+                item.role = ROLE_SYSTEM_PUSHBUTTON;
+                break;
+            case KeyboardFocusTargetKind::QuickAccessRow:
+            {
+                if (focusTarget.index < 0
+                    || focusTarget.index >= static_cast<int>(quickAccessDestinationRows_.size()))
+                {
+                    continue;
+                }
+                const auto& row = quickAccessDestinationRows_[static_cast<std::size_t>(focusTarget.index)];
+                const std::wstring label = quickAccessLabel(row);
+                item.name = L"Quick Actions folder: " + label;
+                item.description = row.destinationPath;
+                item.defaultAction = L"Open folder";
+                item.value = row.destinationPath;
+                item.bounds = clientToScreenRect(row.rowRect);
+                item.role = ROLE_SYSTEM_LISTITEM;
+                if (!CanNavigateToQuickAccessDestination(row.destinationPath))
+                {
+                    item.state = addState(item.state, STATE_SYSTEM_UNAVAILABLE);
+                }
+                break;
+            }
+            case KeyboardFocusTargetKind::QuickAccessButton:
+            {
+                const int rowIndex = focusTarget.index / 3;
+                const int actionIndex = focusTarget.index % 3;
+                if (rowIndex < 0 || rowIndex >= static_cast<int>(quickAccessDestinationRows_.size()))
+                {
+                    continue;
+                }
+                const auto& row = quickAccessDestinationRows_[static_cast<std::size_t>(rowIndex)];
+                const std::wstring label = quickAccessLabel(row);
+                item.name = actionIndex == 0
+                    ? L"Copy files to " + label
+                    : actionIndex == 1
+                        ? L"Move files to " + label
+                        : L"Remove " + label + L" from Quick Actions";
+                item.description = row.destinationPath;
+                item.defaultAction = actionIndex == 0
+                    ? L"Copy"
+                    : actionIndex == 1
+                        ? L"Move"
+                        : L"Remove";
+                item.bounds = clientToScreenRect(actionIndex == 0
+                    ? row.copyRect
+                    : actionIndex == 1 ? row.moveRect : row.removeRect);
+                item.role = ROLE_SYSTEM_PUSHBUTTON;
+                if (actionIndex < 2 && !CanUseQuickAccessDestinationActions(row.destinationPath))
+                {
+                    item.state = addState(item.state, STATE_SYSTEM_UNAVAILABLE);
+                }
+                break;
+            }
+            case KeyboardFocusTargetKind::None:
+            case KeyboardFocusTargetKind::FilterEdit:
+            case KeyboardFocusTargetKind::FolderTree:
+            case KeyboardFocusTargetKind::DetailsText:
+            case KeyboardFocusTargetKind::QuickAccessShortcutEdit:
+            case KeyboardFocusTargetKind::QuickAccessScrollBar:
+            default:
+                continue;
+            }
+            addItem(std::move(item));
+        }
+
+        return items;
+    }
+
+    long MainWindow::AccessibilityFocusedChildId() const
+    {
+        const auto targets = BuildAccessibilityTargets();
+        if (commandBarKeyboardActive_ && GetFocus() == hwnd_)
+        {
+            for (std::size_t index = 0; index < targets.size(); ++index)
+            {
+                if (targets[index].kind == AccessibilityTargetKind::CommandBarMenu
+                    && targets[index].index == commandBarHotIndex_)
+                {
+                    return static_cast<long>(index + 1);
+                }
+            }
+        }
+
+        const KeyboardFocusTarget current = CurrentKeyboardFocusTarget();
+        for (std::size_t index = 0; index < targets.size(); ++index)
+        {
+            if (targets[index].kind == AccessibilityTargetKind::KeyboardFocus
+                && targets[index].keyboardFocus == current)
+            {
+                return static_cast<long>(index + 1);
+            }
+        }
+        return CHILDID_SELF;
+    }
+
+    bool MainWindow::FocusAccessibilityChild(long childId)
+    {
+        if (childId == CHILDID_SELF)
+        {
+            if (hwnd_ && IsWindowEnabled(hwnd_))
+            {
+                SetFocus(hwnd_);
+                if (accessibility_)
+                {
+                    accessibility_->NotifyFocusChanged();
+                }
+                return GetFocus() == hwnd_;
+            }
+            return false;
+        }
+
+        const auto targets = BuildAccessibilityTargets();
+        if (childId <= CHILDID_SELF || childId > static_cast<long>(targets.size()))
+        {
+            return false;
+        }
+        const AccessibilityTarget& target = targets[static_cast<std::size_t>(childId - 1)];
+        if (target.kind == AccessibilityTargetKind::CommandBarMenu)
+        {
+            ActivateCommandBarKeyboardMode(target.index);
+            return commandBarKeyboardActive_ && GetFocus() == hwnd_;
+        }
+        return FocusKeyboardTarget(target.keyboardFocus);
+    }
+
+    bool MainWindow::ActivateAccessibilityChild(long childId)
+    {
+        const auto targets = BuildAccessibilityTargets();
+        if (childId <= CHILDID_SELF || childId > static_cast<long>(targets.size()))
+        {
+            return false;
+        }
+        const AccessibilityTarget& target = targets[static_cast<std::size_t>(childId - 1)];
+        if (target.kind == AccessibilityTargetKind::CommandBarMenu)
+        {
+            ActivateCommandBarKeyboardMode(target.index);
+            OpenCommandBarMenu(target.index);
+            return commandBarKeyboardActive_ && GetFocus() == hwnd_;
+        }
+
+        if (!IsKeyboardFocusTargetAvailable(target.keyboardFocus)
+            || !FocusKeyboardTarget(target.keyboardFocus))
+        {
+            return false;
+        }
+        if (target.keyboardFocus.kind == KeyboardFocusTargetKind::BrowserPane)
+        {
+            return true;
+        }
+        ActivateKeyboardFocusTarget(target.keyboardFocus);
+        return true;
+    }
+
+    MainWindow::KeyboardFocusTarget MainWindow::CurrentKeyboardFocusTarget() const
+    {
+        const HWND focus = GetFocus();
+        if (!focus)
+        {
+            return {};
+        }
+
+        if (focus == filterEdit_)
+        {
+            return {KeyboardFocusTargetKind::FilterEdit};
+        }
+        if (focus == treePane_ || (treePane_ && IsChild(treePane_, focus)))
+        {
+            return {KeyboardFocusTargetKind::FolderTree};
+        }
+        if (focus == browserPane_ || (browserPane_ && IsChild(browserPane_, focus)))
+        {
+            return {KeyboardFocusTargetKind::BrowserPane};
+        }
+        if (focus == detailsPanelText_)
+        {
+            return {KeyboardFocusTargetKind::DetailsText};
+        }
+        if (focus == quickAccessScrollBar_)
+        {
+            return {KeyboardFocusTargetKind::QuickAccessScrollBar};
+        }
+        for (int index = 0; index < static_cast<int>(quickAccessShortcutEdits_.size()); ++index)
+        {
+            if (focus == quickAccessShortcutEdits_[static_cast<std::size_t>(index)])
+            {
+                return {KeyboardFocusTargetKind::QuickAccessShortcutEdit, index};
+            }
+        }
+        if (focus == hwnd_ && IsKeyboardFocusTargetAvailable(keyboardFocusTarget_))
+        {
+            return keyboardFocusTarget_;
+        }
+
+        return {};
+    }
+
+    bool MainWindow::IsKeyboardFocusTargetAvailable(const KeyboardFocusTarget& target) const
+    {
+        const auto isWindowTargetAvailable = [](HWND window)
+        {
+            return window && IsWindow(window) != FALSE
+                && IsWindowVisible(window) != FALSE
+                && IsWindowEnabled(window) != FALSE;
+        };
+
+        switch (target.kind)
+        {
+        case KeyboardFocusTargetKind::FilterEdit:
+            return isWindowTargetAvailable(filterEdit_);
+        case KeyboardFocusTargetKind::ToolbarItem:
+            return target.index >= 0
+                && target.index < static_cast<int>(toolbarItems_.size())
+                && toolbarItems_[static_cast<std::size_t>(target.index)].kind != ToolbarItemKind::Separator
+                && toolbarItems_[static_cast<std::size_t>(target.index)].kind != ToolbarItemKind::FilterEdit
+                && toolbarItems_[static_cast<std::size_t>(target.index)].enabled
+                && !IsRectEmpty(&toolbarItems_[static_cast<std::size_t>(target.index)].rect);
+        case KeyboardFocusTargetKind::FolderTree:
+            return isWindowTargetAvailable(treePane_);
+        case KeyboardFocusTargetKind::BrowserPane:
+            return isWindowTargetAvailable(browserPane_);
+        case KeyboardFocusTargetKind::DetailsTab:
+            return detailsStripVisible_
+                && target.index >= 0
+                && target.index < static_cast<int>(detailsPanelTabRects_.size())
+                && !IsRectEmpty(&detailsPanelTabRects_[static_cast<std::size_t>(target.index)]);
+        case KeyboardFocusTargetKind::DetailsCloseButton:
+            return detailsStripVisible_ && !IsRectEmpty(&detailsPanelCloseButtonRect_);
+        case KeyboardFocusTargetKind::DetailsText:
+            return activeRightPaneTab_ == RightPaneTab::FileDetails
+                && isWindowTargetAvailable(detailsPanelText_);
+        case KeyboardFocusTargetKind::QuickAccessSortButton:
+            return activeRightPaneTab_ == RightPaneTab::QuickSend
+                && !IsRectEmpty(&quickAccessSortButtonRect_);
+        case KeyboardFocusTargetKind::QuickAccessShortcutEdit:
+            return activeRightPaneTab_ == RightPaneTab::QuickSend
+                && target.index >= 0
+                && target.index < static_cast<int>(quickAccessDestinationRows_.size())
+                && target.index < static_cast<int>(quickAccessShortcutEdits_.size())
+                && quickAccessShortcutEdits_[static_cast<std::size_t>(target.index)]
+                && IsWindow(quickAccessShortcutEdits_[static_cast<std::size_t>(target.index)]) != FALSE
+                && IsWindowEnabled(quickAccessShortcutEdits_[static_cast<std::size_t>(target.index)]) != FALSE;
+        case KeyboardFocusTargetKind::QuickAccessRow:
+            return activeRightPaneTab_ == RightPaneTab::QuickSend
+                && target.index >= 0
+                && target.index < static_cast<int>(quickAccessDestinationRows_.size())
+                && CanNavigateToQuickAccessDestination(
+                    quickAccessDestinationRows_[static_cast<std::size_t>(target.index)].destinationPath);
+        case KeyboardFocusTargetKind::QuickAccessButton:
+        {
+            if (activeRightPaneTab_ != RightPaneTab::QuickSend || target.index < 0)
+            {
+                return false;
+            }
+            const int rowIndex = target.index / 3;
+            const int actionIndex = target.index % 3;
+            if (rowIndex < 0 || rowIndex >= static_cast<int>(quickAccessDestinationRows_.size()))
+            {
+                return false;
+            }
+            if (actionIndex == 2)
+            {
+                return true;
+            }
+            return CanUseQuickAccessDestinationActions(
+                quickAccessDestinationRows_[static_cast<std::size_t>(rowIndex)].destinationPath);
+        }
+        case KeyboardFocusTargetKind::QuickAccessScrollBar:
+            return isWindowTargetAvailable(quickAccessScrollBar_);
+        case KeyboardFocusTargetKind::None:
+        default:
+            return false;
+        }
+    }
+
+    void MainWindow::EnsureQuickAccessTargetVisible(int rowIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= static_cast<int>(quickAccessDestinationRows_.size())
+            || IsRectEmpty(&quickAccessDestinationViewportRect_))
+        {
+            return;
+        }
+
+        const RECT& rowRect = quickAccessDestinationRows_[static_cast<std::size_t>(rowIndex)].rowRect;
+        int nextOffset = quickAccessScrollOffset_;
+        if (rowRect.top < quickAccessDestinationViewportRect_.top)
+        {
+            nextOffset += rowRect.top - quickAccessDestinationViewportRect_.top;
+        }
+        else if (rowRect.bottom > quickAccessDestinationViewportRect_.bottom)
+        {
+            nextOffset += rowRect.bottom - quickAccessDestinationViewportRect_.bottom;
+        }
+
+        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+        const int totalRowsHeight = static_cast<int>(quickAccessDestinationRows_.size()) * metrics.rowHeight
+            + static_cast<int>((quickAccessDestinationRows_.size() - 1) * kQuickAccessPanelRowGap);
+        const int maximumScrollOffset = std::max(
+            0,
+            totalRowsHeight - static_cast<int>(quickAccessDestinationViewportRect_.bottom
+                                               - quickAccessDestinationViewportRect_.top));
+        nextOffset = std::clamp(nextOffset, 0, maximumScrollOffset);
+        if (nextOffset != quickAccessScrollOffset_)
+        {
+            quickAccessScrollOffset_ = nextOffset;
+            LayoutChildren();
+        }
+    }
+
+    bool MainWindow::FocusKeyboardTarget(const KeyboardFocusTarget& target)
+    {
+        if (target.kind == KeyboardFocusTargetKind::QuickAccessShortcutEdit
+            || target.kind == KeyboardFocusTargetKind::QuickAccessRow
+            || target.kind == KeyboardFocusTargetKind::QuickAccessButton)
+        {
+            EnsureQuickAccessTargetVisible(target.index / (target.kind == KeyboardFocusTargetKind::QuickAccessButton ? 3 : 1));
+        }
+
+        if (!IsKeyboardFocusTargetAvailable(target))
+        {
+            return false;
+        }
+
+        HWND focusWindow = hwnd_;
+        switch (target.kind)
+        {
+        case KeyboardFocusTargetKind::FilterEdit:
+            focusWindow = filterEdit_;
+            break;
+        case KeyboardFocusTargetKind::FolderTree:
+            focusWindow = treePane_;
+            break;
+        case KeyboardFocusTargetKind::BrowserPane:
+            focusWindow = browserPane_;
+            break;
+        case KeyboardFocusTargetKind::DetailsText:
+            focusWindow = detailsPanelText_;
+            break;
+        case KeyboardFocusTargetKind::QuickAccessShortcutEdit:
+            focusWindow = quickAccessShortcutEdits_[static_cast<std::size_t>(target.index)];
+            break;
+        case KeyboardFocusTargetKind::QuickAccessScrollBar:
+            focusWindow = quickAccessScrollBar_;
+            break;
+        case KeyboardFocusTargetKind::ToolbarItem:
+        case KeyboardFocusTargetKind::DetailsTab:
+        case KeyboardFocusTargetKind::DetailsCloseButton:
+        case KeyboardFocusTargetKind::QuickAccessSortButton:
+        case KeyboardFocusTargetKind::QuickAccessRow:
+        case KeyboardFocusTargetKind::QuickAccessButton:
+        case KeyboardFocusTargetKind::None:
+        default:
+            break;
+        }
+
+        const KeyboardFocusTarget previousTarget = keyboardFocusTarget_;
+        keyboardFocusTarget_ = target;
+        if (GetFocus() != focusWindow)
+        {
+            SetFocus(focusWindow);
+        }
+
+        const bool focused = GetFocus() == focusWindow
+            || (target.kind == KeyboardFocusTargetKind::BrowserPane
+                && browserPane_ && IsChild(browserPane_, GetFocus()));
+        if (!focused)
+        {
+            keyboardFocusTarget_ = previousTarget;
+            return false;
+        }
+
+        if (previousTarget != target || target.kind == KeyboardFocusTargetKind::ToolbarItem
+            || target.kind == KeyboardFocusTargetKind::DetailsTab
+            || target.kind == KeyboardFocusTargetKind::DetailsCloseButton
+            || target.kind == KeyboardFocusTargetKind::QuickAccessSortButton
+            || target.kind == KeyboardFocusTargetKind::QuickAccessRow
+            || target.kind == KeyboardFocusTargetKind::QuickAccessButton)
+        {
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+        if (accessibility_)
+        {
+            accessibility_->NotifyFocusChanged();
+        }
+        return true;
+    }
+
+    void MainWindow::ActivateKeyboardFocusTarget(const KeyboardFocusTarget& target)
+    {
+        switch (target.kind)
+        {
+        case KeyboardFocusTargetKind::ToolbarItem:
+            ToolbarHandleClick(target.index);
+            break;
+        case KeyboardFocusTargetKind::DetailsTab:
+            SelectRightPaneTab(target.index == static_cast<int>(RightPaneTab::QuickSend)
+                ? RightPaneTab::QuickSend
+                : RightPaneTab::FileDetails);
+            break;
+        case KeyboardFocusTargetKind::DetailsCloseButton:
+            ToggleDetailsPanelVisibility();
+            if (!detailsStripVisible_)
+            {
+                FocusKeyboardTarget({KeyboardFocusTargetKind::BrowserPane});
+                return;
+            }
+            break;
+        case KeyboardFocusTargetKind::QuickAccessSortButton:
+            SortFavoriteDestinationsByShortcut();
+            if (hwnd_ && detailsStripVisible_)
+            {
+                LayoutChildren();
+            }
+            UpdateMenuState();
+            break;
+        case KeyboardFocusTargetKind::QuickAccessRow:
+            if (target.index >= 0 && target.index < static_cast<int>(quickAccessDestinationRows_.size()))
+            {
+                LoadFolderAsync(quickAccessDestinationRows_[static_cast<std::size_t>(target.index)].destinationPath);
+            }
+            break;
+        case KeyboardFocusTargetKind::QuickAccessButton:
+        {
+            const int rowIndex = target.index / 3;
+            const int actionIndex = target.index % 3;
+            if (rowIndex < 0 || rowIndex >= static_cast<int>(quickAccessDestinationRows_.size()))
+            {
+                break;
+            }
+
+            const QuickAccessDestinationRow& row = quickAccessDestinationRows_[static_cast<std::size_t>(rowIndex)];
+            if (actionIndex == 2)
+            {
+                if (row.favorite)
+                {
+                    RemoveFavoriteDestination(row.destinationPath);
+                }
+                else
+                {
+                    RemoveRecentDestination(row.destinationPath);
+                }
+            }
+            else
+            {
+                StartSelectionFileOperationToDestination(
+                    actionIndex == 0 ? services::FileOperationType::Copy : services::FileOperationType::Move,
+                    row.destinationPath);
+            }
+            break;
+        }
+        case KeyboardFocusTargetKind::FilterEdit:
+        case KeyboardFocusTargetKind::FolderTree:
+        case KeyboardFocusTargetKind::BrowserPane:
+        case KeyboardFocusTargetKind::DetailsText:
+        case KeyboardFocusTargetKind::QuickAccessShortcutEdit:
+        case KeyboardFocusTargetKind::QuickAccessScrollBar:
+        case KeyboardFocusTargetKind::None:
+        default:
+            break;
+        }
+
+        if (!IsKeyboardFocusTargetAvailable(target))
+        {
+            const std::vector<KeyboardFocusTarget> sequence = BuildKeyboardFocusSequence();
+            if (!sequence.empty())
+            {
+                FocusKeyboardTarget(sequence.front());
+            }
+        }
+    }
+
+    bool MainWindow::HandleKeyboardFocusInput(UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if ((message != WM_KEYDOWN && message != WM_SYSKEYDOWN) || !hwnd_)
+        {
+            return false;
+        }
+
+        const HWND focus = GetFocus();
+        const bool knownTextInput = focus == filterEdit_
+            || focus == detailsPanelText_
+            || IsQuickAccessShortcutEdit(focus);
+        if (focus && IsTextInputControlWindow(focus) && !knownTextInput)
+        {
+            return false;
+        }
+
+        if (commandBarKeyboardActive_ && wParam == VK_TAB)
+        {
+            DeactivateCommandBarKeyboardMode(false);
+        }
+
+        const KeyboardFocusTarget currentTarget = CurrentKeyboardFocusTarget();
+        if (wParam == VK_TAB)
+        {
+            const std::vector<KeyboardFocusTarget> sequence = BuildKeyboardFocusSequence();
+            if (sequence.empty())
+            {
+                return false;
+            }
+
+            const bool reverse = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            const auto current = std::find(sequence.begin(), sequence.end(), currentTarget);
+            const int currentIndex = current == sequence.end()
+                ? (reverse ? 0 : static_cast<int>(sequence.size()) - 1)
+                : static_cast<int>(std::distance(sequence.begin(), current));
+            const int direction = reverse ? -1 : 1;
+            const int nextIndex = (currentIndex + direction + static_cast<int>(sequence.size()))
+                % static_cast<int>(sequence.size());
+            return FocusKeyboardTarget(sequence[static_cast<std::size_t>(nextIndex)]);
+        }
+
+        if (wParam == VK_RETURN || wParam == VK_SPACE)
+        {
+            switch (currentTarget.kind)
+            {
+            case KeyboardFocusTargetKind::ToolbarItem:
+            case KeyboardFocusTargetKind::DetailsTab:
+            case KeyboardFocusTargetKind::DetailsCloseButton:
+            case KeyboardFocusTargetKind::QuickAccessSortButton:
+            case KeyboardFocusTargetKind::QuickAccessRow:
+            case KeyboardFocusTargetKind::QuickAccessButton:
+                if (wParam == VK_SPACE && message != WM_KEYDOWN)
+                {
+                    return false;
+                }
+                ActivateKeyboardFocusTarget(currentTarget);
+                return true;
+            default:
+                break;
+            }
+        }
+
+        (void)lParam;
+        return false;
     }
 
     void MainWindow::HandleCommandBarMenuTrackingTimer()
@@ -12211,9 +13870,13 @@ namespace hyperbrowse::ui
             static_cast<int>(activeRightPaneTab_),
             detailsPanelHotTabIndex_,
             detailsPanelPressedTabIndex_,
+            keyboardFocusTarget_.kind == KeyboardFocusTargetKind::DetailsTab && GetFocus() == hwnd_
+                ? keyboardFocusTarget_.index
+                : -1,
             detailsPanelCloseButtonRect_,
             detailsPanelCloseButtonHot_,
-            detailsPanelCloseButtonPressed_};
+            detailsPanelCloseButtonPressed_,
+            keyboardFocusTarget_.kind == KeyboardFocusTargetKind::DetailsCloseButton && GetFocus() == hwnd_};
     }
 
     DetailsPanelChromePainter::Palette MainWindow::BuildDetailsPanelChromePainterPalette(const ThemePalette& palette) const
@@ -12291,9 +13954,17 @@ namespace hyperbrowse::ui
             metrics,
             quickAccessSortButtonHot_,
             quickAccessSortButtonPressed_,
+            keyboardFocusTarget_.kind == KeyboardFocusTargetKind::QuickAccessSortButton && GetFocus() == hwnd_,
             quickAccessHotRowIndex_,
             quickAccessHotButtonIndex_,
-            quickAccessPressedButtonIndex_};
+            quickAccessPressedRowIndex_,
+            quickAccessPressedButtonIndex_,
+            keyboardFocusTarget_.kind == KeyboardFocusTargetKind::QuickAccessRow && GetFocus() == hwnd_
+                ? keyboardFocusTarget_.index
+                : -1,
+            keyboardFocusTarget_.kind == KeyboardFocusTargetKind::QuickAccessButton && GetFocus() == hwnd_
+                ? keyboardFocusTarget_.index
+                : -1};
     }
 
     QuickAccessPainter::Palette MainWindow::BuildQuickAccessPainterPalette(const ThemePalette& palette) const
@@ -13417,6 +15088,15 @@ namespace hyperbrowse::ui
 
     void MainWindow::ToggleDetailsPanelVisibility()
     {
+        const bool focusWasInDetails = GetFocus() == hwnd_
+            && (keyboardFocusTarget_.kind == KeyboardFocusTargetKind::DetailsTab
+                || keyboardFocusTarget_.kind == KeyboardFocusTargetKind::DetailsCloseButton
+                || keyboardFocusTarget_.kind == KeyboardFocusTargetKind::DetailsText
+                || keyboardFocusTarget_.kind == KeyboardFocusTargetKind::QuickAccessSortButton
+                || keyboardFocusTarget_.kind == KeyboardFocusTargetKind::QuickAccessShortcutEdit
+                || keyboardFocusTarget_.kind == KeyboardFocusTargetKind::QuickAccessRow
+                || keyboardFocusTarget_.kind == KeyboardFocusTargetKind::QuickAccessButton
+                || keyboardFocusTarget_.kind == KeyboardFocusTargetKind::QuickAccessScrollBar);
         detailsStripVisible_ = !detailsStripVisible_;
         if (detailsStripVisible_)
         {
@@ -13433,6 +15113,10 @@ namespace hyperbrowse::ui
         LayoutChildren();
         UpdateDetailsPanel();
         UpdateMenuState();
+        if (!detailsStripVisible_ && focusWasInDetails)
+        {
+            FocusKeyboardTarget({KeyboardFocusTargetKind::BrowserPane});
+        }
     }
 
     int MainWindow::HitTestDetailsPanelTab(int x, int y) const
@@ -17884,6 +19568,10 @@ namespace hyperbrowse::ui
         commandBarController_.UpdateItemStates(state);
 
         InvalidateToolbarStrip();
+        if (accessibility_)
+        {
+            accessibility_->NotifyStateChanged(CHILDID_SELF);
+        }
     }
 
     void MainWindow::InvalidateToolbarStrip()
@@ -20495,6 +22183,9 @@ namespace hyperbrowse::ui
             commandBarPressedIndex_,
             toolbarHotIndex_,
             toolbarPressedIndex_,
+            keyboardFocusTarget_.kind == KeyboardFocusTargetKind::ToolbarItem && GetFocus() == hwnd_
+                ? keyboardFocusTarget_.index
+                : -1,
             commandBarKeyboardActive_,
             filterEdit_ != nullptr,
             GetFocus() == filterEdit_,
@@ -20527,6 +22218,9 @@ namespace hyperbrowse::ui
             commandBarPressedIndex_,
             toolbarHotIndex_,
             toolbarPressedIndex_,
+            keyboardFocusTarget_.kind == KeyboardFocusTargetKind::ToolbarItem && GetFocus() == hwnd_
+                ? keyboardFocusTarget_.index
+                : -1,
             commandBarKeyboardActive_,
             filterEdit_ != nullptr,
             GetFocus() == filterEdit_,
@@ -20727,6 +22421,7 @@ namespace hyperbrowse::ui
             const int hit = ToolbarHitTest(x, y);
             if (hit >= 0)
             {
+                FocusKeyboardTarget({KeyboardFocusTargetKind::ToolbarItem, hit});
                 toolbarPressedIndex_ = hit;
                 InvalidateToolbarStrip();
                 SetCapture(hwnd_);
@@ -20737,6 +22432,7 @@ namespace hyperbrowse::ui
         const int detailsPanelTab = HitTestDetailsPanelTab(x, y);
         if (detailsPanelTab >= 0)
         {
+            FocusKeyboardTarget({KeyboardFocusTargetKind::DetailsTab, detailsPanelTab});
             detailsPanelPressedTabIndex_ = detailsPanelTab;
             SetCapture(hwnd_);
             invalidateDetailsPanelTabs();
@@ -20745,6 +22441,7 @@ namespace hyperbrowse::ui
 
         if (HitTestDetailsPanelCloseButton(x, y) >= 0)
         {
+            FocusKeyboardTarget({KeyboardFocusTargetKind::DetailsCloseButton});
             detailsPanelCloseButtonPressed_ = true;
             SetCapture(hwnd_);
             if (!IsRectEmpty(&detailsPanelRect_))
@@ -20756,6 +22453,7 @@ namespace hyperbrowse::ui
 
         if (HitTestQuickAccessSortButton(x, y) >= 0)
         {
+            FocusKeyboardTarget({KeyboardFocusTargetKind::QuickAccessSortButton});
             quickAccessSortButtonPressed_ = true;
             SetCapture(hwnd_);
             if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
@@ -20768,6 +22466,7 @@ namespace hyperbrowse::ui
         const int quickAccessButton = HitTestQuickAccessDestinationButton(x, y);
         if (quickAccessButton >= 0)
         {
+            FocusKeyboardTarget({KeyboardFocusTargetKind::QuickAccessButton, quickAccessButton});
             quickAccessPressedButtonIndex_ = quickAccessButton;
             SetCapture(hwnd_);
             if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
@@ -20780,6 +22479,7 @@ namespace hyperbrowse::ui
         const int quickAccessRow = HitTestQuickAccessDestinationRow(x, y);
         if (quickAccessRow >= 0)
         {
+            FocusKeyboardTarget({KeyboardFocusTargetKind::QuickAccessRow, quickAccessRow});
             quickAccessPressedRowIndex_ = quickAccessRow;
             SetCapture(hwnd_);
             if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
@@ -21969,6 +23669,16 @@ namespace hyperbrowse::ui
                 return 0;
             }
             return DefWindowProcW(hwnd_, message, wParam, lParam);
+        case WM_GETOBJECT:
+            if (accessibility_)
+            {
+                const LRESULT result = accessibility_->HandleGetObject(wParam, lParam);
+                if (result != 0)
+                {
+                    return result;
+                }
+            }
+            break;
         case WM_GETMINMAXINFO:
             OnGetMinMaxInfo(reinterpret_cast<MINMAXINFO*>(lParam));
             return 0;
@@ -22046,6 +23756,13 @@ namespace hyperbrowse::ui
             }
             RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
             break;
+        case WM_SETFOCUS:
+        case WM_KILLFOCUS:
+            if (accessibility_)
+            {
+                accessibility_->NotifyFocusChanged();
+            }
+            break;
         case WM_SYSCOMMAND:
             if ((wParam & 0xFFF0) == SC_MONITORPOWER && lParam == static_cast<LPARAM>(-1))
             {
@@ -22088,6 +23805,10 @@ namespace hyperbrowse::ui
                 && wParam == VK_ESCAPE)
             {
                 FinishInternalSelectionDrag(false);
+                return 0;
+            }
+            if (HandleKeyboardFocusInput(message, wParam, lParam))
+            {
                 return 0;
             }
             if (HandleCommandBarKeyboardInput(message, wParam, lParam))

@@ -37,6 +37,7 @@
 #include "ui/DisplaySurfaceRecoveryPolicy.h"
 #include "ui/MenuPainter.h"
 #include "ui/MenuMessageHandling.h"
+#include "ui/MainWindowAccessibility.h"
 #include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickAccessLayout.h"
 #include "ui/QuickAccessPainter.h"
@@ -160,6 +161,45 @@ namespace hyperbrowse::ui
             LeftSplitter,
             DetailsSplitter,
             QuickAccessInternal
+        };
+
+        enum class KeyboardFocusTargetKind
+        {
+            None,
+            FilterEdit,
+            ToolbarItem,
+            FolderTree,
+            BrowserPane,
+            DetailsTab,
+            DetailsCloseButton,
+            DetailsText,
+            QuickAccessSortButton,
+            QuickAccessShortcutEdit,
+            QuickAccessRow,
+            QuickAccessButton,
+            QuickAccessScrollBar
+        };
+
+        struct KeyboardFocusTarget
+        {
+            KeyboardFocusTargetKind kind{KeyboardFocusTargetKind::None};
+            int index{-1};
+            int subIndex{-1};
+
+            bool operator==(const KeyboardFocusTarget&) const noexcept = default;
+        };
+
+        enum class AccessibilityTargetKind
+        {
+            CommandBarMenu,
+            KeyboardFocus,
+        };
+
+        struct AccessibilityTarget
+        {
+            AccessibilityTargetKind kind{AccessibilityTargetKind::KeyboardFocus};
+            int index{-1};
+            KeyboardFocusTarget keyboardFocus{};
         };
 
         struct ThemePalette
@@ -470,6 +510,18 @@ namespace hyperbrowse::ui
         void ActivateCommandBarKeyboardMode(int index);
         void DeactivateCommandBarKeyboardMode(bool restoreFocus);
         bool HandleCommandBarKeyboardInput(UINT message, WPARAM wParam, LPARAM lParam);
+        bool HandleKeyboardFocusInput(UINT message, WPARAM wParam, LPARAM lParam);
+        std::vector<KeyboardFocusTarget> BuildKeyboardFocusSequence() const;
+        KeyboardFocusTarget CurrentKeyboardFocusTarget() const;
+        bool IsKeyboardFocusTargetAvailable(const KeyboardFocusTarget& target) const;
+        bool FocusKeyboardTarget(const KeyboardFocusTarget& target);
+        void ActivateKeyboardFocusTarget(const KeyboardFocusTarget& target);
+        std::vector<AccessibilityTarget> BuildAccessibilityTargets() const;
+        std::vector<MainWindowAccessibility::Item> BuildAccessibilityItems() const;
+        long AccessibilityFocusedChildId() const;
+        bool FocusAccessibilityChild(long childId);
+        bool ActivateAccessibilityChild(long childId);
+        void EnsureQuickAccessTargetVisible(int rowIndex);
         void HandleCommandBarMenuTrackingTimer();
         void OpenCommandBarMenu(int index);
         ThemePalette GetThemePalette() const;
@@ -558,6 +610,8 @@ namespace hyperbrowse::ui
         bool menuStateRefreshPosted_{};
         int toolbarHotIndex_{-1};
         int toolbarPressedIndex_{-1};
+        KeyboardFocusTarget keyboardFocusTarget_{};
+        std::unique_ptr<MainWindowAccessibility> accessibility_;
         bool toolbarMouseTracking_{};
         std::vector<ToolbarItem>& toolbarItems_;
         std::unique_ptr<ToolbarIconLibrary> toolbarIconLibrary_;

@@ -376,6 +376,26 @@ namespace hyperbrowse::ui::dialog_detail
         RECT bounds{};
         std::wstring text;
         bool muted{};
+        wchar_t mnemonic{};
+    };
+
+    enum class ExperimentalSettingsFocusTargetKind
+    {
+        None,
+        Tab,
+        CustomControl,
+        NativeControl,
+        ApplyButton,
+        OkButton,
+        CancelButton,
+    };
+
+    struct ExperimentalSettingsFocusTarget
+    {
+        ExperimentalSettingsFocusTargetKind kind{ExperimentalSettingsFocusTargetKind::None};
+        int index{-1};
+
+        bool operator==(const ExperimentalSettingsFocusTarget&) const noexcept = default;
     };
 
     struct ExperimentalSettingsDialogState
@@ -408,6 +428,7 @@ namespace hyperbrowse::ui::dialog_detail
         RECT okButtonRect{};
         RECT cancelButtonRect{};
         ConsolidatedSettingsPage page{ConsolidatedSettingsPage::Slideshow};
+        ExperimentalSettingsFocusTarget focusedTarget{};
         int hoveredControl{-1};
         int hoveredTab{-1};
         int pressedControl{-1};

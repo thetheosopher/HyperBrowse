@@ -168,6 +168,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/MainWindow.cpp
     src/ui/MainWindowDialogs.cpp
     src/ui/MenuMessageHandling.cpp
+    src/ui/MainWindowAccessibility.cpp
     src/ui/QuickSend.cpp
     src/ui/ShellDragSource.cpp
     src/ui/ShellPainter.cpp
@@ -204,6 +205,7 @@ target_link_libraries(HyperBrowseCore PUBLIC
     d3d11
     dwrite
     msimg32
+    oleacc
     propsys
     uxtheme
     windowscodecs

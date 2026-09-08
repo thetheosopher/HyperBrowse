@@ -91,6 +91,17 @@ namespace hyperbrowse::ui
                 renderTarget->DrawRoundedRectangle(&roundedRect, outlineBrush.Get(), 1.0f);
             }
         };
+        const auto drawFocusRing = [renderTarget, &createBrush, &palette](const RECT& sourceRect, float radius)
+        {
+            RECT focusRect = sourceRect;
+            InflateRect(&focusRect, -1, -1);
+            const auto focusBrush = createBrush(palette.accent);
+            if (focusBrush)
+            {
+                const auto roundedRect = render::ToD2DRoundedRect(focusRect, radius, radius);
+                renderTarget->DrawRoundedRectangle(&roundedRect, focusBrush.Get(), 2.0f);
+            }
+        };
 
         const auto mutedBrush = createBrush(palette.mutedText);
         drawText(L"Quick Actions", summaryFormat, state.headerRect, mutedBrush.Get());
@@ -125,6 +136,10 @@ namespace hyperbrowse::ui
                                        sortBrush.Get(),
                                        1.5f);
             }
+                            if (state.sortButtonFocused)
+                            {
+                                drawFocusRing(state.sortButtonRect, 4.0f);
+                            }
         }
 
         const COLORREF rowBackground = BlendColor(palette.actionFieldBackground,
@@ -143,6 +158,7 @@ namespace hyperbrowse::ui
         {
             const bool hot = buttonIndex == state.hotButtonIndex;
             const bool pressed = buttonIndex == state.pressedButtonIndex;
+            const bool focused = buttonIndex == state.focusedButtonIndex;
             const COLORREF fillColor = enabled
                 ? (pressed ? palette.accent : (hot ? BlendColor(baseFill, palette.accent, 48) : baseFill))
                 : disabledButtonFill;
@@ -150,6 +166,10 @@ namespace hyperbrowse::ui
             drawRounded(rect, fillColor, enabled ? enabledBorder : palette.actionStripBorder, 5.0f);
             const auto buttonBrush = createBrush(textColor);
             drawText(label, bodyFormat, rect, buttonBrush.Get());
+            if (enabled && focused)
+            {
+                drawFocusRing(rect, 5.0f);
+            }
         };
 
         const int savedDc = clipDc ? SaveDC(clipDc) : 0;
@@ -227,6 +247,10 @@ namespace hyperbrowse::ui
                                         palette.darkTheme ? 12 : 20),
                              palette.mutedText,
                              palette.actionStripBorder);
+            if (static_cast<int>(rowIndex) == state.focusedRowIndex)
+            {
+                drawFocusRing(row.rowRect, 6.0f);
+            }
         }
 
         if (validViewport)
@@ -257,6 +281,18 @@ namespace hyperbrowse::ui
         const HFONT resolvedBodyFont = bodyFont
             ? bodyFont
             : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const auto drawFocusRing = [hdc, &palette](const RECT& sourceRect, int radius)
+        {
+            RECT focusRect = sourceRect;
+            InflateRect(&focusRect, -1, -1);
+            const HPEN focusPen = CreatePen(PS_SOLID, 2, palette.accent);
+            const HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            const HGDIOBJ oldPen = SelectObject(hdc, focusPen);
+            RoundRect(hdc, focusRect.left, focusRect.top, focusRect.right, focusRect.bottom, radius, radius);
+            SelectObject(hdc, oldPen);
+            SelectObject(hdc, oldBrush);
+            DeleteObject(focusPen);
+        };
         render::DrawGdiText(hdc,
                             resolvedSummaryFont,
                             L"Quick Actions",
@@ -304,6 +340,10 @@ namespace hyperbrowse::ui
             {
                 DeleteDC(iconDc);
             }
+            if (state.sortButtonFocused)
+            {
+                drawFocusRing(state.sortButtonRect, 8);
+            }
         }
 
         const COLORREF rowBackground = BlendColor(palette.actionFieldBackground,
@@ -322,6 +362,7 @@ namespace hyperbrowse::ui
         {
             const bool hot = buttonIndex == state.hotButtonIndex;
             const bool pressed = buttonIndex == state.pressedButtonIndex;
+            const bool focused = buttonIndex == state.focusedButtonIndex;
             const COLORREF fillColor = enabled
                 ? (pressed ? palette.accent : (hot ? BlendColor(baseFill, palette.accent, 48) : baseFill))
                 : disabledButtonFill;
@@ -345,6 +386,10 @@ namespace hyperbrowse::ui
                                 DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
                                 textColor,
                                 fillColor);
+            if (enabled && focused)
+            {
+                drawFocusRing(rect, 10);
+            }
         };
 
         const int savedDc = SaveDC(hdc);
@@ -430,6 +475,10 @@ namespace hyperbrowse::ui
                                         palette.darkTheme ? 12 : 20),
                              palette.mutedText,
                              palette.actionStripBorder);
+            if (static_cast<int>(rowIndex) == state.focusedRowIndex)
+            {
+                drawFocusRing(row.rowRect, 12);
+            }
         }
         if (savedDc != 0)
         {

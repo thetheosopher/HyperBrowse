@@ -5,6 +5,7 @@
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #include <objbase.h>
+#include <oleacc.h>
 #include <propvarutil.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -46,6 +47,7 @@
 #include "services/ThumbnailScheduler.h"
 #include "ui/CommandIds.h"
 #include "ui/MainWindow.h"
+#include "ui/MainWindowDialogState.h"
 #include "util/Diagnostics.h"
 #include "util/ResourceSizing.h"
 #include "util/SettingsRegistry.h"
@@ -80,6 +82,7 @@ namespace
     constexpr wchar_t kRegistryValueWindowWidth[] = L"WindowWidth";
     constexpr wchar_t kRegistryValueWindowHeight[] = L"WindowHeight";
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
+    constexpr wchar_t kRegistryValueUseSlideshowTransition[] = L"UseSlideshowTransition";
     constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
     constexpr wchar_t kRegistryValuePrefetchDepthOverride[] = L"PrefetchDepthOverride";
@@ -3671,12 +3674,14 @@ namespace
         constexpr wchar_t kDialogClassName[] = L"HyperBrowseExperimentalSettingsDialog";
         constexpr wchar_t kSettingsUiEnvironment[] = L"HYPERBROWSE_SETTINGS_UI";
         ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
+        ScopedRegistryDwordBackup slideshowTransitionBackup(kRegistryPath, kRegistryValueUseSlideshowTransition);
         ScopedRegistryDwordBackup thumbnailCacheBackup(kRegistryPath, kRegistryValueThumbnailCacheCapacityOverrideBytes);
         ScopedRegistryDwordBackup metadataCacheBackup(kRegistryPath, kRegistryValueMetadataCacheCapacityOverrideEntries);
         ScopedRegistryDwordBackup prefetchDepthBackup(kRegistryPath, kRegistryValuePrefetchDepthOverride);
         DeleteRegistryValue(kRegistryPath, kRegistryValueAppTextSize);
         DeleteRegistryValue(kRegistryPath, kRegistryValueThumbnailCacheCapacityOverrideBytes);
         DeleteRegistryValue(kRegistryPath, kRegistryValueMetadataCacheCapacityOverrideEntries);
+        SetRegistryDwordValue(kRegistryPath, kRegistryValueUseSlideshowTransition, 0);
         SetRegistryDwordValue(kRegistryPath, kRegistryValuePrefetchDepthOverride, 7);
         wchar_t previousValue[64]{};
         const DWORD previousLength = GetEnvironmentVariableW(
@@ -3801,6 +3806,52 @@ namespace
 
             const HWND slideDurationEdit = GetDlgItem(dialog, 5700);
             const HWND transitionDurationEdit = GetDlgItem(dialog, 5701);
+            const DWORD dialogThreadId = GetWindowThreadProcessId(dialog, nullptr);
+            const auto focusedWindow = [&]() -> HWND
+            {
+                GUITHREADINFO threadInfo{sizeof(threadInfo)};
+                return GetGUIThreadInfo(dialogThreadId, &threadInfo) != FALSE ? threadInfo.hwndFocus : nullptr;
+            };
+            const auto waitForFocus = [&](HWND expected)
+            {
+                const ULONGLONG focusDeadline = GetTickCount64() + 2000;
+                while (GetTickCount64() < focusDeadline && focusedWindow() != expected)
+                {
+                    Sleep(10);
+                }
+                return focusedWindow() == expected;
+            };
+            if (!waitForFocus(transitionCombo))
+            {
+                failAndClose("Experimental Settings did not give initial focus to the transition field");
+                return;
+            }
+            if (!PostMessageW(dialog, WM_KEYDOWN, VK_TAB, 0)
+                || !waitForFocus(slideDurationEdit))
+            {
+                failAndClose("Tab did not move from the transition field to the first numeric field");
+                return;
+            }
+            if (!PostMessageW(dialog, WM_KEYDOWN, VK_TAB, 0)
+                || !waitForFocus(transitionDurationEdit))
+            {
+                failAndClose("Tab did not move between Experimental Settings numeric fields");
+                return;
+            }
+            if (!PostMessageW(dialog, WM_KEYDOWN, VK_TAB, 0)
+                || !waitForFocus(dialog)
+                || !PostMessageW(dialog, WM_KEYDOWN, VK_SPACE, 0))
+            {
+                failAndClose("Tab did not reach or Space did not activate the Experimental Settings Apply action");
+                return;
+            }
+            Sleep(50);
+            if (!FindWindowW(kDialogClassName, nullptr))
+            {
+                failAndClose("Space unexpectedly closed Experimental Settings from the Apply action");
+                return;
+            }
+
             const HWND thumbnailCacheEdit = GetDlgItem(dialog, 5702);
             const HWND metadataCacheEdit = GetDlgItem(dialog, 5703);
             const HWND prefetchDepthEdit = GetDlgItem(dialog, 5704);
@@ -3878,6 +3929,41 @@ namespace
             RECT client{};
             GetClientRect(dialog, &client);
             const int tabWidth = (client.right - 56) / 5;
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'V', 0);
+            auto* experimentalState = reinterpret_cast<hyperbrowse::ui::dialog_detail::ExperimentalSettingsDialogState*>(
+                GetWindowLongPtrW(dialog, GWLP_USERDATA));
+            if (!experimentalState || !waitForFocus(dialog)
+                || experimentalState->page != hyperbrowse::ui::dialog_detail::ConsolidatedSettingsPage::Viewer)
+            {
+                failAndClose("Alt+V did not select the Viewer page in Experimental Settings");
+                return;
+            }
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'U', 0);
+            if (experimentalState->focusedTarget.kind
+                    != hyperbrowse::ui::dialog_detail::ExperimentalSettingsFocusTargetKind::CustomControl
+                || experimentalState->focusedTarget.index != 0)
+            {
+                failAndClose("Alt+U did not focus the custom Viewer transition setting");
+                return;
+            }
+            SendMessageW(dialog, WM_KEYDOWN, VK_SPACE, 0);
+            Sleep(50);
+            if (!experimentalState->settings || !experimentalState->settings->useSlideshowTransition)
+            {
+                failAndClose("Space did not toggle the custom Viewer transition setting");
+                return;
+            }
+            SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(client.right - 300, client.bottom - 46));
+            SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(client.right - 300, client.bottom - 46));
+            DWORD transitionEnabled = 0;
+            if (!TryReadRegistryDwordValue(kRegistryPath, kRegistryValueUseSlideshowTransition, &transitionEnabled)
+                || transitionEnabled == 0)
+            {
+                failAndClose("Custom Viewer setting activation did not persist through Apply (value="
+                    + std::to_string(transitionEnabled) + ")");
+                return;
+            }
+
             for (int index = 0; index < 5; ++index)
             {
                 const int x = 28 + (index * tabWidth) + (tabWidth / 2);
@@ -3906,6 +3992,11 @@ namespace
             }
             SendMessageW(appTextCombo, CB_SETCURSEL, 1, 0);
             SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(5818, CBN_SELCHANGE), reinterpret_cast<LPARAM>(appTextCombo));
+            if (!PostMessageW(dialog, WM_KEYDOWN, VK_TAB, 0))
+            {
+                failAndClose("Failed to advance from Apply to OK in Experimental Settings");
+                return;
+            }
             if (!PostMessageW(dialog, WM_KEYDOWN, VK_RETURN, 0))
             {
                 failAndClose("Failed to post Enter to Experimental Settings");
@@ -3973,6 +4064,119 @@ namespace
                "Experimental Settings interaction timed out");
         worker.join();
         Expect(failure.empty(), failure.empty() ? "Experimental Settings interaction failed" : failure.c_str());
+
+        SetEnvironmentVariableW(kSettingsUiEnvironment, L"legacy");
+        std::atomic_bool legacyDone{false};
+        std::string legacyFailure;
+        std::thread legacyWorker([&]()
+        {
+            constexpr wchar_t kLegacyDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
+            if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
+            {
+                legacyFailure = "Failed to post the legacy Settings command for mnemonic coverage";
+                legacyDone.store(true, std::memory_order_release);
+                return;
+            }
+
+            HWND dialog = nullptr;
+            const ULONGLONG deadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < deadline && !(dialog = FindWindowW(kLegacyDialogClassName, nullptr)))
+            {
+                Sleep(10);
+            }
+            if (!dialog)
+            {
+                legacyFailure = "Legacy Settings dialog did not open for mnemonic coverage";
+                legacyDone.store(true, std::memory_order_release);
+                return;
+            }
+
+            const auto failAndClose = [&](std::string message)
+            {
+                legacyFailure = std::move(message);
+                SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
+                legacyDone.store(true, std::memory_order_release);
+            };
+            HWND tabWindow = nullptr;
+            HWND viewerTransitionControl = nullptr;
+            HWND applyButton = nullptr;
+            HWND okButton = nullptr;
+            const ULONGLONG controlsDeadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < controlsDeadline)
+            {
+                tabWindow = GetDlgItem(dialog, 360);
+                viewerTransitionControl = GetDlgItem(dialog, 5000);
+                applyButton = GetDlgItem(dialog, 5500);
+                okButton = GetDlgItem(dialog, IDOK);
+                if (tabWindow && viewerTransitionControl && applyButton && okButton)
+                {
+                    break;
+                }
+                Sleep(10);
+            }
+            if (!tabWindow || !viewerTransitionControl || !applyButton || !okButton)
+            {
+                failAndClose("Legacy Settings did not create the controls required for mnemonic coverage (tab="
+                    + std::to_string(tabWindow != nullptr) + ", transition="
+                    + std::to_string(viewerTransitionControl != nullptr) + ", apply="
+                    + std::to_string(applyButton != nullptr) + ", ok="
+                    + std::to_string(okButton != nullptr) + ")");
+                return;
+            }
+
+            const DWORD dialogThreadId = GetWindowThreadProcessId(dialog, nullptr);
+            const auto focusedWindow = [&]() -> HWND
+            {
+                GUITHREADINFO threadInfo{sizeof(threadInfo)};
+                return GetGUIThreadInfo(dialogThreadId, &threadInfo) != FALSE ? threadInfo.hwndFocus : nullptr;
+            };
+            const auto waitForFocus = [&](HWND expected)
+            {
+                const ULONGLONG focusDeadline = GetTickCount64() + 2000;
+                while (GetTickCount64() < focusDeadline && focusedWindow() != expected)
+                {
+                    Sleep(10);
+                }
+                return focusedWindow() == expected;
+            };
+
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'V', 0);
+            if (TabCtrl_GetCurSel(tabWindow) != static_cast<int>(hyperbrowse::ui::dialog_detail::ConsolidatedSettingsPage::Viewer)
+                || !waitForFocus(viewerTransitionControl))
+            {
+                failAndClose("Alt+V did not select the Viewer page and focus its first field in legacy Settings");
+                return;
+            }
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'U', 0);
+            if (!waitForFocus(viewerTransitionControl))
+            {
+                failAndClose("Alt+U did not focus the custom-mapped Viewer transition field in legacy Settings");
+                return;
+            }
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'A', 0);
+            Sleep(50);
+            if (!FindWindowW(kLegacyDialogClassName, nullptr))
+            {
+                failAndClose("Alt+A unexpectedly closed legacy Settings instead of applying");
+                return;
+            }
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'O', 0);
+            const ULONGLONG closeDeadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < closeDeadline && FindWindowW(kLegacyDialogClassName, nullptr))
+            {
+                Sleep(10);
+            }
+            if (FindWindowW(kLegacyDialogClassName, nullptr))
+            {
+                legacyFailure = "Alt+O did not close legacy Settings";
+            }
+            legacyDone.store(true, std::memory_order_release);
+        });
+
+        Expect(PumpMessagesUntil([&]() { return legacyDone.load(std::memory_order_acquire); }, 15000),
+               "Legacy Settings mnemonic interaction timed out");
+        legacyWorker.join();
+        Expect(legacyFailure.empty(), legacyFailure.empty() ? "Legacy Settings mnemonic interaction failed" : legacyFailure.c_str());
         DestroyWindow(mainWindow.Hwnd());
         PumpMessagesFor(100);
 
@@ -4232,6 +4436,238 @@ namespace
          }
     }
 
+    void RunMainWindowKeyboardFocusScenario(HINSTANCE instance)
+    {
+        using hyperbrowse::ui::command_ids::ID_ACTION_FILTER_EDIT;
+
+        ScopedRegistryDwordBackup detailsStripBackup(kRegistryPath, L"DetailsStripVisible");
+        SetRegistryDwordValue(kRegistryPath, L"DetailsStripVisible", 1);
+
+        struct KeyboardStateGuard
+        {
+            std::array<BYTE, 256> original{};
+            bool captured{GetKeyboardState(original.data()) != FALSE};
+
+            ~KeyboardStateGuard()
+            {
+                if (captured)
+                {
+                    SetKeyboardState(original.data());
+                }
+            }
+        } keyboardState;
+
+        Expect(keyboardState.captured, "Failed to capture the keyboard state for main-window focus coverage");
+
+        hyperbrowse::ui::MainWindow mainWindow(instance);
+        Expect(mainWindow.Create(), "Failed to create MainWindow for keyboard focus coverage");
+        mainWindow.Show(SW_SHOW);
+        PumpMessagesFor(100);
+
+        const HWND filterEdit = GetDlgItem(mainWindow.Hwnd(), ID_ACTION_FILTER_EDIT);
+        const HWND treePane = FindWindowExW(mainWindow.Hwnd(), nullptr, WC_TREEVIEWW, nullptr);
+        const HWND browserPane = FindWindowExW(mainWindow.Hwnd(), nullptr, L"HyperBrowseBrowserPane", nullptr);
+        struct DetailsTextSearch
+        {
+            HWND parent{};
+            HWND result{};
+        } detailsTextSearch{mainWindow.Hwnd(), nullptr};
+        EnumChildWindows(mainWindow.Hwnd(), [](HWND child, LPARAM parameter) -> BOOL
+        {
+            auto* search = reinterpret_cast<DetailsTextSearch*>(parameter);
+            if (GetParent(child) != search->parent)
+            {
+                return TRUE;
+            }
+
+            wchar_t className[64]{};
+            GetClassNameW(child, className, static_cast<int>(std::size(className)));
+            const LONG_PTR style = GetWindowLongPtrW(child, GWL_STYLE);
+            if ((style & ES_READONLY) != 0
+                || std::wstring_view(className) == L"RICHEDIT50W"
+                || std::wstring_view(className) == L"RichEdit20W")
+            {
+                search->result = child;
+                return FALSE;
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&detailsTextSearch));
+        const HWND detailsText = detailsTextSearch.result;
+
+        Expect(filterEdit != nullptr, "MainWindow did not create the filter edit for keyboard focus coverage");
+        Expect(treePane != nullptr, "MainWindow did not create the folder tree for keyboard focus coverage");
+        Expect(browserPane != nullptr, "MainWindow did not create the browser pane for keyboard focus coverage");
+        Expect(detailsText != nullptr, "MainWindow did not create the read-only details text control for keyboard focus coverage");
+        Expect(IsWindowVisible(detailsText) != FALSE, "Details text control was not visible for keyboard focus coverage");
+
+        const auto sendKey = [&](HWND target, WPARAM key)
+        {
+            MSG message{};
+            message.hwnd = target;
+            message.message = WM_KEYDOWN;
+            message.wParam = key;
+            return mainWindow.TranslateAcceleratorMessage(&message);
+        };
+
+        SetForegroundWindow(mainWindow.Hwnd());
+        SetFocus(filterEdit);
+        Expect(GetFocus() == filterEdit, "Could not focus the filter edit for keyboard traversal coverage");
+
+        Expect(sendKey(filterEdit, VK_TAB), "Tab from the filter edit was not consumed by main-window focus routing");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the filter edit did not reach the custom toolbar focus surface");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab between custom toolbar targets was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab between custom toolbar targets lost the main-window focus surface");
+        Expect(sendKey(mainWindow.Hwnd(), VK_SPACE), "Space did not activate the focused custom toolbar target");
+        Expect(sendKey(mainWindow.Hwnd(), VK_SPACE), "Space did not activate the custom toolbar target a second time");
+
+        SetFocus(filterEdit);
+        int customToolbarFocusCount = 0;
+        bool reachedTree = false;
+        for (int step = 0; step < 64; ++step)
+        {
+            const HWND currentFocus = GetFocus();
+            Expect(currentFocus != nullptr, "Keyboard traversal lost focus before reaching the folder tree");
+            Expect(sendKey(currentFocus, VK_TAB), "Tab was not consumed while traversing the main-window focus sequence");
+            const HWND nextFocus = GetFocus();
+            if (nextFocus == mainWindow.Hwnd())
+            {
+                ++customToolbarFocusCount;
+            }
+            if (nextFocus == treePane)
+            {
+                reachedTree = true;
+                break;
+            }
+        }
+        Expect(customToolbarFocusCount > 0, "Main-window Tab traversal skipped all custom toolbar targets");
+        Expect(reachedTree, "Main-window Tab traversal did not reach the folder tree");
+
+        Expect(sendKey(treePane, VK_TAB), "Tab from the folder tree was not consumed");
+        Expect(GetFocus() == browserPane, "Tab from the folder tree did not focus the browser pane");
+
+        Expect(sendKey(browserPane, VK_TAB), "Tab from the browser pane was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the browser pane did not focus the custom details tab surface");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab between details tabs was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab between details tabs lost the custom focus surface");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab from the details tabs to the close button was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the details tabs did not retain the custom focus surface");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab from the details close button was not consumed");
+        Expect(GetFocus() == detailsText, "Tab did not reach the native details text control");
+
+        std::array<BYTE, 256> shiftedKeyboardState = keyboardState.original;
+        shiftedKeyboardState[VK_SHIFT] |= 0x80;
+        Expect(SetKeyboardState(shiftedKeyboardState.data()) != FALSE,
+               "Failed to stage Shift for reverse main-window focus traversal");
+        Expect(sendKey(detailsText, VK_TAB), "Shift+Tab from the details text control was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Shift+Tab from the details text control did not reach the custom close-button surface");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Shift+Tab from the details close button was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Shift+Tab from the details close button did not retain the custom focus surface");
+        Expect(SetKeyboardState(keyboardState.original.data()) != FALSE,
+               "Failed to restore the keyboard state after reverse focus traversal");
+
+        Expect(sendKey(mainWindow.Hwnd(), VK_RETURN), "Enter did not activate the Quick Actions details tab");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab from the Quick Actions details tab was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the Quick Actions details tab did not reach the custom close-button surface");
+        Expect(sendKey(mainWindow.Hwnd(), VK_SPACE), "Space did not activate the custom details close button");
+        Expect(GetFocus() == browserPane, "Closing the details panel did not restore focus to the browser pane");
+
+        DestroyWindow(mainWindow.Hwnd());
+        PumpMessagesFor(100);
+    }
+
+        void RunMainWindowAccessibilityScenario(HINSTANCE instance)
+        {
+         hyperbrowse::ui::MainWindow mainWindow(instance);
+         Expect(mainWindow.Create(), "Failed to create MainWindow for accessibility coverage");
+         mainWindow.Show(SW_SHOW);
+         PumpMessagesFor(100);
+
+         const LRESULT objectResult = SendMessageW(mainWindow.Hwnd(), WM_GETOBJECT, 0, OBJID_CLIENT);
+         Expect(objectResult != 0, "MainWindow did not return an accessibility object");
+
+         IAccessible* accessible = nullptr;
+         const HRESULT objectStatus = ObjectFromLresult(
+             objectResult,
+             IID_IAccessible,
+             0,
+             reinterpret_cast<void**>(&accessible));
+         Expect(SUCCEEDED(objectStatus) && accessible != nullptr,
+             "Could not materialize the MainWindow accessibility object");
+
+         long childCount = 0;
+         Expect(SUCCEEDED(accessible->get_accChildCount(&childCount)) && childCount > 0,
+             "MainWindow accessibility object did not expose custom children");
+
+         bool foundFileMenu = false;
+         bool foundImageBrowser = false;
+         LONG browserChildId = 0;
+         for (LONG childId = 1; childId <= childCount; ++childId)
+         {
+             VARIANT child{};
+             child.vt = VT_I4;
+             child.lVal = childId;
+             BSTR name = nullptr;
+             Expect(SUCCEEDED(accessible->get_accName(child, &name)) && name != nullptr && SysStringLen(name) > 0,
+                 "MainWindow accessibility child did not expose a name");
+
+             VARIANT role{};
+             Expect(SUCCEEDED(accessible->get_accRole(child, &role)) && role.vt == VT_I4,
+                 "MainWindow accessibility child did not expose a role");
+
+             LONG left = 0;
+             LONG top = 0;
+             LONG width = 0;
+             LONG height = 0;
+             Expect(SUCCEEDED(accessible->accLocation(&left, &top, &width, &height, child))
+                  && width > 0 && height > 0,
+                 "MainWindow accessibility child did not expose screen bounds");
+
+             const std::wstring childName(name, SysStringLen(name));
+             foundFileMenu = foundFileMenu || childName == L"File";
+             if (childName == L"Image browser")
+             {
+              foundImageBrowser = true;
+              browserChildId = childId;
+             }
+             SysFreeString(name);
+             VariantClear(&role);
+         }
+         Expect(foundFileMenu, "MainWindow accessibility tree did not expose the File menu");
+         Expect(foundImageBrowser && browserChildId > 0,
+             "MainWindow accessibility tree did not expose the custom image browser surface");
+
+         VARIANT firstChild{};
+         Expect(SUCCEEDED(accessible->accNavigate(NAVDIR_FIRSTCHILD, VARIANT{VT_I4, {CHILDID_SELF}}, &firstChild))
+                 && firstChild.vt == VT_I4 && firstChild.lVal == 1,
+             "MainWindow accessibility navigation did not expose its first child");
+         VariantClear(&firstChild);
+
+         VARIANT browserChild{};
+         browserChild.vt = VT_I4;
+         browserChild.lVal = browserChildId;
+         Expect(SUCCEEDED(accessible->accSelect(SELFLAG_TAKEFOCUS, browserChild)),
+             "MainWindow accessibility could not focus the custom image browser surface");
+         Expect(GetFocus() == FindWindowExW(mainWindow.Hwnd(), nullptr, L"HyperBrowseBrowserPane", nullptr),
+             "MainWindow accessibility focus selection did not reach the browser surface");
+
+         VARIANT focus{};
+         Expect(SUCCEEDED(accessible->get_accFocus(&focus))
+                 && focus.vt == VT_I4 && focus.lVal == browserChildId,
+             "MainWindow accessibility object did not report the focused custom child");
+         VariantClear(&focus);
+
+         VARIANT browserState{};
+         Expect(SUCCEEDED(accessible->get_accState(browserChild, &browserState))
+                 && browserState.vt == VT_I4
+                 && (browserState.lVal & STATE_SYSTEM_FOCUSED) != 0,
+             "MainWindow accessibility object did not report the focused state");
+         VariantClear(&browserState);
+
+         accessible->Release();
+         DestroyWindow(mainWindow.Hwnd());
+         PumpMessagesFor(100);
+        }
+
     void RunMainWindowTextInputAcceleratorScenario(HINSTANCE instance)
     {
         hyperbrowse::ui::MainWindow mainWindow(instance);
@@ -4360,6 +4796,7 @@ int main(int argc, char* argv[])
         const bool thumbnailFailureOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-failure";
         const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
+        const bool accessibilityOnly = argc > 1 && std::string_view(argv[1]) == "--accessibility";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
         const bool multiViewerSettingsOnly = argc > 1 && std::string_view(argv[1]) == "--multi-viewer-settings";
         const std::string_view selectedScenario = argc > 1 ? std::string_view(argv[1]) : std::string_view{};
@@ -4390,6 +4827,10 @@ int main(int argc, char* argv[])
         else if (appTextSizeOnly)
         {
             RunAppTextSizeScenario(instance);
+        }
+        else if (accessibilityOnly)
+        {
+            RunMainWindowAccessibilityScenario(instance);
         }
         else if (settingsOnly)
         {
@@ -4432,6 +4873,8 @@ int main(int argc, char* argv[])
             RunMainWindowCascadeScenario(instance);
             RunStartupViewerEnumerationScenario(instance);
             RunMainWindowFolderTreeScenario(instance);
+            RunMainWindowKeyboardFocusScenario(instance);
+            RunMainWindowAccessibilityScenario(instance);
             RunMainWindowTextInputAcceleratorScenario(instance);
         }
 

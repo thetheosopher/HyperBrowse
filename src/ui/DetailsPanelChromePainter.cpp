@@ -73,6 +73,17 @@ namespace hyperbrowse::ui
                 renderTarget->DrawRoundedRectangle(&roundedRect, outlineBrush.Get(), 1.0f);
             }
         };
+        const auto drawFocusRing = [renderTarget, &createBrush, &palette](const RECT& sourceRect, float radius)
+        {
+            RECT focusRect = sourceRect;
+            InflateRect(&focusRect, -1, -1);
+            const auto focusBrush = createBrush(palette.accent);
+            if (focusBrush)
+            {
+                const auto roundedRect = render::ToD2DRoundedRect(focusRect, radius, radius);
+                renderTarget->DrawRoundedRectangle(&roundedRect, focusBrush.Get(), 2.0f);
+            }
+        };
 
         if (!IsRectEmpty(&state.tabStripRect))
         {
@@ -115,6 +126,10 @@ namespace hyperbrowse::ui
                     ? palette.accentText
                     : ((hot || pressed) ? palette.text : palette.mutedText);
                 drawRounded(tabRect, fillColor, borderColor, 7.0f);
+                if (static_cast<int>(index) == state.focusedTabIndex)
+                {
+                    drawFocusRing(tabRect, 7.0f);
+                }
                 const auto tabBrush = createBrush(textColor);
                 if (tabBrush)
                 {
@@ -137,6 +152,10 @@ namespace hyperbrowse::ui
                         fillColor,
                         hot || pressed ? palette.accent : palette.actionStripBorder,
                         4.0f);
+            if (state.closeButtonFocused)
+            {
+                drawFocusRing(state.closeButtonRect, 4.0f);
+            }
             const auto closeBrush = createBrush(closeColor);
             if (closeBrush)
             {
@@ -168,6 +187,18 @@ namespace hyperbrowse::ui
         const HFONT resolvedFont = textFont
             ? textFont
             : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const auto drawFocusRing = [hdc, &palette](const RECT& sourceRect, int radius)
+        {
+            RECT focusRect = sourceRect;
+            InflateRect(&focusRect, -1, -1);
+            const HPEN focusPen = CreatePen(PS_SOLID, 2, palette.accent);
+            const HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            const HGDIOBJ oldPen = SelectObject(hdc, focusPen);
+            RoundRect(hdc, focusRect.left, focusRect.top, focusRect.right, focusRect.bottom, radius, radius);
+            SelectObject(hdc, oldPen);
+            SelectObject(hdc, oldBrush);
+            DeleteObject(focusPen);
+        };
         if (!IsRectEmpty(&state.tabStripRect))
         {
             const COLORREF inactiveFill = BlendColor(palette.actionFieldBackground,
@@ -219,6 +250,11 @@ namespace hyperbrowse::ui
                 DeleteObject(tabPen);
                 DeleteObject(tabBrush);
 
+                if (static_cast<int>(index) == state.focusedTabIndex)
+                {
+                    drawFocusRing(tabRect, 14);
+                }
+
                 render::DrawGdiText(hdc,
                                     resolvedFont,
                                     kTabLabels[index].data(),
@@ -257,6 +293,11 @@ namespace hyperbrowse::ui
             SelectObject(hdc, oldBrush);
             DeleteObject(buttonPen);
             DeleteObject(buttonBrush);
+
+            if (state.closeButtonFocused)
+            {
+                drawFocusRing(state.closeButtonRect, 6);
+            }
 
             const int inset = 5;
             const int left = state.closeButtonRect.left + inset;

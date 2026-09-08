@@ -32,10 +32,13 @@ namespace hyperbrowse::ui
             QuickAccessLayout::Metrics metrics{};
             bool sortButtonHot{};
             bool sortButtonPressed{};
+            bool sortButtonFocused{};
             int hotRowIndex{-1};
             int hotButtonIndex{-1};
             int pressedRowIndex{-1};
             int pressedButtonIndex{-1};
+            int focusedRowIndex{-1};
+            int focusedButtonIndex{-1};
         };
 
         struct Palette
