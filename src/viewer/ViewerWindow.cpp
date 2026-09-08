@@ -27,6 +27,7 @@
 #include "services/ImageMetadataService.h"
 #include "ui/ItemNumberNavigationPolicy.h"
 #include "ui/MainWindowDialogs.h"
+#include "ui/ViewerTransitionPolicy.h"
 #include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
@@ -1122,6 +1123,10 @@ namespace hyperbrowse::viewer
         slideshowAdvancePending_ = false;
         slideshowNextPrefetchIndex_ = -1;
         slideshowNextPrefetchGeneration_ = 0;
+        if (!manualTransitionEnabled_)
+        {
+            StopTransition();
+        }
     }
 
     bool ViewerWindow::IsSlideshowActive() const noexcept
@@ -3764,7 +3769,8 @@ namespace hyperbrowse::viewer
     void ViewerWindow::QueueTransitionFromCurrent(bool forward, bool slideshowNavigation)
     {
         StopTransition(false);
-        activeTransitionStyle_ = (slideshowNavigation || manualTransitionEnabled_)
+        pendingTransitionIsSlideshowNavigation_ = slideshowNavigation;
+        activeTransitionStyle_ = ui::ShouldUseViewerTransition(slideshowNavigation, manualTransitionEnabled_)
             ? ResolveActiveTransitionStyle()
             : TransitionStyle::Cut;
 
@@ -3793,6 +3799,7 @@ namespace hyperbrowse::viewer
             || transitionDurationMs_ == 0
             || !pendingTransitionFromImage_
             || !currentImage_
+            || !ui::ShouldUseViewerTransition(pendingTransitionIsSlideshowNavigation_, manualTransitionEnabled_)
             || pendingTransitionFromIndex_ == currentIndex_)
         {
             StopTransition();
@@ -3864,6 +3871,8 @@ namespace hyperbrowse::viewer
             pendingTransitionFromImage_.reset();
             pendingTransitionFromBitmap_.Reset();
             pendingTransitionFromIndex_ = -1;
+            pendingTransitionIsSlideshowNavigation_ = false;
+            activeTransitionStyle_ = TransitionStyle::Cut;
         }
     }
 

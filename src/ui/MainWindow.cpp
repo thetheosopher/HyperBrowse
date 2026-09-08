@@ -12889,13 +12889,15 @@ namespace hyperbrowse::ui
             return false;
         }
 
-        ApplyViewerMouseWheelSetting();
-        ApplyViewerTransitionSettings();
         viewerWindow_->SetAppTextSize(appTextSize_);
         viewerWindow_->SetResourceProfile(resourceProfile_);
         viewerWindow_->SetPrefetchDepthOverride(prefetchDepthOverride_);
         viewerWindow_->SetMemoryPressureActive(thumbnailMemoryPressureActive_);
         viewerWindow_->SetEscapeKeyBehavior(viewerEscapeKeyBehavior_);
+        viewerWindow_->SetMouseWheelBehavior(viewerMouseWheelBehavior_);
+        viewerWindow_->SetKeyboardPanningInverted(invertKeyboardPanning_);
+        viewerWindow_->SetTransitionSettings(slideshowTransitionStyle_, slideshowTransitionDurationMs_);
+        viewerWindow_->SetManualTransitionEnabled(useSlideshowTransition_);
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
             if (startSlideshow)

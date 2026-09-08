@@ -402,6 +402,7 @@ namespace hyperbrowse::viewer
         Microsoft::WRL::ComPtr<ID2D1Bitmap> pendingTransitionFromBitmap_;
         int pendingTransitionFromIndex_{-1};
         bool pendingTransitionForward_{true};
+        bool pendingTransitionIsSlideshowNavigation_{};
         UINT_PTR transitionTimerId_{};
         DWORD windowedStyle_{};
         DWORD windowedExStyle_{};

@@ -47,6 +47,7 @@
 #include "ui/ViewerItemSelectionPolicy.h"
 #include "ui/ViewerPendingOperationState.h"
 #include "ui/ViewerSynchronizer.h"
+#include "ui/ViewerTransitionPolicy.h"
 #include "ui/ViewerSettingsPersistence.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowBoundsPersistence.h"
@@ -88,6 +89,18 @@ namespace hyperbrowse::tests
                    "Prefetch depth did not clamp below the supported range");
             Expect(hyperbrowse::util::ResolvePrefetchDepth(ResourceProfile::Balanced, 99) == 16,
                    "Prefetch depth did not clamp above the supported range");
+        }
+
+        void RunViewerTransitionPolicyScenario()
+        {
+            Expect(!hyperbrowse::ui::ShouldUseViewerTransition(false, false),
+                   "Manual navigation enabled a transition while the setting was disabled");
+            Expect(hyperbrowse::ui::ShouldUseViewerTransition(false, true),
+                   "Manual navigation ignored the enabled transition setting");
+            Expect(hyperbrowse::ui::ShouldUseViewerTransition(true, false),
+                   "Slideshow navigation ignored the configured transition");
+            Expect(hyperbrowse::ui::ShouldUseViewerTransition(true, true),
+                   "Slideshow navigation policy changed when manual transitions were enabled");
         }
 
         void RunFileOperationMediaCacheInvalidationScenario()
@@ -1945,6 +1958,7 @@ namespace hyperbrowse::tests
     void RunPolicyScenarios()
     {
         RunPrefetchSizingScenario();
+        RunViewerTransitionPolicyScenario();
         RunFileOperationMediaCacheInvalidationScenario();
         RunFolderHistoryScenario();
         RunFileOperationJournalScenario();
@@ -2026,6 +2040,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--viewer-item-selection")
         {
             RunViewerItemSelectionPolicyScenario();
+        }
+        else if (scenario == "--viewer-transition-policy")
+        {
+            RunViewerTransitionPolicyScenario();
         }
         else if (scenario == "--item-number-navigation")
         {
