@@ -1560,13 +1560,16 @@ namespace hyperbrowse::tests
             using hyperbrowse::browser::BrowserItem;
             using hyperbrowse::ui::BrowserItemScopeCollector;
 
-            const std::vector<BrowserItem> modelItems = {
+            std::vector<BrowserItem> modelItems = {
                 BrowserItem{L"zero.jpg", L"C:\\Images\\zero.jpg", L"JPG", L"", 0, 10},
                 BrowserItem{L"one.jpg", L"C:\\Images\\one.jpg", L"JPG", L"", 1, 20},
                 BrowserItem{L"two.jpg", L"C:\\Images\\two.jpg", L"JPG", L"", 2, 30},
             };
-            const std::vector<int> orderedModelIndices = {2, 0, 99, -1};
-            const std::vector<int> selectedModelIndices = {1, 2, -1};
+            BrowserItem directoryItem{L"subfolder", L"C:\\Images\\subfolder", L"Folder", L"", 3, 0};
+            directoryItem.isDirectory = true;
+            modelItems.push_back(directoryItem);
+            const std::vector<int> orderedModelIndices = {2, 0, 3, 99, -1};
+            const std::vector<int> selectedModelIndices = {1, 2, 3, -1};
 
             const std::vector<BrowserItem> selectedItems = BrowserItemScopeCollector::Collect({
                 modelItems,

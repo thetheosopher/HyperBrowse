@@ -12,7 +12,9 @@ namespace hyperbrowse::ui
             items.reserve(input.selectedModelIndices.size());
             for (const int modelIndex : input.selectedModelIndices)
             {
-                if (modelIndex >= 0 && modelIndex < static_cast<int>(input.modelItems.size()))
+                if (modelIndex >= 0
+                    && modelIndex < static_cast<int>(input.modelItems.size())
+                    && !input.modelItems[static_cast<std::size_t>(modelIndex)].isDirectory)
                 {
                     items.push_back(input.modelItems[static_cast<std::size_t>(modelIndex)]);
                 }
@@ -35,7 +37,9 @@ namespace hyperbrowse::ui
         items.reserve(orderedModelIndices.size());
         for (const int modelIndex : orderedModelIndices)
         {
-            if (modelIndex >= 0 && modelIndex < static_cast<int>(input.modelItems.size()))
+            if (modelIndex >= 0
+                && modelIndex < static_cast<int>(input.modelItems.size())
+                && !input.modelItems[static_cast<std::size_t>(modelIndex)].isDirectory)
             {
                 items.push_back(input.modelItems[static_cast<std::size_t>(modelIndex)]);
             }
