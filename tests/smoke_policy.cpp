@@ -1718,6 +1718,27 @@ namespace hyperbrowse::tests
                 2});
             Expect(fallback.items.size() == 3 && fallback.selectedIndex == 2,
                    "Viewer item selection policy changed index fallback behavior");
+
+            BrowserItem directory{L"folder", L"C:\\Images\\folder"};
+            directory.isDirectory = true;
+            const std::vector<BrowserItem> modelItemsWithDirectory = {
+                directory,
+                BrowserItem{L"first.jpg", L"C:\\Images\\first.jpg", L"JPG", L"", 3, 30},
+                BrowserItem{L"second.jpg", L"C:\\Images\\second.jpg", L"JPG", L"", 4, 40},
+            };
+            const std::vector<int> orderedModelIndicesWithDirectory = {0, 1, 2};
+            const ViewerItemSelectionPolicy::Result filtered = ViewerItemSelectionPolicy::Build({
+                modelItemsWithDirectory,
+                orderedModelIndicesWithDirectory,
+                1,
+                {},
+                {},
+                -1});
+            Expect(filtered.items.size() == 2
+                       && filtered.selectedIndex == 0
+                       && filtered.items[0].filePath == L"C:\\Images\\first.jpg"
+                       && filtered.items[1].filePath == L"C:\\Images\\second.jpg",
+                   "Viewer item selection policy did not remove directories or remap the selected image");
         }
 
         void RunItemNumberNavigationPolicyScenario()
@@ -1794,13 +1815,16 @@ namespace hyperbrowse::tests
             using hyperbrowse::browser::BrowserItem;
             using hyperbrowse::ui::ViewerSynchronizer;
 
+            BrowserItem directory{L"folder", L"C:\\images\\folder"};
+            directory.isDirectory = true;
             const std::vector<BrowserItem> modelItems = {
+                directory,
                 BrowserItem{L"first.jpg", L"C:\\images\\first.jpg"},
                 BrowserItem{L"second.jpg", L"C:\\images\\second.jpg"}};
             bool resolverSawSlideshow = false;
             const ViewerSynchronizer::Result synchronized = ViewerSynchronizer::Build(
                 modelItems,
-                {0, 1},
+                {0, 1, 2},
                 L"C:\\images\\second.jpg",
                 L"C:\\images\\first.jpg",
                 0,
@@ -1813,8 +1837,10 @@ namespace hyperbrowse::tests
             Expect(!synchronized.closeRequested
                        && synchronized.items.size() == 2
                        && synchronized.selectedIndex == 1
+                       && synchronized.items[0].filePath == L"C:\\images\\first.jpg"
+                       && synchronized.items[1].filePath == L"C:\\images\\second.jpg"
                        && resolverSawSlideshow,
-                   "Viewer synchronizer did not preserve preferred selection and slideshow state");
+                   "Viewer synchronizer did not remove directories or preserve preferred selection and slideshow state");
 
             const ViewerSynchronizer::Result empty = ViewerSynchronizer::Build(
                 {},

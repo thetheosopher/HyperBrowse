@@ -252,7 +252,7 @@ namespace hyperbrowse::viewer
         void ToggleInfoOverlays();
         HMONITOR ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept;
         void SetWindowFitMode(WindowFitMode mode);
-        bool ResizeWindowForFitMode(WindowFitMode mode);
+        bool ResizeWindowForFitMode(WindowFitMode mode, bool preservePosition);
         bool CurrentImageFitsWorkArea() const noexcept;
         void RefreshWindowFitForCurrentImage();
         void RestoreRegularWindowPlacement();

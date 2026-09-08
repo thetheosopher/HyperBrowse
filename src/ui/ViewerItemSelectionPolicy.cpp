@@ -30,7 +30,13 @@ namespace hyperbrowse::ui
                 continue;
             }
 
-            result.items.push_back(input.modelItems[static_cast<std::size_t>(modelIndex)]);
+            const browser::BrowserItem& modelItem = input.modelItems[static_cast<std::size_t>(modelIndex)];
+            if (modelItem.isDirectory)
+            {
+                continue;
+            }
+
+            result.items.push_back(modelItem);
             const int viewerIndex = static_cast<int>(result.items.size()) - 1;
             const std::wstring& path = result.items.back().filePath;
             if (selectedModelIndexPosition < 0 && modelIndex == input.selectedModelIndex)

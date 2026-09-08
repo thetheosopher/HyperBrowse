@@ -2707,6 +2707,20 @@ namespace
             "Viewer FitHeight did not fit the image to the existing client height");
         Expect(viewer.PanOffset().x == 0 && viewer.PanOffset().y == 0,
             "Viewer FitHeight did not reset the pan offset");
+        const LONG movedHeightFitLeft = heightFitAfterRect.left > 100
+            ? heightFitAfterRect.left - 100
+            : heightFitAfterRect.left + 100;
+        Expect(SetWindowPos(viewer.Hwnd(), nullptr,
+                            movedHeightFitLeft,
+                            heightFitAfterRect.top,
+                            heightFitAfterRect.right - heightFitAfterRect.left,
+                            heightFitAfterRect.bottom - heightFitAfterRect.top,
+                            SWP_NOZORDER | SWP_NOACTIVATE) != FALSE,
+            "Failed to move the window after FitHeight");
+        RECT movedHeightFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &movedHeightFitRect) != FALSE
+                && movedHeightFitRect.left == movedHeightFitLeft,
+            "Viewer FitHeight test did not establish a moved window position");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_PRIOR, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
@@ -2717,11 +2731,9 @@ namespace
         Expect(GetWindowRect(viewer.Hwnd(), &previousHeightFitRect) != FALSE
                 && GetClientRect(viewer.Hwnd(), &previousHeightFitClientRect) != FALSE,
             "Failed to read the viewer bounds after FitHeight navigation");
-        Expect(previousHeightFitRect.left == heightFitBeforeRect.left
-                && previousHeightFitRect.top == heightFitBeforeRect.top
-                && previousHeightFitRect.right == heightFitBeforeRect.right
-                && previousHeightFitRect.bottom == heightFitBeforeRect.bottom,
-            "Viewer FitHeight navigation changed the window geometry");
+        Expect(previousHeightFitRect.left == movedHeightFitRect.left
+                && previousHeightFitRect.top == movedHeightFitRect.top,
+            "Viewer FitHeight navigation changed the window position");
         const int expectedPreviousHeightFitZoom = std::max(
             1,
             static_cast<int>(std::lround(
@@ -2732,6 +2744,11 @@ namespace
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_NEXT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 1 && viewer.CurrentZoomPercent() > 0; }, 5000),
             "Viewer next-image navigation failed while returning from FitHeight");
+        RECT restoredHeightFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &restoredHeightFitRect) != FALSE
+                && restoredHeightFitRect.left == movedHeightFitRect.left
+                && restoredHeightFitRect.top == movedHeightFitRect.top,
+            "Viewer FitHeight navigation did not preserve the moved window position");
 
         RECT widthFitBeforeRect{};
         Expect(GetWindowRect(viewer.Hwnd(), &widthFitBeforeRect) != FALSE,
@@ -2759,6 +2776,18 @@ namespace
             "Viewer FitWidth did not fit the image to the existing client width");
         Expect(viewer.PanOffset().x == 0 && viewer.PanOffset().y == 0,
             "Viewer FitWidth did not reset the pan offset");
+        const LONG movedWidthFitLeft = widthFitAfterRect.left + 100;
+        Expect(SetWindowPos(viewer.Hwnd(), nullptr,
+                            movedWidthFitLeft,
+                            widthFitAfterRect.top,
+                            widthFitAfterRect.right - widthFitAfterRect.left,
+                            widthFitAfterRect.bottom - widthFitAfterRect.top,
+                            SWP_NOZORDER | SWP_NOACTIVATE) != FALSE,
+            "Failed to move the window after FitWidth");
+        RECT movedWidthFitRect{};
+        Expect(GetWindowRect(viewer.Hwnd(), &movedWidthFitRect) != FALSE
+                && movedWidthFitRect.left == movedWidthFitLeft,
+            "Viewer FitWidth test did not establish a moved window position");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 2 && viewer.CurrentZoomPercent() > 0; }, 5000),
@@ -2768,11 +2797,9 @@ namespace
         Expect(GetWindowRect(viewer.Hwnd(), &nextWidthFitRect) != FALSE
                 && GetClientRect(viewer.Hwnd(), &nextWidthFitClientRect) != FALSE,
             "Failed to read the viewer bounds after FitWidth navigation");
-        Expect(nextWidthFitRect.left == widthFitBeforeRect.left
-                && nextWidthFitRect.top == widthFitBeforeRect.top
-                && nextWidthFitRect.right == widthFitBeforeRect.right
-                && nextWidthFitRect.bottom == widthFitBeforeRect.bottom,
-            "Viewer FitWidth navigation changed the window geometry");
+        Expect(nextWidthFitRect.left == movedWidthFitRect.left
+                && nextWidthFitRect.top == movedWidthFitRect.top,
+            "Viewer FitWidth navigation changed the window position");
         const int expectedNextWidthFitZoom = std::max(
             1,
             static_cast<int>(std::lround(
@@ -2785,11 +2812,9 @@ namespace
         RECT constrainedWidthFitRect{};
         Expect(GetWindowRect(viewer.Hwnd(), &constrainedWidthFitRect) != FALSE,
             "Failed to read the viewer bounds after the portrait FitWidth navigation");
-        Expect(constrainedWidthFitRect.left == widthFitBeforeRect.left
-                && constrainedWidthFitRect.top == widthFitBeforeRect.top
-                && constrainedWidthFitRect.right == widthFitBeforeRect.right
-                && constrainedWidthFitRect.bottom == widthFitBeforeRect.bottom,
-            "Viewer FitWidth navigation changed the window geometry for an oversized image height");
+        Expect(constrainedWidthFitRect.left == movedWidthFitRect.left
+                && constrainedWidthFitRect.top == movedWidthFitRect.top,
+            "Viewer FitWidth navigation changed the window position for an oversized image height");
 
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 2 && viewer.CurrentZoomPercent() > 0; }, 5000),

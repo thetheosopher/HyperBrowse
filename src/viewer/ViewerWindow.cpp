@@ -2818,7 +2818,7 @@ namespace hyperbrowse::viewer
             ShowWindow(hwnd_, SW_RESTORE);
         }
 
-        if (ResizeWindowForFitMode(mode))
+        if (ResizeWindowForFitMode(mode, false))
         {
             windowFitMode_ = mode;
         }
@@ -2848,7 +2848,7 @@ namespace hyperbrowse::viewer
             && imageHeight <= workHeight;
     }
 
-    bool ViewerWindow::ResizeWindowForFitMode(WindowFitMode mode)
+    bool ViewerWindow::ResizeWindowForFitMode(WindowFitMode mode, bool preservePosition)
     {
         if (!hwnd_ || fullScreen_ || mode == WindowFitMode::Regular || !currentImage_)
         {
@@ -2918,7 +2918,8 @@ namespace hyperbrowse::viewer
                          windowTop,
                          windowWidth,
                          windowHeight,
-                         SWP_FRAMECHANGED | SWP_SHOWWINDOW) == FALSE)
+                         SWP_FRAMECHANGED | SWP_SHOWWINDOW
+                             | (preservePosition ? SWP_NOMOVE : 0)) == FALSE)
         {
             return false;
         }
@@ -2930,7 +2931,7 @@ namespace hyperbrowse::viewer
     {
         if (windowFitMode_ != WindowFitMode::Regular)
         {
-            ResizeWindowForFitMode(windowFitMode_);
+            ResizeWindowForFitMode(windowFitMode_, true);
         }
     }
 
