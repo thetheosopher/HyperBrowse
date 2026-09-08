@@ -530,6 +530,7 @@ namespace hyperbrowse::ui
         HMENU fileMenu_{};
         HMENU editMenu_{};
         HMENU viewMenu_{};
+        HMENU toolsMenu_{};
         HMENU helpMenu_{};
         HMENU openRecentFolderMenu_{};
         HMENU copySelectionToMenu_{};
@@ -537,7 +538,7 @@ namespace hyperbrowse::ui
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
         int detailsPanelWidth_{340};
-        std::array<CommandBarMenuButton, 4>& commandBarMenuButtons_;
+        std::array<CommandBarMenuButton, 5>& commandBarMenuButtons_;
         int commandBarHotIndex_{-1};
         int commandBarPressedIndex_{-1};
         int commandBarMenuNavigationIndex_{-1};

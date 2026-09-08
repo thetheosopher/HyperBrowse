@@ -368,12 +368,12 @@ namespace hyperbrowse::ui
         return items_;
     }
 
-    std::array<CommandBarController::CommandBarMenuButton, 4>& CommandBarController::MenuButtons()
+    std::array<CommandBarController::CommandBarMenuButton, 5>& CommandBarController::MenuButtons()
     {
         return menuButtons_;
     }
 
-    const std::array<CommandBarController::CommandBarMenuButton, 4>& CommandBarController::MenuButtons() const
+    const std::array<CommandBarController::CommandBarMenuButton, 5>& CommandBarController::MenuButtons() const
     {
         return menuButtons_;
     }

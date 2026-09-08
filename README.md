@@ -218,7 +218,7 @@ ctest --preset release-tests
 
 The smoke coverage includes folder enumeration, folder tree enumeration, thumbnail scheduling and caching, WIC decode behavior, LibRaw decode behavior, metadata caching, file operations, batch convert cancellation, browser selection behavior, viewer interaction, and persisted UI state.
 
-The consolidated Settings dialog is available from View > Settings or with Ctrl+Shift+T. Its Slideshow, Viewer, Appearance, Performance, and Behavior tabs stage changes until Apply or OK; Cancel and closing the dialog discard uncommitted changes. Performance includes the resource profile, adaptive or explicit cache caps, and Auto or explicit 1-16 item prefetch depth.
+The consolidated Settings dialog is available from Tools > Settings or with Ctrl+Shift+T. Its Slideshow, Viewer, Appearance, Performance, and Behavior tabs stage changes until Apply or OK; Cancel and closing the dialog discard uncommitted changes. Performance includes the resource profile, adaptive or explicit cache caps, and Auto or explicit 1-16 item prefetch depth.
 
 The Direct2D/DirectWrite Settings surface is the default. Set `HYPERBROWSE_SETTINGS_UI=legacy` before launching HyperBrowse to use the classic native dialog. HyperBrowse also falls back to the classic dialog automatically if the Direct2D surface cannot be created.
 

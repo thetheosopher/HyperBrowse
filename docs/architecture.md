@@ -187,7 +187,7 @@ controller:
   for folder navigation, clipboard actions, file operations, batch conversion,
   and undo/redo. MainWindow supplies explicit callbacks and retains window,
   model, service, and presentation state.
-- `ui/ViewCommandController.*` owns the view, settings, help, diagnostics, and
+- `ui/ViewCommandController.*` owns the view, tools, help, diagnostics, and
   viewer-display command-ID mapping. MainWindow supplies explicit callbacks
   and retains mutable settings, presentation state, and window effects.
 - `ui/CommandBarController.*` owns command-bar item definitions, menu and

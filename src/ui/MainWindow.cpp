@@ -9587,6 +9587,7 @@ namespace hyperbrowse::ui
         fileMenu_ = CreatePopupMenu();
         editMenu_ = CreatePopupMenu();
         viewMenu_ = CreatePopupMenu();
+        toolsMenu_ = CreatePopupMenu();
         helpMenu_ = CreatePopupMenu();
         openRecentFolderMenu_ = CreatePopupMenu();
         copySelectionToMenu_ = CreatePopupMenu();
@@ -9599,23 +9600,15 @@ namespace hyperbrowse::ui
         HMENU ratingMenu = CreatePopupMenu();
         HMENU viewMenu = viewMenu_;
         HMENU editMenu = editMenu_;
-        HMENU behaviorSettingsMenu = CreatePopupMenu();
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
         HMENU slideshowMenu = CreatePopupMenu();
-        HMENU appTextSizeMenu = CreatePopupMenu();
-        HMENU viewerMenu = CreatePopupMenu();
-        HMENU viewerMouseWheelMenu = CreatePopupMenu();
-        HMENU viewerOverlayTextSizeMenu = CreatePopupMenu();
-        HMENU pairedRawJpegViewerMenu = CreatePopupMenu();
-        HMENU themeMenu = CreatePopupMenu();
         HMENU advancedViewMenu = CreatePopupMenu();
         HMENU performanceMenu = CreatePopupMenu();
-        HMENU performanceProfileMenu = CreatePopupMenu();
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !behaviorSettingsMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !appTextSizeMenu || !viewerMenu || !viewerMouseWheelMenu || !viewerOverlayTextSizeMenu || !pairedRawJpegViewerMenu || !themeMenu || !advancedViewMenu || !performanceMenu || !performanceProfileMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !toolsMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !advancedViewMenu || !performanceMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -9697,6 +9690,12 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_BACK_FOLDER, L"Navigate &Back\tBackspace / Alt+Left");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_FORWARD_FOLDER, L"Navigate &Forward\tAlt+Right");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_RECURSIVE, L"&Recursive Browsing");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SHOW_SUBFOLDERS, L"Show &Subfolders");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"&Compact Thumbnail Layout");
+        AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By &Filename");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_MODIFIED, L"By &Modified Date");
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_SIZE, L"By File &Size");
@@ -9723,6 +9722,7 @@ namespace hyperbrowse::ui
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_480, L"4&80 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_560, L"5&60 px");
         AppendMenuW(thumbnailSizeMenu, MF_STRING, ID_VIEW_THUMBNAIL_SIZE_640, L"6&40 px");
+        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(thumbnailSizeMenu), L"Thumbnail Si&ze");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_SELECTION, L"From &Selection\tCtrl+Shift+S");
         AppendMenuW(slideshowMenu, MF_STRING, ID_VIEW_SLIDESHOW_FOLDER, L"From &Folder\tCtrl+Shift+F");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
@@ -9731,28 +9731,32 @@ namespace hyperbrowse::ui
         AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
 
         AppendMenuW(advancedViewMenu, MF_STRING, ID_FILE_ASSOCIATIONS, L"File &Associations...");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Integration");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_USER_GUIDE, L"&User Guide\tF1");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_KEYBOARD_SHORTCUTS, L"&Keyboard Shortcuts...");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"&Snapshot\tCtrl+Shift+D");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_EXPORT, L"Export &Redacted Snapshot...");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"&Reset\tCtrl+Shift+X");
-        AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SETTINGS, L"&Settings...\tCtrl+Shift+T");
+
+        AppendMenuW(toolsMenu_, MF_STRING, ID_VIEW_SETTINGS, L"&Settings...\tCtrl+Shift+T");
+        AppendMenuW(toolsMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
+        AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
+        AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Integration");
 
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu_), L"&File");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(editMenu), L"&Edit");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(viewMenu), L"&View");
+        AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(toolsMenu_), L"&Tools");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"&Help");
 
         RefreshPersistentMenuOwnerDraw();
         commandBarController_.SetMenuButton(0, L"File", L'F', fileMenu_);
         commandBarController_.SetMenuButton(1, L"Edit", L'E', editMenu_);
         commandBarController_.SetMenuButton(2, L"View", L'V', viewMenu_);
-        commandBarController_.SetMenuButton(3, L"Help", L'H', helpMenu_);
+        commandBarController_.SetMenuButton(3, L"Tools", L'T', toolsMenu_);
+        commandBarController_.SetMenuButton(4, L"Help", L'H', helpMenu_);
 
         SetMenu(hwnd_, nullptr);
         DrawMenuBar(hwnd_);
@@ -17655,65 +17659,6 @@ namespace hyperbrowse::ui
 
         CheckMenuRadioItem(
             menu_,
-            ID_VIEW_THEME_LIGHT,
-            ID_VIEW_THEME_DARK,
-            themeMode_ == ThemeMode::Light ? ID_VIEW_THEME_LIGHT : ID_VIEW_THEME_DARK,
-            MF_BYCOMMAND);
-
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_NVJPEG_ACCELERATION,
-            MF_BYCOMMAND | ((nvJpegEnabled_ && HasNvJpegCapability()) ? MF_CHECKED : MF_UNCHECKED));
-        EnableMenuItem(
-            menu_,
-            ID_VIEW_NVJPEG_ACCELERATION,
-            MF_BYCOMMAND | (HasNvJpegCapability() ? MF_ENABLED : MF_GRAYED));
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_LIBRAW_OUT_OF_PROCESS,
-            MF_BYCOMMAND | ((libRawOutOfProcessEnabled_ && decode::IsLibRawBuildEnabled()) ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_PERSISTENT_THUMBNAIL_CACHE,
-            MF_BYCOMMAND | (persistentThumbnailCacheEnabled_ ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_SINGLE_INSTANCE,
-            MF_BYCOMMAND | (app::Application::IsSingleInstanceEnabled() ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR,
-            MF_BYCOMMAND | (defaultViewerToSecondaryMonitor_ ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_USE_SLIDESHOW_TRANSITION,
-            MF_BYCOMMAND | (useSlideshowTransition_ ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuRadioItem(
-            menu_,
-            ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG,
-            ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW,
-            pairedRawJpegViewerPreference_ == browser::RawJpegDisplayPreference::Jpeg
-                ? ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG
-                : ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW,
-            MF_BYCOMMAND);
-        EnableMenuItem(
-            menu_,
-            ID_VIEW_PAIRED_RAW_JPEG_PREFER_JPEG,
-            MF_BYCOMMAND | (rawJpegPairedOperationsEnabled_ ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(
-            menu_,
-            ID_VIEW_PAIRED_RAW_JPEG_PREFER_RAW,
-            MF_BYCOMMAND | (rawJpegPairedOperationsEnabled_ ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(
-            menu_,
-            ID_VIEW_DEFAULT_VIEWER_SECONDARY_MONITOR,
-            MF_BYCOMMAND | (hasSecondaryMonitor ? MF_ENABLED : MF_GRAYED));
-        EnableMenuItem(
-            menu_,
-            ID_VIEW_LIBRAW_OUT_OF_PROCESS,
-            MF_BYCOMMAND | (decode::IsLibRawBuildEnabled() ? MF_ENABLED : MF_GRAYED));
-        CheckMenuRadioItem(
-            menu_,
             ID_VIEW_THUMBNAIL_SIZE_96,
             ID_VIEW_THUMBNAIL_SIZE_640,
             CommandIdFromThumbnailSizePreset(thumbnailSizePreset),
@@ -17726,50 +17671,6 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_DETAILS_STRIP,
             MF_BYCOMMAND | (detailsStripVisible_ ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuRadioItem(
-            menu_,
-            ID_VIEW_APP_TEXT_SIZE_SMALL,
-            ID_VIEW_APP_TEXT_SIZE_LARGE,
-            CommandIdFromAppTextSize(appTextSize_),
-            MF_BYCOMMAND);
-        CheckMenuRadioItem(
-            menu_,
-            ID_VIEW_VIEWER_MOUSE_WHEEL_ZOOM,
-            ID_VIEW_VIEWER_MOUSE_WHEEL_NAVIGATE,
-            CommandIdFromViewerMouseWheelBehavior(viewerMouseWheelBehavior_),
-            MF_BYCOMMAND);
-        const viewer::ViewerWindow* activeViewer = ActiveViewer();
-        const viewer::InfoOverlayTextSize overlayTextSize = activeViewer
-            ? activeViewer->OverlayTextSize()
-            : viewer::ViewerWindow::DefaultOverlayTextSize();
-        CheckMenuRadioItem(
-            menu_,
-            ID_VIEW_VIEWER_OVERLAY_TEXT_SMALL,
-            ID_VIEW_VIEWER_OVERLAY_TEXT_LARGE,
-            CommandIdFromViewerOverlayTextSize(overlayTextSize),
-            MF_BYCOMMAND);
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_VIEWER_DETAIL_OVERLAYS,
-            MF_BYCOMMAND | ((activeViewer && activeViewer->AreInfoOverlaysVisible()) ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_VIEWER_FULL_METADATA,
-            MF_BYCOMMAND | ((activeViewer && activeViewer->IsFullMetadataVisible()) ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(
-            menu_,
-            ID_VIEW_PRESSURE_STATE_STATUS,
-            MF_BYCOMMAND | (showPressureStateInStatusBar_ ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(
-            menu_,
-            ID_EDIT_CLOSE_MAIN_WINDOW_ON_ESCAPE,
-            MF_BYCOMMAND | (closeMainWindowOnEscape_ ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuRadioItem(
-            menu_,
-            ID_HELP_PERFORMANCE_PROFILE_CONSERVATIVE,
-            ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE,
-            CommandIdFromResourceProfile(resourceProfile_),
-            MF_BYCOMMAND);
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,

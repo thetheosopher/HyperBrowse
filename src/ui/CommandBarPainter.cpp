@@ -52,7 +52,7 @@ namespace hyperbrowse::ui
     void CommandBarPainter::PaintD2D(
         ID2D1RenderTarget* renderTarget,
         const RECT& stripRect,
-        const std::array<CommandBarController::CommandBarMenuButton, 4>& menuButtons,
+        const std::array<CommandBarController::CommandBarMenuButton, 5>& menuButtons,
         const std::vector<CommandBarController::ToolbarItem>& toolbarItems,
         const CommandBarPalette& palette,
         IDWriteTextFormat* textFormat,
@@ -358,7 +358,7 @@ namespace hyperbrowse::ui
     void CommandBarPainter::PaintGdi(
         HDC hdc,
         const RECT& stripRect,
-        const std::array<CommandBarController::CommandBarMenuButton, 4>& menuButtons,
+        const std::array<CommandBarController::CommandBarMenuButton, 5>& menuButtons,
         const std::vector<CommandBarController::ToolbarItem>& toolbarItems,
         const CommandBarPalette& palette,
         HFONT menuFont,

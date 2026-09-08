@@ -105,11 +105,11 @@ namespace hyperbrowse::ui
 
         std::vector<ToolbarItem>& Items();
         const std::vector<ToolbarItem>& Items() const;
-        std::array<CommandBarMenuButton, 4>& MenuButtons();
-        const std::array<CommandBarMenuButton, 4>& MenuButtons() const;
+        std::array<CommandBarMenuButton, 5>& MenuButtons();
+        const std::array<CommandBarMenuButton, 5>& MenuButtons() const;
 
     private:
-        std::array<CommandBarMenuButton, 4> menuButtons_{};
+        std::array<CommandBarMenuButton, 5> menuButtons_{};
         std::vector<ToolbarItem> items_;
     };
 }

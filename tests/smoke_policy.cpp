@@ -363,7 +363,8 @@ namespace hyperbrowse::tests
             controller.SetMenuButton(0, L"File", L'F', reinterpret_cast<HMENU>(static_cast<INT_PTR>(1)));
             controller.SetMenuButton(1, L"Edit", L'E', reinterpret_cast<HMENU>(static_cast<INT_PTR>(2)));
             controller.SetMenuButton(2, L"View", L'V', reinterpret_cast<HMENU>(static_cast<INT_PTR>(3)));
-            controller.SetMenuButton(3, L"Help", L'H', reinterpret_cast<HMENU>(static_cast<INT_PTR>(4)));
+            controller.SetMenuButton(3, L"Tools", L'T', reinterpret_cast<HMENU>(static_cast<INT_PTR>(4)));
+            controller.SetMenuButton(4, L"Help", L'H', reinterpret_cast<HMENU>(static_cast<INT_PTR>(5)));
             controller.Layout(900,
                               6,
                               nullptr,
@@ -374,8 +375,11 @@ namespace hyperbrowse::tests
 
             const auto& menuButtons = controller.MenuButtons();
             Expect(controller.Items().size() == 17, "Command-bar controller did not initialize toolbar items");
+                 Expect(menuButtons.size() == 5, "Command-bar controller did not retain all five top-level menus");
             Expect(controller.MenuHitTest(menuButtons[0].rect.left + 1, menuButtons[0].rect.top + 1) == 0,
                    "Command-bar controller did not hit-test the first menu button");
+                 Expect(controller.MenuHitTest(menuButtons[4].rect.left + 1, menuButtons[4].rect.top + 1) == 4,
+                     "Command-bar controller did not hit-test the fifth menu button");
 
             const auto thumbnailItem = std::find_if(controller.Items().begin(),
                                                     controller.Items().end(),

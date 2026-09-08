@@ -42,7 +42,9 @@ namespace hyperbrowse::tests
                    "Alt+E does not select the Edit menu");
             Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('V') == 2,
                    "Alt+V does not select the View menu");
-            Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('H') == 3,
+            Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('T') == 3,
+                   "Alt+T does not select the Tools menu");
+            Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('H') == 4,
                    "Alt+H does not select the Help menu");
             Expect(hyperbrowse::ui::MainMenuMnemonicIndexFromVirtualKey('x') == -1,
                    "An unrelated access key selected a command-bar menu");

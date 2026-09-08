@@ -279,7 +279,7 @@
 
         <section id="slideshow">
             <h2>Run a slideshow</h2>
-            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>Settings &gt; Settings</strong>, or press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd>.</p>
+            <p>Start from the current selection with <strong>View &gt; Slideshow &gt; From Selection</strong>, or show the current folder with <strong>From Folder</strong>. Configure the interval and transition style in <strong>Tools &gt; Settings &gt; Slideshow</strong>, or press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd>.</p>
             <p>Slideshow transitions include cut, crossfade, slide, and Ken Burns styles. Slideshow scope follows the current recursive-browsing setting. The viewer can open on a secondary monitor when that preference is enabled.</p>
         </section>
 
@@ -331,14 +331,14 @@
 
         <section id="settings">
             <h2>Settings and performance</h2>
-            <p>Preferences are grouped in the consolidated <strong>Settings &gt; Settings</strong> dialog and are remembered per user. Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> to open it. The dialog stages edits until you choose <strong>Apply</strong> or <strong>OK</strong>; <strong>Cancel</strong> or closing the dialog discards uncommitted edits.</p>
+            <p>Preferences are grouped in the consolidated <strong>Tools &gt; Settings</strong> dialog and are remembered per user. Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> to open it. The dialog stages edits until you choose <strong>Apply</strong> or <strong>OK</strong>; <strong>Cancel</strong> or closing the dialog discards uncommitted edits.</p>
             <ul>
                 <li><strong>Slideshow</strong> contains transition style and timing for slideshow playback.</li>
                 <li><strong>Viewer</strong> contains manual-navigation transitions, mouse-wheel behavior, overlay text size, detail overlays, full metadata, secondary-monitor defaults, and RAW/JPEG display preferences.</li>
                 <li><strong>Appearance</strong> contains the light/dark theme, app text size, thumbnail size, thumbnail details, compact layout, and details panel.</li>
                 <li><strong>Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
-                <li><strong>Settings &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
-                <li><strong>Settings &gt; Integration</strong> contains file associations. Single-instance behavior is on the Behavior tab.</li>
+                <li><strong>Tools &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
+                <li><strong>Tools &gt; Integration</strong> contains file associations. Single-instance behavior is on the Behavior tab.</li>
                 <li><strong>Behavior</strong> can enable recursive browsing, show subfolders, make Esc close the main window instead of minimizing it, and enable single-instance behavior. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> continues to minimize.</li>
                 <li><strong>View &gt; Thumbnail Size</strong> still provides fixed presets and keyboard stepping.</li>
             </ul>
@@ -417,9 +417,9 @@
             <h3>The guide does not open</h3>
             <p>Keep the <code>docs</code> folder with the executable. Installed copies normally place the guide in the application <code>docs</code> folder beside <code>bin</code>; portable copies place it in <code>docs</code> beside <code>HyperBrowse.exe</code>. HyperBrowse uses the executable location, not the current working directory, to find it.</p>
             <h3>An image cannot be decoded</h3>
-            <p>Confirm that the file uses a supported format. For RAW images, check whether the optional helper is present beside the application and try the in-process fallback from <strong>Settings &gt; Performance</strong>. Unsupported RAW variants may still show no preview.</p>
+            <p>Confirm that the file uses a supported format. For RAW images, check whether the optional helper is present beside the application and try the in-process fallback from <strong>Tools &gt; Settings &gt; Performance</strong>. Unsupported RAW variants may still show no preview.</p>
             <h3>Browsing a large folder feels busy</h3>
-            <p>Allow the initial enumeration to finish, then adjust the Performance Profile if needed. Persistent thumbnail cache maintenance is available under <strong>Settings &gt; Performance</strong>. The diagnostics snapshot under <strong>Settings &gt; Diagnostics</strong> can capture state for a bug report.</p>
+            <p>Allow the initial enumeration to finish, then adjust the Performance Profile if needed. Persistent thumbnail cache maintenance is available under <strong>Tools &gt; Performance</strong>. The diagnostics snapshot under <strong>Tools &gt; Diagnostics</strong> can capture state for a bug report.</p>
             <h3>Where are settings stored?</h3>
             <p>User settings are stored under <code>HKCU\Software\HyperBrowse</code>. Portable mode does not make settings portable; the application still uses the current Windows user's profile.</p>
         </section>
