@@ -11218,6 +11218,10 @@ namespace hyperbrowse::ui
                                                  kQuickSendConfirmationTimerId,
                                                  kQuickSendConfirmationDurationMs,
                                                  nullptr);
+        if (quickSendConfirmationTimerId_ == 0)
+        {
+            quickSendConfirmationText_.clear();
+        }
         UpdateStatusText();
     }
 

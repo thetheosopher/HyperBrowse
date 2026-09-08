@@ -449,6 +449,6 @@ namespace hyperbrowse::viewer
         static constexpr UINT_PTR kTransitionTimerId = 9003;
         static constexpr UINT kTransitionIntervalMs = 16;
         static constexpr UINT_PTR kWraparoundTimerId = 9004;
-        static constexpr UINT kWraparoundMessageDurationMs = 1400;
+        static constexpr UINT kWraparoundMessageDurationMs = 2500;
     };
 }
