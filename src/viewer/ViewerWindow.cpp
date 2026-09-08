@@ -2535,6 +2535,22 @@ namespace hyperbrowse::viewer
             + L", hitRate=" + std::to_wstring(hitRate) + L"%");
     }
 
+    void ViewerWindow::CompleteSmoothZoom()
+    {
+        if (!smoothZoomTimerId_)
+        {
+            return;
+        }
+
+        smoothZoomCurrent_ = smoothZoomTarget_;
+        customZoomScale_ = smoothZoomTarget_;
+        panOffsetX_ = smoothZoomTargetPanX_;
+        panOffsetY_ = smoothZoomTargetPanY_;
+        KillTimer(hwnd_, kSmoothZoomTimerId);
+        smoothZoomTimerId_ = 0;
+        ClampPanOffsets();
+    }
+
     void ViewerWindow::ZoomBy(double factor, const POINT* anchorPoint)
     {
         if (!currentImage_ || factor <= 0.0 || !hwnd_)
@@ -4513,19 +4529,23 @@ namespace hyperbrowse::viewer
                 {
                     SetCompareMode(true, CompareDirection::Next);
                 }
-                else if (CanPanHorizontally())
-                {
-                    double maxPanX = 0.0;
-                    double maxPanY = 0.0;
-                    CalculatePanLimits(maxPanX, maxPanY);
-                    const double panStep = std::min(kKeyboardPanStep, maxPanX);
-                    panOffsetX_ += keyboardPanningInverted_ ? panStep : -panStep;
-                    ClampPanOffsets();
-                    RequestRepaint();
-                }
                 else
                 {
-                    Navigate(+1);
+                    CompleteSmoothZoom();
+                    if (CanPanHorizontally())
+                    {
+                        double maxPanX = 0.0;
+                        double maxPanY = 0.0;
+                        CalculatePanLimits(maxPanX, maxPanY);
+                        const double panStep = std::min(kKeyboardPanStep, maxPanX);
+                        panOffsetX_ += keyboardPanningInverted_ ? panStep : -panStep;
+                        ClampPanOffsets();
+                        RequestRepaint();
+                    }
+                    else
+                    {
+                        Navigate(+1);
+                    }
                 }
                 return 0;
             case VK_LEFT:
@@ -4533,23 +4553,28 @@ namespace hyperbrowse::viewer
                 {
                     SetCompareMode(true, CompareDirection::Previous);
                 }
-                else if (CanPanHorizontally())
-                {
-                    double maxPanX = 0.0;
-                    double maxPanY = 0.0;
-                    CalculatePanLimits(maxPanX, maxPanY);
-                    const double panStep = std::min(kKeyboardPanStep, maxPanX);
-                    panOffsetX_ -= keyboardPanningInverted_ ? panStep : -panStep;
-                    ClampPanOffsets();
-                    RequestRepaint();
-                }
                 else
                 {
-                    Navigate(-1);
+                    CompleteSmoothZoom();
+                    if (CanPanHorizontally())
+                    {
+                        double maxPanX = 0.0;
+                        double maxPanY = 0.0;
+                        CalculatePanLimits(maxPanX, maxPanY);
+                        const double panStep = std::min(kKeyboardPanStep, maxPanX);
+                        panOffsetX_ -= keyboardPanningInverted_ ? panStep : -panStep;
+                        ClampPanOffsets();
+                        RequestRepaint();
+                    }
+                    else
+                    {
+                        Navigate(-1);
+                    }
                 }
                 return 0;
             case VK_UP:
             case VK_DOWN:
+                CompleteSmoothZoom();
                 if (CanPanVertically())
                 {
                     double maxPanX = 0.0;
@@ -4791,16 +4816,7 @@ namespace hyperbrowse::viewer
 
             if (currentImage_)
             {
-                if (smoothZoomTimerId_)
-                {
-                    smoothZoomCurrent_ = smoothZoomTarget_;
-                    customZoomScale_ = smoothZoomTarget_;
-                    panOffsetX_ = smoothZoomTargetPanX_;
-                    panOffsetY_ = smoothZoomTargetPanY_;
-                    KillTimer(hwnd_, kSmoothZoomTimerId);
-                    smoothZoomTimerId_ = 0;
-                    ClampPanOffsets();
-                }
+                CompleteSmoothZoom();
 
                 panning_ = true;
                 lastPanPoint_ = clickPoint;

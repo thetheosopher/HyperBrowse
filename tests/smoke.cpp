@@ -3384,6 +3384,14 @@ namespace
         }
 
         const POINT initialPan = viewer.PanOffset();
+         const int indexBeforeImmediateArrow = viewer.CurrentIndex();
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
+         const POINT immediateArrowPan = viewer.PanOffset();
+         Expect(viewer.CurrentIndex() == indexBeforeImmediateArrow,
+             "Viewer immediate wheel-zoom arrow input navigated instead of panning");
+         Expect(immediateArrowPan.y != initialPan.y,
+             "Viewer immediate wheel-zoom arrow input did not pan the viewport");
+
         const POINT dragStart{
             wheelZoomClientRect.right / 2,
             wheelZoomClientRect.bottom / 2};

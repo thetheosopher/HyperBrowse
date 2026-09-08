@@ -239,6 +239,7 @@ namespace hyperbrowse::viewer
         void WaitForBackgroundTasks();
         void LogPrefetchStats() const;
         void ZoomBy(double factor, const POINT* anchorPoint = nullptr);
+        void CompleteSmoothZoom();
         void FitToWindow();
         void FitToHeight();
         void FitToWidth();
