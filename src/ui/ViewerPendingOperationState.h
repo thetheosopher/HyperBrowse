@@ -39,6 +39,7 @@ namespace hyperbrowse::ui
             std::wstring resumeTargetPath;
             FilingResumeFileIdentity resumeFolderIdentity;
             FilingResumeFileIdentity resumeTargetIdentity;
+            std::optional<wchar_t> destinationShortcut;
             bool viewerAdvanced{};
             bool active{};
         };

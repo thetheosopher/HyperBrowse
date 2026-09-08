@@ -160,6 +160,7 @@ namespace hyperbrowse::viewer
         std::wstring FilingResumeTargetPathForMove() const;
         bool AdvanceAfterDeleteCurrent();
         void RecoverDisplaySurface();
+        void ShowQuickSendConfirmation(std::wstring message);
 
     private:
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseViewerWindow";

@@ -18,6 +18,7 @@ namespace hyperbrowse::ui
             UINT_PTR folderPresentation{};
             UINT_PTR memoryPressure{};
             UINT_PTR displaySurfaceRecovery{};
+            UINT_PTR quickSendConfirmation{};
         };
 
         struct Handlers
@@ -26,6 +27,7 @@ namespace hyperbrowse::ui
             Handler onFolderPresentation;
             Handler onMemoryPressure;
             Handler onDisplaySurfaceRecovery;
+            Handler onQuickSendConfirmation;
         };
 
         WindowTimerRouter() = default;

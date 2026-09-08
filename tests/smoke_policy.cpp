@@ -39,6 +39,7 @@
 #include "ui/QuickAccessMenuBuilder.h"
 #include "ui/QuickAccessPathList.h"
 #include "ui/QuickAccessShortcutEditPolicy.h"
+#include "ui/QuickSendConfirmation.h"
 #include "ui/RightPaneHitTester.h"
 #include "ui/SelectedPathPersistence.h"
 #include "ui/SelectionRatingPolicy.h"
@@ -1872,6 +1873,44 @@ namespace hyperbrowse::tests
                        && !cleared.updateText,
                    "Quick Actions shortcut policy changed accepted clearing behavior");
         }
+
+        void RunQuickSendConfirmationScenario()
+        {
+            using hyperbrowse::services::FileOperationType;
+            using hyperbrowse::ui::BuildQuickSendConfirmation;
+            using hyperbrowse::ui::QuickSendConfirmationRequest;
+
+            const auto copied = BuildQuickSendConfirmation(QuickSendConfirmationRequest{
+                FileOperationType::Copy,
+                1,
+                1,
+                L"C:\\Images\\first.jpg",
+                L"D:\\Favorites\\Travel",
+                L'8'});
+            Expect(copied
+                       && *copied == L"Copied first.jpg to Travel (D:\\Favorites\\Travel) [8]",
+                   "Quick Send copy confirmation did not include the file, destination, and shortcut");
+
+            const auto partial = BuildQuickSendConfirmation(QuickSendConfirmationRequest{
+                FileOperationType::Move,
+                3,
+                2,
+                {},
+                L"D:\\Favorites\\Travel",
+                std::nullopt});
+            Expect(partial
+                       && *partial == L"Moved 2 of 3 items to Travel (D:\\Favorites\\Travel)",
+                   "Quick Send partial confirmation did not report the successful item count");
+
+            const auto failed = BuildQuickSendConfirmation(QuickSendConfirmationRequest{
+                FileOperationType::Copy,
+                1,
+                0,
+                L"C:\\Images\\first.jpg",
+                L"D:\\Favorites\\Travel",
+                L'8'});
+            Expect(!failed, "Quick Send displayed a success confirmation after a failed operation");
+        }
     }
 
     void RunPolicyScenarios()
@@ -1896,6 +1935,7 @@ namespace hyperbrowse::tests
         RunViewerPendingOperationStateScenario();
         RunViewerSynchronizerScenario();
         RunQuickAccessShortcutEditPolicyScenario();
+        RunQuickSendConfirmationScenario();
         RunDetailsPanelLayoutScenario();
         RunDisplaySurfaceRecoveryPolicyScenario();
         RunClipboardFileTransferScenario();
@@ -1973,6 +2013,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--quick-access-shortcut")
         {
             RunQuickAccessShortcutEditPolicyScenario();
+        }
+        else if (scenario == "--quick-send-confirmation")
+        {
+            RunQuickSendConfirmationScenario();
         }
         else if (scenario == "--details-layout")
         {

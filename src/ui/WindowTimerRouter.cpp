@@ -29,6 +29,10 @@ namespace hyperbrowse::ui
         {
             handler = &handlers_.onDisplaySurfaceRecovery;
         }
+        else if (timerId == timerIds_.quickSendConfirmation)
+        {
+            handler = &handlers_.onQuickSendConfirmation;
+        }
 
         if (!handler || !*handler)
         {

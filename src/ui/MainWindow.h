@@ -23,6 +23,7 @@
 #include "util/UiTextSize.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FileOperationReconciler.h"
+#include "ui/QuickSendConfirmation.h"
 #include "ui/FilingResumePersistence.h"
 #include "ui/FolderTreeDragController.h"
 #include "ui/FolderLoadCoordinator.h"
@@ -121,7 +122,9 @@ namespace hyperbrowse::ui
         static constexpr UINT kDeferredMenuStateMessage = WM_APP + 73;
         static constexpr UINT_PTR kDisplaySurfaceRecoveryTimerId = 9103;
         static constexpr UINT_PTR kFileOperationShutdownTimerId = 9104;
+        static constexpr UINT_PTR kQuickSendConfirmationTimerId = 9105;
         static constexpr UINT kFileOperationShutdownIntervalMs = 1000;
+        static constexpr UINT kQuickSendConfirmationDurationMs = 2500;
         static constexpr UINT kDisplaySurfaceRecoveryIntervalMs = 400;
         static constexpr int kDisplaySurfaceRecoveryRetryLimit = 8;
         static constexpr int kActionStripHeight = 44;
@@ -193,6 +196,7 @@ namespace hyperbrowse::ui
         std::wstring GetSelectedFolderTreePath() const;
         void LayoutChildren();
         void UpdateStatusText();
+        void ShowQuickSendConfirmation(std::wstring message, HWND viewerHwnd = nullptr);
         void UpdateMenuState();
         void UpdateWindowTitle() const;
         void ApplyViewerMouseWheelSetting();
@@ -295,7 +299,9 @@ namespace hyperbrowse::ui
         void StartFolderTreeDelete(std::wstring folderPath, bool permanent);
         void StartFolderTreeMoveToDestination(std::wstring folderPath, std::wstring destinationFolder);
         void StartCreateNewFolder(std::wstring parentPath);
-        void StartSelectionFileOperationToDestination(services::FileOperationType type, std::wstring destinationFolder);
+        void StartSelectionFileOperationToDestination(services::FileOperationType type,
+                                  std::wstring destinationFolder,
+                                  bool quickSend = false);
         bool ChooseQuickSendDestination(services::FileOperationType operationType,
                          POINT popupPoint,
                          HWND dialogOwner,
@@ -661,6 +667,8 @@ namespace hyperbrowse::ui
         HWND focusWindowAtFileOperationStart_{};
         bool batchConvertActive_{};
         bool fileOperationActive_{};
+        UINT_PTR quickSendConfirmationTimerId_{};
+        std::wstring quickSendConfirmationText_;
         bool cacheMaintenanceActive_{};
         bool closePending_{};
         ULONGLONG closePendingSinceTick_{};
@@ -675,6 +683,13 @@ namespace hyperbrowse::ui
         std::wstring pendingInlineRenameOriginalPath_;
         using PendingViewerDelete = ViewerPendingOperationState::DeleteRequest;
         using PendingViewerQuickSend = ViewerPendingOperationState::QuickSendRequest;
+        struct PendingBrowserQuickSend
+        {
+            services::FileOperationType type{static_cast<services::FileOperationType>(0)};
+            std::vector<std::wstring> sourcePaths;
+            std::wstring destinationFolder;
+            std::optional<wchar_t> destinationShortcut;
+        };
         struct FileOperationActivationContext
         {
             HWND activationRestoreWindow{};
@@ -709,10 +724,12 @@ namespace hyperbrowse::ui
             FileOperationActivationContext activation;
             FileOperationUndoRedoContext undoRedo;
             FileOperationViewerContext viewer;
+            std::optional<PendingBrowserQuickSend> browserQuickSend;
             FileOperationDeferredWatchContext deferredWatch;
             FileOperationTreeContext tree;
         };
         ViewerPendingOperationState viewerPendingOperations_;
+        std::optional<PendingBrowserQuickSend> pendingBrowserQuickSend_;
         bool quickSendPopupActive_{};
         std::size_t quickSendPopupInitialDownCount_{};
         std::wstring activeFileOperationLabel_;

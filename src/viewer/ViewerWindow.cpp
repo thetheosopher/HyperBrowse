@@ -2625,6 +2625,11 @@ namespace hyperbrowse::viewer
         RequestRepaint();
     }
 
+    void ViewerWindow::ShowQuickSendConfirmation(std::wstring message)
+    {
+        ShowNavigationMessage(std::move(message));
+    }
+
     void ViewerWindow::FitToWindow()
     {
         zoomMode_ = ZoomMode::Fit;
@@ -6272,8 +6277,8 @@ namespace hyperbrowse::viewer
 
                     if (!wraparoundMessage_.empty() && d2dInfoFormat_ && d2dTextBrush_)
                     {
-                        const float toastWidth = std::min(320.0f, std::max(120.0f, clientWidth - 32.0f));
-                        const float toastHeight = 42.0f;
+                        const float toastWidth = std::min(720.0f, std::max(120.0f, clientWidth - 32.0f));
+                        const float toastHeight = 50.0f;
                         const float toastLeft = std::max(8.0f, (clientWidth - toastWidth) / 2.0f);
                         const D2D1_RECT_F toastRect = D2D1::RectF(toastLeft,
                                                                   16.0f,
@@ -6419,8 +6424,8 @@ namespace hyperbrowse::viewer
 
             if (!wraparoundMessage_.empty())
             {
-                const int toastWidth = std::min(320, std::max(120, clientWidth - 32));
-                const int toastHeight = 42;
+                const int toastWidth = std::min(720, std::max(120, clientWidth - 32));
+                const int toastHeight = 50;
                 const int toastLeft = std::max(8, (clientWidth - toastWidth) / 2);
                 const int toastTop = 16;
                 HBRUSH toastBrush = CreateSolidBrush(PanelFillColor(darkTheme_));

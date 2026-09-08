@@ -151,6 +151,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/QuickAccessLayout.cpp
     src/ui/QuickAccessShortcutEditPolicy.cpp
     src/ui/QuickSendPersistence.cpp
+    src/ui/QuickSendConfirmation.cpp
     src/ui/RightPaneHitTester.cpp
     src/ui/ExternalDropTarget.cpp
     src/ui/FileCommandController.cpp

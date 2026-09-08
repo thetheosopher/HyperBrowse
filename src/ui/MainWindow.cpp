@@ -8706,12 +8706,26 @@ namespace hyperbrowse::ui
             }
             return static_cast<LRESULT>(0);
         };
+        timerHandlers.onQuickSendConfirmation = [this]() -> std::optional<LRESULT>
+        {
+            if (quickSendConfirmationTimerId_ == 0)
+            {
+                return std::nullopt;
+            }
+
+            KillTimer(hwnd_, quickSendConfirmationTimerId_);
+            quickSendConfirmationTimerId_ = 0;
+            quickSendConfirmationText_.clear();
+            UpdateStatusText();
+            return static_cast<LRESULT>(0);
+        };
         timerRouter_.Configure(
             WindowTimerRouter::TimerIds{
                 kFileOperationShutdownTimerId,
                 FolderLoadCoordinator::kPresentationTimerId,
                 kMemoryPressureTimerId,
-                kDisplaySurfaceRecoveryTimerId},
+                kDisplaySurfaceRecoveryTimerId,
+                kQuickSendConfirmationTimerId},
             std::move(timerHandlers));
 
         FileCommandController::Handlers fileCommandHandlers;
@@ -11117,6 +11131,10 @@ namespace hyperbrowse::ui
         {
             statusPrimaryText_ = activeFileOperationLabel_ + L"  |  " + statusPrimaryText_;
         }
+        else if (!quickSendConfirmationText_.empty())
+        {
+            statusPrimaryText_ = L"Quick Send: " + quickSendConfirmationText_ + L"  |  " + statusPrimaryText_;
+        }
         else if (batchConvertActive_)
         {
             statusPrimaryText_ = L"Converting: "
@@ -11173,6 +11191,34 @@ namespace hyperbrowse::ui
         }
 
         InvalidateRect(statusBar_, nullptr, TRUE);
+    }
+
+    void MainWindow::ShowQuickSendConfirmation(std::wstring message, HWND viewerHwnd)
+    {
+        if (message.empty())
+        {
+            return;
+        }
+
+        if (viewer::ViewerWindow* viewer = FindViewerByHwnd(viewerHwnd))
+        {
+            if (viewer->IsOpen())
+            {
+                viewer->ShowQuickSendConfirmation(std::move(message));
+                return;
+            }
+        }
+
+        if (quickSendConfirmationTimerId_ != 0)
+        {
+            KillTimer(hwnd_, quickSendConfirmationTimerId_);
+        }
+        quickSendConfirmationText_ = std::move(message);
+        quickSendConfirmationTimerId_ = SetTimer(hwnd_,
+                                                 kQuickSendConfirmationTimerId,
+                                                 kQuickSendConfirmationDurationMs,
+                                                 nullptr);
+        UpdateStatusText();
     }
 
     void MainWindow::DrawStatusStrip(const DRAWITEMSTRUCT& drawItem) const
@@ -13704,7 +13750,9 @@ namespace hyperbrowse::ui
         }
     }
 
-    void MainWindow::StartSelectionFileOperationToDestination(services::FileOperationType type, std::wstring destinationFolder)
+    void MainWindow::StartSelectionFileOperationToDestination(services::FileOperationType type,
+                                                               std::wstring destinationFolder,
+                                                               bool quickSend)
     {
         if (!browserPaneController_ || fileOperationActive_)
         {
@@ -13761,12 +13809,24 @@ namespace hyperbrowse::ui
         }
 
         const std::wstring quickSendDestination = destinationFolder;
+        const std::optional<int> quickSendShortcut = quickSendModel_.ShortcutForDestination(quickSendDestination);
         if (StartFileOperation(type,
                                std::vector<std::wstring>(sourcePaths),
                                std::move(destinationFolder),
                                conflictPolicy,
                                std::move(targetLeafNames)))
         {
+            if (quickSend)
+            {
+                pendingBrowserQuickSend_ = PendingBrowserQuickSend{
+                    type,
+                    sourcePaths,
+                    quickSendDestination,
+                    quickSendShortcut
+                        ? std::optional<wchar_t>(QuickSendModel::ShortcutCharacter(*quickSendShortcut))
+                        : std::nullopt};
+            }
+
             MutateQuickSendState([&]
             {
                 lastQuickSendDestination_ = quickSendDestination;
@@ -16899,6 +16959,11 @@ namespace hyperbrowse::ui
             context.viewer.viewerHwnd = quickSend->viewerHwnd;
             context.viewer.viewerQuickSend = *quickSend;
         }
+        if (pendingBrowserQuickSend_)
+        {
+            context.browserQuickSend = std::move(pendingBrowserQuickSend_);
+            pendingBrowserQuickSend_.reset();
+        }
 
         if (folderLoadCoordinator_)
         {
@@ -17370,6 +17435,53 @@ namespace hyperbrowse::ui
             completionContext,
             viewerDeleteOperation,
             viewerQuickSendOperation);
+
+        if (viewerQuickSendOperation)
+        {
+            const PendingViewerQuickSend& quickSend = completionContext.viewer.viewerQuickSend;
+            bool primaryPathSucceeded = std::any_of(
+                update.succeededSourcePaths.begin(),
+                update.succeededSourcePaths.end(),
+                [&](const std::wstring& succeededPath)
+                {
+                    return browser::FilePathsEqual(succeededPath, quickSend.sourcePath);
+                });
+            if (!primaryPathSucceeded
+                && quickSend.type == services::FileOperationType::Move
+                && !update.aborted)
+            {
+                std::error_code error;
+                primaryPathSucceeded = !fs::exists(fs::path(quickSend.sourcePath), error) && !error;
+            }
+
+            if (const std::optional<std::wstring> confirmation = BuildQuickSendConfirmation({
+                    quickSend.type,
+                    1,
+                    primaryPathSucceeded ? 1U : 0U,
+                    quickSend.sourcePath,
+                    quickSend.destinationFolder,
+                    quickSend.destinationShortcut}); confirmation)
+            {
+                ShowQuickSendConfirmation(*confirmation, quickSend.viewerHwnd);
+            }
+        }
+        else if (completionContext.browserQuickSend)
+        {
+            const PendingBrowserQuickSend& quickSend = *completionContext.browserQuickSend;
+            const std::wstring displaySourcePath = quickSend.sourcePaths.size() == 1
+                ? quickSend.sourcePaths.front()
+                : std::wstring{};
+            if (const std::optional<std::wstring> confirmation = BuildQuickSendConfirmation({
+                    quickSend.type,
+                    quickSend.sourcePaths.size(),
+                    update.succeededSourcePaths.size(),
+                    displaySourcePath,
+                    quickSend.destinationFolder,
+                    quickSend.destinationShortcut}); confirmation)
+            {
+                ShowQuickSendConfirmation(*confirmation);
+            }
+        }
 
         if (viewerQuickSendOperation
             && !update.aborted
@@ -19534,7 +19646,7 @@ namespace hyperbrowse::ui
         std::wstring destinationFolder;
         if (ChooseQuickSendDestination(type, popupPoint, hwnd_, &destinationFolder))
         {
-            StartSelectionFileOperationToDestination(type, std::move(destinationFolder));
+            StartSelectionFileOperationToDestination(type, std::move(destinationFolder), true);
         }
     }
 
@@ -19670,6 +19782,10 @@ namespace hyperbrowse::ui
         pending.resumeTargetPath = resumeTargetPath;
         pending.resumeFolderIdentity = resumeFolderIdentity;
         pending.resumeTargetIdentity = resumeTargetIdentity;
+        if (const std::optional<int> shortcut = quickSendModel_.ShortcutForDestination(destinationFolder))
+        {
+            pending.destinationShortcut = QuickSendModel::ShortcutCharacter(*shortcut);
+        }
         viewerPendingOperations_.SetQuickSend(std::move(pending));
 
         const std::wstring quickSendDestination = destinationFolder;
@@ -22031,6 +22147,11 @@ namespace hyperbrowse::ui
                 monitorPowerNotify_ = nullptr;
             }
             KillTimer(hwnd_, kFileOperationShutdownTimerId);
+            if (quickSendConfirmationTimerId_ != 0)
+            {
+                KillTimer(hwnd_, quickSendConfirmationTimerId_);
+                quickSendConfirmationTimerId_ = 0;
+            }
             if (memoryPressureTimerId_ != 0)
             {
                 KillTimer(hwnd_, kMemoryPressureTimerId);
