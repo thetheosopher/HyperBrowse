@@ -33,6 +33,10 @@ namespace hyperbrowse::ui
         {
             handler = &handlers_.onQuickSendConfirmation;
         }
+        else if (timerId == timerIds_.commandBarMenuTracking)
+        {
+            handler = &handlers_.onCommandBarMenuTracking;
+        }
 
         if (!handler || !*handler)
         {

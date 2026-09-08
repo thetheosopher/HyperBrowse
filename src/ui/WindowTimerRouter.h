@@ -19,6 +19,7 @@ namespace hyperbrowse::ui
             UINT_PTR memoryPressure{};
             UINT_PTR displaySurfaceRecovery{};
             UINT_PTR quickSendConfirmation{};
+            UINT_PTR commandBarMenuTracking{};
         };
 
         struct Handlers
@@ -28,6 +29,7 @@ namespace hyperbrowse::ui
             Handler onMemoryPressure;
             Handler onDisplaySurfaceRecovery;
             Handler onQuickSendConfirmation;
+            Handler onCommandBarMenuTracking;
         };
 
         WindowTimerRouter() = default;

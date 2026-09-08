@@ -145,6 +145,7 @@ namespace
     constexpr int kDetailsPanelCloseButtonGap = 8;
     constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
     constexpr UINT kPersistentThumbnailCacheMaintenanceMessage = WM_APP + 75;
+    constexpr UINT kCommandBarMenuTrackingIntervalMs = 50;
     enum class PersistentThumbnailCacheMaintenanceOperation : unsigned int
     {
         Statistics = 0,
@@ -8719,13 +8720,24 @@ namespace hyperbrowse::ui
             UpdateStatusText();
             return static_cast<LRESULT>(0);
         };
+        timerHandlers.onCommandBarMenuTracking = [this]() -> std::optional<LRESULT>
+        {
+            if (commandBarMenuTrackingIndex_ < 0)
+            {
+                return std::nullopt;
+            }
+
+            HandleCommandBarMenuTrackingTimer();
+            return static_cast<LRESULT>(0);
+        };
         timerRouter_.Configure(
             WindowTimerRouter::TimerIds{
                 kFileOperationShutdownTimerId,
                 FolderLoadCoordinator::kPresentationTimerId,
                 kMemoryPressureTimerId,
                 kDisplaySurfaceRecoveryTimerId,
-                kQuickSendConfirmationTimerId},
+                kQuickSendConfirmationTimerId,
+                kCommandBarMenuTrackingTimerId},
             std::move(timerHandlers));
 
         FileCommandController::Handlers fileCommandHandlers;
@@ -11374,6 +11386,35 @@ namespace hyperbrowse::ui
         return true;
     }
 
+    void MainWindow::HandleCommandBarMenuTrackingTimer()
+    {
+        if (commandBarMenuTrackingIndex_ < 0
+            || commandBarMenuTrackingIndex_ >= static_cast<int>(commandBarMenuButtons_.size()))
+        {
+            return;
+        }
+
+        POINT screenPoint{};
+        if (!GetCursorPos(&screenPoint) || !ScreenToClient(hwnd_, &screenPoint))
+        {
+            return;
+        }
+
+        const int menuIndex = CommandBarMenuHitTest(screenPoint.x, screenPoint.y);
+        if (menuIndex < 0 || menuIndex == commandBarMenuTrackingIndex_)
+        {
+            return;
+        }
+
+        commandBarMenuNavigationIndex_ = menuIndex;
+        commandBarHotIndex_ = menuIndex;
+        InvalidateToolbarStrip();
+        if (!EndMenu())
+        {
+            commandBarMenuNavigationIndex_ = -1;
+        }
+    }
+
     void MainWindow::OpenCommandBarMenu(int index)
     {
         if (index < 0 || index >= static_cast<int>(commandBarMenuButtons_.size()))
@@ -11404,6 +11445,8 @@ namespace hyperbrowse::ui
             RECT screenRect = button.rect;
             MapWindowPoints(hwnd_, HWND_DESKTOP, reinterpret_cast<LPPOINT>(&screenRect), 2);
             commandBarMenuNavigationIndex_ = -1;
+            commandBarMenuTrackingIndex_ = menuIndex;
+            SetTimer(hwnd_, kCommandBarMenuTrackingTimerId, kCommandBarMenuTrackingIntervalMs, nullptr);
             SetForegroundWindow(hwnd_);
 
             HHOOK menuFilterHook = nullptr;
@@ -11423,6 +11466,8 @@ namespace hyperbrowse::ui
                                                     hwnd_,
                                                     nullptr);
 
+            KillTimer(hwnd_, kCommandBarMenuTrackingTimerId);
+            commandBarMenuTrackingIndex_ = -1;
             if (menuFilterHook)
             {
                 UnhookWindowsHookEx(menuFilterHook);
@@ -11430,7 +11475,7 @@ namespace hyperbrowse::ui
             g_commandBarMenuFilterWindow = nullptr;
             PostMessageW(hwnd_, WM_NULL, 0, 0);
 
-            if (keyboardOpen && commandBarMenuNavigationIndex_ >= 0)
+            if (commandBarMenuNavigationIndex_ >= 0)
             {
                 menuIndex = commandBarMenuNavigationIndex_;
                 continue;

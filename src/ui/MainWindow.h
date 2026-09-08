@@ -123,6 +123,7 @@ namespace hyperbrowse::ui
         static constexpr UINT_PTR kDisplaySurfaceRecoveryTimerId = 9103;
         static constexpr UINT_PTR kFileOperationShutdownTimerId = 9104;
         static constexpr UINT_PTR kQuickSendConfirmationTimerId = 9105;
+        static constexpr UINT_PTR kCommandBarMenuTrackingTimerId = 9106;
         static constexpr UINT kFileOperationShutdownIntervalMs = 1000;
         static constexpr UINT kQuickSendConfirmationDurationMs = 2500;
         static constexpr UINT kDisplaySurfaceRecoveryIntervalMs = 400;
@@ -469,6 +470,7 @@ namespace hyperbrowse::ui
         void ActivateCommandBarKeyboardMode(int index);
         void DeactivateCommandBarKeyboardMode(bool restoreFocus);
         bool HandleCommandBarKeyboardInput(UINT message, WPARAM wParam, LPARAM lParam);
+        void HandleCommandBarMenuTrackingTimer();
         void OpenCommandBarMenu(int index);
         ThemePalette GetThemePalette() const;
         void InitToolbarItems();
@@ -548,6 +550,7 @@ namespace hyperbrowse::ui
         int commandBarHotIndex_{-1};
         int commandBarPressedIndex_{-1};
         int commandBarMenuNavigationIndex_{-1};
+        int commandBarMenuTrackingIndex_{-1};
         HWND commandBarPreviousFocus_{};
         bool commandBarKeyboardActive_{};
         bool menuLoopActive_{};
