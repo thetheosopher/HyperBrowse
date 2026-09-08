@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <unordered_map>
 
 #include "decode/ImageDecoder.h"
+#include "util/PathUtils.h"
 #include "util/StringConvert.h"
 
 namespace hyperbrowse::ui
@@ -18,6 +20,14 @@ namespace hyperbrowse::ui
                 || util::EqualsIgnoreCaseOrdinal(fileType, L"jpeg")
                 || util::EqualsIgnoreCaseOrdinal(fileType, L".jpg")
                 || util::EqualsIgnoreCaseOrdinal(fileType, L".jpeg");
+        }
+
+        std::wstring PairKey(const browser::BrowserItem& item)
+        {
+            const fs::path itemPath(item.filePath);
+            return util::NormalizePathForComparison(itemPath.parent_path().wstring())
+                + L'\0'
+                + util::NormalizePathForComparison(itemPath.stem().wstring());
         }
     }
 
@@ -76,9 +86,46 @@ namespace hyperbrowse::ui
         browser::RawJpegDisplayPreference preference,
         const FolderPathEquals& folderPathEquals)
     {
+        std::unordered_map<std::wstring, const browser::BrowserItem*> rawCandidates;
+        std::unordered_map<std::wstring, const browser::BrowserItem*> jpegCandidates;
+        rawCandidates.reserve(candidates.size());
+        jpegCandidates.reserve(candidates.size());
+        for (const browser::BrowserItem& candidate : candidates)
+        {
+            if (decode::IsRawFileType(candidate.fileType))
+            {
+                rawCandidates.emplace(PairKey(candidate), &candidate);
+            }
+            else if (IsJpegFileType(candidate.fileType))
+            {
+                jpegCandidates.emplace(PairKey(candidate), &candidate);
+            }
+        }
+
+        const auto& preferredCandidates = preference == browser::RawJpegDisplayPreference::Raw
+            ? rawCandidates
+            : jpegCandidates;
         for (browser::BrowserItem& item : items)
         {
-            item = Resolve(item, candidates, preference, folderPathEquals);
+            const bool itemIsRaw = decode::IsRawFileType(item.fileType);
+            const bool itemIsJpeg = IsJpegFileType(item.fileType);
+            if ((preference == browser::RawJpegDisplayPreference::Raw && !itemIsJpeg)
+                || (preference == browser::RawJpegDisplayPreference::Jpeg && !itemIsRaw))
+            {
+                continue;
+            }
+
+            const auto candidate = preferredCandidates.find(PairKey(item));
+            if (candidate != preferredCandidates.end()
+                && !browser::FilePathsEqual(candidate->second->filePath, item.filePath))
+            {
+                const fs::path itemPath(item.filePath);
+                const fs::path candidatePath(candidate->second->filePath);
+                if (folderPathEquals(itemPath.parent_path().wstring(), candidatePath.parent_path().wstring()))
+                {
+                    item = *candidate->second;
+                }
+            }
         }
 
         return items;
