@@ -2,6 +2,7 @@ add_executable(HyperBrowseTests
     smoke.cpp
     smoke_decode.cpp
     smoke_model.cpp
+    smoke_metadata.cpp
     smoke_policy.cpp
     smoke_runtime.cpp
     smoke_watch.cpp
@@ -53,8 +54,8 @@ add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-si
 add_test(NAME HyperBrowseAccessibilitySmoke COMMAND HyperBrowseTests --accessibility)
 add_test(NAME HyperBrowseSettingsSmoke COMMAND HyperBrowseTests --settings)
 add_test(NAME HyperBrowseMultiViewerSettingsSmoke COMMAND HyperBrowseTests --multi-viewer-settings)
-set_tests_properties(HyperBrowseMultiViewerSettingsSmoke PROPERTIES DISABLED TRUE)
 add_test(NAME HyperBrowseItemNumberNavigationSmoke COMMAND HyperBrowseTests --item-number-navigation)
+add_test(NAME HyperBrowseUserMetadataSmoke COMMAND HyperBrowseTests --user-metadata)
 
 if(HYPERBROWSE_BUILD_FUZZ_TESTS)
     add_executable(HyperBrowseBoundaryFuzz

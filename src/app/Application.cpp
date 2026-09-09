@@ -31,6 +31,7 @@ namespace
     {
         StartupBenchmarkOptions benchmark;
         std::wstring launchPath;
+        bool forceSingleInstanceForTest{};
     };
 
     class CurrentUserPipeSecurity
@@ -153,6 +154,12 @@ namespace
             {
                 options.benchmark.enabled = true;
                 options.benchmark.outputPath.assign(argument.substr(kBenchStartupPrefix.size()));
+                continue;
+            }
+
+            if (argument == L"--test-single-instance")
+            {
+                options.forceSingleInstanceForTest = true;
                 continue;
             }
 
@@ -461,7 +468,8 @@ namespace hyperbrowse::app
         SetCurrentProcessExplicitAppUserModelID(L"TheTheosopher.HyperBrowse");
 
         // Single instance is opt-in: a second launch forwards its path to the running window.
-        if (IsSingleInstanceEnabled() && !TryBecomePrimaryInstance(startupOptions.launchPath))
+        if ((startupOptions.forceSingleInstanceForTest || IsSingleInstanceEnabled())
+            && !TryBecomePrimaryInstance(startupOptions.launchPath))
         {
             util::LogInfo(L"Another HyperBrowse instance is running; forwarded launch path and exiting.");
             if (shouldUninitializeOle)

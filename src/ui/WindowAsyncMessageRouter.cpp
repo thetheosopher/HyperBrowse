@@ -5,7 +5,9 @@
 #include "browser/BrowserPane.h"
 #include "services/BatchConvertService.h"
 #include "services/FileOperationService.h"
+#include "services/ImageCommandService.h"
 #include "services/ThumbnailScheduler.h"
+#include "services/UserMetadataStore.h"
 #include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
 #include "viewer/ViewerWindow.h"
@@ -78,10 +80,14 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onBrowserPaneQuickSendDrag, wParam, lParam);
         case services::BatchConvertService::kMessageId:
             return Invoke(handlers_.onBatchConvert, lParam);
+        case services::ImageCommandService::kMessageId:
+            return Invoke(handlers_.onImageCommand, lParam);
         case services::FileOperationService::kMessageId:
             return Invoke(handlers_.onFileOperation, lParam);
         case services::FileOperationService::kProgressMessageId:
             return Invoke(handlers_.onFileOperationProgress, lParam);
+        case services::UserMetadataStore::kMessageId:
+            return Invoke(handlers_.onUserMetadataSaveError);
         case services::ThumbnailScheduler::kMessageId:
             return Invoke(handlers_.onDetailsPanelThumbnail, lParam);
         case viewer::ViewerWindow::kZoomChangedMessage:

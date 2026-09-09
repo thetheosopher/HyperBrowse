@@ -55,50 +55,50 @@ Name: "{group}\Uninstall HyperBrowse"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\HyperBrowse"; Filename: "{app}\bin\HyperBrowse.exe"; WorkingDir: "{app}\bin"; IconFilename: "{app}\bin\HyperBrowse.exe"; Tasks: desktopicon
 
 ; ---------------------------------------------------------------------------
-; Per-user image file associations (HKCU — no admin required, PrivilegesRequired=lowest).
-; Registers a HyperBrowse.Image prog-id, an "Open with HyperBrowse" verb, and lists
-; HyperBrowse under Open With for each supported extension. The app's File
-; Associations page applies the user's selected defaults where Windows permits it.
+; Registration follows the selected install mode. HKA resolves to HKCU for a
+; current-user install and HKLM for an administrative all-users install. The
+; application's preferences remain in each user's HKCU\Software\HyperBrowse key.
+; Uninstall removes only registration-owned values/subkeys and retains preferences.
 ; ---------------------------------------------------------------------------
 [Registry]
 ; Application capabilities / Open With registration
-Root: HKCU; Subkey: "Software\HyperBrowse"; ValueType: string; ValueName: ""; ValueData: "HyperBrowse Image Browser"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "HyperBrowse"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "High-performance native image browser for Windows"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\bin\HyperBrowse.exe,0"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".jpg"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".jpeg"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".png"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".gif"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".tif"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".tiff"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".arw"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".cr2"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".cr3"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".dng"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".nef"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".nrw"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".raf"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".rw2"; ValueData: "HyperBrowse.Image"
-Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "HyperBrowse"; ValueData: "Software\HyperBrowse\Capabilities"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\HyperBrowse"; ValueType: string; ValueName: ""; ValueData: "HyperBrowse Image Browser"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "HyperBrowse"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "High-performance native image browser for Windows"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\bin\HyperBrowse.exe,0"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".jpg"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".jpeg"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".png"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".gif"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".tif"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".tiff"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".arw"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".cr2"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".cr3"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".dng"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".nef"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".nrw"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".raf"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\HyperBrowse\Capabilities\FileAssociations"; ValueType: string; ValueName: ".rw2"; ValueData: "HyperBrowse.Image"
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "HyperBrowse"; ValueData: "Software\HyperBrowse\Capabilities"; Flags: uninsdeletevalue
 
 ; ProgID for images opened by HyperBrowse
-Root: HKCU; Subkey: "Software\Classes\HyperBrowse.Image"; ValueType: string; ValueName: ""; ValueData: "HyperBrowse Image"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\HyperBrowse.Image\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\bin\HyperBrowse.exe,0"
-Root: HKCU; Subkey: "Software\Classes\HyperBrowse.Image\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\HyperBrowse.exe"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\HyperBrowse.Image"; ValueType: string; ValueName: ""; ValueData: "HyperBrowse Image"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\HyperBrowse.Image\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\bin\HyperBrowse.exe,0"
+Root: HKA; Subkey: "Software\Classes\HyperBrowse.Image\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bin\HyperBrowse.exe"" ""%1"""
 
 ; Map each extension's OpenWith list to the HyperBrowse.Image prog-id.
-Root: HKCU; Subkey: "Software\Classes\.jpg\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.jpeg\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.png\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.gif\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.tif\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.tiff\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.arw\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.cr2\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.cr3\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.dng\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.nef\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.nrw\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.raf\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\.rw2\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.jpg\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.jpeg\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.png\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.gif\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.tif\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.tiff\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.arw\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.cr2\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.cr3\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.dng\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.nef\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.nrw\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.raf\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.rw2\OpenWithProgids"; ValueType: string; ValueName: "HyperBrowse.Image"; ValueData: ""; Flags: uninsdeletevalue

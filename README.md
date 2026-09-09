@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.1.0-2EA043)
+![Version](https://img.shields.io/badge/Version-2.2.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -21,7 +21,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Direct2D and DirectWrite rendering in the browser and viewer, with per-monitor DPI awareness v2.
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
 - WIC baseline decode path, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
-- Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, in-folder filename filtering, thumbnail ratings, and multi-selection workflows.
+- Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, filename/rating/tag filtering, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
 - Quick Actions with saved destinations, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy for the currently displayed image or selected browser files.
@@ -41,7 +41,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 
 | Area | Included today |
 | --- | --- |
-| Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
+| Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename/rating/tag filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
 | Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
@@ -53,6 +53,8 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 Quick Actions supports saved destinations with one-character shortcuts from digits, letters, and supported printable punctuation. Each newly added destination is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`, followed by punctuation; its key field accepts one supported character and can be edited later. Assignments persist by folder path and remain associated with the same destination when the list is reordered. Recent folders are not included.
 
 In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed. Press `F4` in the main window to restore the most recently recorded filing position for the current folder. Positions follow renamed or moved folders and keep up to 64 folders; the target must still be present in the current view.
+
+The filter field accepts ordinary filename terms plus `tag:value`, `tags:value`, `rating:rated`, `rating:unrated`, and numeric rating constraints such as `rating:4`, `rating:>=3`, or `rating:<2`. Whitespace-separated terms are combined, and tag matching is case-insensitive.
 
 ### Multiple viewer windows
 
@@ -146,7 +148,7 @@ The current implementation combines a Win32 shell with Direct2D and DirectWrite 
 
 - Windows 10 or Windows 11, x64.
 - Visual Studio 2026 Build Tools or Visual Studio 2026 with Desktop development for C++.
-- CMake 4.2 or newer for the bundled Visual Studio 2026 presets. The CMake bundled with Visual Studio or the Visual Studio Build Tools is supported; it does not need to be on `PATH`.
+- CMake 4.2 or newer for the bundled Visual Studio 2026 presets. Manual generator builds support the project minimum of CMake 3.23. The CMake bundled with Visual Studio or the Visual Studio Build Tools is supported; it does not need to be on `PATH`.
 - PowerShell and Inno Setup 6 for release packaging.
 - Optional internet access when `HYPERBROWSE_BUNDLE_CUDA_REDIST=ON`, because CMake downloads NVIDIA redistributables for packaging.
 
@@ -229,13 +231,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.1.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.2.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.1.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.2.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -253,11 +255,11 @@ powershell -ExecutionPolicy Bypass -NoProfile -File .\tools\PackageRelease.ps1 -
 
 The packaging script can use the CMake and CTest bundled with Visual Studio or the Visual Studio Build Tools. It checks `PATH`, the CMake recorded in the selected build tree, Visual Studio installations discovered with `vswhere.exe`, and known standalone installation locations.
 
-The dedicated release-packaging configure preset keeps the static MSVC runtime enabled, keeps LibRaw linked statically, and keeps CUDA redistributable bundling enabled so the portable zip and installer carry the RAW helper executable plus the nvJPEG runtime DLLs they need. The packaging target runs the release smoke tests, stages both install components under `build-release-package/dist/`, creates `HyperBrowse-<version>-portable-win64.zip`, and compiles `HyperBrowse-<version>-installer.exe` with Inno Setup 6.
+The dedicated release-packaging configure preset keeps the static MSVC runtime enabled, keeps LibRaw linked statically, and keeps CUDA redistributable bundling enabled so the portable zip and installer carry the RAW helper executable plus the nvJPEG runtime DLLs they need. The packaging target runs the release smoke tests, derives its required-file checks from the configured capabilities, validates executable and installer version metadata, verifies the portable archive contents, and writes SHA-256 manifests for each layout and the final artifacts.
 
-The generated installer supports either current-user or all-users installation, writes the correct Add/Remove Programs entry for the selected scope, creates a Start Menu shortcut automatically, and offers an optional desktop shortcut.
+The generated installer supports either current-user or all-users installation, writes application and Open With registration in the matching user or machine scope, creates a Start Menu shortcut automatically, and offers an optional desktop shortcut. Uninstall removes registration owned by the installer and retains each user's HyperBrowse preferences by default.
 
-Both the portable package and installer include the offline user guide under `docs/`, along with the main-window screenshot used by the guide. Installed builds place the application executable under `bin/` and the guide under the neighboring `docs/` directory.
+Both the portable package and installer include the offline user guide under `docs/`, the main-window screenshot used by the guide, the project license, a reviewed third-party dependency inventory, and all applicable vendored notices. Installed builds place the application executable under `bin/` and the guide and notices under the neighboring `docs/` directory.
 
 When CUDA redistributable bundling is enabled, CMake downloads the official NVIDIA `cuda_cudart` and `libnvjpeg` redistributable archives, verifies their SHA256 hashes, and stages the runtime DLLs and license files beside the application. That keeps nvJPEG deployment self-contained instead of depending on a machine-wide CUDA install or `PATH` setup.
 
@@ -284,6 +286,7 @@ The `specs/` directory tracks both design intent and implementation follow-up. U
 - [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, validation expectations, and pull request checklist.
 - [docs/architecture.md](docs/architecture.md) for current component ownership, threading boundaries, data flows, and rendering responsibilities.
 - [docs/testing.md](docs/testing.md) for build, smoke-test, benchmark, diagnostics, and manual validation guidance.
+- [docs/RELEASE_POLISH_PLAN_2026-09-08.md](docs/RELEASE_POLISH_PLAN_2026-09-08.md) for the 2.2 implementation ledger, validation evidence, and remaining release gates.
 - [.github/copilot-instructions.md](.github/copilot-instructions.md) for repository-wide coding guidance used by GitHub Copilot.
 - [docs/decisions/README.md](docs/decisions/README.md) for durable architecture decisions and invariants.
 - [specs/01-product-spec.md](specs/01-product-spec.md) for product scope and supported workflows.
@@ -306,11 +309,21 @@ If you want the current backlog in detail, start with [specs/14-todo.md](specs/1
 
 ## Version
 
-Current release: **2.1.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.1.0-portable-win64.zip` and `HyperBrowse-2.1.0-installer.exe`).
+Current release: **2.2.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.2.0-portable-win64.zip` and `HyperBrowse-2.2.0-installer.exe`).
 
 Release **2.0.0** expands HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It adds richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.2.0
+
+- Made ratings and tags durable for Unicode paths and tags, folder and case-only renames, multiple app instances, atomic-save failures, and later retries; failed saves now remain pending and produce a recoverable warning.
+- Hardened file-operation undo/redo with result identity checks and authoritative shell mappings, and moved image information, pixel-copy decode, and multi-JPEG orientation work to a cancellable bounded worker.
+- Made batch conversion totals consistent, kept cancellation active until the worker drains, and publish converted files atomically without overwriting a newly occupied name.
+- Re-enabled multi-viewer Settings coverage, applied slideshow intervals to every active viewer, added semantic Settings accessibility, adopted Windows high-contrast colors, and bounded Quick Actions confirmations at larger text and DPI settings.
+- Strengthened package capability checks, distribution notices, installer ownership, startup benchmark isolation, and the 2.2 release validation ledger.
+
+Known limits: GIF and TIFF browsing displays the first frame or page; JPEG orientation adjustment edits EXIF orientation metadata; converted JPEG/PNG/TIFF output is a rendered copy and may not preserve all source metadata, color profiles, animation/pages, or alpha when the target format cannot represent it. Optional nvJPEG acceleration depends on a supported NVIDIA GPU and runtime and otherwise falls back to WIC. Final screen-reader, high-contrast, mixed-DPI, clean-machine installer, and hosted-CI evidence remains recorded in the release polish plan until those external gates are run.
 
 ### 2.1.0
 
@@ -438,7 +451,7 @@ HyperBrowse is released under the [MIT License](LICENSE).
 
 Copyright (c) 2026 Michael A. McCloskey.
 
-Third-party components retain their own licenses. Notable bundled components:
+Third-party components retain their own licenses. The generated distribution includes `THIRD-PARTY-NOTICES.txt` with the candidate's versions, source tree revisions, linkage choices, review date, and review owner. Notable bundled components:
 
 - [LibRaw](external/libraw) is dual-licensed under [LGPL 2.1](external/libraw/LICENSE.LGPL) and [CDDL 1.0](external/libraw/LICENSE.CDDL).
 - [NanoSVG](external/nanosvg) is distributed under the [zlib license](external/nanosvg/LICENSE.txt).

@@ -1,8 +1,13 @@
 #pragma once
 
+#include <windows.h>
+
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -17,12 +22,16 @@ namespace hyperbrowse::services
     {
         int rating{};
         std::wstring tags;
+
+        bool operator==(const UserMetadataEntry&) const = default;
     };
 
     class UserMetadataStore
     {
     public:
-        UserMetadataStore();
+        static constexpr UINT kMessageId = WM_APP + 76;
+
+        explicit UserMetadataStore(std::wstring storageDirectory = {});
         ~UserMetadataStore();
 
         UserMetadataStore(const UserMetadataStore&) = delete;
@@ -35,22 +44,45 @@ namespace hyperbrowse::services
                                       const std::vector<std::wstring>& sourcePaths,
                                       const std::vector<std::wstring>& createdPaths);
 
+        void SetNotificationWindow(HWND window) noexcept;
+        std::wstring LastSaveError() const;
+        bool Flush(std::chrono::milliseconds timeout, std::wstring* errorMessage = nullptr);
+        void Shutdown();
+
     private:
+        struct PendingMutation
+        {
+            std::optional<UserMetadataEntry> entry;
+            std::uint64_t generation{};
+        };
+
         void EnsureLoadedLocked() const;
         bool LoadLocked() const;
-        void QueueSaveLocked();
-        void SaveWorkerLoop();
+        void QueueSaveLocked(const std::vector<std::wstring>& changedKeys);
+        void SaveWorkerLoop() noexcept;
         static std::wstring NormalizeTags(std::wstring_view tags);
         static bool IsEmptyEntry(const UserMetadataEntry& entry) noexcept;
+
+        std::wstring storageDirectory_;
+        std::wstring metadataFilePath_;
+        std::wstring lockFilePath_;
 
         mutable std::mutex mutex_;
         mutable bool loaded_{};
         mutable std::unordered_map<std::wstring, UserMetadataEntry> entries_;
-        std::mutex saveMutex_;
+        std::unordered_map<std::wstring, PendingMutation> pendingMutations_;
+        std::uint64_t mutationGeneration_{};
+
+        mutable std::mutex saveMutex_;
         std::condition_variable saveAvailable_;
-        std::thread saveWorker_;
+        std::condition_variable saveFinished_;
         std::uint64_t requestedSaveGeneration_{};
-        std::uint64_t completedSaveGeneration_{};
+        std::uint64_t attemptedSaveGeneration_{};
+        std::uint64_t successfulSaveGeneration_{};
         bool saveShuttingDown_{};
+        bool shutdownComplete_{};
+        std::wstring lastSaveError_;
+        std::atomic<HWND> notificationWindow_{nullptr};
+        std::thread saveWorker_;
     };
 }

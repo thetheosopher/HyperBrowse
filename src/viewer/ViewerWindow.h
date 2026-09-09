@@ -129,6 +129,7 @@ namespace hyperbrowse::viewer
         void StartSlideshow(UINT intervalMs = 3000);
         void StopSlideshow();
         bool IsSlideshowActive() const noexcept;
+        UINT SlideshowIntervalMs() const noexcept;
         void SetCompareMode(bool enabled, CompareDirection direction = CompareDirection::Next);
         bool IsCompareModeEnabled() const noexcept;
         static bool DefaultInfoOverlaysVisible();

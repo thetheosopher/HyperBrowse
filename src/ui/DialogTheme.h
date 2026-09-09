@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include "ui/SystemTheme.h"
+
 namespace hyperbrowse::ui
 {
     struct DialogTheme
@@ -19,6 +21,21 @@ namespace hyperbrowse::ui
 
     inline DialogTheme MakeDialogTheme(bool darkTheme) noexcept
     {
+        if (IsHighContrastEnabled())
+        {
+            return DialogTheme{
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_GRAYTEXT),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_HIGHLIGHT),
+                GetSysColor(COLOR_HIGHLIGHT),
+                GetSysColor(COLOR_HIGHLIGHTTEXT),
+            };
+        }
+
         if (darkTheme)
         {
             return DialogTheme{

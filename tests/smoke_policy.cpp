@@ -224,12 +224,16 @@ namespace hyperbrowse::tests
             Expect(journal.UndoEntry() && journal.UndoEntry()->type == 4,
                    "File-operation journal did not expose the newest undo entry");
 
+            FileOperationJournalEntry restoredSecond = second;
+            restoredSecond.sourcePaths = {L"C:\\source\\restored-after-conflict.jpg"};
             journal.Begin(UndoRedoOperation::Undo);
-            journal.Complete(UndoRedoOperation::Undo, true);
+            journal.Complete(UndoRedoOperation::Undo, true, restoredSecond);
             Expect(journal.CanUndo() && journal.CanRedo(),
                    "Successful undo did not move the entry to redo history");
             Expect(journal.RedoEntry() && journal.RedoEntry()->type == 4,
                    "File-operation journal stored the wrong redo entry");
+            Expect(journal.RedoEntry()->sourcePaths == restoredSecond.sourcePaths,
+                   "File-operation journal did not retain the actual inverse result mapping");
 
             journal.Begin(UndoRedoOperation::Redo);
             journal.Complete(UndoRedoOperation::Redo, false);
@@ -237,6 +241,9 @@ namespace hyperbrowse::tests
                    "Failed redo changed journal history");
             Expect(journal.PendingOperation() == UndoRedoOperation::None,
                    "File-operation journal retained a failed pending operation");
+
+            journal.Discard(UndoRedoOperation::Redo);
+            Expect(!journal.CanRedo(), "File-operation journal retained an unsafe discarded redo entry");
 
             FileOperationJournalEntry third;
             third.type = 0;

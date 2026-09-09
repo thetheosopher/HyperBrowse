@@ -14,6 +14,9 @@ namespace hyperbrowse::ui
         FocusedChildProvider focusedChildProvider;
         FocusProvider focusProvider;
         DefaultActionProvider defaultActionProvider;
+        std::wstring rootName;
+        std::wstring rootDescription;
+        long rootRole{ROLE_SYSTEM_WINDOW};
     };
 
     namespace
@@ -163,7 +166,7 @@ namespace hyperbrowse::ui
         {
             if (IsSelf(childId))
             {
-                return SetString(name, L"HyperBrowse");
+                return SetString(name, data_ ? data_->rootName : std::wstring{});
             }
 
             Item item;
@@ -175,7 +178,7 @@ namespace hyperbrowse::ui
         {
             if (IsSelf(childId))
             {
-                return SetString(value, L"HyperBrowse");
+                return SetString(value, data_ ? data_->rootName : std::wstring{});
             }
 
             Item item;
@@ -187,7 +190,7 @@ namespace hyperbrowse::ui
         {
             if (IsSelf(childId))
             {
-                return SetString(description, L"Keyboard-accessible image browser window");
+                return SetString(description, data_ ? data_->rootDescription : std::wstring{});
             }
 
             Item item;
@@ -205,7 +208,7 @@ namespace hyperbrowse::ui
             role->vt = VT_I4;
             if (IsSelf(childId))
             {
-                role->lVal = ROLE_SYSTEM_WINDOW;
+                role->lVal = data_ ? data_->rootRole : ROLE_SYSTEM_WINDOW;
                 return S_OK;
             }
 
@@ -585,7 +588,10 @@ namespace hyperbrowse::ui
                                                      SnapshotProvider snapshotProvider,
                                                      FocusedChildProvider focusedChildProvider,
                                                      FocusProvider focusProvider,
-                                                     DefaultActionProvider defaultActionProvider)
+                                                     DefaultActionProvider defaultActionProvider,
+                                                     std::wstring rootName,
+                                                     std::wstring rootDescription,
+                                                     long rootRole)
         : data_(std::make_shared<Data>())
     {
         data_->window = window;
@@ -593,6 +599,9 @@ namespace hyperbrowse::ui
         data_->focusedChildProvider = std::move(focusedChildProvider);
         data_->focusProvider = std::move(focusProvider);
         data_->defaultActionProvider = std::move(defaultActionProvider);
+        data_->rootName = std::move(rootName);
+        data_->rootDescription = std::move(rootDescription);
+        data_->rootRole = rootRole;
     }
 
     MainWindowAccessibility::~MainWindowAccessibility()

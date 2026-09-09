@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -75,8 +76,38 @@ namespace hyperbrowse::util
         }
     };
 
+    namespace resource_sizing_detail
+    {
+        inline std::atomic_bool memorySnapshotOverrideEnabled{};
+        inline std::atomic_uint64_t memorySnapshotOverrideTotalBytes{};
+        inline std::atomic_uint64_t memorySnapshotOverrideAvailableBytes{};
+    }
+
+    inline void SetMemorySnapshotOverrideForTests(MemorySnapshot snapshot) noexcept
+    {
+        resource_sizing_detail::memorySnapshotOverrideTotalBytes.store(
+            snapshot.totalPhysicalBytes,
+            std::memory_order_relaxed);
+        resource_sizing_detail::memorySnapshotOverrideAvailableBytes.store(
+            snapshot.availablePhysicalBytes,
+            std::memory_order_relaxed);
+        resource_sizing_detail::memorySnapshotOverrideEnabled.store(true, std::memory_order_release);
+    }
+
+    inline void ClearMemorySnapshotOverrideForTests() noexcept
+    {
+        resource_sizing_detail::memorySnapshotOverrideEnabled.store(false, std::memory_order_release);
+    }
+
     inline MemorySnapshot QueryMemorySnapshot() noexcept
     {
+        if (resource_sizing_detail::memorySnapshotOverrideEnabled.load(std::memory_order_acquire))
+        {
+            return MemorySnapshot{
+                resource_sizing_detail::memorySnapshotOverrideTotalBytes.load(std::memory_order_relaxed),
+                resource_sizing_detail::memorySnapshotOverrideAvailableBytes.load(std::memory_order_relaxed)};
+        }
+
         MEMORYSTATUSEX status{};
         status.dwLength = sizeof(status);
         if (GlobalMemoryStatusEx(&status) == FALSE)

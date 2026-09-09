@@ -25,6 +25,7 @@ namespace hyperbrowse::services
         std::uint64_t requestId{};
         std::size_t completedCount{};
         std::size_t totalCount{};
+        std::size_t succeededCount{};
         std::size_t failedCount{};
         BatchConvertFormat format{BatchConvertFormat::Jpeg};
         std::wstring outputFolder;
@@ -49,7 +50,8 @@ namespace hyperbrowse::services
                             std::vector<browser::BrowserItem> items,
                             std::wstring outputFolder,
                             BatchConvertFormat format);
-        void Cancel();
+        void Cancel() noexcept;
+        void Shutdown() noexcept;
         std::size_t ActiveTaskCount() const noexcept
         {
             return executor_.ActiveTaskCount();

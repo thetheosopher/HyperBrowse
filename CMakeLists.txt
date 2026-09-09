@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 
-project(HyperBrowse VERSION 2.1.0 LANGUAGES CXX)
+project(HyperBrowse VERSION 2.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,8 @@ set(HYPERBROWSE_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseVersion
 set(HYPERBROWSE_BUILD_INFO_HEADER "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseBuildInfo.h")
 set(HYPERBROWSE_PORTABLE_README "${CMAKE_CURRENT_BINARY_DIR}/PortableREADME.txt")
 set(HYPERBROWSE_RUNTIME_DEPENDENCIES "${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.txt")
+set(HYPERBROWSE_THIRD_PARTY_NOTICES "${CMAKE_CURRENT_BINARY_DIR}/THIRD-PARTY-NOTICES.txt")
+set(HYPERBROWSE_PACKAGING_CAPABILITIES "${CMAKE_CURRENT_BINARY_DIR}/PackagingCapabilities.txt")
 set(HYPERBROWSE_INNO_SETUP_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/HyperBrowseInstaller.iss")
 set(HYPERBROWSE_TOOLBAR_ICONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/toolbar-icons")
 set(HYPERBROWSE_APP_PUBLISHER "thetheosopher")
@@ -66,6 +68,13 @@ set(HYPERBROWSE_RUNTIME_DEPENDENCY_MSVC_LINE "No separate Microsoft Visual C++ r
 set(HYPERBROWSE_PORTABLE_NVIDIA_RUNTIME_LINE "The app uses WIC by default and only uses nvJPEG when that optional runtime is available.")
 set(HYPERBROWSE_RUNTIME_DEPENDENCY_NVIDIA_LINE "nvJPEG, because acceleration is optional and the application stays correct without NVIDIA runtime support")
 set(HYPERBROWSE_PORTABLE_NVIDIA_CONTENT_LINE "")
+set(HYPERBROWSE_PORTABLE_LIBRAW_CONTENT_LINE "")
+set(HYPERBROWSE_RUNTIME_DEPENDENCY_RAW_LINE "LibRaw helper and LibRaw notices are omitted because this build has RAW support disabled")
+
+if(HYPERBROWSE_ENABLE_LIBRAW)
+    set(HYPERBROWSE_PORTABLE_LIBRAW_CONTENT_LINE "- HyperBrowseRawHelper.exe")
+    set(HYPERBROWSE_RUNTIME_DEPENDENCY_RAW_LINE "HyperBrowseRawHelper.exe and statically linked LibRaw 0.22.1")
+endif()
 
 if(MSVC AND NOT HYPERBROWSE_STATIC_MSVC_RUNTIME)
     set(HYPERBROWSE_PORTABLE_MSVC_RUNTIME_LINE "- Microsoft Visual C++ runtime DLLs staged by CMake for this toolchain")
@@ -80,10 +89,24 @@ if(HYPERBROWSE_ENABLE_NVJPEG AND HYPERBROWSE_BUNDLE_CUDA_REDIST)
     set(HYPERBROWSE_RUNTIME_DEPENDENCY_NVIDIA_LINE "NVIDIA CUDA runtime DLLs (cudart64_12.dll and nvjpeg64_12.dll) downloaded from official NVIDIA redistributable archives and staged beside HyperBrowse.exe when nvJPEG support is enabled")
 endif()
 
+set(HYPERBROWSE_PACKAGE_CUDA_REDIST_ENABLED OFF)
+set(HYPERBROWSE_PACKAGE_CUDA_RUNTIME_FILES "")
+if(HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
+    set(HYPERBROWSE_PACKAGE_CUDA_REDIST_ENABLED ON)
+    set(_hyperbrowse_cuda_runtime_names "")
+    foreach(_hyperbrowse_cuda_runtime_dll IN LISTS HYPERBROWSE_BUNDLED_CUDA_RUNTIME_DLLS)
+        get_filename_component(_hyperbrowse_cuda_runtime_name "${_hyperbrowse_cuda_runtime_dll}" NAME)
+        list(APPEND _hyperbrowse_cuda_runtime_names "${_hyperbrowse_cuda_runtime_name}")
+    endforeach()
+    list(JOIN _hyperbrowse_cuda_runtime_names ";" HYPERBROWSE_PACKAGE_CUDA_RUNTIME_FILES)
+endif()
+
 configure_file(cmake/HyperBrowseVersion.rc.in "${HYPERBROWSE_VERSION_RESOURCE}" @ONLY)
 configure_file(cmake/HyperBrowseBuildInfo.h.in "${HYPERBROWSE_BUILD_INFO_HEADER}" @ONLY)
 configure_file(cmake/PortableREADME.txt.in "${HYPERBROWSE_PORTABLE_README}" @ONLY)
 configure_file(cmake/RuntimeDependencies.txt.in "${HYPERBROWSE_RUNTIME_DEPENDENCIES}" @ONLY)
+configure_file(cmake/ThirdPartyNotices.txt.in "${HYPERBROWSE_THIRD_PARTY_NOTICES}" @ONLY)
+configure_file(cmake/PackagingCapabilities.txt.in "${HYPERBROWSE_PACKAGING_CAPABILITIES}" @ONLY)
 configure_file(cmake/HyperBrowseInstaller.iss.in "${HYPERBROWSE_INNO_SETUP_SCRIPT}" @ONLY)
 
 if(MSVC)
@@ -122,6 +145,7 @@ add_library(HyperBrowseCore STATIC
     src/services/FolderTreeEnumerationService.cpp
     src/services/FolderWatchService.cpp
     src/services/ImageMetadataService.cpp
+    src/services/ImageCommandService.cpp
     src/services/JpegTransformService.cpp
     src/services/ThumbnailScheduler.cpp
     src/services/UserMetadataStore.cpp
@@ -248,6 +272,7 @@ if(HYPERBROWSE_ENABLE_LIBRAW)
         src/decode/RawHelperProtocol.cpp
         src/decode/WicThumbnailDecoder.cpp
         src/util/Diagnostics.cpp
+        "${HYPERBROWSE_VERSION_RESOURCE}"
     )
 
     target_include_directories(HyperBrowseRawHelper PRIVATE
@@ -348,6 +373,52 @@ install(FILES "${HYPERBROWSE_RUNTIME_DEPENDENCIES}"
     DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
     COMPONENT Runtime
     RENAME "runtime-dependencies.txt")
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    DESTINATION "."
+    COMPONENT Portable
+    RENAME "LICENSE.txt")
+
+install(FILES "${HYPERBROWSE_THIRD_PARTY_NOTICES}"
+    DESTINATION "."
+    COMPONENT Portable)
+
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/nanosvg/LICENSE.txt"
+    DESTINATION "licenses"
+    COMPONENT Portable
+    RENAME "NanoSVG-LICENSE.txt")
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
+    COMPONENT Runtime
+    RENAME "LICENSE.txt")
+
+install(FILES "${HYPERBROWSE_THIRD_PARTY_NOTICES}"
+    DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}"
+    COMPONENT Runtime)
+
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/nanosvg/LICENSE.txt"
+    DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}/licenses"
+    COMPONENT Runtime
+    RENAME "NanoSVG-LICENSE.txt")
+
+if(HYPERBROWSE_ENABLE_LIBRAW)
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/external/libraw/COPYRIGHT"
+        "${CMAKE_CURRENT_SOURCE_DIR}/external/libraw/LICENSE.LGPL"
+        "${CMAKE_CURRENT_SOURCE_DIR}/external/libraw/LICENSE.CDDL"
+        DESTINATION "licenses"
+        COMPONENT Portable)
+
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/external/libraw/COPYRIGHT"
+        "${CMAKE_CURRENT_SOURCE_DIR}/external/libraw/LICENSE.LGPL"
+        "${CMAKE_CURRENT_SOURCE_DIR}/external/libraw/LICENSE.CDDL"
+        DESTINATION "${HYPERBROWSE_INSTALLER_DOC_DIR}/licenses"
+        COMPONENT Runtime)
+endif()
 
 install(FILES
     "${HYPERBROWSE_USER_GUIDE}"

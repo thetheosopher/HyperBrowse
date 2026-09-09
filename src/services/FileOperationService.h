@@ -43,6 +43,7 @@ namespace hyperbrowse::services
     {
         std::uint64_t requestId{};
         FileOperationType type{FileOperationType::Copy};
+        FileConflictPolicy conflictPolicy{FileConflictPolicy::PromptShell};
         std::size_t requestedCount{};
         std::size_t failedCount{};
         std::vector<std::wstring> succeededSourcePaths;

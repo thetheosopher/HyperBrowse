@@ -14,6 +14,7 @@
 
 #include "browser/BrowserModel.h"
 #include "ui/DialogTheme.h"
+#include "ui/MainWindowAccessibility.h"
 #include "util/ResourceSizing.h"
 #include "util/UiTextSize.h"
 #include "viewer/ViewerWindow.h"
@@ -424,6 +425,7 @@ namespace hyperbrowse::ui::dialog_detail
         std::array<HWND, 5> numericEdits{};
         std::array<HWND, 5> numericSpins{};
         std::vector<ExperimentalSettingsLabel> labels;
+        std::shared_ptr<hyperbrowse::ui::MainWindowAccessibility> accessibility;
         RECT applyButtonRect{};
         RECT okButtonRect{};
         RECT cancelButtonRect{};

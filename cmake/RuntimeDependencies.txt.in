@@ -2,10 +2,11 @@ HyperBrowse Runtime Dependencies
 
 Bundled by these packaging rules:
 - HyperBrowse.exe
-- HyperBrowseRawHelper.exe
+- @HYPERBROWSE_RUNTIME_DEPENDENCY_RAW_LINE@
 - @HYPERBROWSE_RUNTIME_DEPENDENCY_MSVC_LINE@
 - @HYPERBROWSE_RUNTIME_DEPENDENCY_NVIDIA_LINE@
 - README.txt / README-portable.txt and this dependency manifest
+- Project and third-party license notices
 
 Not shipped as separate third-party runtime DLLs in this build:
 - LibRaw, because the vendored build is linked statically

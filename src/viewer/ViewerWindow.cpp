@@ -27,6 +27,7 @@
 #include "services/ImageMetadataService.h"
 #include "ui/ItemNumberNavigationPolicy.h"
 #include "ui/MainWindowDialogs.h"
+#include "ui/SystemTheme.h"
 #include "ui/ViewerTransitionPolicy.h"
 #include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
@@ -187,26 +188,46 @@ namespace
 
     COLORREF BackgroundColor(bool darkTheme)
     {
+        if (hyperbrowse::ui::IsHighContrastEnabled())
+        {
+            return GetSysColor(COLOR_WINDOW);
+        }
         return darkTheme ? RGB(18, 21, 25) : RGB(247, 249, 252);
     }
 
     COLORREF TextColor(bool darkTheme)
     {
+        if (hyperbrowse::ui::IsHighContrastEnabled())
+        {
+            return GetSysColor(COLOR_WINDOWTEXT);
+        }
         return darkTheme ? RGB(236, 240, 244) : RGB(28, 33, 40);
     }
 
     COLORREF MutedTextColor(bool darkTheme)
     {
+        if (hyperbrowse::ui::IsHighContrastEnabled())
+        {
+            return GetSysColor(COLOR_GRAYTEXT);
+        }
         return darkTheme ? RGB(165, 176, 188) : RGB(96, 107, 118);
     }
 
     COLORREF PanelFillColor(bool darkTheme)
     {
+        if (hyperbrowse::ui::IsHighContrastEnabled())
+        {
+            return GetSysColor(COLOR_WINDOW);
+        }
         return darkTheme ? RGB(28, 33, 39) : RGB(255, 255, 255);
     }
 
     COLORREF PanelBorderColor(bool darkTheme)
     {
+        if (hyperbrowse::ui::IsHighContrastEnabled())
+        {
+            return GetSysColor(COLOR_WINDOWTEXT);
+        }
         return darkTheme ? RGB(70, 80, 94) : RGB(206, 215, 225);
     }
 
@@ -1132,6 +1153,11 @@ namespace hyperbrowse::viewer
     bool ViewerWindow::IsSlideshowActive() const noexcept
     {
         return slideshowActive_;
+    }
+
+    UINT ViewerWindow::SlideshowIntervalMs() const noexcept
+    {
+        return slideshowIntervalMs_;
     }
 
     void ViewerWindow::SetCompareMode(bool enabled, CompareDirection direction)
@@ -4391,6 +4417,11 @@ namespace hyperbrowse::viewer
         case WM_DISPLAYCHANGE:
             RecoverDisplaySurface();
             return 0;
+        case WM_SETTINGCHANGE:
+        case WM_SYSCOLORCHANGE:
+        case WM_THEMECHANGED:
+            SetDarkTheme(darkTheme_);
+            return 0;
         case WM_ERASEBKGND:
             return 1;
         case WM_ACTIVATE:
@@ -6285,15 +6316,20 @@ namespace hyperbrowse::viewer
                         }
                     }
 
-                    if (!wraparoundMessage_.empty() && d2dInfoFormat_ && d2dTextBrush_)
+                    if (!wraparoundMessage_.empty() && d2dTextBrush_)
                     {
-                        const float toastWidth = std::min(720.0f, std::max(120.0f, clientWidth - 32.0f));
-                        const float toastHeight = 50.0f;
-                        const float toastLeft = std::max(8.0f, (clientWidth - toastWidth) / 2.0f);
+                        const UINT dpi = std::max<UINT>(96, GetDpiForWindow(hwnd_));
+                        const float dpiScale = static_cast<float>(dpi) / 96.0f;
+                        const float toastWidth = std::min(720.0f * dpiScale,
+                                                          std::max(120.0f * dpiScale,
+                                                                   clientWidth - (32.0f * dpiScale)));
+                        const float toastHeight = static_cast<float>(
+                            hyperbrowse::util::ScaleAppTextDimension(64, appTextSize_)) * dpiScale;
+                        const float toastLeft = std::max(8.0f * dpiScale, (clientWidth - toastWidth) / 2.0f);
                         const D2D1_RECT_F toastRect = D2D1::RectF(toastLeft,
-                                                                  16.0f,
+                                                                  16.0f * dpiScale,
                                                                   toastLeft + toastWidth,
-                                                                  16.0f + toastHeight);
+                                                                  (16.0f * dpiScale) + toastHeight);
                         const D2D1_ROUNDED_RECT roundedToast = D2D1::RoundedRect(toastRect, 8.0f, 8.0f);
                         if (d2dPanelFillBrush_)
                         {
@@ -6304,15 +6340,40 @@ namespace hyperbrowse::viewer
                             d2dRenderTarget_->DrawRoundedRectangle(roundedToast, d2dPanelBorderBrush_.Get(), 1.0f);
                         }
 
-                        d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-                        d2dRenderTarget_->DrawText(wraparoundMessage_.c_str(),
-                                                   static_cast<UINT32>(wraparoundMessage_.size()),
-                                                   d2dInfoFormat_.Get(),
-                                                   D2D1::RectF(toastRect.left + 12.0f,
-                                                               toastRect.top,
-                                                               toastRect.right - 12.0f,
-                                                               toastRect.bottom),
-                                                   d2dTextBrush_.Get());
+                        auto toastFormat = render::D2DRenderer::Instance().CreateTextFormatFromFont(
+                            MenuFontOrDefault(menuFont_));
+                        if (toastFormat)
+                        {
+                            toastFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                            toastFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                            toastFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+                            const float padding = 12.0f * dpiScale;
+                            const auto textLayout = render::D2DRenderer::Instance().CreateTextLayout(
+                                wraparoundMessage_,
+                                toastFormat.Get(),
+                                std::max(1.0f, toastWidth - (padding * 2.0f)),
+                                toastHeight);
+                            if (textLayout)
+                            {
+                                const DWRITE_TRIMMING trimming{
+                                    DWRITE_TRIMMING_GRANULARITY_WORD,
+                                    0,
+                                    0};
+                                Microsoft::WRL::ComPtr<IDWriteInlineObject> trimmingSign;
+                                if (render::D2DRenderer::Instance().DWriteFactory())
+                                {
+                                    render::D2DRenderer::Instance().DWriteFactory()->CreateEllipsisTrimmingSign(
+                                        toastFormat.Get(),
+                                        trimmingSign.GetAddressOf());
+                                }
+                                textLayout->SetTrimming(&trimming, trimmingSign.Get());
+                                d2dRenderTarget_->DrawTextLayout(
+                                    D2D1::Point2F(toastRect.left + padding, toastRect.top),
+                                    textLayout.Get(),
+                                    d2dTextBrush_.Get(),
+                                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                            }
+                        }
                     }
                 }
 
@@ -6434,10 +6495,14 @@ namespace hyperbrowse::viewer
 
             if (!wraparoundMessage_.empty())
             {
-                const int toastWidth = std::min(720, std::max(120, clientWidth - 32));
-                const int toastHeight = 50;
-                const int toastLeft = std::max(8, (clientWidth - toastWidth) / 2);
-                const int toastTop = 16;
+                const int dpi = static_cast<int>(std::max<UINT>(96, GetDpiForWindow(hwnd_)));
+                const auto scaleForDpi = [dpi](int value) { return MulDiv(value, dpi, 96); };
+                const int toastWidth = std::min(scaleForDpi(720),
+                                                std::max(scaleForDpi(120), clientWidth - scaleForDpi(32)));
+                const int toastHeight = scaleForDpi(
+                    hyperbrowse::util::ScaleAppTextDimension(64, appTextSize_));
+                const int toastLeft = std::max(scaleForDpi(8), (clientWidth - toastWidth) / 2);
+                const int toastTop = scaleForDpi(16);
                 HBRUSH toastBrush = CreateSolidBrush(PanelFillColor(darkTheme_));
                 HPEN toastPen = CreatePen(PS_SOLID, 1, PanelBorderColor(darkTheme_));
                 HGDIOBJ oldBrush = SelectObject(hdc, toastBrush);
@@ -6448,13 +6513,17 @@ namespace hyperbrowse::viewer
                 DeleteObject(toastPen);
                 DeleteObject(toastBrush);
 
-                RECT toastRect{toastLeft + 12, toastTop, toastLeft + toastWidth - 12, toastTop + toastHeight};
+                const int textPadding = scaleForDpi(12);
+                RECT toastRect{toastLeft + textPadding,
+                               toastTop,
+                               toastLeft + toastWidth - textPadding,
+                               toastTop + toastHeight};
                 render::DrawGdiText(hdc,
-                                    nullptr,
+                                    MenuFontOrDefault(menuFont_),
                                     wraparoundMessage_.c_str(),
                                     static_cast<int>(wraparoundMessage_.size()),
                                     toastRect,
-                                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                                    DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS,
                                     TextColor(darkTheme_),
                                     PanelFillColor(darkTheme_));
             }

@@ -32,7 +32,8 @@
                 "HYPERBROWSE_ENABLE_LIBRAW": "ON",
                 "HYPERBROWSE_ENABLE_NVJPEG": "ON",
                 "HYPERBROWSE_BUNDLE_CUDA_REDIST": "ON",
-                "HYPERBROWSE_STATIC_MSVC_RUNTIME": "ON"
+                "HYPERBROWSE_STATIC_MSVC_RUNTIME": "ON",
+                "HYPERBROWSE_WARNINGS_AS_ERRORS": "ON"
             }
         }
     ],

@@ -202,6 +202,7 @@
                 <a href="#viewer">Viewer</a>
                 <a href="#file-workflows">File workflows</a>
                 <a href="#quick-actions">Quick Actions</a>
+                <a href="#release-2-2">2.2 notes</a>
                 <a href="#shortcuts">Shortcuts</a>
                 <a href="#troubleshooting">Troubleshooting</a>
             </nav>
@@ -239,7 +240,7 @@
                 <div>
                     <h3>Find and arrange</h3>
                     <ul>
-                        <li>Type in the filter field to narrow the current folder by filename.</li>
+                        <li>Type ordinary words in the filter field to match filenames. Add <code>tag:value</code> or <code>tags:value</code> for tags, <code>rating:rated</code> or <code>rating:unrated</code>, or numeric constraints such as <code>rating:4</code>, <code>rating:&gt;=3</code>, and <code>rating:&lt;2</code>. Whitespace-separated terms are combined.</li>
                         <li>Use <strong>View &gt; Sort</strong> to sort by filename, modified date, file size, dimensions, type, date taken, rating, tags, or random order.</li>
                         <li>Toggle <strong>View &gt; Sort &gt; Descending</strong> to switch between ascending and descending order.</li>
                         <li>Turn on <strong>View &gt; Recursive Browsing</strong> when the current folder and its descendants should be treated as one image collection.</li>
@@ -299,7 +300,7 @@
                 <div>
                     <h3>Image operations</h3>
                     <ul>
-                        <li>Batch convert a selection or the current folder to JPEG, PNG, or TIFF.</li>
+                        <li>Batch convert a selection or the current folder to JPEG, PNG, or TIFF. Conversion creates a rendered output; it may omit source metadata, color profiles, animation/pages, or alpha when the target format cannot represent it.</li>
                         <li>JPEG orientation adjustment changes EXIF orientation metadata. It does not claim to be a lossless pixel rotation.</li>
                         <li>Use <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> to copy the displayed image pixels to the clipboard.</li>
                         <li>Use <strong>Edit &gt; Undo</strong> and <strong>Edit &gt; Redo</strong> for recent copy, move, and rename operations. Recycle Bin deletes remain recoverable through Windows.</li>
@@ -319,6 +320,7 @@
                 <li>The same commands work with selected files in the browser.</li>
                 <li>Paired RAW/JPEG files are included when paired operations are enabled.</li>
                 <li>Assignments are remembered by folder path, even when the destination list is reordered.</li>
+                <li>Confirmation text is also exposed through the main status surface; long paths are bounded to two lines in the temporary toast.</li>
             </ul>
         </section>
 
@@ -339,10 +341,16 @@
                 <li><strong>Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
                 <li><strong>Tools &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
                 <li><strong>Tools &gt; Integration</strong> contains file associations. Single-instance behavior is on the Behavior tab.</li>
-                <li><strong>Behavior</strong> can enable recursive browsing, show subfolders, make Esc close the main window instead of minimizing it, and enable single-instance behavior. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> continues to minimize.</li>
+                <li><strong>Behavior</strong> can enable recursive browsing, show subfolders, make Esc close the main window instead of doing nothing, and enable single-instance behavior. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> minimizes.</li>
                 <li><strong>View &gt; Thumbnail Size</strong> still provides fixed presets and keyboard stepping.</li>
             </ul>
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
+        </section>
+
+        <section id="release-2-2">
+            <h2>What changed in 2.2</h2>
+            <p>Version 2.2 strengthens ratings and tags across Unicode paths, folder and case-only renames, save failures, and multiple app instances. File-operation undo verifies result identity, batch conversion publishes complete files atomically, image information/copy/orientation work runs through a cancellable background service, and slideshow timing now updates every active viewer. Settings adds semantic accessibility, custom surfaces follow Windows high-contrast colors, and Quick Actions confirmations use a bounded two-line layout.</p>
+            <div class="callout"><strong>Known limitations.</strong> GIF and TIFF browsing shows the first frame or page. JPEG orientation adjustment edits EXIF orientation metadata. Converted output is a rendered copy and can omit source-only metadata or features. Optional NVIDIA acceleration requires a supported GPU and runtime; WIC remains the fallback. Screen-reader, mixed-DPI, high-contrast, installer, and hosted-CI sign-off is tracked in the release polish plan.</div>
         </section>
 
         <section id="shortcuts">
@@ -357,7 +365,7 @@
                     <tr><td>File</td><td><kbd>F2</kbd></td><td>Rename the selected item</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>Open the selected image in a new viewer window</td></tr>
                     <tr><td>File</td><td><kbd>F5</kbd></td><td>Refresh the folder tree</td></tr>
-                    <tr><td>File</td><td><kbd>Esc</kbd></td><td>Minimize, or close when enabled in Settings</td></tr>
+                    <tr><td>File</td><td><kbd>Esc</kbd></td><td>Close when enabled in Settings; otherwise do nothing</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td>Minimize the main window</td></tr>
                     <tr><td>Navigation</td><td>Mouse Back button / <kbd>Backspace</kbd> / <kbd>Alt</kbd> + <kbd>Left</kbd></td><td>Navigate to the previous folder</td></tr>
                     <tr><td>Navigation</td><td>Mouse Forward button / <kbd>Alt</kbd> + <kbd>Right</kbd></td><td>Navigate to the next folder</td></tr>
@@ -421,7 +429,7 @@
             <h3>Browsing a large folder feels busy</h3>
             <p>Allow the initial enumeration to finish, then adjust the Performance Profile if needed. Persistent thumbnail cache maintenance is available under <strong>Tools &gt; Performance</strong>. The diagnostics snapshot under <strong>Tools &gt; Diagnostics</strong> can capture state for a bug report.</p>
             <h3>Where are settings stored?</h3>
-            <p>User settings are stored under <code>HKCU\Software\HyperBrowse</code>. Portable mode does not make settings portable; the application still uses the current Windows user's profile.</p>
+            <p>User settings are stored under <code>HKCU\Software\HyperBrowse</code>. Portable mode does not make settings portable; the application still uses the current Windows user's profile. The installer retains these preferences on uninstall. A current-user installation registers Open With entries for that user, while an all-users installation registers them at machine scope.</p>
         </section>
 
         <section id="about-this-guide">

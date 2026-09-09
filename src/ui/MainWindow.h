@@ -62,8 +62,11 @@ namespace hyperbrowse::services
     enum class FileOperationType : int;
     struct FileConflictPlan;
     struct FileOperationUpdate;
+    struct ImageCommandUpdate;
+    struct ImageMetadata;
     class BatchConvertService;
     class FileOperationService;
+    class ImageCommandService;
     class FolderEnumerationService;
     class FolderWatchService;
     class ThumbnailScheduler;
@@ -120,6 +123,7 @@ namespace hyperbrowse::ui
         using FolderTreeNodeData = FolderTreeController::NodeData;
 
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseMainWindow";
+        static constexpr const wchar_t* kQuickSendConfirmationToastWindowClassName = L"HyperBrowseQuickSendConfirmationToast";
         static constexpr UINT kDeferredMenuStateMessage = WM_APP + 73;
         static constexpr UINT_PTR kDisplaySurfaceRecoveryTimerId = 9103;
         static constexpr UINT_PTR kFileOperationShutdownTimerId = 9104;
@@ -238,6 +242,8 @@ namespace hyperbrowse::ui
         void LayoutChildren();
         void UpdateStatusText();
         void ShowQuickSendConfirmation(std::wstring message, HWND viewerHwnd = nullptr);
+        void LayoutQuickSendConfirmationToast();
+        void PaintQuickSendConfirmationToast(HDC hdc) const;
         void UpdateMenuState();
         void UpdateWindowTitle() const;
         void ApplyViewerMouseWheelSetting();
@@ -326,6 +332,9 @@ namespace hyperbrowse::ui
         void ExportRedactedDiagnosticsSnapshot();
         void ResetDiagnosticsState();
         void ShowImageInformation(HWND ownerWindow = nullptr);
+        void PresentImageInformation(const browser::BrowserItem& item,
+                                     std::shared_ptr<const services::ImageMetadata> metadata,
+                                     HWND ownerWindow);
         void StartRenameSelectedImage();
         void StartBatchRenameSelection();
         void StartCompareSelected();
@@ -390,6 +399,8 @@ namespace hyperbrowse::ui
         void SetDesktopWallpaperFromImageFile(const std::wstring& imagePath);
         void ShowImageInformationForPath(const std::wstring& filePath, HWND ownerWindow = nullptr);
         void CopySelectedImagePixelsToClipboard(std::wstring_view preferredPath = {});
+        void CopyDecodedImageToClipboard(std::shared_ptr<const cache::CachedThumbnail> image,
+                                         HWND ownerWindow);
         void StartDuplicateSelection();
         void StartSlideshow(bool selectionScope);
         void StartFolderSlideshow(std::wstring_view preferredPath = {});
@@ -443,6 +454,7 @@ namespace hyperbrowse::ui
         LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneQuickSendDragMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBatchConvertMessage(LPARAM lParam);
+        LRESULT OnImageCommandMessage(LPARAM lParam);
         LRESULT OnFileOperationMessage(LPARAM lParam);
         LRESULT OnFileOperationProgressMessage(LPARAM lParam);
         LRESULT OnDetailsPanelThumbnailMessage(LPARAM lParam);
@@ -548,6 +560,10 @@ namespace hyperbrowse::ui
 
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+        static LRESULT CALLBACK QuickSendConfirmationToastWindowProc(HWND hwnd,
+                                         UINT message,
+                                         WPARAM wParam,
+                                         LPARAM lParam);
 
         void OnSize();
         void OnGetMinMaxInfo(MINMAXINFO* minMaxInfo) const;
@@ -653,6 +669,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<browser::BrowserModel> browserModel_;
         std::unique_ptr<browser::BrowserPane> browserPaneController_;
         std::unique_ptr<services::BatchConvertService> batchConvertService_;
+        std::unique_ptr<services::ImageCommandService> imageCommandService_;
         std::unique_ptr<services::FileOperationService> fileOperationService_;
         std::unique_ptr<FolderLoadCoordinator> folderLoadCoordinator_;
         std::unique_ptr<FolderWatchChangeCoordinator> folderWatchChangeCoordinator_;
@@ -719,12 +736,17 @@ namespace hyperbrowse::ui
         std::array<std::uint32_t, 64> detailsPanelHistogramBlue_{};
         std::uint32_t detailsPanelHistogramPeak_{};
         std::uint64_t activeBatchConvertRequestId_{};
+        std::uint64_t activeImageCommandRequestId_{};
         std::uint64_t activeFileOperationRequestId_{};
         HWND foregroundWindowAtFileOperationStart_{};
         HWND focusWindowAtFileOperationStart_{};
         bool batchConvertActive_{};
+        bool batchConvertCancelling_{};
+        bool imageCommandActive_{};
+        bool imageCommandCancelling_{};
         bool fileOperationActive_{};
         UINT_PTR quickSendConfirmationTimerId_{};
+        HWND quickSendConfirmationToastWindow_{};
         std::wstring quickSendConfirmationText_;
         bool cacheMaintenanceActive_{};
         bool closePending_{};
@@ -735,6 +757,7 @@ namespace hyperbrowse::ui
         std::size_t batchConvertFailed_{};
         std::wstring batchConvertOutputFolder_;
         std::wstring batchConvertCurrentFile_;
+        std::wstring imageCommandActivityLabel_;
         std::wstring activeTreeFolderOperationPath_;
         std::wstring activeTreeFolderRenamePath_;
         std::wstring pendingInlineRenameOriginalPath_;

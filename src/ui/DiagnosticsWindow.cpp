@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "app/resource.h"
+#include "ui/SystemTheme.h"
 
 namespace
 {
@@ -604,6 +605,17 @@ namespace hyperbrowse::ui
 
     DiagnosticsWindow::ThemeColors DiagnosticsWindow::GetThemeColors() const
     {
+        if (IsHighContrastEnabled())
+        {
+            return ThemeColors{
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_GRAYTEXT),
+                GetSysColor(COLOR_WINDOWTEXT),
+            };
+        }
+
         if (darkTheme_)
         {
             return ThemeColors{
@@ -635,6 +647,11 @@ namespace hyperbrowse::ui
             return 0;
         case WM_DISPLAYCHANGE:
             RecoverDisplaySurface();
+            return 0;
+        case WM_SETTINGCHANGE:
+        case WM_SYSCOLORCHANGE:
+        case WM_THEMECHANGED:
+            ApplyTheme();
             return 0;
         case WM_GETMINMAXINFO:
         {

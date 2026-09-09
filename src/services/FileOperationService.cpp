@@ -623,6 +623,7 @@ namespace hyperbrowse::services
             auto update = std::make_unique<FileOperationUpdate>();
             update->requestId = requestId;
             update->type = type;
+            update->conflictPolicy = conflictPolicy;
             update->requestedCount = sourcePaths.size();
             update->destinationFolder = destinationFolder;
             update->finished = true;
@@ -815,6 +816,7 @@ namespace hyperbrowse::services
             auto update = std::make_unique<FileOperationUpdate>();
             update->requestId = requestId;
             update->type = type;
+            update->conflictPolicy = conflictPolicy;
             update->requestedCount = requestedItemCount;
             update->failedCount = requestedItemCount;
             update->destinationFolder = requestedDestinationFolder;

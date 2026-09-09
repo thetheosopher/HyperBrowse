@@ -37,6 +37,7 @@
 #include "services/FileAssociationService.h"
 #include "services/FileOperationService.h"
 #include "services/ImageMetadataService.h"
+#include "services/ImageCommandService.h"
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
@@ -59,6 +60,7 @@
 #include "ui/FolderTreeDropPolicy.h"
 #include "ui/FolderTreeDragController.h"
 #include "ui/RightPaneHitTester.h"
+#include "ui/SystemTheme.h"
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
 #include "ui/MainWindowDialogState.h"
@@ -104,6 +106,12 @@
 namespace fs = std::filesystem;
 
 using namespace hyperbrowse::ui::command_ids;
+
+namespace hyperbrowse::ui
+{
+    void InitializeExperimentalSettingsAccessibility(
+        dialog_detail::ExperimentalSettingsDialogState& state);
+}
 
 namespace
 {
@@ -1605,6 +1613,25 @@ namespace
         }
 
         return path;
+    }
+
+    std::vector<std::wstring> FileLeafNames(const std::vector<std::wstring>& paths)
+    {
+        std::vector<std::wstring> names;
+        names.reserve(paths.size());
+        for (const std::wstring& path : paths)
+        {
+            names.push_back(fs::path(path).filename().wstring());
+        }
+        return names;
+    }
+
+    bool AllFileOperationPathStatesValid(const std::vector<hyperbrowse::ui::FileOperationPathState>& states)
+    {
+        return std::all_of(states.begin(), states.end(), [](const hyperbrowse::ui::FileOperationPathState& state)
+        {
+            return state.valid;
+        });
     }
 
     std::wstring RewritePathPrefix(std::wstring_view path, std::wstring_view oldPrefix, std::wstring_view newPrefix)
@@ -3711,7 +3738,7 @@ namespace
                 &normalizedQuickSendShortcutOrder))
         {
             MessageBoxW(hwnd,
-                        L"Enter each supported Quick Send key at most once; unsupported characters are not allowed.",
+                        L"Enter each supported Quick Actions key at most once; unsupported characters are not allowed.",
                         state->title.c_str(),
                         MB_OK | MB_ICONWARNING);
             SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::QuickSendShortcutOrder));
@@ -3871,7 +3898,7 @@ namespace
                 L"Thumbnail cache cap (MB)",
                 L"Metadata cache cap (entries)",
                 L"Prefetch depth (items)",
-                L"New Quick Send shortcut order"};
+                L"New Quick Actions shortcut order"};
             const std::array checkboxTexts{
                 L"Use slideshow transitions",
                 L"Treat paired RAW+JPEG files as one operation",
@@ -4070,7 +4097,7 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
             y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::QuickSendShortcutOrder, L"New Quick Send shortcut order", y);
+            label(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::QuickSendShortcutOrder, L"New Quick Actions shortcut order", y);
             CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Behavior, L"EDIT", nullptr,
                                               WS_TABSTOP | ES_AUTOHSCROLL, valueLeft, y, valueWidth, rowHeight,
                                               ConsolidatedSettingsControlId(ConsolidatedSettingsControl::QuickSendShortcutOrder),
@@ -4898,7 +4925,7 @@ namespace
             y += rowHeight + rowGap;
             check(ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
             y += rowHeight + rowGap;
-            labelValue(L"New Quick Send shortcut order", ConsolidatedSettingsControl::QuickSendShortcutOrder, y);
+            labelValue(L"New Quick Actions shortcut order", ConsolidatedSettingsControl::QuickSendShortcutOrder, y);
             break;
         default:
             break;
@@ -5379,6 +5406,10 @@ namespace
         }
 
         InvalidateRect(state.dialogWindow, nullptr, FALSE);
+        if (state.accessibility)
+        {
+            state.accessibility->NotifyFocusChanged();
+        }
         return true;
     }
 
@@ -5431,6 +5462,10 @@ namespace
             UpdateExperimentalSettingsCacheValues(state);
         }
         InvalidateRect(state.dialogWindow, nullptr, FALSE);
+        if (state.accessibility)
+        {
+            state.accessibility->NotifyStateChanged(CHILDID_SELF);
+        }
     }
 
     void ActivateExperimentalSettingsTarget(ExperimentalSettingsDialogState& state,
@@ -5747,8 +5782,8 @@ namespace
         }
         RECT client{};
         GetClientRect(state.dialogWindow, &client);
-        const bool dark = state.settings->darkTheme;
-        const COLORREF windowColor = dark ? RGB(24, 28, 32) : RGB(244, 246, 249);
+        const COLORREF windowColor = hyperbrowse::ui::MakeDialogTheme(
+            state.settings->darkTheme).windowBackground;
         const bool dialogHasSemanticFocus = GetFocus() == state.dialogWindow;
         const auto customTargetFocused = [&](ExperimentalSettingsFocusTargetKind kind, int index)
         {
@@ -5901,7 +5936,7 @@ namespace
                 &normalizedQuickSendShortcutOrder))
         {
             MessageBoxW(hwnd,
-                        L"Enter each supported Quick Send key at most once; unsupported characters are not allowed.",
+                        L"Enter each supported Quick Actions key at most once; unsupported characters are not allowed.",
                         state.settings->title.c_str(),
                         MB_OK | MB_ICONWARNING);
             SetFocus(state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)]);
@@ -5965,13 +6000,7 @@ namespace
     void ApplyExperimentalSettingsTheme(ExperimentalSettingsDialogState& state)
     {
         const bool dark = state.settings && state.settings->darkTheme;
-        const COLORREF panelColor = dark ? RGB(34, 39, 45) : RGB(255, 255, 255);
-        const COLORREF fieldColor = dark ? RGB(45, 51, 59) : RGB(247, 249, 252);
-        const COLORREF borderColor = dark ? RGB(78, 87, 98) : RGB(215, 221, 229);
-        const COLORREF textColor = dark ? RGB(235, 239, 244) : RGB(30, 36, 44);
-        const COLORREF mutedColor = dark ? RGB(157, 167, 179) : RGB(105, 116, 131);
-        const COLORREF accentColor = dark ? RGB(112, 169, 227) : RGB(54, 114, 186);
-        const COLORREF accentFill = dark ? RGB(47, 68, 92) : RGB(220, 233, 247);
+        const hyperbrowse::ui::DialogTheme theme = hyperbrowse::ui::MakeDialogTheme(dark);
         auto createBrush = [&](Microsoft::WRL::ComPtr<ID2D1SolidColorBrush>& brush, COLORREF color)
         {
             if (state.renderTarget)
@@ -5979,14 +6008,19 @@ namespace
                 state.renderTarget->CreateSolidColorBrush(hyperbrowse::render::ToD2DColor(color), brush.ReleaseAndGetAddressOf());
             }
         };
-        createBrush(state.panelBrush, panelColor);
-        createBrush(state.fieldBrush, fieldColor);
-        createBrush(state.borderBrush, borderColor);
-        createBrush(state.textBrush, textColor);
-        createBrush(state.mutedTextBrush, mutedColor);
-        createBrush(state.accentBrush, accentColor);
-        createBrush(state.accentFillBrush, accentFill);
-        createBrush(state.buttonTextBrush, RGB(255, 255, 255));
+        createBrush(state.panelBrush, theme.surfaceBackground);
+        createBrush(state.fieldBrush, theme.fieldBackground);
+        createBrush(state.borderBrush, theme.border);
+        createBrush(state.textBrush, theme.text);
+        createBrush(state.mutedTextBrush, theme.mutedText);
+        createBrush(state.accentBrush, theme.accent);
+        createBrush(state.accentFillBrush, theme.accentFill);
+        createBrush(state.buttonTextBrush, theme.accentText);
+        if (state.editBackgroundBrush)
+        {
+            DeleteObject(state.editBackgroundBrush);
+        }
+        state.editBackgroundBrush = CreateSolidBrush(theme.fieldBackground);
         InvalidateRect(state.dialogWindow, nullptr, FALSE);
     }
 
@@ -6001,13 +6035,11 @@ namespace
         const bool editField = (drawItem.itemState & ODS_COMBOBOXEDIT) != 0;
         const bool selected = (drawItem.itemState & ODS_SELECTED) != 0 && !editField;
         const bool disabled = (drawItem.itemState & ODS_DISABLED) != 0;
-        const bool dark = state.settings->darkTheme;
-        const COLORREF fieldBackground = dark ? RGB(45, 51, 59) : RGB(247, 249, 252);
-        const COLORREF selectedBackground = dark ? RGB(47, 68, 92) : RGB(220, 233, 247);
-        const COLORREF text = disabled
-            ? dark ? RGB(157, 167, 179) : RGB(105, 116, 131)
-            : dark ? RGB(235, 239, 244) : RGB(30, 36, 44);
-        const COLORREF border = dark ? RGB(78, 87, 98) : RGB(215, 221, 229);
+        const auto theme = hyperbrowse::ui::MakeDialogTheme(state.settings->darkTheme);
+        const COLORREF fieldBackground = theme.fieldBackground;
+        const COLORREF selectedBackground = theme.accentFill;
+        const COLORREF text = disabled ? theme.mutedText : (selected ? theme.accentText : theme.text);
+        const COLORREF border = theme.border;
         const RECT itemRect = drawItem.rcItem;
         HBRUSH backgroundBrush = CreateSolidBrush(selected ? selectedBackground : fieldBackground);
         if (backgroundBrush)
@@ -6249,6 +6281,7 @@ namespace
             EnableWindow(state->numericSpins[4], prefetchDepthAutomatic ? FALSE : TRUE);
             ApplyExperimentalSettingsTheme(*state);
             LayoutExperimentalSettings(*state);
+            hyperbrowse::ui::InitializeExperimentalSettingsAccessibility(*state);
             return 0;
         }
         case WM_SIZE:
@@ -6341,6 +6374,16 @@ namespace
                 {
                     DrawExperimentalSettingsComboItem(*state, *drawItem);
                     return TRUE;
+                }
+            }
+            break;
+        case WM_GETOBJECT:
+            if (state && state->accessibility)
+            {
+                const LRESULT result = state->accessibility->HandleGetObject(wParam, lParam);
+                if (result != 0)
+                {
+                    return result;
                 }
             }
             break;
@@ -6529,6 +6572,10 @@ namespace
                     state->settings->resourceProfile = static_cast<hyperbrowse::util::ResourceProfile>(selected);
                     UpdateExperimentalSettingsCacheValues(*state);
                 }
+                if (state->accessibility)
+                {
+                    state->accessibility->NotifyStateChanged(CHILDID_SELF);
+                }
                 return 0;
             }
             break;
@@ -6538,17 +6585,35 @@ namespace
             if (state)
             {
                 const HDC dc = reinterpret_cast<HDC>(wParam);
-                SetTextColor(dc, state->settings->darkTheme ? RGB(235, 239, 244) : RGB(30, 36, 44));
-                SetBkColor(dc, state->settings->darkTheme ? RGB(45, 51, 59) : RGB(247, 249, 252));
+                const auto theme = hyperbrowse::ui::MakeDialogTheme(state->settings->darkTheme);
+                SetTextColor(dc, theme.text);
+                SetBkColor(dc, theme.fieldBackground);
                 return reinterpret_cast<LRESULT>(state->editBackgroundBrush);
             }
             break;
+        case WM_SETTINGCHANGE:
+        case WM_SYSCOLORCHANGE:
+        case WM_THEMECHANGED:
+            if (state)
+            {
+                ApplyExperimentalSettingsTheme(*state);
+                const auto theme = hyperbrowse::ui::MakeDialogTheme(state->settings->darkTheme);
+                ApplyWindowFrameTheme(hwnd,
+                                      state->settings->darkTheme && !hyperbrowse::ui::IsHighContrastEnabled(),
+                                      theme.windowBackground,
+                                      theme.text,
+                                      theme.border);
+                RedrawWindow(hwnd, nullptr, nullptr,
+                             RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+            }
+            return 0;
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
             if (state)
             {
+                state->accessibility.reset();
                 for (HWND edit : state->numericEdits)
                 {
                     if (edit)
@@ -6625,10 +6690,12 @@ namespace
             return ExperimentalSettingsDialogResult::Unavailable;
         }
         SetWindowTextW(dialogWindow, settings->title.c_str());
-        ApplyWindowFrameTheme(dialogWindow, settings->darkTheme,
-                              settings->darkTheme ? RGB(24, 28, 32) : RGB(244, 246, 249),
-                              settings->darkTheme ? RGB(235, 239, 244) : RGB(30, 36, 44),
-                              settings->darkTheme ? RGB(78, 87, 98) : RGB(215, 221, 229));
+        const auto dialogTheme = hyperbrowse::ui::MakeDialogTheme(settings->darkTheme);
+        ApplyWindowFrameTheme(dialogWindow,
+                              settings->darkTheme && !hyperbrowse::ui::IsHighContrastEnabled(),
+                              dialogTheme.windowBackground,
+                              dialogTheme.text,
+                              dialogTheme.border);
         RefreshWindowNonClientArea(dialogWindow);
         CenterWindowOnOwner(dialogWindow, ownerWindow);
         ShowWindow(dialogWindow, SW_SHOWNORMAL);
@@ -9401,6 +9468,7 @@ namespace hyperbrowse::ui
         , browserModel_(std::make_unique<browser::BrowserModel>())
         , browserPaneController_(std::make_unique<browser::BrowserPane>(instance))
         , batchConvertService_(std::make_unique<services::BatchConvertService>())
+        , imageCommandService_(std::make_unique<services::ImageCommandService>())
         , fileOperationService_(std::make_unique<services::FileOperationService>())
         , folderLoadCoordinator_(std::make_unique<FolderLoadCoordinator>())
         , folderWatchChangeCoordinator_(std::make_unique<FolderWatchChangeCoordinator>())
@@ -9432,8 +9500,19 @@ namespace hyperbrowse::ui
         messageHandlers.onBrowserPaneContextMenu = std::bind_front(&MainWindow::OnBrowserPaneContextMenuMessage, this);
         messageHandlers.onBrowserPaneQuickSendDrag = std::bind_front(&MainWindow::OnBrowserPaneQuickSendDragMessage, this);
         messageHandlers.onBatchConvert = std::bind_front(&MainWindow::OnBatchConvertMessage, this);
+        messageHandlers.onImageCommand = std::bind_front(&MainWindow::OnImageCommandMessage, this);
         messageHandlers.onFileOperation = std::bind_front(&MainWindow::OnFileOperationMessage, this);
         messageHandlers.onFileOperationProgress = std::bind_front(&MainWindow::OnFileOperationProgressMessage, this);
+        messageHandlers.onUserMetadataSaveError = [this]()
+        {
+            const std::wstring error = userMetadataStore_ ? userMetadataStore_->LastSaveError() : std::wstring{};
+            if (!error.empty() && hwnd_)
+            {
+                const std::wstring message = L"HyperBrowse could not save ratings and tags. Your current changes remain available while the application is open, and the next edit will retry the save.\n\n" + error;
+                MessageBoxW(hwnd_, message.c_str(), L"Ratings and tags were not saved", MB_OK | MB_ICONWARNING);
+            }
+            return static_cast<LRESULT>(0);
+        };
         messageHandlers.onDetailsPanelThumbnail = std::bind_front(&MainWindow::OnDetailsPanelThumbnailMessage, this);
         messageHandlers.onViewerZoom = std::bind_front(&MainWindow::OnViewerZoomMessage, this);
         messageHandlers.onViewerActivity = std::bind_front(&MainWindow::OnViewerActivityMessage, this);
@@ -9496,6 +9575,10 @@ namespace hyperbrowse::ui
                 {
                     activeFileOperationLabel_ = L"Waiting for conversion to finish";
                 }
+                else if (imageCommandActive_)
+                {
+                    imageCommandActivityLabel_ = L"Waiting for the image command to finish";
+                }
                 UpdateStatusText();
             }
             return static_cast<LRESULT>(0);
@@ -9545,6 +9628,10 @@ namespace hyperbrowse::ui
             KillTimer(hwnd_, quickSendConfirmationTimerId_);
             quickSendConfirmationTimerId_ = 0;
             quickSendConfirmationText_.clear();
+            if (quickSendConfirmationToastWindow_)
+            {
+                ShowWindow(quickSendConfirmationToastWindow_, SW_HIDE);
+            }
             UpdateStatusText();
             return static_cast<LRESULT>(0);
         };
@@ -9640,6 +9727,14 @@ namespace hyperbrowse::ui
         };
         fileCommandHandlers.onEscape = [this]
         {
+            if (imageCommandActive_ && imageCommandService_)
+            {
+                imageCommandService_->Cancel();
+                imageCommandCancelling_ = true;
+                imageCommandActivityLabel_ = L"Cancelling image command";
+                UpdateStatusText();
+                return;
+            }
             if (closeMainWindowOnEscape_)
             {
                 PostMessageW(hwnd_, WM_CLOSE, 0, 0);
@@ -9739,10 +9834,10 @@ namespace hyperbrowse::ui
         fileCommandHandlers.onBatchConvert = std::bind_front(&MainWindow::StartBatchConvert, this);
         fileCommandHandlers.onCancelBatchConvert = [this]
         {
-            if (batchConvertService_)
+            if (batchConvertService_ && batchConvertActive_ && !batchConvertCancelling_)
             {
                 batchConvertService_->Cancel();
-                batchConvertActive_ = false;
+                batchConvertCancelling_ = true;
                 UpdateStatusText();
                 UpdateMenuState();
             }
@@ -9976,6 +10071,17 @@ namespace hyperbrowse::ui
         accessibility_.reset();
         cacheMaintenanceExecutor_.reset();
 
+        if (userMetadataStore_)
+        {
+            userMetadataStore_->SetNotificationWindow(nullptr);
+            userMetadataStore_->Shutdown();
+        }
+
+        if (imageCommandService_)
+        {
+            imageCommandService_->Shutdown();
+        }
+
         if (shortcutReferenceWindow_ && IsWindow(shortcutReferenceWindow_))
         {
             DestroyWindow(shortcutReferenceWindow_);
@@ -10004,7 +10110,7 @@ namespace hyperbrowse::ui
 
         if (batchConvertService_)
         {
-            batchConvertService_->Cancel();
+            batchConvertService_->Shutdown();
         }
 
         if (fileOperationService_)
@@ -10114,6 +10220,11 @@ namespace hyperbrowse::ui
         {
             util::LogLastError(L"CreateWindowExW(MainWindow)");
             return false;
+        }
+
+        if (userMetadataStore_)
+        {
+            userMetadataStore_->SetNotificationWindow(hwnd_);
         }
 
         sessionNotificationRegistered_ = WTSRegisterSessionNotification(hwnd_, NOTIFY_FOR_THIS_SESSION) != FALSE;
@@ -10433,7 +10544,18 @@ namespace hyperbrowse::ui
                        IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
                        GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
 
-        return RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+        const bool mainClassRegistered = RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+
+        WNDCLASSEXW toastClass = wc;
+        toastClass.lpfnWndProc = &MainWindow::QuickSendConfirmationToastWindowProc;
+        toastClass.lpszClassName = kQuickSendConfirmationToastWindowClassName;
+        toastClass.hIcon = nullptr;
+        toastClass.hIconSm = nullptr;
+        toastClass.style = CS_HREDRAW | CS_VREDRAW;
+        const bool toastClassRegistered = RegisterClassExW(&toastClass) != 0
+            || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+
+        return mainClassRegistered && toastClassRegistered;
     }
 
     bool MainWindow::CreateAccelerators()
@@ -11961,6 +12083,7 @@ namespace hyperbrowse::ui
         }
 
         UpdateStatusText();
+        LayoutQuickSendConfirmationToast();
         if (accessibility_)
         {
             accessibility_->NotifyStateChanged(CHILDID_SELF);
@@ -12005,16 +12128,20 @@ namespace hyperbrowse::ui
         }
         else if (!quickSendConfirmationText_.empty())
         {
-            statusPrimaryText_ = L"Quick Send: " + quickSendConfirmationText_ + L"  |  " + statusPrimaryText_;
+            statusPrimaryText_ = L"Quick Actions: " + quickSendConfirmationText_ + L"  |  " + statusPrimaryText_;
         }
         else if (batchConvertActive_)
         {
-            statusPrimaryText_ = L"Converting: "
+            statusPrimaryText_ = (batchConvertCancelling_ ? L"Cancelling conversion: " : L"Converting: ")
                 + std::to_wstring(batchConvertCompleted_)
                 + L" / "
                 + std::to_wstring(batchConvertTotal_)
                 + L"  |  "
                 + statusPrimaryText_;
+        }
+        else if (imageCommandActive_ && !imageCommandActivityLabel_.empty())
+        {
+            statusPrimaryText_ = imageCommandActivityLabel_ + L" (Esc to cancel)  |  " + statusPrimaryText_;
         }
 
         const std::uint64_t selectedCount = browserPaneController_ ? browserPaneController_->SelectedCount() : 0;
@@ -12086,6 +12213,35 @@ namespace hyperbrowse::ui
             KillTimer(hwnd_, quickSendConfirmationTimerId_);
         }
         quickSendConfirmationText_ = std::move(message);
+        if (!quickSendConfirmationToastWindow_ && hwnd_)
+        {
+            quickSendConfirmationToastWindow_ = CreateWindowExW(
+                WS_EX_NOACTIVATE,
+                kQuickSendConfirmationToastWindowClassName,
+                nullptr,
+                WS_CHILD | WS_CLIPSIBLINGS,
+                0,
+                0,
+                0,
+                0,
+                hwnd_,
+                nullptr,
+                instance_,
+                this);
+            if (!quickSendConfirmationToastWindow_)
+            {
+                util::LogLastError(L"CreateWindowExW(QuickSendConfirmationToast)");
+            }
+        }
+        if (quickSendConfirmationToastWindow_)
+        {
+            SetWindowTextW(quickSendConfirmationToastWindow_, quickSendConfirmationText_.c_str());
+            NotifyWinEvent(EVENT_SYSTEM_ALERT,
+                           quickSendConfirmationToastWindow_,
+                           OBJID_WINDOW,
+                           CHILDID_SELF);
+        }
+        LayoutQuickSendConfirmationToast();
         quickSendConfirmationTimerId_ = SetTimer(hwnd_,
                                                  kQuickSendConfirmationTimerId,
                                                  kQuickSendConfirmationDurationMs,
@@ -12093,8 +12249,183 @@ namespace hyperbrowse::ui
         if (quickSendConfirmationTimerId_ == 0)
         {
             quickSendConfirmationText_.clear();
+            if (quickSendConfirmationToastWindow_)
+            {
+                ShowWindow(quickSendConfirmationToastWindow_, SW_HIDE);
+            }
         }
         UpdateStatusText();
+    }
+
+    void MainWindow::LayoutQuickSendConfirmationToast()
+    {
+        if (!quickSendConfirmationToastWindow_ || !IsWindow(quickSendConfirmationToastWindow_))
+        {
+            return;
+        }
+
+        if (quickSendConfirmationText_.empty())
+        {
+            ShowWindow(quickSendConfirmationToastWindow_, SW_HIDE);
+            return;
+        }
+
+        RECT client{};
+        GetClientRect(hwnd_, &client);
+        const int clientWidth = std::max(0, static_cast<int>(client.right - client.left));
+        const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top));
+        const int statusHeight = std::min(kStatusStripHeight,
+                                          std::max(0, clientHeight - kActionStripHeight));
+        const int contentHeight = std::max(0, clientHeight - statusHeight - kActionStripHeight);
+        if (clientWidth <= 0 || contentHeight <= 0)
+        {
+            ShowWindow(quickSendConfirmationToastWindow_, SW_HIDE);
+            return;
+        }
+
+        const int dpi = static_cast<int>(std::max<UINT>(96, GetDpiForWindow(hwnd_)));
+        const auto scaleForDpi = [dpi](int value)
+        {
+            return MulDiv(value, dpi, 96);
+        };
+        const int toastWidth = std::min(scaleForDpi(720),
+                                        std::max(scaleForDpi(120), clientWidth - scaleForDpi(32)));
+        const int requestedToastHeight = scaleForDpi(
+            hyperbrowse::util::ScaleAppTextDimension(64, appTextSize_));
+        const int toastHeight = std::min(requestedToastHeight, contentHeight);
+        const int toastLeft = std::max(scaleForDpi(8), (clientWidth - toastWidth) / 2);
+        const int toastTop = kActionStripHeight
+            + std::min(scaleForDpi(16), std::max(0, contentHeight - toastHeight));
+        const int cornerRadius = std::min(scaleForDpi(16), std::max(2, toastHeight / 2));
+        HRGN region = CreateRoundRectRgn(0,
+                                         0,
+                                         toastWidth + 1,
+                                         toastHeight + 1,
+                                         cornerRadius,
+                                         cornerRadius);
+        if (region)
+        {
+            if (!SetWindowRgn(quickSendConfirmationToastWindow_, region, TRUE))
+            {
+                DeleteObject(region);
+            }
+        }
+
+        SetWindowPos(quickSendConfirmationToastWindow_,
+                     HWND_TOP,
+                     toastLeft,
+                     toastTop,
+                     toastWidth,
+                     toastHeight,
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        InvalidateRect(quickSendConfirmationToastWindow_, nullptr, FALSE);
+    }
+
+    void MainWindow::PaintQuickSendConfirmationToast(HDC hdc) const
+    {
+        if (!hdc || quickSendConfirmationText_.empty())
+        {
+            return;
+        }
+
+        RECT client{};
+        GetClientRect(quickSendConfirmationToastWindow_, &client);
+        const int width = client.right - client.left;
+        const int height = client.bottom - client.top;
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        const int dpi = static_cast<int>(std::max<UINT>(96, GetDpiForWindow(hwnd_)));
+        const float textPadding = static_cast<float>(MulDiv(12, dpi, 96));
+        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+        const HFONT textFont = detailsPanelSummaryFont_
+            ? detailsPanelSummaryFont_
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        if (renderer.IsAvailable())
+        {
+            const auto renderTarget = renderer.CreateDCRenderTarget();
+            const auto textFormat = renderer.CreateTextFormatFromFont(textFont);
+            if (renderTarget && textFormat && SUCCEEDED(renderTarget->BindDC(hdc, &client)))
+            {
+                const auto createBrush = [renderTarget](COLORREF color)
+                {
+                    hyperbrowse::render::ComPtr<ID2D1SolidColorBrush> brush;
+                    renderTarget->CreateSolidColorBrush(
+                        hyperbrowse::render::ToD2DColor(color),
+                        brush.GetAddressOf());
+                    return brush;
+                };
+                const auto fillBrush = createBrush(palette.paneBackground);
+                const auto borderBrush = createBrush(palette.actionStripBorder);
+                const auto textBrush = createBrush(palette.text);
+                if (fillBrush && borderBrush && textBrush)
+                {
+                    textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                    textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                    textFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+                    const D2D1_RECT_F toastRect = D2D1::RectF(0.0f,
+                                                               0.0f,
+                                                               static_cast<float>(width),
+                                                               static_cast<float>(height));
+                    const D2D1_ROUNDED_RECT roundedToast = D2D1::RoundedRect(toastRect, 8.0f, 8.0f);
+                    renderTarget->BeginDraw();
+                    renderTarget->FillRoundedRectangle(roundedToast, fillBrush.Get());
+                    renderTarget->DrawRoundedRectangle(roundedToast, borderBrush.Get(), 1.0f);
+                    const auto textLayout = renderer.CreateTextLayout(
+                        quickSendConfirmationText_,
+                        textFormat.Get(),
+                        std::max(1.0f, static_cast<float>(width) - (textPadding * 2.0f)),
+                        static_cast<float>(height));
+                    if (textLayout)
+                    {
+                        const DWRITE_TRIMMING trimming{
+                            DWRITE_TRIMMING_GRANULARITY_WORD,
+                            0,
+                            0};
+                        Microsoft::WRL::ComPtr<IDWriteInlineObject> trimmingSign;
+                        if (renderer.DWriteFactory())
+                        {
+                            renderer.DWriteFactory()->CreateEllipsisTrimmingSign(
+                                textFormat.Get(),
+                                trimmingSign.GetAddressOf());
+                        }
+                        textLayout->SetTrimming(&trimming, trimmingSign.Get());
+                        renderTarget->DrawTextLayout(
+                            D2D1::Point2F(textPadding, 0.0f),
+                            textLayout.Get(),
+                            textBrush.Get(),
+                            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    }
+                    if (SUCCEEDED(renderTarget->EndDraw()))
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+
+        const HBRUSH toastBrush = CreateSolidBrush(palette.paneBackground);
+        const HPEN toastPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
+        const HGDIOBJ oldBrush = SelectObject(hdc, toastBrush);
+        const HGDIOBJ oldPen = SelectObject(hdc, toastPen);
+        RoundRect(hdc, 0, 0, width, height, 12, 12);
+        SelectObject(hdc, oldPen);
+        SelectObject(hdc, oldBrush);
+        DeleteObject(toastPen);
+        DeleteObject(toastBrush);
+
+        render::DrawGdiText(hdc,
+                            textFont,
+                            quickSendConfirmationText_.c_str(),
+                            static_cast<int>(quickSendConfirmationText_.size()),
+                            RECT{static_cast<LONG>(textPadding), 0,
+                                 width - static_cast<LONG>(textPadding), height},
+                            DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS,
+                            palette.text,
+                            palette.paneBackground);
     }
 
     void MainWindow::DrawStatusStrip(const DRAWITEMSTRUCT& drawItem) const
@@ -17128,7 +17459,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::ShowImageInformation(HWND ownerWindow)
     {
-        if (!browserPaneController_)
+        if (!browserPaneController_ || !browserModel_ || !imageCommandService_)
         {
             return;
         }
@@ -17148,28 +17479,44 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const browser::BrowserItem& item = items[static_cast<std::size_t>(modelIndex)];
-        std::wstring errorMessage;
-        const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex)
-            ? browserPaneController_->FindCachedMetadataForModelIndex(modelIndex)
-            : services::ExtractImageMetadata(item, &errorMessage);
+        const browser::BrowserItem item = items[static_cast<std::size_t>(modelIndex)];
+        if (const auto metadata = browserPaneController_->FindCachedMetadataForModelIndex(modelIndex))
+        {
+            PresentImageInformation(item, metadata, dialogOwner);
+            return;
+        }
 
+        imageCommandActive_ = true;
+        imageCommandCancelling_ = false;
+        imageCommandActivityLabel_ = L"Reading image information";
+        activeImageCommandRequestId_ = imageCommandService_->StartInformation(hwnd_, dialogOwner, item);
+        UpdateStatusText();
+    }
+
+    void MainWindow::PresentImageInformation(
+        const browser::BrowserItem& item,
+        std::shared_ptr<const services::ImageMetadata> metadata,
+        HWND ownerWindow)
+    {
+        const HWND dialogOwner = ownerWindow && IsWindow(ownerWindow) ? ownerWindow : hwnd_;
         if (!metadata)
         {
             MessageBoxW(dialogOwner,
-                        errorMessage.empty() ? L"No metadata is available for the selected image." : errorMessage.c_str(),
+                        L"No metadata is available for the selected image.",
                         L"Image Information",
                         MB_OK | MB_ICONINFORMATION);
             return;
         }
-
         const std::wstring content = services::FormatImageInfoContent(item);
         const std::wstring expanded = services::FormatImageInfoExpanded(*metadata);
         const std::wstring metadataContent = expanded.empty()
             ? L"No embedded EXIF, IPTC, XMP, or other metadata is available."
             : expanded;
         const std::wstring prompt = services::ExtractImagePrompt(*metadata);
-        std::wstring diagnostic = browserPaneController_->ThumbnailDecodeFailureMessageForModelIndex(modelIndex);
+        const int currentModelIndex = browserModel_ ? browserModel_->FindItemIndexByPath(item.filePath) : -1;
+        std::wstring diagnostic = browserPaneController_ && currentModelIndex >= 0
+            ? browserPaneController_->ThumbnailDecodeFailureMessageForModelIndex(currentModelIndex)
+            : std::wstring{};
         if (!diagnostic.empty())
         {
             diagnostic.insert(0, L"Decode diagnostic:\r\n");
@@ -17230,7 +17577,8 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const browser::BrowserItem& item = items[static_cast<std::size_t>(modelIndex)];
+        const std::wstring sourcePath = items[static_cast<std::size_t>(modelIndex)].filePath;
+        const std::wstring sourceLeafName = items[static_cast<std::size_t>(modelIndex)].fileName;
         std::wstring renamedLeafName;
         if (!PromptForRenameLeafName(hwnd_,
                                      instance_,
@@ -17238,15 +17586,31 @@ namespace hyperbrowse::ui
                                      themeMode_ == ThemeMode::Dark,
                                      L"Rename File",
                                      L"Enter a new file name.",
-                                     item.fileName,
+                                     sourceLeafName,
                                      true,
                                      &renamedLeafName))
         {
             return;
         }
 
+        const bool sourceStillCurrent = std::any_of(
+            browserModel_->Items().begin(),
+            browserModel_->Items().end(),
+            [&sourcePath](const browser::BrowserItem& currentItem)
+            {
+                return util::NormalizedPathEquals(currentItem.filePath, sourcePath);
+            });
+        if (!sourceStillCurrent || GetFileAttributesW(sourcePath.c_str()) == INVALID_FILE_ATTRIBUTES)
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected image changed or is no longer available. Refresh the folder and try again.",
+                        L"Rename Image",
+                        MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
         StartFileOperation(services::FileOperationType::Rename,
-                           {item.filePath},
+                           {sourcePath},
                            {},
                            services::FileConflictPolicy::PromptShell,
                            {renamedLeafName});
@@ -17473,6 +17837,17 @@ namespace hyperbrowse::ui
                                      false,
                                      &renamedLeafName))
         {
+            return;
+        }
+
+        error.clear();
+        if (!fs::is_directory(fs::path(folderPath), error) || error)
+        {
+            MessageBoxW(hwnd_,
+                        L"The selected folder changed or is no longer available. Refresh the folder tree and try again.",
+                        L"Rename Folder",
+                        MB_OK | MB_ICONINFORMATION);
+            RefreshFolderTree();
             return;
         }
 
@@ -18049,7 +18424,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::CopySelectedImagePixelsToClipboard(std::wstring_view preferredPath)
     {
-        if (!browserPaneController_ || !browserModel_)
+        if (!browserPaneController_ || !browserModel_ || !imageCommandService_)
         {
             return;
         }
@@ -18063,18 +18438,37 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const browser::BrowserItem& item = browserModel_->Items()[static_cast<std::size_t>(modelIndex)];
-        std::wstring errorMessage;
-        const auto image = decode::DecodeFullImage(item, &errorMessage);
-        if (!image || !image->Bitmap())
+        const browser::BrowserItem item = browserModel_->Items()[static_cast<std::size_t>(modelIndex)];
+        HWND dialogOwner = hwnd_;
+        if (!preferredPath.empty())
         {
-            MessageBoxW(hwnd_,
-                        errorMessage.empty() ? L"Unable to decode the selected image." : errorMessage.c_str(),
-                        L"Copy Image",
-                        MB_OK | MB_ICONERROR);
-            return;
+            for (viewer::ViewerWindow* viewer : OpenViewerWindows())
+            {
+                if (util::NormalizedPathEquals(viewer->CurrentFilePath(), preferredPath))
+                {
+                    dialogOwner = viewer->Hwnd();
+                    break;
+                }
+            }
         }
 
+        imageCommandActive_ = true;
+        imageCommandCancelling_ = false;
+        imageCommandActivityLabel_ = L"Decoding image for the clipboard";
+        activeImageCommandRequestId_ = imageCommandService_->StartCopyPixels(hwnd_, dialogOwner, item);
+        UpdateStatusText();
+    }
+
+    void MainWindow::CopyDecodedImageToClipboard(
+        std::shared_ptr<const cache::CachedThumbnail> image,
+        HWND ownerWindow)
+    {
+        const HWND dialogOwner = ownerWindow && IsWindow(ownerWindow) ? ownerWindow : hwnd_;
+        if (!image || !image->Bitmap())
+        {
+            MessageBoxW(dialogOwner, L"Unable to decode the selected image.", L"Copy Image", MB_OK | MB_ICONERROR);
+            return;
+        }
         // Convert the decoded bitmap into a packed CF_DIB (BITMAPINFOHEADER + pixels),
         // which is the clipboard format most image editors read.
         HDC screenDc = GetDC(nullptr);
@@ -18135,7 +18529,7 @@ namespace hyperbrowse::ui
             ReleaseDC(nullptr, screenDc);
         }
 
-        if (success && OpenClipboard(hwnd_))
+        if (success && OpenClipboard(dialogOwner))
         {
             success = EmptyClipboard() != FALSE && SetClipboardData(CF_DIB, dibBuffer) != nullptr;
             CloseClipboard();
@@ -18147,8 +18541,255 @@ namespace hyperbrowse::ui
             {
                 GlobalFree(dibBuffer);
             }
-            MessageBoxW(hwnd_, L"Failed to copy the image to the clipboard.", L"Copy Image", MB_OK | MB_ICONERROR);
+            MessageBoxW(dialogOwner, L"Failed to copy the image to the clipboard.", L"Copy Image", MB_OK | MB_ICONERROR);
         }
+    }
+
+    const wchar_t* ExperimentalSettingsAccessibleControlName(ConsolidatedSettingsControl control)
+    {
+        switch (control)
+        {
+        case ConsolidatedSettingsControl::TransitionEnabled: return L"Use slideshow transitions";
+        case ConsolidatedSettingsControl::TransitionStyle: return L"Transition style";
+        case ConsolidatedSettingsControl::SlideshowDuration: return L"Slide duration in milliseconds";
+        case ConsolidatedSettingsControl::TransitionDuration: return L"Transition duration in milliseconds";
+        case ConsolidatedSettingsControl::ViewerWheelZoom: return L"Mouse wheel zoom";
+        case ConsolidatedSettingsControl::ViewerWheelNavigate: return L"Mouse wheel navigate";
+        case ConsolidatedSettingsControl::InvertKeyboardPanning: return L"Invert keyboard panning";
+        case ConsolidatedSettingsControl::RawPairingEnabled: return L"Treat paired RAW and JPEG files as one operation";
+        case ConsolidatedSettingsControl::RawPreferJpeg: return L"Prefer JPEG";
+        case ConsolidatedSettingsControl::RawPreferRaw: return L"Prefer RAW";
+        case ConsolidatedSettingsControl::SecondaryMonitor: return L"Open viewers on a secondary monitor when available";
+        case ConsolidatedSettingsControl::InfoOverlays: return L"Show viewer detail overlays";
+        case ConsolidatedSettingsControl::OverlayTextSize: return L"Overlay text size";
+        case ConsolidatedSettingsControl::ThemeLight: return L"Light theme";
+        case ConsolidatedSettingsControl::ThemeDark: return L"Dark theme";
+        case ConsolidatedSettingsControl::AppTextSize: return L"Application text size";
+        case ConsolidatedSettingsControl::ThumbnailSize: return L"Thumbnail size";
+        case ConsolidatedSettingsControl::ThumbnailDetails: return L"Show thumbnail details";
+        case ConsolidatedSettingsControl::CompactLayout: return L"Use compact thumbnail layout";
+        case ConsolidatedSettingsControl::DetailsPanel: return L"Show the details panel";
+        case ConsolidatedSettingsControl::ResourceProfile: return L"Resource profile";
+        case ConsolidatedSettingsControl::PersistentCache: return L"Keep the persistent thumbnail cache enabled";
+        case ConsolidatedSettingsControl::ThumbnailCache: return L"Thumbnail cache cap in megabytes";
+        case ConsolidatedSettingsControl::ThumbnailCacheAutomatic: return L"Follow profile for thumbnail cache";
+        case ConsolidatedSettingsControl::MetadataCache: return L"Metadata cache cap in entries";
+        case ConsolidatedSettingsControl::MetadataCacheAutomatic: return L"Follow profile for metadata cache";
+        case ConsolidatedSettingsControl::PressureStatus: return L"Show memory pressure state in the status bar";
+        case ConsolidatedSettingsControl::NvJpeg: return L"Use NVIDIA JPEG acceleration when available";
+        case ConsolidatedSettingsControl::LibRawOutOfProcess: return L"Use out-of-process LibRaw fallback";
+        case ConsolidatedSettingsControl::RecursiveBrowsing: return L"Browse folders recursively";
+        case ConsolidatedSettingsControl::ShowSubfolders: return L"Show subfolders in the browser";
+        case ConsolidatedSettingsControl::CloseOnEscape: return L"Close the main window when Escape is pressed";
+        case ConsolidatedSettingsControl::SingleInstance: return L"Use a single application instance";
+        case ConsolidatedSettingsControl::EscapeKeyBehavior: return L"Escape key behavior in full screen";
+        case ConsolidatedSettingsControl::WindowedFullMetadata: return L"Show full metadata in windowed mode";
+        case ConsolidatedSettingsControl::FullScreenFullMetadata: return L"Show full metadata in full-screen mode";
+        case ConsolidatedSettingsControl::PrefetchDepth: return L"Prefetch depth in items";
+        case ConsolidatedSettingsControl::PrefetchDepthAutomatic: return L"Follow profile for prefetch depth";
+        case ConsolidatedSettingsControl::QuickSendShortcutOrder: return L"Quick Actions shortcut order";
+        default: return L"Setting";
+        }
+    }
+
+    bool ExperimentalSettingsAccessibleControlIsRadio(ConsolidatedSettingsControl control)
+    {
+        return control == ConsolidatedSettingsControl::ViewerWheelZoom
+            || control == ConsolidatedSettingsControl::ViewerWheelNavigate
+            || control == ConsolidatedSettingsControl::RawPreferRaw
+            || control == ConsolidatedSettingsControl::RawPreferJpeg
+            || control == ConsolidatedSettingsControl::ThemeLight
+            || control == ConsolidatedSettingsControl::ThemeDark;
+    }
+
+    std::vector<ExperimentalSettingsFocusTarget> ExperimentalSettingsAccessibilityTargets(
+        const ExperimentalSettingsDialogState& state)
+    {
+        std::vector<ExperimentalSettingsFocusTarget> targets;
+        targets.reserve(state.tabRects.size()
+                        + ExperimentalSettingsPageControlOrder(state.page).size()
+                        + 3);
+        for (int index = 0; index < static_cast<int>(state.tabRects.size()); ++index)
+        {
+            targets.push_back({ExperimentalSettingsFocusTargetKind::Tab, index});
+        }
+        for (const ConsolidatedSettingsControl control : ExperimentalSettingsPageControlOrder(state.page))
+        {
+            targets.push_back({ExperimentalSettingsNativeWindow(state, control)
+                                   ? ExperimentalSettingsFocusTargetKind::NativeControl
+                                   : ExperimentalSettingsFocusTargetKind::CustomControl,
+                               static_cast<int>(control)});
+        }
+        targets.push_back({ExperimentalSettingsFocusTargetKind::ApplyButton});
+        targets.push_back({ExperimentalSettingsFocusTargetKind::OkButton});
+        targets.push_back({ExperimentalSettingsFocusTargetKind::CancelButton});
+        return targets;
+    }
+
+    RECT ExperimentalSettingsAccessibleBounds(const ExperimentalSettingsDialogState& state,
+                                               const ExperimentalSettingsFocusTarget& target)
+    {
+        if (target.kind == ExperimentalSettingsFocusTargetKind::NativeControl)
+        {
+            RECT bounds{};
+            GetWindowRect(ExperimentalSettingsNativeWindow(
+                              state,
+                              static_cast<ConsolidatedSettingsControl>(target.index)),
+                          &bounds);
+            return bounds;
+        }
+
+        RECT bounds{};
+        if (target.kind == ExperimentalSettingsFocusTargetKind::Tab)
+        {
+            bounds = state.tabRects[static_cast<std::size_t>(target.index)];
+        }
+        else if (target.kind == ExperimentalSettingsFocusTargetKind::CustomControl)
+        {
+            bounds = state.controlRects[static_cast<std::size_t>(target.index)];
+        }
+        else if (target.kind == ExperimentalSettingsFocusTargetKind::ApplyButton)
+        {
+            bounds = state.applyButtonRect;
+        }
+        else if (target.kind == ExperimentalSettingsFocusTargetKind::OkButton)
+        {
+            bounds = state.okButtonRect;
+        }
+        else if (target.kind == ExperimentalSettingsFocusTargetKind::CancelButton)
+        {
+            bounds = state.cancelButtonRect;
+        }
+        POINT topLeft{bounds.left, bounds.top};
+        POINT bottomRight{bounds.right, bounds.bottom};
+        ClientToScreen(state.dialogWindow, &topLeft);
+        ClientToScreen(state.dialogWindow, &bottomRight);
+        return RECT{topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
+    }
+
+    void InitializeExperimentalSettingsAccessibility(ExperimentalSettingsDialogState& state)
+    {
+        auto snapshotProvider = [&state]()
+        {
+            std::vector<hyperbrowse::ui::MainWindowAccessibility::Item> items;
+            const auto targets = ExperimentalSettingsAccessibilityTargets(state);
+            items.reserve(targets.size());
+            for (const ExperimentalSettingsFocusTarget& target : targets)
+            {
+                hyperbrowse::ui::MainWindowAccessibility::Item item;
+                item.bounds = ExperimentalSettingsAccessibleBounds(state, target);
+                item.state = STATE_SYSTEM_FOCUSABLE;
+                switch (target.kind)
+                {
+                case ExperimentalSettingsFocusTargetKind::Tab:
+                    item.name = std::wstring(ExperimentalSettingsPageTitle(
+                        static_cast<ConsolidatedSettingsPage>(target.index))) + L" tab";
+                    item.role = ROLE_SYSTEM_PAGETAB;
+                    item.defaultAction = L"Select";
+                    item.state |= STATE_SYSTEM_SELECTABLE;
+                    if (static_cast<int>(state.page) == target.index)
+                    {
+                        item.state |= STATE_SYSTEM_SELECTED;
+                    }
+                    break;
+                case ExperimentalSettingsFocusTargetKind::NativeControl:
+                case ExperimentalSettingsFocusTargetKind::CustomControl:
+                {
+                    const auto control = static_cast<ConsolidatedSettingsControl>(target.index);
+                    item.name = ExperimentalSettingsAccessibleControlName(control);
+                    item.keyboardShortcut.assign(ExperimentalSettingsControlMnemonic(control)
+                                                     ? std::wstring(L"Alt+") + ExperimentalSettingsControlMnemonic(control)
+                                                     : std::wstring{});
+                    const HWND nativeWindow = ExperimentalSettingsNativeWindow(state, control);
+                    if (nativeWindow)
+                    {
+                        item.role = ExperimentalSettingsControlIsChoice(control)
+                            ? ROLE_SYSTEM_COMBOBOX
+                            : ROLE_SYSTEM_TEXT;
+                        item.value = ReadWindowText(nativeWindow);
+                        item.defaultAction = ExperimentalSettingsControlIsChoice(control) ? L"Open" : L"Edit";
+                    }
+                    else
+                    {
+                        item.role = ExperimentalSettingsAccessibleControlIsRadio(control)
+                            ? ROLE_SYSTEM_RADIOBUTTON
+                            : ROLE_SYSTEM_CHECKBUTTON;
+                        const bool checked = ExperimentalSettingsChecked(*state.settings, control);
+                        item.value = checked ? L"Checked" : L"Not checked";
+                        item.defaultAction = ExperimentalSettingsAccessibleControlIsRadio(control)
+                            ? L"Select"
+                            : L"Toggle";
+                        if (checked)
+                        {
+                            item.state |= STATE_SYSTEM_CHECKED;
+                        }
+                    }
+                    if (!ExperimentalSettingsControlAvailable(state, control))
+                    {
+                        item.state |= STATE_SYSTEM_UNAVAILABLE;
+                    }
+                    break;
+                }
+                case ExperimentalSettingsFocusTargetKind::ApplyButton:
+                case ExperimentalSettingsFocusTargetKind::OkButton:
+                case ExperimentalSettingsFocusTargetKind::CancelButton:
+                    item.name = target.kind == ExperimentalSettingsFocusTargetKind::ApplyButton
+                        ? L"Apply"
+                        : target.kind == ExperimentalSettingsFocusTargetKind::OkButton ? L"OK" : L"Cancel";
+                    item.role = ROLE_SYSTEM_PUSHBUTTON;
+                    item.defaultAction = L"Press";
+                    break;
+                default:
+                    break;
+                }
+                item.description = item.value;
+                items.push_back(std::move(item));
+            }
+            return items;
+        };
+        auto focusedChildProvider = [&state]() -> long
+        {
+            const ExperimentalSettingsFocusTarget focused = ExperimentalSettingsCurrentFocusTarget(state);
+            const auto targets = ExperimentalSettingsAccessibilityTargets(state);
+            const auto iterator = std::find(targets.begin(), targets.end(), focused);
+            return iterator == targets.end()
+                ? CHILDID_SELF
+                : static_cast<long>(std::distance(targets.begin(), iterator) + 1);
+        };
+        auto focusProvider = [&state](long childId)
+        {
+            const auto targets = ExperimentalSettingsAccessibilityTargets(state);
+            return childId > 0 && childId <= static_cast<long>(targets.size())
+                && FocusExperimentalSettingsTarget(state, targets[static_cast<std::size_t>(childId - 1)]);
+        };
+        auto defaultActionProvider = [&state](long childId)
+        {
+            const auto targets = ExperimentalSettingsAccessibilityTargets(state);
+            if (childId <= 0 || childId > static_cast<long>(targets.size()))
+            {
+                return false;
+            }
+            const ExperimentalSettingsFocusTarget target = targets[static_cast<std::size_t>(childId - 1)];
+            if (!ExperimentalSettingsFocusTargetAvailable(state, target))
+            {
+                return false;
+            }
+            if (target.kind == ExperimentalSettingsFocusTargetKind::NativeControl)
+            {
+                return FocusExperimentalSettingsTarget(state, target);
+            }
+            ActivateExperimentalSettingsTarget(state, target);
+            return true;
+        };
+        state.accessibility = std::make_shared<hyperbrowse::ui::MainWindowAccessibility>(
+            state.dialogWindow,
+            std::move(snapshotProvider),
+            std::move(focusedChildProvider),
+            std::move(focusProvider),
+            std::move(defaultActionProvider),
+            L"HyperBrowse Settings",
+            L"HyperBrowse application settings",
+            ROLE_SYSTEM_DIALOG);
     }
 
     void MainWindow::StartDuplicateSelection()
@@ -18400,6 +19041,7 @@ namespace hyperbrowse::ui
         batchConvertFailed_ = 0;
         batchConvertCurrentFile_.clear();
         batchConvertActive_ = true;
+        batchConvertCancelling_ = false;
         activeBatchConvertRequestId_ = batchConvertService_->Start(hwnd_, std::move(items), outputFolder, format);
         UpdateStatusText();
         UpdateMenuState();
@@ -18407,7 +19049,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::AdjustSelectedJpegOrientation(int quarterTurnsDelta)
     {
-        if (!browserModel_ || !browserPaneController_)
+        if (!browserModel_ || !browserPaneController_ || !imageCommandService_)
         {
             return;
         }
@@ -18419,57 +19061,26 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::vector<std::wstring> selectedPaths = browserPaneController_->SelectedFilePathsSnapshot();
-        const std::wstring focusedPath = browserPaneController_->FocusedFilePathSnapshot();
-
-        std::vector<std::wstring> updatedPaths;
-        std::size_t successCount = 0;
-        std::size_t failureCount = 0;
-        std::wstring firstFailureMessage;
-        for (const browser::BrowserItem& item : items)
+        const bool hasJpeg = std::any_of(items.begin(), items.end(), [](const browser::BrowserItem& item)
         {
-            if (!decode::IsWicFileType(item.fileType) || (_wcsicmp(item.fileType.c_str(), L"JPG") != 0 && _wcsicmp(item.fileType.c_str(), L"JPEG") != 0))
-            {
-                continue;
-            }
-
-            std::wstring errorMessage;
-            if (services::AdjustJpegOrientation(item.filePath, quarterTurnsDelta, &errorMessage))
-            {
-                ++successCount;
-                updatedPaths.push_back(item.filePath);
-                browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(fs::path(item.filePath)));
-            }
-            else
-            {
-                ++failureCount;
-                if (firstFailureMessage.empty() && !errorMessage.empty())
-                {
-                    firstFailureMessage = std::move(errorMessage);
-                }
-            }
+            return _wcsicmp(item.fileType.c_str(), L"JPG") == 0
+                || _wcsicmp(item.fileType.c_str(), L"JPEG") == 0;
+        });
+        if (!hasJpeg)
+        {
+            MessageBoxW(hwnd_, L"Select one or more JPEG images first.", L"Adjust JPEG Orientation", MB_OK | MB_ICONINFORMATION);
+            return;
         }
 
-        if (!updatedPaths.empty())
-        {
-            browserPaneController_->InvalidateMediaCacheForPaths(updatedPaths);
-            RefreshBrowserPane();
-            browserPaneController_->RestoreSelectionByFilePaths(selectedPaths, focusedPath);
-        }
-
-        std::wstring summary = L"Updated orientation metadata for " + std::to_wstring(successCount) + L" JPEG file(s).";
-        if (failureCount > 0)
-        {
-            summary.append(L"\nFailed: ");
-            summary.append(std::to_wstring(failureCount));
-            summary.append(L".");
-            if (!firstFailureMessage.empty())
-            {
-                summary.append(L"\nReason: ");
-                summary.append(firstFailureMessage);
-            }
-        }
-        MessageBoxW(hwnd_, summary.c_str(), L"Adjust JPEG Orientation", MB_OK | MB_ICONINFORMATION);
+        imageCommandActive_ = true;
+        imageCommandCancelling_ = false;
+        imageCommandActivityLabel_ = L"Adjusting JPEG orientation";
+        activeImageCommandRequestId_ = imageCommandService_->StartJpegOrientation(
+            hwnd_,
+            hwnd_,
+            items,
+            quarterTurnsDelta);
+        UpdateStatusText();
     }
 
     void MainWindow::RecordUndoableOperation(const services::FileOperationUpdate& update)
@@ -18490,6 +19101,13 @@ namespace hyperbrowse::ui
             return;
         }
 
+        // Overwrite destroys the prior destination contents. Without a backup there is
+        // no safe inverse, so do not advertise that operation as undoable.
+        if (update.conflictPolicy == services::FileConflictPolicy::OverwriteExisting)
+        {
+            return;
+        }
+
         if (update.succeededSourcePaths.empty())
         {
             return;
@@ -18499,6 +19117,8 @@ namespace hyperbrowse::ui
         operation.type = static_cast<int>(type);
         operation.sourcePaths = update.succeededSourcePaths;
         operation.createdPaths = update.createdPaths;
+        operation.undoLeafNames = FileLeafNames(operation.sourcePaths);
+        operation.redoLeafNames = FileLeafNames(operation.createdPaths);
         operation.destinationFolder = update.destinationFolder;
         operation.description = services::FileOperationTypeToActivityLabel(type);
 
@@ -18507,6 +19127,20 @@ namespace hyperbrowse::ui
         if (operation.createdPaths.size() != operation.sourcePaths.size())
         {
             return;
+        }
+
+        operation.createdStates = CaptureFileOperationPathStates(operation.createdPaths);
+        if (!AllFileOperationPathStatesValid(operation.createdStates))
+        {
+            return;
+        }
+        if (isCopy)
+        {
+            operation.sourceStates = CaptureFileOperationPathStates(operation.sourcePaths);
+            if (!AllFileOperationPathStatesValid(operation.sourceStates))
+            {
+                return;
+            }
         }
 
         if (isMove)
@@ -18545,6 +19179,21 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> undoLeafNames;
         bool started = false;
 
+        std::wstring changedPath;
+        if (!FileOperationPathStatesMatch(operation->createdPaths, operation->createdStates, &changedPath))
+        {
+            std::wstring message = L"HyperBrowse will not undo this operation because a result changed outside the application.";
+            if (!changedPath.empty())
+            {
+                message.append(L"\n\nChanged path:\n");
+                message.append(changedPath);
+            }
+            MessageBoxW(hwnd_, message.c_str(), L"Undo is no longer safe", MB_OK | MB_ICONWARNING);
+            fileOperationJournal_.Discard(UndoRedoOperation::Undo);
+            UpdateUndoRedoMenuState();
+            return;
+        }
+
         if (type == services::FileOperationType::Copy)
         {
             // Undo a copy = delete the created copies (recycle bin for safety).
@@ -18577,24 +19226,18 @@ namespace hyperbrowse::ui
                                          operation->createdPaths,
                                          originalFolder,
                                          services::FileConflictPolicy::PromptShell,
-                                         {});
+                                         operation->undoLeafNames);
         }
         else // Rename
         {
             // Undo a rename = rename back to the original leaf name.
-            std::vector<std::wstring> originalLeafNames;
-            originalLeafNames.reserve(operation->sourcePaths.size());
-            for (const std::wstring& sourcePath : operation->sourcePaths)
-            {
-                originalLeafNames.push_back(fs::path(sourcePath).filename().wstring());
-            }
             applyingUndoRedo_ = true;
             fileOperationJournal_.Begin(UndoRedoOperation::Undo);
             started = StartFileOperation(services::FileOperationType::Rename,
                                          operation->createdPaths,
                                          {},
                                          services::FileConflictPolicy::PromptShell,
-                                         originalLeafNames);
+                                         operation->undoLeafNames);
         }
 
         if (!started)
@@ -18614,6 +19257,20 @@ namespace hyperbrowse::ui
         }
 
         const auto type = static_cast<services::FileOperationType>(operation->type);
+        std::wstring changedPath;
+        if (!FileOperationPathStatesMatch(operation->sourcePaths, operation->sourceStates, &changedPath))
+        {
+            std::wstring message = L"HyperBrowse will not redo this operation because a source changed outside the application.";
+            if (!changedPath.empty())
+            {
+                message.append(L"\n\nChanged path:\n");
+                message.append(changedPath);
+            }
+            MessageBoxW(hwnd_, message.c_str(), L"Redo is no longer safe", MB_OK | MB_ICONWARNING);
+            fileOperationJournal_.Discard(UndoRedoOperation::Redo);
+            UpdateUndoRedoMenuState();
+            return;
+        }
         applyingUndoRedo_ = true;
         fileOperationJournal_.Begin(UndoRedoOperation::Redo);
         bool started = false;
@@ -18623,7 +19280,7 @@ namespace hyperbrowse::ui
                                          operation->sourcePaths,
                                          operation->destinationFolder,
                                          services::FileConflictPolicy::PromptShell,
-                                         {});
+                                         operation->redoLeafNames);
         }
         else if (type == services::FileOperationType::Move)
         {
@@ -18631,21 +19288,15 @@ namespace hyperbrowse::ui
                                          operation->sourcePaths,
                                          operation->destinationFolder,
                                          services::FileConflictPolicy::PromptShell,
-                                         {});
+                                         operation->redoLeafNames);
         }
         else // Rename: redo renames back to the new leaf names.
         {
-            std::vector<std::wstring> newLeafNames;
-            newLeafNames.reserve(operation->createdPaths.size());
-            for (const std::wstring& createdPath : operation->createdPaths)
-            {
-                newLeafNames.push_back(fs::path(createdPath).filename().wstring());
-            }
             started = StartFileOperation(services::FileOperationType::Rename,
                                          operation->sourcePaths,
                                          {},
                                          services::FileConflictPolicy::PromptShell,
-                                         newLeafNames);
+                                         operation->redoLeafNames);
         }
 
         if (!started)
@@ -19050,7 +19701,10 @@ namespace hyperbrowse::ui
         const HWND activationRestoreWindow = completionContext.activation.activationRestoreWindow;
         const HWND focusRestoreWindow = completionContext.activation.focusRestoreWindow;
 
-        RecordUndoableOperation(update);
+        if (completedUndoRedoOperation == UndoRedoOperation::None)
+        {
+            RecordUndoableOperation(update);
+        }
         for (const std::wstring& path : update.succeededSourcePaths)
         {
             InvalidateFolderTreeChildPresence(path);
@@ -19260,11 +19914,71 @@ namespace hyperbrowse::ui
 
         if (completedUndoRedoOperation != UndoRedoOperation::None)
         {
-            const bool undoRedoSucceeded = update.finished
+            bool undoRedoSucceeded = update.finished
                 && !update.aborted
                 && update.failedCount == 0
-                && update.succeededSourcePaths.size() == update.requestedCount;
-            fileOperationJournal_.Complete(completedUndoRedoOperation, undoRedoSucceeded);
+                && update.succeededSourcePaths.size() == update.requestedCount
+                && (update.type == services::FileOperationType::DeleteRecycleBin
+                    || update.createdPaths.size() == update.requestedCount);
+
+            std::optional<FileOperationJournalEntry> completedEntry;
+            const FileOperationJournalEntry* pendingEntry = completedUndoRedoOperation == UndoRedoOperation::Undo
+                ? fileOperationJournal_.UndoEntry()
+                : fileOperationJournal_.RedoEntry();
+            if (undoRedoSucceeded && pendingEntry)
+            {
+                completedEntry = *pendingEntry;
+                const auto originalType = static_cast<services::FileOperationType>(completedEntry->type);
+                if (completedUndoRedoOperation == UndoRedoOperation::Undo)
+                {
+                    if (originalType == services::FileOperationType::Move
+                        || originalType == services::FileOperationType::Rename)
+                    {
+                        completedEntry->sourcePaths = update.createdPaths;
+                        completedEntry->sourceStates = CaptureFileOperationPathStates(completedEntry->sourcePaths);
+                        completedEntry->undoLeafNames = FileLeafNames(completedEntry->sourcePaths);
+                        undoRedoSucceeded = AllFileOperationPathStatesValid(completedEntry->sourceStates);
+                    }
+                }
+                else
+                {
+                    completedEntry->sourcePaths = update.succeededSourcePaths;
+                    completedEntry->createdPaths = update.createdPaths;
+                    completedEntry->createdStates = CaptureFileOperationPathStates(completedEntry->createdPaths);
+                    completedEntry->undoLeafNames = FileLeafNames(completedEntry->sourcePaths);
+                    completedEntry->redoLeafNames = FileLeafNames(completedEntry->createdPaths);
+                    undoRedoSucceeded = AllFileOperationPathStatesValid(completedEntry->createdStates);
+                    if (originalType == services::FileOperationType::Copy)
+                    {
+                        completedEntry->sourceStates = CaptureFileOperationPathStates(completedEntry->sourcePaths);
+                        undoRedoSucceeded = undoRedoSucceeded
+                            && AllFileOperationPathStatesValid(completedEntry->sourceStates);
+                    }
+                    else
+                    {
+                        completedEntry->sourceStates.clear();
+                    }
+                }
+            }
+
+            if (undoRedoSucceeded)
+            {
+                fileOperationJournal_.Complete(
+                    completedUndoRedoOperation,
+                    true,
+                    std::move(completedEntry));
+            }
+            else if (update.finished && !update.aborted && update.failedCount == 0)
+            {
+                // The filesystem operation completed but its identity could not be
+                // captured. Drop the stale history entry instead of offering an unsafe
+                // inverse on a later pathname match.
+                fileOperationJournal_.Discard(completedUndoRedoOperation);
+            }
+            else
+            {
+                fileOperationJournal_.Complete(completedUndoRedoOperation, false);
+            }
             applyingUndoRedo_ = false;
         }
 
@@ -19521,7 +20235,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
-            MF_BYCOMMAND | (batchConvertActive_ ? MF_ENABLED : MF_GRAYED));
+            MF_BYCOMMAND | (batchConvertActive_ && !batchConvertCancelling_ ? MF_ENABLED : MF_GRAYED));
 
         const browser::BrowserSortMode sortMode = browserPaneController_
             ? browserPaneController_->GetSortMode()
@@ -19811,7 +20525,7 @@ namespace hyperbrowse::ui
         if (hwnd_)
         {
             ApplyWindowFrameTheme(hwnd_,
-                                  themeMode_ == ThemeMode::Dark,
+                                  themeMode_ == ThemeMode::Dark && !IsHighContrastEnabled(),
                                   palette.actionStripBackground,
                                   palette.text,
                                   palette.actionStripBorder);
@@ -20469,9 +21183,15 @@ namespace hyperbrowse::ui
                 RefreshBrowserPane();
             }
 
-            if (slideshowDurationChanged && viewerWindow_ && viewerWindow_->IsSlideshowActive())
+            if (slideshowDurationChanged)
             {
-                viewerWindow_->StartSlideshow(slideshowIntervalMs_);
+                for (viewer::ViewerWindow* viewer : openViewerWindows)
+                {
+                    if (viewer->IsSlideshowActive())
+                    {
+                        viewer->StartSlideshow(slideshowIntervalMs_);
+                    }
+                }
             }
             UpdateStatusText();
             UpdateMenuState();
@@ -20530,9 +21250,15 @@ namespace hyperbrowse::ui
         slideshowTransitionStyle_ = transitionStyle;
         slideshowTransitionDurationMs_ = NormalizeSlideshowTransitionDuration(transitionDurationMs);
         ApplyViewerTransitionSettings();
-        if (slideshowDurationChanged && viewerWindow_ && viewerWindow_->IsSlideshowActive())
+        if (slideshowDurationChanged)
         {
-            viewerWindow_->StartSlideshow(slideshowIntervalMs_);
+            for (viewer::ViewerWindow* viewer : OpenViewerWindows())
+            {
+                if (viewer->IsSlideshowActive())
+                {
+                    viewer->StartSlideshow(slideshowIntervalMs_);
+                }
+            }
         }
         UpdateMenuState();
     }
@@ -21099,6 +21825,7 @@ namespace hyperbrowse::ui
         if (update->finished)
         {
             batchConvertActive_ = false;
+            batchConvertCancelling_ = false;
             UpdateMenuState();
 
             std::wstring summary;
@@ -21109,7 +21836,7 @@ namespace hyperbrowse::ui
             }
 
             summary.append(L"Converted ");
-            summary.append(std::to_wstring(update->completedCount - update->failedCount));
+            summary.append(std::to_wstring(update->succeededCount));
             summary.append(L" of ");
             summary.append(std::to_wstring(update->totalCount));
             summary.append(L" image(s).");
@@ -21140,6 +21867,110 @@ namespace hyperbrowse::ui
         }
 
         UpdateStatusText();
+        return 0;
+    }
+
+    LRESULT MainWindow::OnImageCommandMessage(LPARAM lParam)
+    {
+        std::unique_ptr<services::ImageCommandUpdate> update(
+            reinterpret_cast<services::ImageCommandUpdate*>(lParam));
+        if (!update || update->requestId != activeImageCommandRequestId_)
+        {
+            return 0;
+        }
+
+        if (!update->finished)
+        {
+            imageCommandActivityLabel_ = L"Adjusting JPEG orientation: "
+                + std::to_wstring(update->completedCount)
+                + L" / "
+                + std::to_wstring(update->totalCount);
+            UpdateStatusText();
+            return 0;
+        }
+
+        const bool discardResult = imageCommandCancelling_ || update->cancelled;
+        imageCommandActive_ = false;
+        imageCommandCancelling_ = false;
+        imageCommandActivityLabel_.clear();
+        UpdateStatusText();
+
+        if (!discardResult)
+        {
+            const HWND dialogOwner = update->ownerWindow && IsWindow(update->ownerWindow)
+                ? update->ownerWindow
+                : hwnd_;
+            switch (update->kind)
+            {
+            case services::ImageCommandKind::Information:
+                if (update->metadata)
+                {
+                    PresentImageInformation(update->item, std::move(update->metadata), dialogOwner);
+                }
+                else
+                {
+                    MessageBoxW(
+                        dialogOwner,
+                        update->message.empty() ? L"No metadata is available for the selected image." : update->message.c_str(),
+                        L"Image Information",
+                        MB_OK | MB_ICONINFORMATION);
+                }
+                break;
+            case services::ImageCommandKind::CopyPixels:
+                if (update->image)
+                {
+                    CopyDecodedImageToClipboard(std::move(update->image), dialogOwner);
+                }
+                else
+                {
+                    MessageBoxW(
+                        dialogOwner,
+                        update->message.empty() ? L"Unable to decode the selected image." : update->message.c_str(),
+                        L"Copy Image",
+                        MB_OK | MB_ICONERROR);
+                }
+                break;
+            case services::ImageCommandKind::AdjustJpegOrientation:
+            {
+                if (!update->updatedPaths.empty() && browserPaneController_ && browserModel_)
+                {
+                    const std::vector<std::wstring> currentSelection = browserPaneController_->SelectedFilePathsSnapshot();
+                    const std::wstring currentFocus = browserPaneController_->FocusedFilePathSnapshot();
+                    for (const std::wstring& path : update->updatedPaths)
+                    {
+                        browserModel_->UpsertItem(browser::BuildBrowserItemFromPath(fs::path(path)));
+                    }
+                    browserPaneController_->InvalidateMediaCacheForPaths(update->updatedPaths);
+                    RefreshBrowserPane();
+                    browserPaneController_->RestoreSelectionByFilePaths(currentSelection, currentFocus);
+                }
+
+                std::wstring summary = L"Updated orientation metadata for "
+                    + std::to_wstring(update->succeededCount)
+                    + L" JPEG file(s).";
+                if (update->failedCount > 0)
+                {
+                    summary.append(L"\nFailed: ");
+                    summary.append(std::to_wstring(update->failedCount));
+                    summary.append(L".");
+                    if (!update->message.empty())
+                    {
+                        summary.append(L"\nReason: ");
+                        summary.append(update->message);
+                    }
+                }
+                MessageBoxW(dialogOwner, summary.c_str(), L"Adjust JPEG Orientation", MB_OK | MB_ICONINFORMATION);
+                break;
+            }
+            default:
+                break;
+            }
+        }
+
+        if (closePending_)
+        {
+            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+        }
         return 0;
     }
 
@@ -22040,6 +22871,24 @@ namespace hyperbrowse::ui
 
     MainWindow::ThemePalette MainWindow::GetThemePalette() const
     {
+        if (IsHighContrastEnabled())
+        {
+            return ThemePalette{
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_GRAYTEXT),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_BTNFACE),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_HIGHLIGHT),
+                GetSysColor(COLOR_HIGHLIGHT),
+                GetSysColor(COLOR_HIGHLIGHTTEXT),
+            };
+        }
+
         switch (themeMode_)
         {
         case ThemeMode::Dark:
@@ -23640,7 +24489,7 @@ namespace hyperbrowse::ui
             }
             break;
         case WM_CLOSE:
-            if (fileOperationActive_ || batchConvertActive_)
+            if (fileOperationActive_ || batchConvertActive_ || imageCommandActive_)
             {
                 if (!closePending_)
                 {
@@ -23659,11 +24508,18 @@ namespace hyperbrowse::ui
                 if (batchConvertActive_ && batchConvertService_)
                 {
                     batchConvertService_->Cancel();
+                    batchConvertCancelling_ = true;
+                }
+                if (imageCommandActive_ && imageCommandService_)
+                {
+                    imageCommandService_->Cancel();
+                    imageCommandCancelling_ = true;
+                    imageCommandActivityLabel_ = L"Cancelling image command";
                 }
                 activeFileOperationLabel_ = fileOperationActive_
                     ? (closeWaitNoticeShown_ ? L"Waiting for Windows to finish file operation"
                                              : L"Cancelling file operation")
-                    : L"Cancelling batch conversion";
+                    : (batchConvertActive_ ? L"Cancelling batch conversion" : std::wstring{});
                 UpdateStatusText();
                 UpdateMenuState();
                 return 0;
@@ -23707,11 +24563,16 @@ namespace hyperbrowse::ui
             HandleDisplaySurfaceChange();
             return 0;
         case WM_SETTINGCHANGE:
+            ApplyTheme();
             if (lParam == 0
                 || _wcsicmp(reinterpret_cast<const wchar_t*>(lParam), L"ShellState") == 0)
             {
                 RefreshFolderTree();
             }
+            return 0;
+        case WM_SYSCOLORCHANGE:
+        case WM_THEMECHANGED:
+            ApplyTheme();
             return 0;
         case WM_WTSSESSION_CHANGE:
             switch (wParam)
@@ -23924,6 +24785,11 @@ namespace hyperbrowse::ui
                 KillTimer(hwnd_, quickSendConfirmationTimerId_);
                 quickSendConfirmationTimerId_ = 0;
             }
+            if (quickSendConfirmationToastWindow_)
+            {
+                DestroyWindow(quickSendConfirmationToastWindow_);
+                quickSendConfirmationToastWindow_ = nullptr;
+            }
             if (memoryPressureTimerId_ != 0)
             {
                 KillTimer(hwnd_, kMemoryPressureTimerId);
@@ -23940,11 +24806,20 @@ namespace hyperbrowse::ui
             }
             if (batchConvertService_)
             {
-                batchConvertService_->Cancel();
+                batchConvertService_->Shutdown();
+            }
+            if (imageCommandService_)
+            {
+                imageCommandService_->Shutdown();
             }
             if (fileOperationService_)
             {
                 fileOperationService_->Shutdown();
+            }
+            if (userMetadataStore_)
+            {
+                userMetadataStore_->SetNotificationWindow(nullptr);
+                userMetadataStore_->Shutdown();
             }
             SaveWindowState();
             PostQuitMessage(0);
@@ -23979,6 +24854,48 @@ namespace hyperbrowse::ui
         if (self)
         {
             return self->HandleMessage(message, wParam, lParam);
+        }
+
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    LRESULT CALLBACK MainWindow::QuickSendConfirmationToastWindowProc(HWND hwnd,
+                                                                       UINT message,
+                                                                       WPARAM wParam,
+                                                                       LPARAM lParam)
+    {
+        MainWindow* owner = reinterpret_cast<MainWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (message == WM_NCCREATE)
+        {
+            const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            owner = create ? static_cast<MainWindow*>(create->lpCreateParams) : nullptr;
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(owner));
+        }
+
+        switch (message)
+        {
+        case WM_PAINT:
+        {
+            PAINTSTRUCT paintStruct{};
+            HDC hdc = BeginPaint(hwnd, &paintStruct);
+            if (owner)
+            {
+                owner->PaintQuickSendConfirmationToast(hdc);
+            }
+            EndPaint(hwnd, &paintStruct);
+            return 0;
+        }
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_MOUSEACTIVATE:
+            return MA_NOACTIVATE;
+        case WM_NCHITTEST:
+            return HTTRANSPARENT;
+        case WM_NCDESTROY:
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            break;
+        default:
+            break;
         }
 
         return DefWindowProcW(hwnd, message, wParam, lParam);

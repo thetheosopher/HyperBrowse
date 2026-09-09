@@ -5,6 +5,7 @@
 #include <wrl/client.h>
 
 #include <filesystem>
+#include <functional>
 #include <vector>
 
 #include "cache/ThumbnailCache.h"
@@ -275,37 +276,131 @@ namespace
         return true;
     }
 
-    fs::path MakeUniqueOutputPath(const fs::path& outputFolder,
-                                  const hyperbrowse::browser::BrowserItem& item,
-                                  hyperbrowse::services::BatchConvertFormat format)
+    fs::path OutputPathForSuffix(const fs::path& outputFolder,
+                                 const hyperbrowse::browser::BrowserItem& item,
+                                 hyperbrowse::services::BatchConvertFormat format,
+                                 int suffix)
     {
-        const fs::path basePath = outputFolder / (fs::path(item.fileName).stem().wstring() + hyperbrowse::services::BatchConvertFormatExtension(format));
-        std::error_code existsError;
-        if (!fs::exists(basePath, existsError) && !existsError)
+        std::wstring fileName = fs::path(item.fileName).stem().wstring();
+        if (suffix > 0)
         {
-            return basePath;
+            fileName.push_back(L'_');
+            fileName.append(std::to_wstring(suffix));
         }
-        if (existsError)
-        {
-            return {};
-        }
+        fileName.append(hyperbrowse::services::BatchConvertFormatExtension(format));
+        return outputFolder / fileName;
+    }
 
-        for (int suffix = 1; suffix < 1000; ++suffix)
+    fs::path CreateTemporaryOutputPath(const fs::path& outputFolder, std::wstring* errorMessage)
+    {
+        static std::atomic_uint64_t nextTemporaryId{0};
+        for (unsigned int attempt = 0; attempt < 32; ++attempt)
         {
-            const fs::path candidate = outputFolder
-                / (fs::path(item.fileName).stem().wstring() + L"_" + std::to_wstring(suffix) + hyperbrowse::services::BatchConvertFormatExtension(format));
-            existsError.clear();
-            if (!fs::exists(candidate, existsError) && !existsError)
+            const fs::path temporaryPath = outputFolder
+                / (L".hyperbrowse-convert-"
+                   + std::to_wstring(GetCurrentProcessId())
+                   + L"-"
+                   + std::to_wstring(GetCurrentThreadId())
+                   + L"-"
+                   + std::to_wstring(nextTemporaryId.fetch_add(1, std::memory_order_relaxed) + 1)
+                   + L".tmp");
+            const HANDLE file = CreateFileW(
+                temporaryPath.c_str(),
+                GENERIC_WRITE,
+                0,
+                nullptr,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_TEMPORARY,
+                nullptr);
+            if (file != INVALID_HANDLE_VALUE)
             {
-                return candidate;
+                CloseHandle(file);
+                return temporaryPath;
             }
-            if (existsError)
+            const DWORD error = GetLastError();
+            if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS)
             {
+                if (errorMessage)
+                {
+                    *errorMessage = L"Failed to reserve a temporary output file (error "
+                        + std::to_wstring(error)
+                        + L").";
+                }
                 return {};
             }
         }
 
+        if (errorMessage)
+        {
+            *errorMessage = L"No temporary output filename was available.";
+        }
         return {};
+    }
+
+    bool EncodeAndPublishImage(
+        const hyperbrowse::cache::CachedThumbnail& image,
+        const fs::path& outputFolder,
+        const hyperbrowse::browser::BrowserItem& item,
+        hyperbrowse::services::BatchConvertFormat format,
+        const std::function<bool()>& isCancelled,
+        bool* cancelled,
+        std::wstring* errorMessage)
+    {
+        *cancelled = false;
+        const fs::path temporaryPath = CreateTemporaryOutputPath(outputFolder, errorMessage);
+        if (temporaryPath.empty())
+        {
+            return false;
+        }
+
+        bool succeeded = EncodeImage(image, temporaryPath, format, errorMessage);
+        if (succeeded && isCancelled())
+        {
+            *cancelled = true;
+            succeeded = false;
+        }
+
+        if (succeeded)
+        {
+            for (int suffix = 0; suffix < 1000; ++suffix)
+            {
+                const fs::path candidate = OutputPathForSuffix(outputFolder, item, format, suffix);
+                if (MoveFileExW(temporaryPath.c_str(), candidate.c_str(), MOVEFILE_WRITE_THROUGH))
+                {
+                    return true;
+                }
+
+                const DWORD error = GetLastError();
+                if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS)
+                {
+                    if (errorMessage)
+                    {
+                        *errorMessage = L"Failed to publish the converted image (error "
+                            + std::to_wstring(error)
+                            + L").";
+                    }
+                    succeeded = false;
+                    break;
+                }
+                if (isCancelled())
+                {
+                    *cancelled = true;
+                    succeeded = false;
+                    break;
+                }
+            }
+            if (succeeded)
+            {
+                if (errorMessage)
+                {
+                    *errorMessage = L"No available output filename could be selected.";
+                }
+                succeeded = false;
+            }
+        }
+
+        DeleteFileW(temporaryPath.c_str());
+        return false;
     }
 }
 
@@ -347,8 +442,7 @@ namespace hyperbrowse::services
 
     BatchConvertService::~BatchConvertService()
     {
-        sharedState_->shutdown.store(true, std::memory_order_release);
-        Cancel();
+        Shutdown();
     }
 
     std::uint64_t BatchConvertService::Start(HWND targetWindow,
@@ -370,6 +464,9 @@ namespace hyperbrowse::services
              format,
              requestId]() mutable
         {
+            std::size_t completedCount = 0;
+            std::size_t succeededCount = 0;
+            std::size_t failedCount = 0;
             try
             {
             const auto isCancelled = [&]()
@@ -378,12 +475,13 @@ namespace hyperbrowse::services
                     || sharedState->activeRequestId.load(std::memory_order_acquire) != requestId;
             };
 
-            const auto postCancelled = [&](std::size_t completedCount, std::size_t failedCount)
+            const auto postCancelled = [&]()
             {
                 auto update = std::make_unique<BatchConvertUpdate>();
                 update->requestId = requestId;
                 update->completedCount = completedCount;
                 update->totalCount = items.size();
+                update->succeededCount = succeededCount;
                 update->failedCount = failedCount;
                 update->format = format;
                 update->outputFolder = outputFolder;
@@ -398,7 +496,9 @@ namespace hyperbrowse::services
             {
                 auto update = std::make_unique<BatchConvertUpdate>();
                 update->requestId = requestId;
+                update->completedCount = items.size();
                 update->totalCount = items.size();
+                update->succeededCount = 0;
                 update->failedCount = items.size();
                 update->format = format;
                 update->outputFolder = outputFolder;
@@ -408,13 +508,11 @@ namespace hyperbrowse::services
                 return;
             }
 
-            std::size_t completedCount = 0;
-            std::size_t failedCount = 0;
             for (const browser::BrowserItem& item : items)
             {
                 if (isCancelled())
                 {
-                    postCancelled(completedCount, failedCount);
+                    postCancelled();
                     return;
                 }
 
@@ -422,7 +520,7 @@ namespace hyperbrowse::services
                 const auto decodedImage = decode::DecodeFullImage(item, &errorMessage);
                 if (isCancelled())
                 {
-                    postCancelled(completedCount, failedCount);
+                    postCancelled();
                     return;
                 }
 
@@ -432,27 +530,32 @@ namespace hyperbrowse::services
                 }
                 else
                 {
-                    const fs::path outputPath = MakeUniqueOutputPath(outputFolder, item, format);
-                    if (outputPath.empty())
+                    bool cancelled = false;
+                    if (!EncodeAndPublishImage(
+                            *decodedImage,
+                            fs::path(outputFolder),
+                            item,
+                            format,
+                            isCancelled,
+                            &cancelled,
+                            &errorMessage))
                     {
+                        if (cancelled)
+                        {
+                            postCancelled();
+                            return;
+                        }
                         ++failedCount;
-                        errorMessage = L"No available output filename could be selected.";
                     }
-                    else if (isCancelled())
+                    else
                     {
-                        postCancelled(completedCount, failedCount);
-                        return;
-                    }
-
-                    if (!EncodeImage(*decodedImage, outputPath, format, &errorMessage))
-                    {
-                        ++failedCount;
+                        ++succeededCount;
                     }
                 }
 
                 if (isCancelled())
                 {
-                    postCancelled(completedCount, failedCount);
+                    postCancelled();
                     return;
                 }
 
@@ -461,6 +564,7 @@ namespace hyperbrowse::services
                 progress->requestId = requestId;
                 progress->completedCount = completedCount;
                 progress->totalCount = items.size();
+                progress->succeededCount = succeededCount;
                 progress->failedCount = failedCount;
                 progress->format = format;
                 progress->outputFolder = outputFolder;
@@ -474,9 +578,10 @@ namespace hyperbrowse::services
             {
                 auto update = std::make_unique<BatchConvertUpdate>();
                 update->requestId = requestId;
-                update->completedCount = 0;
+                update->completedCount = items.size();
                 update->totalCount = items.size();
-                update->failedCount = items.size();
+                update->succeededCount = succeededCount;
+                update->failedCount = items.size() - succeededCount;
                 update->format = format;
                 update->outputFolder = outputFolder;
                 update->finished = true;
@@ -487,9 +592,10 @@ namespace hyperbrowse::services
             {
                 auto update = std::make_unique<BatchConvertUpdate>();
                 update->requestId = requestId;
-                update->completedCount = 0;
+                update->completedCount = items.size();
                 update->totalCount = items.size();
-                update->failedCount = items.size();
+                update->succeededCount = succeededCount;
+                update->failedCount = items.size() - succeededCount;
                 update->format = format;
                 update->outputFolder = outputFolder;
                 update->finished = true;
@@ -504,6 +610,7 @@ namespace hyperbrowse::services
             update->requestId = requestId;
             update->completedCount = requestedItemCount;
             update->totalCount = requestedItemCount;
+            update->succeededCount = 0;
             update->failedCount = requestedItemCount;
             update->format = format;
             update->outputFolder = requestedOutputFolder;
@@ -516,10 +623,19 @@ namespace hyperbrowse::services
         return requestId;
     }
 
-    void BatchConvertService::Cancel()
+    void BatchConvertService::Cancel() noexcept
     {
         sharedState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
         cancellationCount_.fetch_add(1, std::memory_order_relaxed);
         util::IncrementCounter(L"service.batch_convert.cancelled");
+    }
+
+    void BatchConvertService::Shutdown() noexcept
+    {
+        if (!sharedState_->shutdown.exchange(true, std::memory_order_acq_rel))
+        {
+            Cancel();
+            executor_.Shutdown();
+        }
     }
 }

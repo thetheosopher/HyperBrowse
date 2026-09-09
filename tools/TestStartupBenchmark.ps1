@@ -6,7 +6,7 @@ param(
     [string]$ExecutablePath = '',
     [string]$DatasetPath = '',
     [string]$OutputPath = '',
-    [string]$RegistryPath = 'HKCU:\Software\HyperBrowse',
+    [string]$RegistryPath = 'HKCU:\Software\HyperBrowse\StartupBenchmark',
     [string]$LogPath = '',
     [int]$StartupTimeoutSeconds = 20,
     [int]$ShutdownTimeoutSeconds = 15,
@@ -95,37 +95,108 @@ function Write-StepSummary {
     ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 }
 
+function ConvertTo-ChildRegistrySubkey {
+    param([string]$ProviderPath)
+
+    $normalized = $ProviderPath.Trim()
+    foreach ($prefix in @('HKCU:\', 'HKCU\', 'HKEY_CURRENT_USER\')) {
+        if ($normalized.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $normalized = $normalized.Substring($prefix.Length)
+            break
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($normalized) -or $normalized.Contains(':')) {
+        throw "RegistryPath must identify a subkey under HKEY_CURRENT_USER: $ProviderPath"
+    }
+    return $normalized
+}
+
+function ConvertTo-WindowsCommandLineArgument {
+    param([AllowEmptyString()][string]$Value)
+
+    $builder = New-Object System.Text.StringBuilder
+    $null = $builder.Append('"')
+    $backslashCount = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashCount++
+            continue
+        }
+        if ($character -eq '"') {
+            $null = $builder.Append('\', ($backslashCount * 2) + 1)
+            $null = $builder.Append('"')
+            $backslashCount = 0
+            continue
+        }
+        if ($backslashCount -gt 0) {
+            $null = $builder.Append('\', $backslashCount)
+            $backslashCount = 0
+        }
+        $null = $builder.Append($character)
+    }
+    if ($backslashCount -gt 0) {
+        $null = $builder.Append('\', $backslashCount * 2)
+    }
+    $null = $builder.Append('"')
+    return $builder.ToString()
+}
+
 if (Get-Process HyperBrowse -ErrorAction SilentlyContinue) {
     throw 'HyperBrowse is already running; startup benchmark requires exclusive access.'
 }
 
-New-Item -Path $RegistryPath -Force | Out-Null
-$existing = Get-ItemProperty -Path $RegistryPath -Name SelectedFolderPath -ErrorAction SilentlyContinue
-$previous = if ($null -ne $existing) { $existing.SelectedFolderPath } else { $null }
+if (-not (Test-Path -Path $RegistryPath)) {
+    New-Item -Path $RegistryPath -Force | Out-Null
+}
+$settingsKey = Get-Item -Path $RegistryPath
+$hadPreviousSelectedFolder = $settingsKey.GetValueNames() -contains 'SelectedFolderPath'
+$previousSelectedFolder = if ($hadPreviousSelectedFolder) {
+    [string]$settingsKey.GetValue('SelectedFolderPath', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+} else {
+    $null
+}
+$settingsEnvironmentName = 'HYPERBROWSE_SETTINGS_REGISTRY_PATH'
+$previousSettingsEnvironment = [System.Environment]::GetEnvironmentVariable($settingsEnvironmentName, 'Process')
+$childRegistrySubkey = ConvertTo-ChildRegistrySubkey -ProviderPath $RegistryPath
 
 try {
     Set-ItemProperty -Path $RegistryPath -Name SelectedFolderPath -Value $DatasetPath
+    [System.Environment]::SetEnvironmentVariable($settingsEnvironmentName, $childRegistrySubkey, 'Process')
     Remove-Item -Path $OutputPath -ErrorAction SilentlyContinue
 
     $beforeLogCount = if (Test-Path $LogPath) { (Get-Content -Path $LogPath).Count } else { 0 }
 
-    $process = Start-Process -FilePath $ExecutablePath -ArgumentList @('--bench-startup', $OutputPath) -PassThru
+    $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $processStartInfo.FileName = $ExecutablePath
+    $processStartInfo.UseShellExecute = $false
+    $quotedArguments = @('--bench-startup', $OutputPath) |
+        ForEach-Object { ConvertTo-WindowsCommandLineArgument -Value $_ }
+    $processStartInfo.Arguments = $quotedArguments -join ' '
+    $process = [System.Diagnostics.Process]::Start($processStartInfo)
+    if ($null -eq $process) {
+        throw "Failed to start HyperBrowse: $ExecutablePath"
+    }
     try {
         $null = $process.WaitForInputIdle(15000)
     }
     catch {
     }
 
-    Wait-Process -Id $process.Id -Timeout $StartupTimeoutSeconds -ErrorAction SilentlyContinue
-    if (-not $process.HasExited) {
-        $null = $process.CloseMainWindow()
+    if (-not $process.WaitForExit($StartupTimeoutSeconds * 1000)) {
+        if (-not $process.CloseMainWindow()) {
+            Stop-Process -Id $process.Id -Force
+            $process.WaitForExit()
+            throw "Startup benchmark could not request a normal application shutdown after $StartupTimeoutSeconds seconds."
+        }
     }
-    if (-not $process.HasExited) {
-        Wait-Process -Id $process.Id -Timeout $ShutdownTimeoutSeconds -ErrorAction SilentlyContinue
-    }
-    if (-not $process.HasExited) {
+    if (-not $process.WaitForExit($ShutdownTimeoutSeconds * 1000)) {
         Stop-Process -Id $process.Id -Force
         $process.WaitForExit()
+        throw "Startup benchmark forced process termination after a $ShutdownTimeoutSeconds-second shutdown timeout."
+    }
+
+    if ($process.ExitCode -ne 0) {
+        throw "HyperBrowse startup benchmark failed with exit code $($process.ExitCode)."
     }
 
     if (-not (Test-Path $OutputPath)) {
@@ -168,8 +239,10 @@ try {
     }
 }
 finally {
-    if ($null -ne $previous -and $previous -ne '') {
-        Set-ItemProperty -Path $RegistryPath -Name SelectedFolderPath -Value $previous
+    [System.Environment]::SetEnvironmentVariable($settingsEnvironmentName, $previousSettingsEnvironment, 'Process')
+    if ($hadPreviousSelectedFolder) {
+        New-Item -Path $RegistryPath -Force | Out-Null
+        New-ItemProperty -Path $RegistryPath -Name SelectedFolderPath -Value $previousSelectedFolder -PropertyType String -Force | Out-Null
     }
     else {
         Remove-ItemProperty -Path $RegistryPath -Name SelectedFolderPath -ErrorAction SilentlyContinue

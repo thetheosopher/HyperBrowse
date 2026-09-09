@@ -31,10 +31,29 @@ ctest --preset release-tests
 The current test target registers:
 
 - `HyperBrowseSmoke`
+- `HyperBrowseFolderHistorySmoke`
+- `HyperBrowseFileOperationMediaCacheSmoke`
 - `HyperBrowseViewerFitSmoke`
+- `HyperBrowseViewerInteractionSmoke`
+- `HyperBrowseThumbnailPersistenceSmoke`
+- `HyperBrowseThumbnailFailureSmoke`
 - `HyperBrowseFileRenameSmoke`
 - `HyperBrowseAppTextSizeSmoke`
+- `HyperBrowseAccessibilitySmoke`
 - `HyperBrowseSettingsSmoke`
+- `HyperBrowseMultiViewerSettingsSmoke`
+- `HyperBrowseItemNumberNavigationSmoke`
+- `HyperBrowseUserMetadataSmoke`
+
+All 14 tests above are enabled. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+
+On a machine with a supported NVIDIA GPU, prove that the configured runtime performs an actual decode, rather than only compiling the nvJPEG path, with:
+
+```powershell
+.\build-release-package\tests\Release\HyperBrowseTests.exe --nvjpeg-hardware C:\path\to\fixture.jpg
+```
+
+Run this command from a CUDA-bundled build tree so `cudart64_12.dll` and `nvjpeg64_12.dll` are beside the test executable. A successful exit means an nvJPEG decode completed on the available CUDA device; the normal CTest matrix continues to allow WIC fallback on hosts without suitable hardware.
 
 The tests cover model/service behavior and selected application/viewer state without requiring every workflow to be driven through a live desktop session. Add focused coverage to `tests/smoke.cpp` when a change can be exercised deterministically there.
 
@@ -75,6 +94,7 @@ Check the affected workflow and its neighboring state transitions. Depending on 
 - viewer open, next/previous navigation, async decode, delete, zoom, fullscreen, comparison, and keyboard focus;
 - settings Apply/OK/Cancel and persistence across restart;
 - multi-monitor and high-DPI behavior for geometry or rendering changes;
+- keyboard-only focus, Inspect/MSAA names and states, a screen reader, and both Windows high-contrast schemes for accessibility changes;
 - RAW, WIC, and optional nvJPEG fallback paths for decoder changes.
 
 ## Diagnostics

@@ -1,0 +1,32 @@
+HyperBrowse Third-Party Dependency Inventory
+
+Review date: 2026-09-08
+Review owner: HyperBrowse release maintainer
+Candidate version: @PROJECT_VERSION@
+
+NanoSVG
+- Version: vendored source snapshot (upstream has no release version in the vendored headers)
+- Repository tree object: cefeb686ab48a47fb56919e410d427a4751caa95
+- Use: compiled into HyperBrowse for SVG toolbar rasterization
+- License: zlib-style license; see licenses/NanoSVG-LICENSE.txt
+
+LibRaw
+- Version: 0.22.1
+- Repository tree object: b7090a4092f81cca5413f964fd7b5ea04514d954
+- Configured in this candidate: @HYPERBROWSE_ENABLE_LIBRAW@
+- Use: statically linked into HyperBrowse and HyperBrowseRawHelper when enabled
+- Distribution selection: CDDL 1.0 under LibRaw's dual-license terms
+- Notices: see licenses/COPYRIGHT, licenses/LICENSE.CDDL, and licenses/LICENSE.LGPL
+
+Microsoft Visual C++ runtime
+- Configuration: @HYPERBROWSE_RUNTIME_DEPENDENCY_MSVC_LINE@
+
+NVIDIA CUDA runtime and nvJPEG
+- CUDA Runtime package: 12.6.77 (pinned redistributable manifest 12.6.3)
+- nvJPEG package: 12.3.3.54 (pinned redistributable manifest 12.6.3)
+- Configuration: @HYPERBROWSE_RUNTIME_DEPENDENCY_NVIDIA_LINE@
+- When bundled, the NVIDIA license files are staged beside this inventory.
+
+This inventory records the audited release payload and its supplied notices. It is
+not a legal opinion. Re-run the dependency review when a component, revision,
+linkage mode, or redistribution setting changes.

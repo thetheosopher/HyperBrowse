@@ -33,8 +33,10 @@ namespace hyperbrowse::ui
             WParamLParamHandler onBrowserPaneContextMenu;
             WParamLParamHandler onBrowserPaneQuickSendDrag;
             LParamHandler onBatchConvert;
+            LParamHandler onImageCommand;
             LParamHandler onFileOperation;
             LParamHandler onFileOperationProgress;
+            NoArgumentHandler onUserMetadataSaveError;
             LParamHandler onDetailsPanelThumbnail;
             WParamLParamHandler onViewerZoom;
             WParamLParamHandler onViewerActivity;

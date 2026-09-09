@@ -27,6 +27,7 @@
 #include "services/UserMetadataStore.h"
 #include "util/Diagnostics.h"
 #include "util/ResourcePng.h"
+#include "ui/SystemTheme.h"
 
 namespace
 {
@@ -116,6 +117,25 @@ namespace
 
     hyperbrowse::browser::BrowserPane::ThemeColors MakeThemeColors(bool darkTheme)
     {
+        if (hyperbrowse::ui::IsHighContrastEnabled())
+        {
+            return hyperbrowse::browser::BrowserPane::ThemeColors{
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_HIGHLIGHT),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_GRAYTEXT),
+                GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_HIGHLIGHT),
+                GetSysColor(COLOR_HIGHLIGHT),
+                GetSysColor(COLOR_HIGHLIGHTTEXT),
+                GetSysColor(COLOR_HIGHLIGHT),
+                GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOW),
+            };
+        }
+
         if (darkTheme)
         {
             return hyperbrowse::browser::BrowserPane::ThemeColors{

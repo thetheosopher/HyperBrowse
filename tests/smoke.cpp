@@ -35,6 +35,7 @@
 #include "app/Application.h"
 #include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
+#include "decode/NvJpegDecoder.h"
 #include "decode/WicThumbnailDecoder.h"
 
 #include "services/BatchConvertService.h"
@@ -43,6 +44,7 @@
 #include "services/FolderTreeEnumerationService.h"
 #include "services/FolderWatchService.h"
 #include "services/ImageMetadataService.h"
+#include "services/ImageCommandService.h"
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "ui/CommandIds.h"
@@ -57,6 +59,7 @@
 #include "smoke_policy.h"
 #include "smoke_decode.h"
 #include "smoke_model.h"
+#include "smoke_metadata.h"
 #include "smoke_runtime.h"
 #include "smoke_watch.h"
 
@@ -137,6 +140,20 @@ namespace
         bool completed{};
     };
 
+    struct BatchConvertResult
+    {
+        std::uint64_t expectedRequestId{};
+        hyperbrowse::services::BatchConvertUpdate update;
+        bool completed{};
+    };
+
+    struct ImageCommandResult
+    {
+        std::uint64_t expectedRequestId{};
+        hyperbrowse::services::ImageCommandUpdate update;
+        bool completed{};
+    };
+
     struct TestWindowState
     {
         std::uint64_t expectedRequestId{};
@@ -144,6 +161,8 @@ namespace
         ThumbnailResult thumbnailResult;
         FolderTreeEnumerationResult folderTreeEnumerationResult;
         FileOperationResult fileOperationResult;
+        BatchConvertResult batchConvertResult;
+        ImageCommandResult imageCommandResult;
         int viewerStartFolderSlideshowRequests{};
         HWND lastViewerStartFolderSlideshowSource{};
         int viewerQuickSendRequests{};
@@ -295,6 +314,23 @@ namespace
         bool hadValue_{};
     };
 
+    class ScopedMemorySnapshotOverride
+    {
+    public:
+        explicit ScopedMemorySnapshotOverride(hyperbrowse::util::MemorySnapshot snapshot)
+        {
+            hyperbrowse::util::SetMemorySnapshotOverrideForTests(snapshot);
+        }
+
+        ~ScopedMemorySnapshotOverride()
+        {
+            hyperbrowse::util::ClearMemorySnapshotOverrideForTests();
+        }
+
+        ScopedMemorySnapshotOverride(const ScopedMemorySnapshotOverride&) = delete;
+        ScopedMemorySnapshotOverride& operator=(const ScopedMemorySnapshotOverride&) = delete;
+    };
+
     enum class TestImageFormat
     {
         Jpeg,
@@ -332,7 +368,8 @@ namespace
             / L"HyperBrowse.exe";
         Expect(fs::exists(applicationPath), "Failed to locate the HyperBrowse executable for IPC testing");
 
-        std::wstring commandLine = L"\"" + applicationPath.wstring() + L"\"";
+        std::wstring commandLine = L"\"" + applicationPath.wstring()
+            + L"\" --test-single-instance";
         std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
         mutableCommandLine.push_back(L'\0');
 
@@ -807,6 +844,34 @@ namespace
 
             state->fileOperationResult.update = std::move(*update);
             state->fileOperationResult.completed = true;
+            return 0;
+        }
+
+        if (message == hyperbrowse::services::BatchConvertService::kMessageId)
+        {
+            std::unique_ptr<hyperbrowse::services::BatchConvertUpdate> update(
+                reinterpret_cast<hyperbrowse::services::BatchConvertUpdate*>(lParam));
+            if (!state || !update || update->requestId != state->batchConvertResult.expectedRequestId)
+            {
+                return 0;
+            }
+
+            state->batchConvertResult.update = std::move(*update);
+            state->batchConvertResult.completed = state->batchConvertResult.update.finished;
+            return 0;
+        }
+
+        if (message == hyperbrowse::services::ImageCommandService::kMessageId)
+        {
+            std::unique_ptr<hyperbrowse::services::ImageCommandUpdate> update(
+                reinterpret_cast<hyperbrowse::services::ImageCommandUpdate*>(lParam));
+            if (!state || !update || update->requestId != state->imageCommandResult.expectedRequestId)
+            {
+                return 0;
+            }
+
+            state->imageCommandResult.update = std::move(*update);
+            state->imageCommandResult.completed = state->imageCommandResult.update.finished;
             return 0;
         }
 
@@ -1726,7 +1791,99 @@ namespace
         runCase(L"plus-three.jpg", +3, 1);
     }
 
-    void RunBatchConvertCancellationScenario(HWND hwnd)
+    void RunNvJpegHardwareScenario(const fs::path& jpegPath)
+    {
+        Expect(fs::is_regular_file(jpegPath), "nvJPEG hardware fixture does not exist");
+        hyperbrowse::decode::SetNvJpegAccelerationEnabled(true);
+        hyperbrowse::decode::NvJpegDecoder decoder;
+        std::wstring errorMessage;
+        const auto thumbnail = decoder.Decode(MakeCacheKey(jpegPath, 1), &errorMessage);
+        Expect(thumbnail != nullptr,
+               std::string("nvJPEG did not decode the hardware fixture: ") + Utf8FromWide(errorMessage));
+        Expect(thumbnail->Width() > 0 && thumbnail->Height() > 0,
+               "nvJPEG returned an empty hardware-decoded thumbnail");
+    }
+
+    void RunImageCommandServiceScenario(HWND hwnd, TestWindowState* state)
+    {
+        TempFolder root(L"HyperBrowseImageCommandService");
+        const fs::path pngPath = root.Root() / L"copy.png";
+        const fs::path firstJpegPath = root.Root() / L"first.jpg";
+        const fs::path secondJpegPath = root.Root() / L"second.jpg";
+        WriteTestImage(pngPath, TestImageFormat::Png, 64, 32);
+        WriteTestImage(firstJpegPath, TestImageFormat::Jpeg, 24, 48, 6);
+        WriteTestImage(secondJpegPath, TestImageFormat::Jpeg, 24, 48, 6);
+
+        hyperbrowse::services::ImageCommandService service;
+        state->imageCommandResult = {};
+        state->imageCommandResult.expectedRequestId = service.StartCopyPixels(
+            hwnd,
+            hwnd,
+            hyperbrowse::browser::BuildBrowserItemFromPath(pngPath));
+        Expect(PumpMessagesUntil([&]() { return state->imageCommandResult.completed; }, 10000),
+               "Asynchronous Copy Image decode did not finish");
+        Expect(state->imageCommandResult.update.succeededCount == 1
+                   && state->imageCommandResult.update.image
+                   && state->imageCommandResult.update.image->Bitmap(),
+               "Asynchronous Copy Image did not return decoded pixels");
+
+        state->imageCommandResult = {};
+        state->imageCommandResult.expectedRequestId = service.StartInformation(
+            hwnd,
+            hwnd,
+            hyperbrowse::browser::BuildBrowserItemFromPath(pngPath));
+        Expect(PumpMessagesUntil([&]() { return state->imageCommandResult.completed; }, 10000),
+               "Asynchronous Image Information extraction did not finish");
+        Expect(state->imageCommandResult.update.succeededCount == 1
+                   && state->imageCommandResult.update.metadata,
+               "Asynchronous Image Information did not return metadata");
+
+        state->imageCommandResult = {};
+        state->imageCommandResult.expectedRequestId = service.StartJpegOrientation(
+            hwnd,
+            hwnd,
+            {hyperbrowse::browser::BuildBrowserItemFromPath(firstJpegPath),
+             hyperbrowse::browser::BuildBrowserItemFromPath(secondJpegPath)},
+            1);
+        Expect(PumpMessagesUntil([&]() { return state->imageCommandResult.completed; }, 10000),
+               "Asynchronous JPEG orientation adjustment did not finish");
+        std::wstring firstDecodeError;
+        std::wstring secondDecodeError;
+        const auto firstImage = hyperbrowse::decode::DecodeFullImage(
+            hyperbrowse::browser::BuildBrowserItemFromPath(firstJpegPath),
+            &firstDecodeError);
+        const auto secondImage = hyperbrowse::decode::DecodeFullImage(
+            hyperbrowse::browser::BuildBrowserItemFromPath(secondJpegPath),
+            &secondDecodeError);
+        Expect(state->imageCommandResult.update.completedCount == 2
+                   && state->imageCommandResult.update.succeededCount == 2
+                   && state->imageCommandResult.update.failedCount == 0
+                   && state->imageCommandResult.update.updatedPaths.size() == 2
+                   && firstImage
+                   && secondImage
+                   && firstImage->Width() == 24
+                   && firstImage->Height() == 48
+                   && secondImage->Width() == 24
+                   && secondImage->Height() == 48,
+               "Asynchronous JPEG orientation adjustment reported or wrote the wrong result (completed="
+                   + std::to_string(state->imageCommandResult.update.completedCount)
+                   + ", succeeded="
+                   + std::to_string(state->imageCommandResult.update.succeededCount)
+                   + ", failed="
+                   + std::to_string(state->imageCommandResult.update.failedCount)
+                   + ", paths="
+                   + std::to_string(state->imageCommandResult.update.updatedPaths.size())
+                   + ", service-error="
+                   + Utf8FromWide(state->imageCommandResult.update.message)
+                   + ", first-decode-error="
+                   + Utf8FromWide(firstDecodeError)
+                   + ", second-decode-error="
+                   + Utf8FromWide(secondDecodeError)
+                   + ")");
+        service.Shutdown();
+    }
+
+    void RunBatchConvertCancellationScenario(HWND hwnd, TestWindowState* state)
     {
         const fs::path fixtureRoot = TestSourceDirectory() / L"fixtures" / L"raw";
         const fs::path nefPath = fixtureRoot / L"RAW_NIKON_D1.NEF";
@@ -1742,7 +1899,12 @@ namespace
 
         TempFolder output(L"HyperBrowseBatchCancel");
         hyperbrowse::services::BatchConvertService service;
-        service.Start(hwnd, std::move(items), output.Root().wstring(), hyperbrowse::services::BatchConvertFormat::Png);
+        state->batchConvertResult = {};
+        state->batchConvertResult.expectedRequestId = service.Start(
+            hwnd,
+            std::move(items),
+            output.Root().wstring(),
+            hyperbrowse::services::BatchConvertFormat::Png);
 
         PumpMessagesFor(100);
         const ULONGLONG start = GetTickCount64();
@@ -1753,6 +1915,14 @@ namespace
                "Batch conversion service did not record cancellation");
         Expect(service.RejectedTaskCount() == 0,
                "Batch conversion service rejected work during the focused scenario");
+        Expect(PumpMessagesUntil([&]() { return state->batchConvertResult.completed; }, 15000),
+               "Cancelled batch conversion did not post its terminal state");
+        Expect(state->batchConvertResult.update.succeededCount
+                   + state->batchConvertResult.update.failedCount
+                   <= state->batchConvertResult.update.completedCount
+                   && state->batchConvertResult.update.completedCount
+                   <= state->batchConvertResult.update.totalCount,
+               "Cancelled batch conversion reported inconsistent totals");
 
         TempFolder burstOutput(L"HyperBrowseBatchBurst");
         const auto missingItem = hyperbrowse::browser::BuildBrowserItemFromPath(
@@ -1787,6 +1957,62 @@ namespace
                                               });
         Expect(queueMetric != diagnostics.counters.end() && queueMetric->value <= 1,
                "Batch conversion queue-depth diagnostics were not surfaced");
+
+        TempFolder input(L"HyperBrowseBatchInput");
+        const fs::path sourcePath = input.Root() / L"source.png";
+        WriteTestImage(sourcePath, TestImageFormat::Png, 48, 32);
+        const auto sourceItem = hyperbrowse::browser::BuildBrowserItemFromPath(sourcePath);
+
+        TempFolder successfulOutput(L"HyperBrowseBatchAtomicSuccess");
+        successfulOutput.WriteFile(L"source.png", 7);
+        state->batchConvertResult = {};
+        state->batchConvertResult.expectedRequestId = service.Start(
+            hwnd,
+            {sourceItem},
+            successfulOutput.Root().wstring(),
+            hyperbrowse::services::BatchConvertFormat::Png);
+        Expect(PumpMessagesUntil([&]() { return state->batchConvertResult.completed; }, 10000),
+               "Successful batch conversion did not finish");
+        Expect(state->batchConvertResult.update.completedCount == 1
+                   && state->batchConvertResult.update.totalCount == 1
+                   && state->batchConvertResult.update.succeededCount == 1
+                   && state->batchConvertResult.update.failedCount == 0
+                   && fs::exists(successfulOutput.Root() / L"source_1.png")
+                   && fs::file_size(successfulOutput.Root() / L"source.png") == 7,
+               "Batch conversion did not publish atomically without overwriting an occupied name");
+
+        TempFolder exhaustedOutput(L"HyperBrowseBatchAtomicExhausted");
+        for (int suffix = 0; suffix < 1000; ++suffix)
+        {
+            const std::wstring fileName = suffix == 0
+                ? L"source.png"
+                : L"source_" + std::to_wstring(suffix) + L".png";
+            exhaustedOutput.WriteFile(fileName, 1);
+        }
+        state->batchConvertResult = {};
+        state->batchConvertResult.expectedRequestId = service.Start(
+            hwnd,
+            {sourceItem},
+            exhaustedOutput.Root().wstring(),
+            hyperbrowse::services::BatchConvertFormat::Png);
+        Expect(PumpMessagesUntil([&]() { return state->batchConvertResult.completed; }, 10000),
+               "Filename-exhausted batch conversion did not finish");
+        Expect(state->batchConvertResult.update.completedCount == 1
+                   && state->batchConvertResult.update.totalCount == 1
+                   && state->batchConvertResult.update.succeededCount == 0
+                   && state->batchConvertResult.update.failedCount == 1,
+               "Filename exhaustion double-counted a batch failure or reported an invalid success total");
+
+        const auto hasTemporaryOutput = [](const fs::path& folder)
+        {
+            return std::any_of(fs::directory_iterator(folder), fs::directory_iterator(), [](const fs::directory_entry& entry)
+            {
+                return entry.path().filename().wstring().starts_with(L".hyperbrowse-convert-");
+            });
+        };
+        Expect(!hasTemporaryOutput(successfulOutput.Root()) && !hasTemporaryOutput(exhaustedOutput.Root()),
+               "Batch conversion retained an owned temporary output after completion");
+        service.Shutdown();
     }
 
     void RunFileRenameOperationScenario(HWND hwnd, TestWindowState* state)
@@ -1816,6 +2042,18 @@ namespace
         Expect(state->fileOperationResult.update.createdPaths.size() == 1
                    && state->fileOperationResult.update.createdPaths.front() == renamedPath.wstring(),
                "File rename operation did not report the created path");
+
+        hyperbrowse::ui::FileOperationPathState renamedState;
+        Expect(hyperbrowse::ui::TryCaptureFileOperationPathState(renamedPath.wstring(), &renamedState)
+                   && hyperbrowse::ui::FileOperationPathStatesMatch(
+                       {renamedPath.wstring()},
+                       {renamedState}),
+               "File-operation journal identity did not match an unchanged result");
+        root.WriteFile(L"after.jpg", 64);
+        Expect(!hyperbrowse::ui::FileOperationPathStatesMatch(
+                   {renamedPath.wstring()},
+                   {renamedState}),
+               "File-operation journal identity accepted an externally changed result");
     }
 
     void RunFileOperationShutdownScenario()
@@ -3671,6 +3909,9 @@ namespace
     {
         using hyperbrowse::ui::command_ids::ID_VIEW_SETTINGS;
 
+        ScopedMemorySnapshotOverride memorySnapshotOverride({
+            16ULL * 1024ULL * 1024ULL * 1024ULL,
+            8ULL * 1024ULL * 1024ULL * 1024ULL});
         constexpr wchar_t kDialogClassName[] = L"HyperBrowseExperimentalSettingsDialog";
         constexpr wchar_t kSettingsUiEnvironment[] = L"HYPERBROWSE_SETTINGS_UI";
         ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
@@ -3696,6 +3937,7 @@ namespace
         std::string failure;
         std::thread worker([&]()
         {
+            ComScope workerComScope;
             if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
             {
                 failure = "Failed to post the experimental Settings command";
@@ -3721,6 +3963,77 @@ namespace
                 SendMessageW(dialog, WM_CLOSE, 0, 0);
                 done.store(true, std::memory_order_release);
             };
+            const LRESULT settingsObjectResult = SendMessageW(dialog, WM_GETOBJECT, 0, OBJID_CLIENT);
+            if (settingsObjectResult == 0)
+            {
+                failAndClose("Experimental Settings did not return an accessibility object");
+                return;
+            }
+            IAccessible* settingsAccessible = nullptr;
+            const HRESULT settingsObjectStatus = ObjectFromLresult(
+                settingsObjectResult,
+                IID_IAccessible,
+                0,
+                reinterpret_cast<void**>(&settingsAccessible));
+            if (FAILED(settingsObjectStatus) || !settingsAccessible)
+            {
+                failAndClose("Could not materialize the Experimental Settings accessibility object");
+                return;
+            }
+            long settingsChildCount = 0;
+            bool foundSelectedSlideshowTab = false;
+            bool foundTransitionStyle = false;
+            bool foundApplyAction = false;
+            if (FAILED(settingsAccessible->get_accChildCount(&settingsChildCount)) || settingsChildCount < 11)
+            {
+                settingsAccessible->Release();
+                failAndClose("Experimental Settings accessibility object omitted semantic children");
+                return;
+            }
+            for (long childId = 1; childId <= settingsChildCount; ++childId)
+            {
+                VARIANT child{};
+                child.vt = VT_I4;
+                child.lVal = childId;
+                BSTR name = nullptr;
+                VARIANT role{};
+                VARIANT accessibleState{};
+                if (FAILED(settingsAccessible->get_accName(child, &name))
+                    || !name
+                    || FAILED(settingsAccessible->get_accRole(child, &role))
+                    || role.vt != VT_I4
+                    || FAILED(settingsAccessible->get_accState(child, &accessibleState))
+                    || accessibleState.vt != VT_I4)
+                {
+                    if (name)
+                    {
+                        SysFreeString(name);
+                    }
+                    VariantClear(&role);
+                    VariantClear(&accessibleState);
+                    settingsAccessible->Release();
+                    failAndClose("Experimental Settings accessibility child omitted its name, role, or state");
+                    return;
+                }
+                const std::wstring accessibleName(name, SysStringLen(name));
+                foundSelectedSlideshowTab = foundSelectedSlideshowTab
+                    || (accessibleName == L"Slideshow tab"
+                        && role.lVal == ROLE_SYSTEM_PAGETAB
+                        && (accessibleState.lVal & STATE_SYSTEM_SELECTED) != 0);
+                foundTransitionStyle = foundTransitionStyle
+                    || (accessibleName == L"Transition style" && role.lVal == ROLE_SYSTEM_COMBOBOX);
+                foundApplyAction = foundApplyAction
+                    || (accessibleName == L"Apply" && role.lVal == ROLE_SYSTEM_PUSHBUTTON);
+                SysFreeString(name);
+                VariantClear(&role);
+                VariantClear(&accessibleState);
+            }
+            settingsAccessible->Release();
+            if (!foundSelectedSlideshowTab || !foundTransitionStyle || !foundApplyAction)
+            {
+                failAndClose("Experimental Settings accessibility tree did not expose its selected tab, field, and footer action");
+                return;
+            }
             if (GetDlgItem(dialog, 5601) != nullptr)
             {
                 failAndClose("Experimental Settings unexpectedly created a native OK button");
@@ -4202,12 +4515,14 @@ namespace
         constexpr int kOverlayTextSizeControlId = 5015;
         constexpr int kWindowedFullMetadataControlId = 5037;
         constexpr int kFullScreenFullMetadataControlId = 5038;
+        constexpr int kSlideshowDurationControlId = 5002;
         constexpr int kApplyButtonId = 5500;
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
         ScopedRegistryDwordBackup overlayTextSizeBackup(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
         ScopedRegistryDwordBackup windowedFullMetadataBackup(kRegistryPath, kRegistryValueViewerWindowedFullMetadataVisible);
         ScopedRegistryDwordBackup fullScreenFullMetadataBackup(kRegistryPath, kRegistryValueViewerFullScreenFullMetadataVisible);
         ScopedRegistryDwordBackup fullMetadataBackup(kRegistryPath, kRegistryValueViewerFullMetadataVisible);
+        ScopedRegistryDwordBackup slideshowIntervalBackup(kRegistryPath, kRegistryValueSlideshowInterval);
         DeleteRegistryValue(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
         DeleteRegistryValue(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
         DeleteRegistryValue(kRegistryPath, kRegistryValueViewerWindowedFullMetadataVisible);
@@ -4243,6 +4558,9 @@ namespace
 
         const std::vector<HWND> viewerHandles = FindOpenViewerWindowHandles();
         std::vector<hyperbrowse::viewer::ViewerWindow*> viewers;
+        const std::vector<hyperbrowse::browser::BrowserItem> slideshowItems{
+            hyperbrowse::browser::BuildBrowserItemFromPath(firstPath),
+            hyperbrowse::browser::BuildBrowserItemFromPath(secondPath)};
         viewers.reserve(viewerHandles.size());
         for (HWND viewerHandle : viewerHandles)
         {
@@ -4250,6 +4568,11 @@ namespace
                 GetWindowLongPtrW(viewerHandle, GWLP_USERDATA));
             Expect(viewer != nullptr, "Could not recover a ViewerWindow for multi-viewer settings smoke coverage");
             viewers.push_back(viewer);
+            Expect(viewer->ReplaceItems(slideshowItems, 0),
+                   "Could not prepare a two-item viewer for slideshow settings coverage");
+            viewer->StartSlideshow(60000);
+            Expect(viewer->IsSlideshowActive(),
+                   "A viewer did not start its slideshow for multi-viewer settings coverage");
             SendMessageW(viewerHandle, WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
         }
         PumpMessagesFor(100);
@@ -4288,6 +4611,20 @@ namespace
                 SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
                 done.store(true, std::memory_order_release);
             };
+            HWND slideshowDuration = nullptr;
+            const ULONGLONG controlsDeadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < controlsDeadline
+                   && !(slideshowDuration = GetDlgItem(dialog, kSlideshowDurationControlId)))
+            {
+                Sleep(10);
+            }
+            if (!slideshowDuration)
+            {
+                failAndClose("Legacy Settings did not create the slideshow duration control");
+                return;
+            }
+            SetWindowTextW(slideshowDuration, L"4321");
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'V', 0);
             const HWND infoOverlays = GetDlgItem(dialog, kInfoOverlaysControlId);
             const HWND overlayTextSize = GetDlgItem(dialog, kOverlayTextSizeControlId);
             const HWND windowedFullMetadata = GetDlgItem(dialog, kWindowedFullMetadataControlId);
@@ -4308,14 +4645,24 @@ namespace
             {
                 if (viewer->AreInfoOverlaysVisible()
                     || viewer->OverlayTextSize() != InfoOverlayTextSize::Large
-                    || !viewer->IsFullMetadataVisible())
+                    || !viewer->IsFullMetadataVisible()
+                    || !viewer->IsSlideshowActive()
+                    || viewer->SlideshowIntervalMs() != 4321)
                 {
                     failAndClose("Legacy Settings did not update every open viewer");
                     return;
                 }
             }
 
-            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDOK, 0), 0);
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'S', 0);
+            const HWND cancelledDuration = GetDlgItem(dialog, kSlideshowDurationControlId);
+            if (!cancelledDuration)
+            {
+                failAndClose("Legacy Settings did not restore the slideshow page before Cancel coverage");
+                return;
+            }
+            SetWindowTextW(cancelledDuration, L"5555");
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
             const ULONGLONG closeDeadline = GetTickCount64() + 10000;
             while (GetTickCount64() < closeDeadline && FindWindowW(kDialogClassName, nullptr))
             {
@@ -4323,7 +4670,7 @@ namespace
             }
             if (FindWindowW(kDialogClassName, nullptr))
             {
-                failure = "Legacy Settings did not close after applying multi-viewer settings";
+                failure = "Legacy Settings did not close after cancelling an unapplied duration";
             }
             done.store(true, std::memory_order_release);
         });
@@ -4343,7 +4690,9 @@ namespace
             Expect(viewer->IsFullScreen(), "Viewer did not return to full-screen mode after Settings Apply");
             Expect(!viewer->AreInfoOverlaysVisible()
                        && viewer->OverlayTextSize() == InfoOverlayTextSize::Large
-                       && !viewer->IsFullMetadataVisible(),
+                       && !viewer->IsFullMetadataVisible()
+                       && viewer->IsSlideshowActive()
+                       && viewer->SlideshowIntervalMs() == 4321,
                    "Legacy Settings did not apply the full-screen metadata preference to every viewer");
         }
 
@@ -4776,6 +5125,11 @@ namespace
 
 int main(int argc, char* argv[])
 {
+    if (hyperbrowse::tests::IsUserMetadataChildScenario(argc, argv))
+    {
+        return hyperbrowse::tests::RunUserMetadataChildScenario(argc, argv);
+    }
+
     try
     {
         ComScope comScope;
@@ -4799,6 +5153,8 @@ int main(int argc, char* argv[])
         const bool accessibilityOnly = argc > 1 && std::string_view(argv[1]) == "--accessibility";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
         const bool multiViewerSettingsOnly = argc > 1 && std::string_view(argv[1]) == "--multi-viewer-settings";
+        const bool userMetadataOnly = argc > 1 && std::string_view(argv[1]) == "--user-metadata";
+        const bool nvJpegHardwareOnly = argc > 1 && std::string_view(argv[1]) == "--nvjpeg-hardware";
         const std::string_view selectedScenario = argc > 1 ? std::string_view(argv[1]) : std::string_view{};
         const bool policyOnly = hyperbrowse::tests::RunFocusedPolicyScenario(selectedScenario);
         if (policyOnly)
@@ -4840,6 +5196,15 @@ int main(int argc, char* argv[])
         {
             RunMultiViewerSettingsScenario(instance);
         }
+        else if (userMetadataOnly)
+        {
+            hyperbrowse::tests::RunUserMetadataScenarios();
+        }
+        else if (nvJpegHardwareOnly)
+        {
+            Expect(argc > 2, "--nvjpeg-hardware requires a JPEG fixture path");
+            RunNvJpegHardwareScenario(fs::path(argv[2]));
+        }
         else
         {
             hyperbrowse::tests::RunPolicyScenarios();
@@ -4854,7 +5219,8 @@ int main(int argc, char* argv[])
             RunRedactedDiagnosticsExportScenario();
             RunWicDecoderScenario();
             RunJpegOrientationAdjustmentScenario();
-            RunBatchConvertCancellationScenario(hwnd);
+            RunImageCommandServiceScenario(hwnd, &state);
+            RunBatchConvertCancellationScenario(hwnd, &state);
             RunFileRenameOperationScenario(hwnd, &state);
             RunFileOperationShutdownScenario();
             RunFileConflictPlanningScenario();

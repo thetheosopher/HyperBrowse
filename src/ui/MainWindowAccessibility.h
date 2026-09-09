@@ -34,7 +34,10 @@ namespace hyperbrowse::ui
                                 SnapshotProvider snapshotProvider,
                                 FocusedChildProvider focusedChildProvider,
                                 FocusProvider focusProvider,
-                                DefaultActionProvider defaultActionProvider);
+                                DefaultActionProvider defaultActionProvider,
+                                std::wstring rootName = L"HyperBrowse",
+                                std::wstring rootDescription = L"Keyboard-accessible image browser window",
+                                long rootRole = ROLE_SYSTEM_WINDOW);
         ~MainWindowAccessibility();
 
         LRESULT HandleGetObject(WPARAM wParam, LPARAM lParam) const;

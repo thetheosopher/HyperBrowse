@@ -225,6 +225,130 @@ function Assert-ReleaseLayoutManifest {
     }
 }
 
+function Read-KeyValueManifest {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Packaging capability manifest was not found: $Path"
+    }
+
+    $values = @{}
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) {
+            continue
+        }
+        $separator = $line.IndexOf('=')
+        if ($separator -le 0) {
+            throw "Invalid packaging capability line: $line"
+        }
+        $values[$line.Substring(0, $separator).Trim()] = $line.Substring($separator + 1).Trim()
+    }
+    return $values
+}
+
+function Test-EnabledValue {
+    param([string]$Value)
+    return $Value -in @('1', 'ON', 'TRUE', 'YES', 'Y')
+}
+
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Assert-ProductVersion {
+    param(
+        [string]$Path,
+        [string]$ExpectedVersion,
+        [string]$ComponentName
+    )
+
+    $versionInfo = (Get-Item -LiteralPath $Path).VersionInfo
+    $expectedPattern = '^' + [regex]::Escape($ExpectedVersion) + '(?:\.0)?(?:\s|$)'
+    foreach ($field in @('FileVersion', 'ProductVersion')) {
+        $actual = [string]$versionInfo.$field
+        if ([string]::IsNullOrWhiteSpace($actual) -or $actual -notmatch $expectedPattern) {
+            throw "$ComponentName $field '$actual' does not match configured version $ExpectedVersion."
+        }
+    }
+}
+
+function Write-Sha256Manifest {
+    param(
+        [string]$Layout,
+        [string]$ManifestName = 'SHA256SUMS.txt'
+    )
+
+    $manifestPath = Join-Path $Layout $ManifestName
+    $lines = @()
+    $files = Get-ChildItem -LiteralPath $Layout -File -Recurse | Where-Object {
+        $_.FullName -ne $manifestPath
+    } | Sort-Object FullName
+    foreach ($file in $files) {
+        $relativePath = $file.FullName.Substring($Layout.Length).TrimStart([char[]]@('\', '/')) -replace '\\', '/'
+        $hash = Get-Sha256Hex -Path $file.FullName
+        $lines += "$hash *$relativePath"
+    }
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($manifestPath, [string[]]$lines, $utf8)
+    return $manifestPath
+}
+
+function Assert-Sha256Manifest {
+    param(
+        [string]$Layout,
+        [string]$ManifestPath
+    )
+
+    foreach ($line in Get-Content -LiteralPath $ManifestPath) {
+        if ($line -notmatch '^([0-9a-f]{64}) \*(.+)$') {
+            throw "Invalid SHA-256 manifest line: $line"
+        }
+        $relativePath = $Matches[2] -replace '/', '\'
+        $filePath = Join-Path $Layout $relativePath
+        if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+            throw "SHA-256 manifest references a missing file: $relativePath"
+        }
+        $actual = Get-Sha256Hex -Path $filePath
+        if ($actual -ne $Matches[1]) {
+            throw "SHA-256 mismatch for $relativePath."
+        }
+    }
+}
+
+function Assert-ZipContents {
+    param(
+        [string]$ArchivePath,
+        [string]$LayoutName,
+        [string[]]$RequiredRelativePaths
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ArchivePath)
+    try {
+        $entries = @($archive.Entries | ForEach-Object { $_.FullName -replace '\\', '/' })
+        foreach ($relativePath in $RequiredRelativePaths) {
+            $expected = "$LayoutName/$($relativePath -replace '\\', '/')"
+            if ($entries -notcontains $expected) {
+                throw "Portable archive is missing required entry: $expected"
+            }
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 $projectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $buildDir = [System.IO.Path]::GetFullPath($BuildDir)
 $cmakeListsPath = Join-Path $projectRoot 'CMakeLists.txt'
@@ -244,6 +368,7 @@ $ctestExecutable = if ($SkipTests) { $null } else { Resolve-CMakeTool -ToolName 
 $innoSetupCompiler = Resolve-InnoSetupCompiler -RequestedPath $InnoSetupCompiler
 $version = Get-ProjectVersion -CMakeListsPath (Join-Path $projectRoot 'CMakeLists.txt')
 $installerScript = Join-Path $buildDir 'HyperBrowseInstaller.iss'
+$capabilityManifestPath = Join-Path $buildDir 'PackagingCapabilities.txt'
 
 if (-not (Test-Path $installerScript)) {
     throw "Expected generated Inno Setup script was not found: $installerScript. Re-run CMake configure for this build tree before packaging."
@@ -254,6 +379,20 @@ $portableDir = Join-Path $distDir "HyperBrowse-$version-portable"
 $runtimeDir = Join-Path $distDir "HyperBrowse-$version-installer-layout"
 $portableZip = Join-Path $distDir "HyperBrowse-$version-portable-win64.zip"
 $installerExe = Join-Path $distDir "HyperBrowse-$version-installer.exe"
+$artifactHashManifest = Join-Path $distDir 'SHA256SUMS.txt'
+$capabilities = Read-KeyValueManifest -Path $capabilityManifestPath
+
+foreach ($requiredCapability in @('PROJECT_VERSION', 'LIBRAW_ENABLED', 'NVJPEG_ENABLED', 'CUDA_REDIST_ENABLED', 'CUDA_RUNTIME_FILES')) {
+    if (-not $capabilities.ContainsKey($requiredCapability)) {
+        throw "Packaging capability manifest is missing $requiredCapability."
+    }
+}
+if ($capabilities.PROJECT_VERSION -ne $version) {
+    throw "Packaging capability version $($capabilities.PROJECT_VERSION) does not match project version $version."
+}
+$libRawEnabled = Test-EnabledValue -Value $capabilities.LIBRAW_ENABLED
+$cudaRedistEnabled = Test-EnabledValue -Value $capabilities.CUDA_REDIST_ENABLED
+$cudaRuntimeFiles = @($capabilities.CUDA_RUNTIME_FILES -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
 Write-Host "Packaging HyperBrowse $version from $projectRoot" -ForegroundColor Green
 
@@ -263,7 +402,7 @@ foreach ($path in @($portableDir, $runtimeDir)) {
     }
 }
 
-foreach ($file in @($portableZip, $installerExe)) {
+foreach ($file in @($portableZip, $installerExe, $artifactHashManifest)) {
     if (Test-Path $file) {
         Remove-PathWithRetry -Path $file
     }
@@ -317,30 +456,72 @@ $portableManifest = @(
     'HyperBrowse.exe',
     'README.txt',
     'RUNTIME-DEPENDENCIES.txt',
+    'LICENSE.txt',
+    'THIRD-PARTY-NOTICES.txt',
+    'licenses\NanoSVG-LICENSE.txt',
     'docs\user-guide.html',
-    'docs\MainWindow.PNG'
+    'docs\MainWindow.PNG',
+    'SHA256SUMS.txt'
 )
 $runtimeManifest = @(
     'bin\HyperBrowse.exe',
     'docs\README-portable.txt',
     'docs\runtime-dependencies.txt',
+    'docs\LICENSE.txt',
+    'docs\THIRD-PARTY-NOTICES.txt',
+    'docs\licenses\NanoSVG-LICENSE.txt',
     'docs\user-guide.html',
-    'docs\MainWindow.PNG'
+    'docs\MainWindow.PNG',
+    'SHA256SUMS.txt'
 )
 $portableRawHelper = Join-Path $portableDir 'HyperBrowseRawHelper.exe'
 $runtimeRawHelper = Join-Path $runtimeDir 'bin\HyperBrowseRawHelper.exe'
-if (Test-Path -LiteralPath $portableRawHelper -PathType Leaf) {
+if ($libRawEnabled) {
     $portableManifest += 'HyperBrowseRawHelper.exe'
-    if (-not (Test-Path -LiteralPath $runtimeRawHelper -PathType Leaf)) {
-        throw 'Runtime layout is missing HyperBrowseRawHelper.exe while the portable layout contains it.'
-    }
     $runtimeManifest += 'bin\HyperBrowseRawHelper.exe'
+    foreach ($notice in @('COPYRIGHT', 'LICENSE.CDDL', 'LICENSE.LGPL')) {
+        $portableManifest += "licenses\$notice"
+        $runtimeManifest += "docs\licenses\$notice"
+    }
+} elseif ((Test-Path -LiteralPath $portableRawHelper -PathType Leaf) -or (Test-Path -LiteralPath $runtimeRawHelper -PathType Leaf)) {
+    throw 'A RAW helper was staged even though LIBRAW_ENABLED is false.'
 }
+
+if ($cudaRedistEnabled) {
+    if ($cudaRuntimeFiles.Count -eq 0) {
+        throw 'CUDA redistributable bundling is enabled but no runtime files were configured.'
+    }
+    foreach ($runtimeFile in $cudaRuntimeFiles) {
+        $portableManifest += $runtimeFile
+        $runtimeManifest += "bin\$runtimeFile"
+    }
+    $portableManifest += @('NVIDIA-CUDA-RUNTIME-LICENSE.txt', 'NVIDIA-NVJPEG-LICENSE.txt')
+    $runtimeManifest += @('docs\nvidia-cuda-runtime-license.txt', 'docs\nvidia-nvjpeg-license.txt')
+} else {
+    $unexpectedCudaFiles = Get-ChildItem -LiteralPath $portableDir -File | Where-Object {
+        $_.Name -match '^(cudart64_|nvjpeg64_)' -or $_.Name -match '^NVIDIA-.*-LICENSE\.txt$'
+    }
+    if ($unexpectedCudaFiles) {
+        throw 'CUDA payload was staged even though CUDA_REDIST_ENABLED is false.'
+    }
+}
+
+$portableHashManifest = Write-Sha256Manifest -Layout $portableDir
+$runtimeHashManifest = Write-Sha256Manifest -Layout $runtimeDir
+Assert-Sha256Manifest -Layout $portableDir -ManifestPath $portableHashManifest
+Assert-Sha256Manifest -Layout $runtimeDir -ManifestPath $runtimeHashManifest
 Assert-ReleaseLayoutManifest -Layout $portableDir -RequiredRelativePaths $portableManifest -ComponentName 'Portable'
 Assert-ReleaseLayoutManifest -Layout $runtimeDir -RequiredRelativePaths $runtimeManifest -ComponentName 'Runtime'
+Assert-ProductVersion -Path (Join-Path $portableDir 'HyperBrowse.exe') -ExpectedVersion $version -ComponentName 'Portable HyperBrowse'
+Assert-ProductVersion -Path (Join-Path $runtimeDir 'bin\HyperBrowse.exe') -ExpectedVersion $version -ComponentName 'Runtime HyperBrowse'
+if ($libRawEnabled) {
+    Assert-ProductVersion -Path $portableRawHelper -ExpectedVersion $version -ComponentName 'Portable RAW helper'
+    Assert-ProductVersion -Path $runtimeRawHelper -ExpectedVersion $version -ComponentName 'Runtime RAW helper'
+}
 
 Write-Host '==> Create portable release archive' -ForegroundColor Cyan
 Compress-Archive -Path $portableDir -DestinationPath $portableZip -CompressionLevel Optimal -Force
+Assert-ZipContents -ArchivePath $portableZip -LayoutName (Split-Path -Leaf $portableDir) -RequiredRelativePaths $portableManifest
 
 Invoke-External -Description 'Compile Inno Setup installer' -FilePath $innoSetupCompiler -ArgumentList @(
     '/Qp',
@@ -351,6 +532,14 @@ Invoke-External -Description 'Compile Inno Setup installer' -FilePath $innoSetup
 if (-not (Test-Path $installerExe)) {
     throw "Expected installer was not created: $installerExe"
 }
+Assert-ProductVersion -Path $installerExe -ExpectedVersion $version -ComponentName 'Installer'
+
+$artifactLines = foreach ($artifact in @($portableZip, $installerExe)) {
+    $hash = Get-Sha256Hex -Path $artifact
+    "$hash *$(Split-Path -Leaf $artifact)"
+}
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllLines($artifactHashManifest, [string[]]$artifactLines, $utf8)
 
 Write-Host ''
 Write-Host 'Release artifacts created:' -ForegroundColor Green
@@ -358,3 +547,4 @@ Write-Host "  Portable layout:   $portableDir"
 Write-Host "  Portable zip:      $portableZip"
 Write-Host "  Installer layout:  $runtimeDir"
 Write-Host "  Installer exe:     $installerExe"
+Write-Host "  Artifact hashes:   $artifactHashManifest"
