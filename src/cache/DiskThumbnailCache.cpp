@@ -520,6 +520,8 @@ namespace hyperbrowse::cache
 
         if (header.width == 0
             || header.height == 0
+            || header.sourceWidth == 0
+            || header.sourceHeight == 0
             || header.width > kMaximumThumbnailDimension
             || header.height > kMaximumThumbnailDimension
             || header.sourceWidth > static_cast<std::uint32_t>(std::numeric_limits<int>::max())

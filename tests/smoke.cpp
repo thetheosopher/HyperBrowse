@@ -1613,6 +1613,12 @@ namespace
         oversizedDimensions.width = UINT32_MAX;
         corruptEntry(oversizedDimensions, 0, "Persistent thumbnail cache accepted oversized dimensions");
 
+        TestDiskThumbnailHeader missingSourceDimensions = validHeader;
+        missingSourceDimensions.sourceWidth = 0;
+        corruptEntry(missingSourceDimensions,
+                     static_cast<std::size_t>(missingSourceDimensions.pixelBytes),
+                     "Persistent thumbnail cache accepted missing source dimensions");
+
         TestDiskThumbnailHeader wrongByteCount = validHeader;
         wrongByteCount.pixelBytes += 4;
         corruptEntry(wrongByteCount, static_cast<std::size_t>(wrongByteCount.pixelBytes), "Persistent thumbnail cache accepted a mismatched pixel byte count");
