@@ -173,18 +173,28 @@ namespace
 
     std::vector<HWND> FindOpenViewerWindowHandles()
     {
+        struct SearchState
+        {
+            std::vector<HWND>* handles;
+            DWORD processId;
+        } state{nullptr, GetCurrentProcessId()};
         std::vector<HWND> handles;
+        state.handles = &handles;
         EnumWindows([](HWND window, LPARAM parameter) -> BOOL
         {
+            auto* state = reinterpret_cast<SearchState*>(parameter);
+            DWORD processId = 0;
             wchar_t className[64]{};
-            if (GetClassNameW(window, className, static_cast<int>(std::size(className))) > 0
+            if (GetWindowThreadProcessId(window, &processId) != 0
+                && processId == state->processId
+                && GetClassNameW(window, className, static_cast<int>(std::size(className))) > 0
                 && std::wstring_view(className) == L"HyperBrowseViewerWindow"
                 && IsWindow(window) != FALSE)
             {
-                static_cast<std::vector<HWND>*>(reinterpret_cast<void*>(parameter))->push_back(window);
+                state->handles->push_back(window);
             }
             return TRUE;
-        }, reinterpret_cast<LPARAM>(&handles));
+        }, reinterpret_cast<LPARAM>(&state));
         return handles;
     }
 
@@ -4579,13 +4589,16 @@ namespace
             viewer->StartSlideshow(60000);
             Expect(viewer->IsSlideshowActive(),
                    "A viewer did not start its slideshow for multi-viewer settings coverage");
-            SendMessageW(viewerHandle, WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+            Expect(PostMessageW(viewerHandle, WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100)) != FALSE,
+                   "Failed to request windowed mode for multi-viewer settings smoke coverage");
         }
-        PumpMessagesFor(100);
-        for (const auto* viewer : viewers)
+        Expect(PumpMessagesUntil([&]()
         {
-            Expect(!viewer->IsFullScreen(), "Viewer did not enter windowed mode for multi-viewer settings smoke coverage");
-        }
+            return std::all_of(viewers.begin(), viewers.end(), [](const auto* viewer)
+            {
+                return !viewer->IsFullScreen();
+            });
+        }, 2000), "Viewer did not enter windowed mode for multi-viewer settings smoke coverage");
 
         std::atomic_bool done{false};
         std::string failure;
@@ -4688,12 +4701,18 @@ namespace
 
         for (HWND viewerHandle : viewerHandles)
         {
-            SendMessageW(viewerHandle, WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100));
+            Expect(PostMessageW(viewerHandle, WM_LBUTTONDBLCLK, 0, MAKELPARAM(100, 100)) != FALSE,
+                   "Failed to request full-screen mode after Settings Apply");
         }
-        PumpMessagesFor(100);
+        Expect(PumpMessagesUntil([&]()
+        {
+            return std::all_of(viewers.begin(), viewers.end(), [](const auto* viewer)
+            {
+                return viewer->IsFullScreen();
+            });
+        }, 2000), "Viewer did not return to full-screen mode after Settings Apply");
         for (const auto* viewer : viewers)
         {
-            Expect(viewer->IsFullScreen(), "Viewer did not return to full-screen mode after Settings Apply");
             Expect(!viewer->AreInfoOverlaysVisible()
                        && viewer->OverlayTextSize() == InfoOverlayTextSize::Large
                        && !viewer->IsFullMetadataVisible()

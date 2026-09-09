@@ -37,6 +37,21 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - A committed Windows CI workflow that builds Debug and Release, runs CTest and startup-budget checks, validates release manifests, and publishes build artifacts.
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
 
+## What's New In 2.2.0
+
+This release expands HyperBrowse's image-review and desktop file-management workflows while tightening the background services that keep large folders responsive.
+
+- Added multiple independent viewer windows, side-by-side comparison, viewer-specific settings, smooth zoom completion, improved fit-width navigation, and more reliable transition behavior when replacing images asynchronously.
+- Added Image Information, Copy Image Pixels, and JPEG orientation commands through a bounded background service with cancellation and safe UI-thread completion.
+- Added keyboard accessibility improvements across the main window, command bar, text input, focus handling, shortcut routing, and screen-reader-facing action semantics.
+- Added Quick Actions shortcut ordering and normalization, filing-position resume, saved destination persistence, richer completion confirmation, and consistent move/copy behavior for paired RAW and JPEG files.
+- Added new-folder and rename workflows, clipboard copy/cut/paste, duplicate selection, shell context-menu integration, native drag-and-drop feedback, drag-out to Explorer and other shell-aware applications, and undo/redo for supported file operations.
+- Added details-panel RGB histograms, richer metadata prompts and reports, expanded image information commands, and improved paired RAW/JPEG candidate resolution.
+- Improved folder enumeration and folder-watch coalescing, incremental large-folder updates, visible-thumbnail prioritization, adaptive prefetching, bounded background executors, cancellation, and shutdown handling.
+- Improved persistent thumbnail caching with journal-based updates, cache maintenance actions, safer invalidation, corrupt-entry cleanup, and validation that cached thumbnails retain source dimensions so the thumbnail footer does not intermittently fall back to `...`.
+- Fixed stale render-cache reuse after deletions, viewer focus loss after shell operations, delayed viewer refreshes after successful deletes, folder reload races, RAW failure presentation, metadata persistence and remapping edge cases, and several file-operation cancellation and shutdown paths.
+- Improved release packaging and CI validation with capability-derived manifests, portable and installer content checks, dependency notices, version checks, artifact hashes, startup-budget checks, WIC-only fallback coverage, and optional CUDA/nvJPEG shipping validation.
+
 ## Current Capabilities
 
 | Area | Included today |
