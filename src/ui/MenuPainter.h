@@ -31,6 +31,8 @@ namespace hyperbrowse::ui
             std::vector<std::unique_ptr<MenuDrawItemData>>& storage,
             bool ownerDrawCurrentLevel) const;
 
+        void RefreshMenuMeasurements(HMENU menu) const;
+
         void MeasureOwnerDrawMenuItem(
             MEASUREITEMSTRUCT* measureItem,
             hyperbrowse::util::AppTextSize appTextSize,

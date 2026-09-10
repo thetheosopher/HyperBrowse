@@ -910,7 +910,8 @@ namespace
 
     HFONT CreateDialogUiFont(int pointSize,
                              int weight,
-                             hyperbrowse::util::AppTextSize size = hyperbrowse::util::kDefaultAppTextSize)
+                             hyperbrowse::util::AppTextSize size = hyperbrowse::util::kDefaultAppTextSize,
+                             UINT dpi = 0)
     {
         NONCLIENTMETRICSW metrics{};
         metrics.cbSize = sizeof(metrics);
@@ -925,12 +926,17 @@ namespace
             wcscpy_s(logFont.lfFaceName, L"Segoe UI");
         }
 
-        HDC screenDc = GetDC(nullptr);
-        const int dpiY = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
-        if (screenDc)
+        HDC screenDc = nullptr;
+        const int dpiY = dpi != 0 ? static_cast<int>(dpi) : [&screenDc]
         {
-            ReleaseDC(nullptr, screenDc);
-        }
+            screenDc = GetDC(nullptr);
+            const int value = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
+            if (screenDc)
+            {
+                ReleaseDC(nullptr, screenDc);
+            }
+            return value;
+        }();
 
         logFont.lfHeight = -MulDiv(hyperbrowse::util::ScaleAppTextDimension(pointSize, size), dpiY, 72);
         logFont.lfWeight = weight;
@@ -962,6 +968,23 @@ namespace
         {
             DeleteObject(font);
         }
+    }
+
+    void RebuildAboutDialogFonts(AboutDialogState& state)
+    {
+        DeleteFontIfOwned(state.titleFont);
+        DeleteFontIfOwned(state.subtitleFont);
+        DeleteFontIfOwned(state.bodyFont);
+        DeleteFontIfOwned(state.footerFont);
+        state.titleFont = CreateDialogUiFont(21, FW_BOLD, state.appTextSize, state.dpi);
+        state.subtitleFont = CreateDialogUiFont(11, FW_SEMIBOLD, state.appTextSize, state.dpi);
+        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL, state.appTextSize, state.dpi);
+        state.footerFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, state.dpi);
+
+        if (!state.titleFont) state.titleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        if (!state.subtitleFont) state.subtitleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        if (!state.bodyFont) state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        if (!state.footerFont) state.footerFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
     }
 
     int MeasureTextBlockHeight(HFONT font,
@@ -1098,65 +1121,89 @@ namespace
         return static_cast<int>(size.cx);
     }
 
-    int MeasureAboutDialogLinkButtonWidth(HFONT font, std::wstring_view firstLabel, std::wstring_view secondLabel)
+    int ScaleAboutDialogDimension(int dimension, const AboutDialogState& state)
+    {
+        return MulDiv(dimension, static_cast<int>(state.dpi == 0 ? 96 : state.dpi), 96);
+    }
+
+    int MeasureAboutDialogLinkButtonWidth(HFONT font,
+                                          std::wstring_view firstLabel,
+                                          std::wstring_view secondLabel,
+                                          const AboutDialogState& state)
     {
         const int textWidth = std::max(MeasureTextWidth(font, firstLabel), MeasureTextWidth(font, secondLabel));
-        return std::max(180, textWidth + 40);
+        return std::max(ScaleAboutDialogDimension(180, state), textWidth + ScaleAboutDialogDimension(40, state));
     }
 
     int MeasureAboutDialogClientHeight(const AboutDialogState& state)
     {
-        const int contentRight = kAboutDialogWidth - kAboutDialogMargin;
-        const int artLeft = contentRight - kAboutDialogBrandArtSize;
-        const int iconLeft = kAboutDialogMargin;
-        const int iconSize = 48;
-        const int textLeft = iconLeft + iconSize + 20;
-        const int textRight = artLeft - 28;
-        const int textWidth = std::max(320, textRight - textLeft);
+        const int clientWidth = ScaleAboutDialogDimension(kAboutDialogWidth, state);
+        const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
+        const int brandArtSize = ScaleAboutDialogDimension(kAboutDialogBrandArtSize, state);
+        const int contentRight = clientWidth - margin;
+        const int artLeft = contentRight - brandArtSize;
+        const int iconLeft = margin;
+        const int iconSize = ScaleAboutDialogDimension(48, state);
+        const int textLeft = iconLeft + iconSize + ScaleAboutDialogDimension(20, state);
+        const int textRight = artLeft - ScaleAboutDialogDimension(28, state);
+        const int textWidth = std::max(ScaleAboutDialogDimension(320, state), textRight - textLeft);
 
-        const int titleTop = kAboutDialogMargin - 2;
-        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 44);
-        const int subtitleTop = titleTop + titleHeight + 10;
-        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
-        const int introTop = subtitleTop + subtitleHeight + 10;
-        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 40);
-        const int artFrameBottom = (kAboutDialogMargin - 4) + kAboutDialogBrandArtSize + 10;
-        const int headerHeight = std::max(kAboutDialogHeaderHeight,
-                                          std::max(artFrameBottom + kAboutDialogMargin - 8,
-                                                   introTop + introHeight + kAboutDialogMargin - 8));
+        const int titleTop = margin - ScaleAboutDialogDimension(2, state);
+        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(44, state));
+        const int subtitleTop = titleTop + titleHeight + ScaleAboutDialogDimension(10, state);
+        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(28, state));
+        const int introTop = subtitleTop + subtitleHeight + ScaleAboutDialogDimension(10, state);
+        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, ScaleAboutDialogDimension(40, state));
+        const int artFrameBottom = (margin - ScaleAboutDialogDimension(4, state)) + brandArtSize + ScaleAboutDialogDimension(10, state);
+        const int headerHeight = std::max(ScaleAboutDialogDimension(kAboutDialogHeaderHeight, state),
+                                          std::max(artFrameBottom + margin - ScaleAboutDialogDimension(8, state),
+                                                   introTop + introHeight + margin - ScaleAboutDialogDimension(8, state)));
 
-        const int bodyWidth = kAboutDialogWidth - (kAboutDialogMargin * 2);
-        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int bodyWidth = clientWidth - (margin * 2);
+        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(28, state));
         const int bodyTextHeight = MeasureTextBlockHeight(state.bodyFont, state.bodyContent, bodyWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
-        const int bodyHeight = 24 + headingHeight + 12 + bodyTextHeight + 26;
+        const int bodyHeight = ScaleAboutDialogDimension(24, state) + headingHeight + ScaleAboutDialogDimension(12, state) + bodyTextHeight + ScaleAboutDialogDimension(26, state);
 
-        const int footerActionWidth = state.githubButtonWidth + state.supportButtonWidth + kAboutDialogButtonWidth + (kAboutDialogButtonGap * 2);
-        const int footerTextWidth = std::max(320, kAboutDialogWidth - (kAboutDialogMargin * 2) - footerActionWidth - 20);
+        const int footerActionWidth = state.githubButtonWidth
+            + state.supportButtonWidth
+            + ScaleAboutDialogDimension(kAboutDialogButtonWidth, state)
+            + ScaleAboutDialogDimension(kAboutDialogButtonGap * 2, state);
+        const int footerTextWidth = std::max(ScaleAboutDialogDimension(320, state), clientWidth - (margin * 2) - footerActionWidth - ScaleAboutDialogDimension(20, state));
         const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
-        const int footerHeight = std::max(kAboutDialogFooterHeight, std::max(footerTextHeight + 34, kAboutDialogButtonHeight + 36));
+        const int footerHeight = std::max(ScaleAboutDialogDimension(kAboutDialogFooterHeight, state),
+                                          std::max(footerTextHeight + ScaleAboutDialogDimension(34, state),
+                                                   ScaleAboutDialogDimension(kAboutDialogButtonHeight + 36, state)));
 
         return headerHeight + bodyHeight + footerHeight;
     }
 
     int MeasureAboutDialogFooterActionWidth(const AboutDialogState& state)
     {
-        return state.githubButtonWidth + state.supportButtonWidth + kAboutDialogButtonWidth + (kAboutDialogButtonGap * 2);
+        return state.githubButtonWidth
+            + state.supportButtonWidth
+            + ScaleAboutDialogDimension(kAboutDialogButtonWidth, state)
+            + ScaleAboutDialogDimension(kAboutDialogButtonGap * 2, state);
     }
 
     int MeasureAboutDialogFooterTextWidth(const AboutDialogState& state, int clientWidth)
     {
-        return std::max(320, clientWidth - (kAboutDialogMargin * 2) - MeasureAboutDialogFooterActionWidth(state) - 20);
+        const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
+        return std::max(ScaleAboutDialogDimension(320, state),
+                        clientWidth - (margin * 2) - MeasureAboutDialogFooterActionWidth(state) - ScaleAboutDialogDimension(20, state));
     }
 
     int AboutDialogFooterButtonsLeft(const RECT& clientRect, const AboutDialogState& state)
     {
-        const int buttonsLeft = static_cast<int>(clientRect.right) - kAboutDialogMargin - MeasureAboutDialogFooterActionWidth(state);
-        return std::max<int>(kAboutDialogMargin, buttonsLeft);
+        const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
+        const int buttonsLeft = static_cast<int>(clientRect.right) - margin - MeasureAboutDialogFooterActionWidth(state);
+        return std::max(margin, buttonsLeft);
     }
 
-    int AboutDialogFooterButtonsTop(const RECT& clientRect)
+    int AboutDialogFooterButtonsTop(const RECT& clientRect, const AboutDialogState& state)
     {
-        return clientRect.bottom - kAboutDialogMargin - kAboutDialogButtonHeight;
+        return clientRect.bottom
+            - ScaleAboutDialogDimension(kAboutDialogMargin, state)
+            - ScaleAboutDialogDimension(kAboutDialogButtonHeight, state);
     }
 
     const wchar_t* GetAboutDialogLinkLabel(UINT controlId)
@@ -1281,14 +1328,17 @@ namespace
         const HPEN borderPen = CreatePen(PS_SOLID, 1, palette.border);
         const HGDIOBJ oldBrush = SelectObject(drawItem.hDC, fillBrush);
         const HGDIOBJ oldPen = SelectObject(drawItem.hDC, borderPen);
-        RoundRect(drawItem.hDC, pillRect.left, pillRect.top, pillRect.right, pillRect.bottom, 16, 16);
+        const int cornerRadius = ScaleAboutDialogDimension(16, state);
+        RoundRect(drawItem.hDC, pillRect.left, pillRect.top, pillRect.right, pillRect.bottom, cornerRadius, cornerRadius);
         SelectObject(drawItem.hDC, oldPen);
         SelectObject(drawItem.hDC, oldBrush);
         DeleteObject(borderPen);
         DeleteObject(fillBrush);
 
         RECT textRect = pillRect;
-        InflateRect(&textRect, -12, -6);
+        InflateRect(&textRect,
+                -ScaleAboutDialogDimension(12, state),
+                -ScaleAboutDialogDimension(6, state));
         hyperbrowse::render::DrawGdiText(drawItem.hDC,
                     state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
                     GetAboutDialogLinkLabel(drawItem.CtlID),
@@ -1301,7 +1351,9 @@ namespace
         if ((drawItem.itemState & ODS_FOCUS) != 0)
         {
             RECT focusRect = pillRect;
-            InflateRect(&focusRect, -4, -4);
+            InflateRect(&focusRect,
+                        -ScaleAboutDialogDimension(4, state),
+                        -ScaleAboutDialogDimension(4, state));
             DrawFocusRect(drawItem.hDC, &focusRect);
         }
     }
@@ -1310,7 +1362,9 @@ namespace
     {
         RECT client{};
         GetClientRect(hwnd, &client);
-        const int buttonTop = AboutDialogFooterButtonsTop(client);
+        const int buttonTop = AboutDialogFooterButtonsTop(client, state);
+        const int buttonHeight = ScaleAboutDialogDimension(kAboutDialogButtonHeight, state);
+        const int buttonGap = ScaleAboutDialogDimension(kAboutDialogButtonGap, state);
         int buttonLeft = AboutDialogFooterButtonsLeft(client, state);
 
         if (state.githubButton)
@@ -1319,9 +1373,9 @@ namespace
                        buttonLeft,
                        buttonTop,
                        state.githubButtonWidth,
-                       kAboutDialogButtonHeight,
+                       buttonHeight,
                        TRUE);
-            buttonLeft += state.githubButtonWidth + kAboutDialogButtonGap;
+            buttonLeft += state.githubButtonWidth + buttonGap;
         }
 
         if (state.supportButton)
@@ -1330,9 +1384,9 @@ namespace
                        buttonLeft,
                        buttonTop,
                        state.supportButtonWidth,
-                       kAboutDialogButtonHeight,
+                       buttonHeight,
                        TRUE);
-            buttonLeft += state.supportButtonWidth + kAboutDialogButtonGap;
+            buttonLeft += state.supportButtonWidth + buttonGap;
         }
 
         if (state.okButton)
@@ -1340,8 +1394,8 @@ namespace
             MoveWindow(state.okButton,
                        buttonLeft,
                        buttonTop,
-                       kAboutDialogButtonWidth,
-                       kAboutDialogButtonHeight,
+                       ScaleAboutDialogDimension(kAboutDialogButtonWidth, state),
+                       buttonHeight,
                        TRUE);
         }
     }
@@ -2627,32 +2681,36 @@ namespace
 
     void PaintAboutDialog(HDC hdc, const RECT& clientRect, const AboutDialogState& state)
     {
-        const int contentRight = clientRect.right - kAboutDialogMargin;
-        const int artLeft = contentRight - kAboutDialogBrandArtSize;
-        const int artTop = kAboutDialogMargin - 4;
-        const int iconLeft = kAboutDialogMargin;
-        const int iconTop = kAboutDialogMargin + 2;
-        const int iconSize = 48;
-        const int textLeft = iconLeft + iconSize + 20;
-        const int textRight = artLeft - 28;
-        const int textWidth = std::max(320, textRight - textLeft);
+        const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
+        const int brandArtSize = ScaleAboutDialogDimension(kAboutDialogBrandArtSize, state);
+        const int contentRight = clientRect.right - margin;
+        const int artLeft = contentRight - brandArtSize;
+        const int artTop = margin - ScaleAboutDialogDimension(4, state);
+        const int iconLeft = margin;
+        const int iconTop = margin + ScaleAboutDialogDimension(2, state);
+        const int iconSize = ScaleAboutDialogDimension(48, state);
+        const int textLeft = iconLeft + iconSize + ScaleAboutDialogDimension(20, state);
+        const int textRight = artLeft - ScaleAboutDialogDimension(28, state);
+        const int textWidth = std::max(ScaleAboutDialogDimension(320, state), textRight - textLeft);
 
-        const int titleTop = kAboutDialogMargin - 2;
-        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 44);
-        const int subtitleTop = titleTop + titleHeight + 10;
-        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
-        const int introTop = subtitleTop + subtitleHeight + 10;
-        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 40);
-        const int artFrameBottom = artTop + kAboutDialogBrandArtSize + 10;
-        const int headerHeight = std::max(kAboutDialogHeaderHeight,
-                                          std::max(artFrameBottom + kAboutDialogMargin - 8,
-                                                   introTop + introHeight + kAboutDialogMargin - 8));
+        const int titleTop = margin - ScaleAboutDialogDimension(2, state);
+        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(44, state));
+        const int subtitleTop = titleTop + titleHeight + ScaleAboutDialogDimension(10, state);
+        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(28, state));
+        const int introTop = subtitleTop + subtitleHeight + ScaleAboutDialogDimension(10, state);
+        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, ScaleAboutDialogDimension(40, state));
+        const int artFrameBottom = artTop + brandArtSize + ScaleAboutDialogDimension(10, state);
+        const int headerHeight = std::max(ScaleAboutDialogDimension(kAboutDialogHeaderHeight, state),
+                                          std::max(artFrameBottom + margin - ScaleAboutDialogDimension(8, state),
+                                                   introTop + introHeight + margin - ScaleAboutDialogDimension(8, state)));
 
-        const int bodyWidth = clientRect.right - (kAboutDialogMargin * 2);
-        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int bodyWidth = clientRect.right - (margin * 2);
+        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(28, state));
         const int footerTextWidth = MeasureAboutDialogFooterTextWidth(state, clientRect.right);
         const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
-        const int footerHeight = std::max(kAboutDialogFooterHeight, std::max(footerTextHeight + 34, kAboutDialogButtonHeight + 36));
+        const int footerHeight = std::max(ScaleAboutDialogDimension(kAboutDialogFooterHeight, state),
+                                          std::max(footerTextHeight + ScaleAboutDialogDimension(34, state),
+                                                   ScaleAboutDialogDimension(kAboutDialogButtonHeight + 36, state)));
 
         const RECT headerRect{clientRect.left, clientRect.top, clientRect.right, clientRect.top + headerHeight};
         const RECT footerRect{clientRect.left, clientRect.bottom - footerHeight, clientRect.right, clientRect.bottom};
@@ -2690,7 +2748,8 @@ namespace
 
         if (state.brandArt)
         {
-            RECT artFrame{artLeft - 10, artTop - 10, artLeft + kAboutDialogBrandArtSize + 10, artTop + kAboutDialogBrandArtSize + 10};
+            const int artInset = ScaleAboutDialogDimension(10, state);
+            RECT artFrame{artLeft - artInset, artTop - artInset, artLeft + brandArtSize + artInset, artTop + brandArtSize + artInset};
             HBRUSH artPanelBrush = CreateSolidBrush(BlendColor(state.headerBackground, state.background, state.darkMode ? 42 : 18));
             HPEN artBorderPen = CreatePen(PS_SOLID, 1, state.border);
             HGDIOBJ oldBrush = SelectObject(hdc, artPanelBrush);
@@ -2701,7 +2760,7 @@ namespace
             DeleteObject(artBorderPen);
             DeleteObject(artPanelBrush);
 
-            hyperbrowse::util::DrawBitmapWithAlpha(hdc, *state.brandArt, artLeft, artTop, kAboutDialogBrandArtSize, kAboutDialogBrandArtSize);
+            hyperbrowse::util::DrawBitmapWithAlpha(hdc, *state.brandArt, artLeft, artTop, brandArtSize, brandArtSize);
         }
 
         RECT titleRect{textLeft, titleTop, textRight, titleTop + titleHeight};
@@ -2735,7 +2794,8 @@ namespace
                     state.mutedText,
                     state.headerBackground);
 
-        RECT headingRect{kAboutDialogMargin, bodyRect.top + 24, clientRect.right - kAboutDialogMargin, bodyRect.top + 24 + headingHeight};
+        const int bodyTopInset = ScaleAboutDialogDimension(24, state);
+        RECT headingRect{margin, bodyRect.top + bodyTopInset, clientRect.right - margin, bodyRect.top + bodyTopInset + headingHeight};
         hyperbrowse::render::DrawGdiText(hdc,
                     state.subtitleFont ? state.subtitleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
                     state.bodyHeading.c_str(),
@@ -2745,7 +2805,7 @@ namespace
                     state.accent,
                     state.panelBackground);
 
-        RECT bodyTextRect{kAboutDialogMargin, headingRect.bottom + 12, clientRect.right - kAboutDialogMargin, footerRect.top - 18};
+        RECT bodyTextRect{margin, headingRect.bottom + ScaleAboutDialogDimension(12, state), clientRect.right - margin, footerRect.top - ScaleAboutDialogDimension(18, state)};
         hyperbrowse::render::DrawGdiText(hdc,
                     state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
                     state.bodyContent.c_str(),
@@ -2755,10 +2815,10 @@ namespace
                     state.text,
                     state.panelBackground);
 
-        RECT footerTextRect{kAboutDialogMargin,
-                    footerRect.top + 18,
-                    std::max(kAboutDialogMargin + 200, AboutDialogFooterButtonsLeft(clientRect, state) - 20),
-                    footerRect.bottom - 16};
+        RECT footerTextRect{margin,
+                footerRect.top + ScaleAboutDialogDimension(18, state),
+                std::max(margin + ScaleAboutDialogDimension(200, state), AboutDialogFooterButtonsLeft(clientRect, state) - ScaleAboutDialogDimension(20, state)),
+                footerRect.bottom - ScaleAboutDialogDimension(16, state)};
         hyperbrowse::render::DrawGdiText(hdc,
                     state.footerFont ? state.footerFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
                     state.footer.c_str(),
@@ -2833,32 +2893,36 @@ namespace
 
         const int clientWidth = static_cast<int>(size.width);
         const int clientHeight = static_cast<int>(size.height);
-        const int contentRight = clientWidth - kAboutDialogMargin;
-        const int artLeft = contentRight - kAboutDialogBrandArtSize;
-        const int artTop = kAboutDialogMargin - 4;
-        const int iconLeft = kAboutDialogMargin;
-        const int iconTop = kAboutDialogMargin + 2;
-        const int iconSize = 48;
-        const int textLeft = iconLeft + iconSize + 20;
-        const int textRight = artLeft - 28;
-        const int textWidth = std::max(320, textRight - textLeft);
+        const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
+        const int brandArtSize = ScaleAboutDialogDimension(kAboutDialogBrandArtSize, state);
+        const int contentRight = clientWidth - margin;
+        const int artLeft = contentRight - brandArtSize;
+        const int artTop = margin - ScaleAboutDialogDimension(4, state);
+        const int iconLeft = margin;
+        const int iconTop = margin + ScaleAboutDialogDimension(2, state);
+        const int iconSize = ScaleAboutDialogDimension(48, state);
+        const int textLeft = iconLeft + iconSize + ScaleAboutDialogDimension(20, state);
+        const int textRight = artLeft - ScaleAboutDialogDimension(28, state);
+        const int textWidth = std::max(ScaleAboutDialogDimension(320, state), textRight - textLeft);
 
-        const int titleTop = kAboutDialogMargin - 2;
-        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 44);
-        const int subtitleTop = titleTop + titleHeight + 10;
-        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
-        const int introTop = subtitleTop + subtitleHeight + 10;
-        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 40);
-        const int artFrameBottom = artTop + kAboutDialogBrandArtSize + 10;
-        const int headerHeight = std::max(kAboutDialogHeaderHeight,
-                                          std::max(artFrameBottom + kAboutDialogMargin - 8,
-                                                   introTop + introHeight + kAboutDialogMargin - 8));
+        const int titleTop = margin - ScaleAboutDialogDimension(2, state);
+        const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(44, state));
+        const int subtitleTop = titleTop + titleHeight + ScaleAboutDialogDimension(10, state);
+        const int subtitleHeight = MeasureTextBlockHeight(state.subtitleFont, state.subtitle, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(28, state));
+        const int introTop = subtitleTop + subtitleHeight + ScaleAboutDialogDimension(10, state);
+        const int introHeight = MeasureTextBlockHeight(state.bodyFont, state.intro, textWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, ScaleAboutDialogDimension(40, state));
+        const int artFrameBottom = artTop + brandArtSize + ScaleAboutDialogDimension(10, state);
+        const int headerHeight = std::max(ScaleAboutDialogDimension(kAboutDialogHeaderHeight, state),
+                          std::max(artFrameBottom + margin - ScaleAboutDialogDimension(8, state),
+                               introTop + introHeight + margin - ScaleAboutDialogDimension(8, state)));
 
-        const int bodyWidth = clientWidth - (kAboutDialogMargin * 2);
-        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, 28);
+        const int bodyWidth = clientWidth - (margin * 2);
+        const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(28, state));
         const int footerTextWidth = MeasureAboutDialogFooterTextWidth(state, clientWidth);
         const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
-        const int footerHeight = std::max(kAboutDialogFooterHeight, std::max(footerTextHeight + 34, kAboutDialogButtonHeight + 36));
+        const int footerHeight = std::max(ScaleAboutDialogDimension(kAboutDialogFooterHeight, state),
+                          std::max(footerTextHeight + ScaleAboutDialogDimension(34, state),
+                               ScaleAboutDialogDimension(kAboutDialogButtonHeight + 36, state)));
 
         const D2D1_RECT_F headerRect = D2D1::RectF(0.0f, 0.0f, static_cast<float>(clientWidth), static_cast<float>(headerHeight));
         const D2D1_RECT_F footerRect = D2D1::RectF(0.0f, static_cast<float>(clientHeight - footerHeight), static_cast<float>(clientWidth), static_cast<float>(clientHeight));
@@ -2910,10 +2974,10 @@ namespace
         if (state.d2dBrandArtBitmap)
         {
             const D2D1_RECT_F artFrame = D2D1::RectF(
-                static_cast<float>(artLeft - 10),
-                static_cast<float>(artTop - 10),
-                static_cast<float>(artLeft + kAboutDialogBrandArtSize + 10),
-                static_cast<float>(artTop + kAboutDialogBrandArtSize + 10));
+                static_cast<float>(artLeft - ScaleAboutDialogDimension(10, state)),
+                static_cast<float>(artTop - ScaleAboutDialogDimension(10, state)),
+                static_cast<float>(artLeft + brandArtSize + ScaleAboutDialogDimension(10, state)),
+                static_cast<float>(artTop + brandArtSize + ScaleAboutDialogDimension(10, state)));
             if (panelBrush)
             {
                 renderTarget->FillRoundedRectangle(
@@ -2931,8 +2995,8 @@ namespace
                 state.d2dBrandArtBitmap.Get(),
                 D2D1::RectF(static_cast<float>(artLeft),
                             static_cast<float>(artTop),
-                            static_cast<float>(artLeft + kAboutDialogBrandArtSize),
-                            static_cast<float>(artTop + kAboutDialogBrandArtSize)),
+                            static_cast<float>(artLeft + brandArtSize),
+                            static_cast<float>(artTop + brandArtSize)),
                 1.0f,
                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         }
@@ -2962,15 +3026,16 @@ namespace
         drawText(state.subtitle, state.d2dSubtitleFormat.Get(), subtitleRect, accentBrush.Get());
         drawText(state.intro, state.d2dBodyFormat.Get(), introRect, mutedTextBrush.Get());
 
-        const RECT headingRect{kAboutDialogMargin, headerHeight + 24, clientWidth - kAboutDialogMargin, headerHeight + 24 + headingHeight};
-        const RECT bodyTextRect{kAboutDialogMargin, headingRect.bottom + 12, clientWidth - kAboutDialogMargin, clientHeight - footerHeight - 18};
+        const int bodyTopInset = ScaleAboutDialogDimension(24, state);
+        const RECT headingRect{margin, headerHeight + bodyTopInset, clientWidth - margin, headerHeight + bodyTopInset + headingHeight};
+        const RECT bodyTextRect{margin, headingRect.bottom + ScaleAboutDialogDimension(12, state), clientWidth - margin, clientHeight - footerHeight - ScaleAboutDialogDimension(18, state)};
         drawText(state.bodyHeading, state.d2dSubtitleFormat.Get(), headingRect, accentBrush.Get());
         drawText(state.bodyContent, state.d2dBodyFormat.Get(), bodyTextRect, textBrush.Get());
 
-        const RECT footerTextRect{kAboutDialogMargin,
-                                  clientHeight - footerHeight + 18,
-                                  std::max(kAboutDialogMargin + 200, AboutDialogFooterButtonsLeft(RECT{0, 0, clientWidth, clientHeight}, state) - 20),
-                                  clientHeight - 16};
+        const RECT footerTextRect{margin,
+                      clientHeight - footerHeight + ScaleAboutDialogDimension(18, state),
+                      std::max(margin + ScaleAboutDialogDimension(200, state), AboutDialogFooterButtonsLeft(RECT{0, 0, clientWidth, clientHeight}, state) - ScaleAboutDialogDimension(20, state)),
+                      clientHeight - ScaleAboutDialogDimension(16, state)};
         drawText(state.footer, state.d2dFooterFormat.Get(), footerTextRect, mutedTextBrush.Get());
 
         (void)backgroundBrush;
@@ -3007,7 +3072,7 @@ namespace
                 0,
                 0,
                 state->githubButtonWidth,
-                kAboutDialogButtonHeight,
+                ScaleAboutDialogDimension(kAboutDialogButtonHeight, *state),
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_ABOUT_OPEN_GITHUB)),
                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
@@ -3020,7 +3085,7 @@ namespace
                 0,
                 0,
                 state->supportButtonWidth,
-                kAboutDialogButtonHeight,
+                ScaleAboutDialogDimension(kAboutDialogButtonHeight, *state),
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_ABOUT_OPEN_SUPPORT)),
                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
@@ -3032,8 +3097,8 @@ namespace
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
                 0,
                 0,
-                kAboutDialogButtonWidth,
-                kAboutDialogButtonHeight,
+                ScaleAboutDialogDimension(kAboutDialogButtonWidth, *state),
+                ScaleAboutDialogDimension(kAboutDialogButtonHeight, *state),
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
@@ -3080,6 +3145,25 @@ namespace
         case WM_DPICHANGED:
             if (state)
             {
+                state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                RebuildAboutDialogFonts(*state);
+                state->githubButtonWidth = MeasureAboutDialogLinkButtonWidth(state->subtitleFont,
+                                                                               kAboutDialogGitHubLabel,
+                                                                               kAboutDialogSupportLabel,
+                                                                               *state);
+                state->supportButtonWidth = state->githubButtonWidth;
+                if (state->githubButton)
+                {
+                    SendMessageW(state->githubButton, WM_SETFONT, reinterpret_cast<WPARAM>(state->subtitleFont), TRUE);
+                }
+                if (state->supportButton)
+                {
+                    SendMessageW(state->supportButton, WM_SETFONT, reinterpret_cast<WPARAM>(state->subtitleFont), TRUE);
+                }
+                if (state->okButton)
+                {
+                    SendMessageW(state->okButton, WM_SETFONT, reinterpret_cast<WPARAM>(state->bodyFont), TRUE);
+                }
                 const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
                 if (suggested)
                 {
@@ -3097,6 +3181,7 @@ namespace
                 state->d2dSubtitleFormat.Reset();
                 state->d2dBodyFormat.Reset();
                 state->d2dFooterFormat.Reset();
+                LayoutAboutDialogControls(hwnd, *state);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -3151,12 +3236,14 @@ namespace
             }
             if (paintedWithD2D && state->heroIcon)
             {
+                const int iconInset = ScaleAboutDialogDimension(2, *state);
+                const int iconSize = ScaleAboutDialogDimension(48, *state);
                 DrawIconEx(hdc,
-                           kAboutDialogMargin,
-                           kAboutDialogMargin + 2,
+                           ScaleAboutDialogDimension(kAboutDialogMargin, *state),
+                           ScaleAboutDialogDimension(kAboutDialogMargin, *state) + iconInset,
                            state->heroIcon,
-                           48,
-                           48,
+                           iconSize,
+                           iconSize,
                            0,
                            nullptr,
                            DI_NORMAL);
@@ -13690,6 +13777,7 @@ namespace hyperbrowse::ui
             return;
         }
 
+        menuPainter_.RefreshMenuMeasurements(menu_);
         std::vector<std::unique_ptr<MenuDrawItemData>> refreshedItems;
         PrepareMenuForOwnerDraw(menu_, refreshedItems, false);
         menuDrawItems_ = std::move(refreshedItems);
@@ -16786,6 +16874,7 @@ namespace hyperbrowse::ui
         state.ownerWindow = hwnd_;
         state.instance = instance_;
         state.appTextSize = appTextSize_;
+        state.dpi = hwnd_ ? std::max<UINT>(96, GetDpiForWindow(hwnd_)) : 96;
         state.darkMode = themeMode_ == ThemeMode::Dark;
         state.background = palette.windowBackground;
         state.headerBackground = BlendColor(palette.actionStripBackground, palette.accent, state.darkMode ? 28 : 18);
@@ -16814,23 +16903,17 @@ namespace hyperbrowse::ui
         state.brandArt = util::LoadPngResourceBitmap(instance_, IDB_HYPERBROWSE_BRAND_PNG, kAboutDialogBrandArtSize, kAboutDialogBrandArtSize);
         state.heroIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, 48, 48, LR_DEFAULTCOLOR));
         state.windowIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
-        state.titleFont = CreateDialogUiFont(21, FW_BOLD, state.appTextSize);
-        state.subtitleFont = CreateDialogUiFont(11, FW_SEMIBOLD, state.appTextSize);
-        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL, state.appTextSize);
-        state.footerFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
-
-        if (!state.titleFont) state.titleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        if (!state.subtitleFont) state.subtitleFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        if (!state.bodyFont) state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        if (!state.footerFont) state.footerFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        RebuildAboutDialogFonts(state);
 
         state.githubButtonWidth = MeasureAboutDialogLinkButtonWidth(state.subtitleFont,
                                          kAboutDialogGitHubLabel,
-                                         kAboutDialogSupportLabel);
+                                         kAboutDialogSupportLabel,
+                                         state);
         state.supportButtonWidth = state.githubButtonWidth;
 
-        const int aboutClientHeight = std::max(kAboutDialogHeight, MeasureAboutDialogClientHeight(state));
-        RECT windowRect{0, 0, kAboutDialogWidth, aboutClientHeight};
+        const int aboutClientWidth = ScaleAboutDialogDimension(kAboutDialogWidth, state);
+        const int aboutClientHeight = std::max(ScaleAboutDialogDimension(kAboutDialogHeight, state), MeasureAboutDialogClientHeight(state));
+        RECT windowRect{0, 0, aboutClientWidth, aboutClientHeight};
         AdjustWindowRectEx(&windowRect,
                            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
                            FALSE,

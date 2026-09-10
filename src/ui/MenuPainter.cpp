@@ -401,6 +401,54 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MenuPainter::RefreshMenuMeasurements(HMENU menu) const
+    {
+        if (!menu)
+        {
+            return;
+        }
+
+        const int itemCount = GetMenuItemCount(menu);
+        for (int itemIndex = 0; itemIndex < itemCount; ++itemIndex)
+        {
+            MENUITEMINFOW menuInfo{};
+            menuInfo.cbSize = sizeof(menuInfo);
+            menuInfo.fMask = MIIM_FTYPE | MIIM_SUBMENU | MIIM_DATA;
+            if (!GetMenuItemInfoW(menu, static_cast<UINT>(itemIndex), TRUE, &menuInfo))
+            {
+                continue;
+            }
+
+            const auto* drawData = reinterpret_cast<const MenuDrawItemData*>(menuInfo.dwItemData);
+            if ((menuInfo.fType & MFT_OWNERDRAW) != 0 && drawData)
+            {
+                MENUITEMINFOW nativeInfo{};
+                nativeInfo.cbSize = sizeof(nativeInfo);
+                nativeInfo.fMask = MIIM_FTYPE | MIIM_DATA;
+                nativeInfo.fType = menuInfo.fType & ~MFT_OWNERDRAW;
+                nativeInfo.dwItemData = 0;
+                if ((menuInfo.fType & MFT_SEPARATOR) == 0)
+                {
+                    nativeInfo.fMask |= MIIM_STRING;
+                    nativeInfo.dwTypeData = const_cast<LPWSTR>(drawData->text.c_str());
+                }
+                SetMenuItemInfoW(menu, static_cast<UINT>(itemIndex), TRUE, &nativeInfo);
+
+                MENUITEMINFOW ownerDrawInfo{};
+                ownerDrawInfo.cbSize = sizeof(ownerDrawInfo);
+                ownerDrawInfo.fMask = MIIM_FTYPE | MIIM_DATA;
+                ownerDrawInfo.fType = menuInfo.fType;
+                ownerDrawInfo.dwItemData = menuInfo.dwItemData;
+                SetMenuItemInfoW(menu, static_cast<UINT>(itemIndex), TRUE, &ownerDrawInfo);
+            }
+
+            if (menuInfo.hSubMenu)
+            {
+                RefreshMenuMeasurements(menuInfo.hSubMenu);
+            }
+        }
+    }
+
     void MenuPainter::MeasureOwnerDrawMenuItem(
         MEASUREITEMSTRUCT* measureItem,
         hyperbrowse::util::AppTextSize appTextSize,

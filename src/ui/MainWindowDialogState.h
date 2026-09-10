@@ -104,6 +104,7 @@ namespace hyperbrowse::ui::dialog_detail
         HICON heroIcon{};
         HICON windowIcon{};
         hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
+        UINT dpi{96};
         bool darkMode{};
         bool done{};
         COLORREF background{};
