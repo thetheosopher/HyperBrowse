@@ -4714,7 +4714,7 @@ namespace hyperbrowse::viewer
                 }
                 else
                 {
-                    StartSlideshow();
+                    StartSlideshow(slideshowIntervalMs_);
                 }
                 return 0;
             case VK_F11:

@@ -6985,6 +6985,23 @@ namespace
         return true;
     }
 
+    int MeasureFileAssociationsCheckboxWidth(HFONT font,
+                                              hyperbrowse::util::AppTextSize appTextSize)
+    {
+        int labelWidth = 0;
+        for (const auto& fileType : hyperbrowse::decode::SupportedFileTypes())
+        {
+            std::wstring label = L".";
+            label.append(fileType.extension);
+            labelWidth = std::max(labelWidth, MeasureDialogButtonWidth(font, label, 0));
+        }
+
+        const int checkboxPadding = hyperbrowse::util::ScaleAppTextDimension(30, appTextSize);
+        return std::max(
+            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogFormatCheckboxWidth, appTextSize),
+            labelWidth + checkboxPadding);
+    }
+
     FileAssociationsDialogLayoutMetrics BuildFileAssociationsDialogLayoutMetrics(
         int clientWidth,
         const FileAssociationsDialogState& state,
@@ -7028,6 +7045,18 @@ namespace
             hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogFormatRowHeight, state.appTextSize),
             lineHeight + hyperbrowse::util::ScaleAppTextDimension(6, state.appTextSize));
         metrics.formatGroupContentTop = hyperbrowse::util::ScaleAppTextDimension(26, state.appTextSize);
+        metrics.formatCheckboxWidth = MeasureFileAssociationsCheckboxWidth(state.bodyFont, state.appTextSize);
+        int descriptionWidth = 0;
+        for (const auto& fileType : hyperbrowse::decode::SupportedFileTypes())
+        {
+            descriptionWidth = std::max(
+                descriptionWidth,
+                MeasureDialogButtonWidth(state.bodyFont, fileType.description, 0));
+        }
+        const int columnGap = hyperbrowse::util::ScaleAppTextDimension(28, state.appTextSize);
+        const int descriptionRightInset = hyperbrowse::util::ScaleAppTextDimension(24, state.appTextSize);
+        const int minimumColumnWidth = metrics.formatCheckboxWidth + descriptionWidth + descriptionRightInset;
+        metrics.minimumClientWidth = metrics.margin * 2 + columnGap + minimumColumnWidth * 2;
         const int formatGroupBottomInset = hyperbrowse::util::ScaleAppTextDimension(10, state.appTextSize);
         metrics.formatGroupHeight = formatGroupBottomInset
             + metrics.formatGroupContentTop
@@ -7109,7 +7138,7 @@ namespace
                 MoveWindow(formatWindow,
                            left,
                            metrics.formatGroupTop + metrics.formatGroupContentTop + row * metrics.formatRowHeight,
-                           kFileAssociationsDialogFormatCheckboxWidth,
+                           metrics.formatCheckboxWidth,
                            metrics.formatRowHeight,
                            TRUE);
             }
@@ -7119,9 +7148,9 @@ namespace
                 if (descriptionWindow)
                 {
                     MoveWindow(descriptionWindow,
-                               left + kFileAssociationsDialogFormatCheckboxWidth,
+                               left + metrics.formatCheckboxWidth,
                                metrics.formatGroupTop + metrics.formatGroupContentTop + row * metrics.formatRowHeight,
-                               std::max(0, columnWidth - kFileAssociationsDialogFormatCheckboxWidth - descriptionRightInset),
+                               std::max(0, columnWidth - metrics.formatCheckboxWidth - descriptionRightInset),
                                metrics.formatRowHeight,
                                TRUE);
                 }
@@ -7804,7 +7833,7 @@ namespace
             state,
             hyperbrowse::decode::SupportedFileTypes().size());
         RECT windowRect{0, 0,
-                        kFileAssociationsDialogWidth,
+                        std::max(kFileAssociationsDialogWidth, layoutMetrics.minimumClientWidth),
                         std::max(kFileAssociationsDialogHeight, layoutMetrics.minimumClientHeight)};
         AdjustWindowRectEx(&windowRect,
                            WS_CAPTION | WS_SYSMENU | WS_POPUP,

@@ -3415,6 +3415,20 @@ namespace
             "Viewer should default to the small overlay text size when no persisted preference exists");
         Expect(!viewer.IsFullMetadataVisible(), "Viewer should default to hiding the full metadata pane when no persisted preference exists");
 
+        viewer.StartSlideshow(1000);
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_SPACE, 0);
+        Expect(!viewer.IsSlideshowActive(), "Viewer Space key did not pause the slideshow");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_SPACE, 0);
+        Expect(viewer.IsSlideshowActive() && viewer.SlideshowIntervalMs() == 1000,
+            "Viewer Space key did not resume the slideshow with its configured interval");
+        const int slideshowStartIndex = viewer.CurrentIndex();
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() != slideshowStartIndex; }, 2500),
+            "Viewer Space key resumed the state but did not restart slideshow playback");
+        viewer.StopSlideshow();
+        Expect(viewer.ReplaceItems(items, 0), "Viewer could not reset after slideshow pause/resume coverage");
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Viewer did not reload its initial item after slideshow pause/resume coverage");
+
         RECT originalViewerRect{};
         Expect(GetWindowRect(viewer.Hwnd(), &originalViewerRect) != FALSE,
             "Failed to save the viewer bounds for the zoom transition test");
