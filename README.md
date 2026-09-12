@@ -184,7 +184,7 @@ cmake --build --preset release
 ctest --preset release-tests
 ```
 
-Smoke tests select a per-process registry subkey under `HKCU\Software\HyperBrowse\SmokeTests`, so they do not read or modify the installed application's preferences. The application normally uses `HKCU\Software\HyperBrowse`; for an isolated manual run, set `HYPERBROWSE_SETTINGS_REGISTRY_PATH` to a registry subkey path before launching it:
+Smoke tests select a per-process registry subkey under `HKCU\Software\HyperBrowse\SmokeTests`, remove it when the test process exits, and therefore do not read or modify the installed application's preferences. The application normally uses `HKCU\Software\HyperBrowse`; for an isolated manual run, set `HYPERBROWSE_SETTINGS_REGISTRY_PATH` to a registry subkey path before launching it:
 
 ```powershell
 $env:HYPERBROWSE_SETTINGS_REGISTRY_PATH = 'Software\HyperBrowse\ManualTest'

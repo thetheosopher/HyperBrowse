@@ -99,6 +99,30 @@ namespace
             gSmokeRegistryPath.c_str()) != FALSE;
     }
 
+    void CleanupSmokeSettingsRegistry()
+    {
+        if (gSmokeRegistryPath.empty())
+        {
+            return;
+        }
+
+        const LONG result = RegDeleteTreeW(HKEY_CURRENT_USER, gSmokeRegistryPath.c_str());
+        if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND)
+        {
+            std::cerr << "Failed to remove the smoke-test settings registry key (error "
+                      << result << ")\n";
+        }
+    }
+
+    class ScopedSmokeSettingsRegistryCleanup
+    {
+    public:
+        ~ScopedSmokeSettingsRegistryCleanup()
+        {
+            CleanupSmokeSettingsRegistry();
+        }
+    };
+
     void Expect(bool condition, const std::string& message);
 
     struct EnumerationResult
@@ -5172,6 +5196,7 @@ int main(int argc, char* argv[])
     try
     {
         ComScope comScope;
+        ScopedSmokeSettingsRegistryCleanup smokeSettingsRegistryCleanup;
         HINSTANCE instance = GetModuleHandleW(nullptr);
         Expect(ConfigureSmokeSettingsRegistry(), "Failed to configure the smoke-test settings registry path");
         INITCOMMONCONTROLSEX commonControls{};
