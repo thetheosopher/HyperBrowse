@@ -48,8 +48,11 @@
 #include "services/JpegTransformService.h"
 #include "services/ThumbnailScheduler.h"
 #include "ui/CommandIds.h"
+#include "ui/DialogDpi.h"
+#include "ui/DialogShell.h"
 #include "ui/MainWindow.h"
 #include "ui/MainWindowDialogState.h"
+#include "ui/SettingsLayout.h"
 #include "util/Diagnostics.h"
 #include "util/ResourceSizing.h"
 #include "util/SettingsRegistry.h"
@@ -3959,7 +3962,197 @@ namespace
          PumpMessagesFor(100);
         }
 
-    void RunDefaultSettingsScenario(HINSTANCE instance)
+        void RunDialogDpiHelperScenario()
+        {
+         using hyperbrowse::ui::DialogDpiForWindow;
+         using hyperbrowse::ui::ScaleDialogAppTextDimension;
+         using hyperbrowse::ui::ScaleDialogDimension;
+
+         Expect(DialogDpiForWindow(nullptr) == hyperbrowse::ui::kDefaultDpi,
+             "Dialog DPI helper did not use the default DPI without a window");
+         Expect(ScaleDialogDimension(100, 96) == 100,
+             "Dialog DPI helper changed a base-size dimension at 96 DPI");
+         Expect(ScaleDialogDimension(100, 144) == 150,
+             "Dialog DPI helper did not scale dimensions to 144 DPI");
+         Expect(ScaleDialogDimension(100, 192) == 200,
+             "Dialog DPI helper did not scale dimensions to 192 DPI");
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Small, 96) == 72,
+             "Dialog DPI helper did not preserve Small text sizing at 100% DPI");
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Medium, 96) == 80,
+             "Dialog DPI helper changed Medium text sizing at 100% DPI");
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 96) == 92,
+             "Dialog DPI helper did not apply Large text sizing at 100% DPI");
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Small, 144) == 108,
+             "Dialog DPI helper did not compose Small text sizing with 150% DPI");
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 144) == 138,
+             "Dialog DPI helper did not compose app text size with monitor DPI");
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 192) == 184,
+             "Dialog DPI helper did not compose Large text sizing with 200% DPI");
+        }
+
+        void RunDialogShellGeometryScenario()
+        {
+         using hyperbrowse::ui::ClampDialogFrameToWorkArea;
+         using hyperbrowse::ui::DialogShellMetrics;
+
+         const RECT workArea{-1920, 40, 0, 1120};
+         const RECT oversizedFrame{-1500, -200, 200, 1300};
+         const RECT clampedFrame = ClampDialogFrameToWorkArea(oversizedFrame, workArea);
+         Expect(clampedFrame.left >= workArea.left
+                    && clampedFrame.top >= workArea.top
+                    && clampedFrame.right <= workArea.right
+                    && clampedFrame.bottom <= workArea.bottom,
+                "Dialog shell did not clamp an oversized frame to the work area");
+         Expect(clampedFrame.right > clampedFrame.left && clampedFrame.bottom > clampedFrame.top,
+                "Dialog shell returned an empty clamped frame");
+
+         constexpr std::array<UINT, 5> dpis{96, 120, 144, 168, 192};
+         constexpr std::array<hyperbrowse::util::AppTextSize, 3> textSizes{
+             hyperbrowse::util::AppTextSize::Small,
+             hyperbrowse::util::AppTextSize::Medium,
+             hyperbrowse::util::AppTextSize::Large};
+         for (const UINT dpi : dpis)
+         {
+             for (const auto textSize : textSizes)
+             {
+                 DialogShellMetrics metrics;
+                 metrics.dpi = dpi;
+                 metrics.appTextSize = textSize;
+                 Expect(metrics.Scale(100) > 0 && metrics.ToPhysical(100) > 0,
+                        "Dialog shell produced a non-positive scaled dimension");
+                 Expect(metrics.ToPhysical(metrics.Scale(100)) >= metrics.ToPhysical(80),
+                        "Dialog shell text metrics were not monotonic");
+             }
+         }
+        }
+
+        void RunSettingsLayoutGeometryScenario()
+        {
+         using hyperbrowse::ui::dialog_detail::ConsolidatedSettingsControl;
+         using hyperbrowse::ui::dialog_detail::ConsolidatedSettingsPage;
+         using hyperbrowse::ui::dialog_detail::MeasureSettingsLayout;
+
+         constexpr std::array<UINT, 5> dpis{96, 120, 144, 168, 192};
+         constexpr std::array<hyperbrowse::util::AppTextSize, 3> textSizes{
+             hyperbrowse::util::AppTextSize::Small,
+             hyperbrowse::util::AppTextSize::Medium,
+             hyperbrowse::util::AppTextSize::Large};
+         constexpr std::array<ConsolidatedSettingsPage, 5> pages{
+             ConsolidatedSettingsPage::Slideshow,
+             ConsolidatedSettingsPage::Viewer,
+             ConsolidatedSettingsPage::Appearance,
+             ConsolidatedSettingsPage::Performance,
+             ConsolidatedSettingsPage::Behavior};
+         constexpr std::array<ConsolidatedSettingsControl, 4> radioControls{
+             ConsolidatedSettingsControl::ViewerWheelZoom,
+             ConsolidatedSettingsControl::ViewerWheelNavigate,
+             ConsolidatedSettingsControl::RawPreferRaw,
+             ConsolidatedSettingsControl::RawPreferJpeg};
+
+         for (const UINT dpi : dpis)
+         {
+             const int logicalWidth = MulDiv(1120, 96, static_cast<int>(dpi));
+             const int logicalHeight = MulDiv(760, 96, static_cast<int>(dpi));
+             const int narrowWidth = MulDiv(560, 96, static_cast<int>(dpi));
+             const int shortHeight = MulDiv(360, 96, static_cast<int>(dpi));
+             for (const auto textSize : textSizes)
+             {
+                 for (const auto page : pages)
+                 {
+                     const auto layout = MeasureSettingsLayout({
+                         page,
+                         textSize,
+                         narrowWidth,
+                         shortHeight,
+                         [](std::wstring_view text)
+                         {
+                             return static_cast<int>(text.size()) * 8;
+                         }});
+                     const auto& metrics = layout.metrics;
+                     Expect(metrics.bodyViewport.left >= metrics.left
+                                && metrics.bodyViewport.right <= metrics.right
+                                && metrics.bodyViewport.top <= metrics.bodyViewport.bottom
+                                && metrics.bodyViewport.bottom <= metrics.footer.top,
+                            "Settings layout produced an invalid body viewport");
+                     Expect(layout.requiredContentHeight >= metrics.bodyViewport.top,
+                            "Settings layout reported content shorter than its body origin");
+                     Expect(layout.scrollExtent >= 0
+                                && layout.requiresScroll == (layout.scrollExtent > 0),
+                            "Settings layout reported an inconsistent scroll extent");
+
+                     for (const RECT& tab : layout.tabRects)
+                     {
+                         Expect(tab.left >= 0 && tab.right <= metrics.width
+                                    && tab.top >= 0 && tab.bottom <= metrics.contentTop
+                                    && tab.right > tab.left && tab.bottom > tab.top,
+                                "Settings layout produced an invalid tab rectangle");
+                     }
+                     for (const auto& label : layout.labels)
+                     {
+                         Expect(label.bounds.right > label.bounds.left
+                                    && label.bounds.bottom > label.bounds.top
+                                    && label.bounds.left >= metrics.left
+                                    && label.bounds.right <= metrics.right
+                                    && label.bounds.bottom <= layout.requiredContentHeight,
+                                "Settings layout produced an invalid label rectangle");
+                     }
+                     for (const RECT& control : layout.controlRects)
+                     {
+                         if (control.right <= control.left || control.bottom <= control.top)
+                         {
+                             continue;
+                         }
+                         Expect(control.left >= metrics.left
+                                    && control.right <= metrics.right
+                                    && control.bottom <= layout.requiredContentHeight,
+                                "Settings layout produced a control outside its content bounds");
+                     }
+                     for (const RECT& numeric : layout.numericEditRects)
+                     {
+                         if (numeric.right <= numeric.left || numeric.bottom <= numeric.top)
+                         {
+                             continue;
+                         }
+                         Expect(numeric.right > numeric.left
+                                    && numeric.bottom > numeric.top
+                                    && numeric.left >= metrics.left
+                                    && numeric.right <= metrics.right
+                                    && numeric.bottom <= layout.requiredContentHeight,
+                                "Settings layout produced an invalid numeric field rectangle");
+                     }
+                     for (const ConsolidatedSettingsControl control : radioControls)
+                     {
+                         const RECT& radio = layout.controlRects[static_cast<std::size_t>(control)];
+                         if (radio.right <= radio.left || radio.bottom <= radio.top)
+                         {
+                             continue;
+                         }
+                         Expect(radio.left >= metrics.left && radio.right <= metrics.right,
+                                "Settings radio control escaped the available width");
+                     }
+                     if (page == ConsolidatedSettingsPage::Performance)
+                     {
+                         Expect(layout.requiresScroll,
+                                "Short Settings work area did not request scrolling for Performance");
+                     }
+                 }
+
+                 const auto fullLayout = MeasureSettingsLayout({
+                     ConsolidatedSettingsPage::Viewer,
+                     textSize,
+                     logicalWidth,
+                     logicalHeight,
+                     [](std::wstring_view text)
+                     {
+                         return static_cast<int>(text.size()) * 8;
+                     }});
+                 Expect(fullLayout.metrics.footer.top > fullLayout.metrics.bodyViewport.top,
+                        "Settings footer was placed before the body");
+             }
+         }
+        }
+
+        void RunDefaultSettingsScenario(HINSTANCE instance)
     {
         using hyperbrowse::ui::command_ids::ID_VIEW_SETTINGS;
 
@@ -3967,7 +4160,6 @@ namespace
             16ULL * 1024ULL * 1024ULL * 1024ULL,
             8ULL * 1024ULL * 1024ULL * 1024ULL});
         constexpr wchar_t kDialogClassName[] = L"HyperBrowseExperimentalSettingsDialog";
-        constexpr wchar_t kSettingsUiEnvironment[] = L"HYPERBROWSE_SETTINGS_UI";
         ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
         ScopedRegistryDwordBackup slideshowTransitionBackup(kRegistryPath, kRegistryValueUseSlideshowTransition);
         ScopedRegistryDwordBackup thumbnailCacheBackup(kRegistryPath, kRegistryValueThumbnailCacheCapacityOverrideBytes);
@@ -3978,12 +4170,6 @@ namespace
         DeleteRegistryValue(kRegistryPath, kRegistryValueMetadataCacheCapacityOverrideEntries);
         SetRegistryDwordValue(kRegistryPath, kRegistryValueUseSlideshowTransition, 0);
         SetRegistryDwordValue(kRegistryPath, kRegistryValuePrefetchDepthOverride, 7);
-        wchar_t previousValue[64]{};
-        const DWORD previousLength = GetEnvironmentVariableW(
-            kSettingsUiEnvironment,
-            previousValue,
-            static_cast<DWORD>(std::size(previousValue)));
-        SetEnvironmentVariableW(kSettingsUiEnvironment, nullptr);
 
         hyperbrowse::ui::MainWindow mainWindow(instance);
         Expect(mainWindow.Create(), "Failed to create MainWindow for experimental-settings smoke coverage");
@@ -4305,6 +4491,16 @@ namespace
                 failAndClose("Alt+V did not select the Viewer page in Experimental Settings");
                 return;
             }
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'P', 0);
+            const auto& lastPerformanceControl = experimentalState->controlRects[
+                static_cast<std::size_t>(hyperbrowse::ui::dialog_detail::ConsolidatedSettingsControl::LibRawOutOfProcess)];
+            if (experimentalState->page != hyperbrowse::ui::dialog_detail::ConsolidatedSettingsPage::Performance
+                || lastPerformanceControl.bottom + 12 > experimentalState->applyButtonRect.top)
+            {
+                failAndClose("Experimental Settings Performance page overlaps its footer actions");
+                return;
+            }
+            SendMessageW(dialog, WM_SYSKEYDOWN, L'V', 0);
             SendMessageW(dialog, WM_SYSKEYDOWN, L'U', 0);
             if (experimentalState->focusedTarget.kind
                     != hyperbrowse::ui::dialog_detail::ExperimentalSettingsFocusTargetKind::CustomControl
@@ -4320,8 +4516,12 @@ namespace
                 failAndClose("Space did not toggle the custom Viewer transition setting");
                 return;
             }
-            SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(client.right - 300, client.bottom - 46));
-            SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(client.right - 300, client.bottom - 46));
+            const UINT dialogDpi = hyperbrowse::ui::DialogDpiForWindow(dialog);
+            const RECT applyButton = experimentalState->applyButtonRect;
+            const int applyX = hyperbrowse::ui::ScaleDialogDimension((applyButton.left + applyButton.right) / 2, dialogDpi);
+            const int applyY = hyperbrowse::ui::ScaleDialogDimension((applyButton.top + applyButton.bottom) / 2, dialogDpi);
+            SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(applyX, applyY));
+            SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(applyX, applyY));
             DWORD transitionEnabled = 0;
             if (!TryReadRegistryDwordValue(kRegistryPath, kRegistryValueUseSlideshowTransition, &transitionEnabled)
                 || transitionEnabled == 0)
@@ -4347,10 +4547,54 @@ namespace
             const int appearanceTabX = 28 + (2 * tabWidth) + (tabWidth / 2);
             SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(appearanceTabX, 36));
             SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(appearanceTabX, 36));
+            RECT mediumTextFrame{};
+            if (!GetWindowRect(dialog, &mediumTextFrame))
+            {
+                failAndClose("Could not measure the Experimental Settings frame before text-size reflow");
+                return;
+            }
+            const auto fontHeight = [](HWND control) -> LONG
+            {
+                const HFONT font = control
+                    ? reinterpret_cast<HFONT>(SendMessageW(control, WM_GETFONT, 0, 0))
+                    : nullptr;
+                LOGFONTW logFont{};
+                return font && GetObjectW(font, sizeof(logFont), &logFont) == sizeof(logFont)
+                    ? logFont.lfHeight
+                    : 0;
+            };
+            const LONG mediumComboFontHeight = fontHeight(appTextCombo);
+            const LONG mediumEditFontHeight = fontHeight(GetDlgItem(dialog, 5700));
+            if (mediumComboFontHeight >= 0 || mediumEditFontHeight >= 0)
+            {
+                failAndClose("Experimental Settings native controls did not expose their Medium font");
+                return;
+            }
             SendMessageW(appTextCombo, CB_SETCURSEL, 2, 0);
             SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(5818, CBN_SELCHANGE), reinterpret_cast<LPARAM>(appTextCombo));
-            SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(client.right - 300, client.bottom - 46));
-            SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(client.right - 300, client.bottom - 46));
+            const LONG largeComboFontHeight = fontHeight(appTextCombo);
+            const LONG largeEditFontHeight = fontHeight(GetDlgItem(dialog, 5700));
+            if (largeComboFontHeight >= mediumComboFontHeight || largeEditFontHeight >= mediumEditFontHeight)
+            {
+                failAndClose("Experimental Settings native controls did not grow their font for Large text");
+                return;
+            }
+            RECT largeTextFrame{};
+            if (!GetWindowRect(dialog, &largeTextFrame)
+                || largeTextFrame.bottom - largeTextFrame.top <= mediumTextFrame.bottom - mediumTextFrame.top)
+            {
+                failAndClose("Experimental Settings did not grow its measured frame for Large text");
+                return;
+            }
+            const RECT resizedApplyButton = experimentalState->applyButtonRect;
+            const int resizedApplyX = hyperbrowse::ui::ScaleDialogDimension(
+                (resizedApplyButton.left + resizedApplyButton.right) / 2,
+                dialogDpi);
+            const int resizedApplyY = hyperbrowse::ui::ScaleDialogDimension(
+                (resizedApplyButton.top + resizedApplyButton.bottom) / 2,
+                dialogDpi);
+            SendMessageW(dialog, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(resizedApplyX, resizedApplyY));
+            SendMessageW(dialog, WM_LBUTTONUP, 0, MAKELPARAM(resizedApplyX, resizedApplyY));
             PumpMessagesFor(100);
             if (mainWindow.AppTextSize() != hyperbrowse::util::AppTextSize::Large || !FindWindowW(kDialogClassName, nullptr))
             {
@@ -4431,130 +4675,8 @@ namespace
                "Experimental Settings interaction timed out");
         worker.join();
         Expect(failure.empty(), failure.empty() ? "Experimental Settings interaction failed" : failure.c_str());
-
-        SetEnvironmentVariableW(kSettingsUiEnvironment, L"legacy");
-        std::atomic_bool legacyDone{false};
-        std::string legacyFailure;
-        std::thread legacyWorker([&]()
-        {
-            constexpr wchar_t kLegacyDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
-            if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
-            {
-                legacyFailure = "Failed to post the legacy Settings command for mnemonic coverage";
-                legacyDone.store(true, std::memory_order_release);
-                return;
-            }
-
-            HWND dialog = nullptr;
-            const ULONGLONG deadline = GetTickCount64() + 10000;
-            while (GetTickCount64() < deadline && !(dialog = FindWindowW(kLegacyDialogClassName, nullptr)))
-            {
-                Sleep(10);
-            }
-            if (!dialog)
-            {
-                legacyFailure = "Legacy Settings dialog did not open for mnemonic coverage";
-                legacyDone.store(true, std::memory_order_release);
-                return;
-            }
-
-            const auto failAndClose = [&](std::string message)
-            {
-                legacyFailure = std::move(message);
-                SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
-                legacyDone.store(true, std::memory_order_release);
-            };
-            HWND tabWindow = nullptr;
-            HWND viewerTransitionControl = nullptr;
-            HWND applyButton = nullptr;
-            HWND okButton = nullptr;
-            const ULONGLONG controlsDeadline = GetTickCount64() + 10000;
-            while (GetTickCount64() < controlsDeadline)
-            {
-                tabWindow = GetDlgItem(dialog, 360);
-                viewerTransitionControl = GetDlgItem(dialog, 5000);
-                applyButton = GetDlgItem(dialog, 5500);
-                okButton = GetDlgItem(dialog, IDOK);
-                if (tabWindow && viewerTransitionControl && applyButton && okButton)
-                {
-                    break;
-                }
-                Sleep(10);
-            }
-            if (!tabWindow || !viewerTransitionControl || !applyButton || !okButton)
-            {
-                failAndClose("Legacy Settings did not create the controls required for mnemonic coverage (tab="
-                    + std::to_string(tabWindow != nullptr) + ", transition="
-                    + std::to_string(viewerTransitionControl != nullptr) + ", apply="
-                    + std::to_string(applyButton != nullptr) + ", ok="
-                    + std::to_string(okButton != nullptr) + ")");
-                return;
-            }
-
-            const DWORD dialogThreadId = GetWindowThreadProcessId(dialog, nullptr);
-            const auto focusedWindow = [&]() -> HWND
-            {
-                GUITHREADINFO threadInfo{sizeof(threadInfo)};
-                return GetGUIThreadInfo(dialogThreadId, &threadInfo) != FALSE ? threadInfo.hwndFocus : nullptr;
-            };
-            const auto waitForFocus = [&](HWND expected)
-            {
-                const ULONGLONG focusDeadline = GetTickCount64() + 2000;
-                while (GetTickCount64() < focusDeadline && focusedWindow() != expected)
-                {
-                    Sleep(10);
-                }
-                return focusedWindow() == expected;
-            };
-
-            SendMessageW(dialog, WM_SYSKEYDOWN, L'V', 0);
-            if (TabCtrl_GetCurSel(tabWindow) != static_cast<int>(hyperbrowse::ui::dialog_detail::ConsolidatedSettingsPage::Viewer)
-                || !waitForFocus(viewerTransitionControl))
-            {
-                failAndClose("Alt+V did not select the Viewer page and focus its first field in legacy Settings");
-                return;
-            }
-            SendMessageW(dialog, WM_SYSKEYDOWN, L'U', 0);
-            if (!waitForFocus(viewerTransitionControl))
-            {
-                failAndClose("Alt+U did not focus the custom-mapped Viewer transition field in legacy Settings");
-                return;
-            }
-            SendMessageW(dialog, WM_SYSKEYDOWN, L'A', 0);
-            Sleep(50);
-            if (!FindWindowW(kLegacyDialogClassName, nullptr))
-            {
-                failAndClose("Alt+A unexpectedly closed legacy Settings instead of applying");
-                return;
-            }
-            SendMessageW(dialog, WM_SYSKEYDOWN, L'O', 0);
-            const ULONGLONG closeDeadline = GetTickCount64() + 10000;
-            while (GetTickCount64() < closeDeadline && FindWindowW(kLegacyDialogClassName, nullptr))
-            {
-                Sleep(10);
-            }
-            if (FindWindowW(kLegacyDialogClassName, nullptr))
-            {
-                legacyFailure = "Alt+O did not close legacy Settings";
-            }
-            legacyDone.store(true, std::memory_order_release);
-        });
-
-        Expect(PumpMessagesUntil([&]() { return legacyDone.load(std::memory_order_acquire); }, 15000),
-               "Legacy Settings mnemonic interaction timed out");
-        legacyWorker.join();
-        Expect(legacyFailure.empty(), legacyFailure.empty() ? "Legacy Settings mnemonic interaction failed" : legacyFailure.c_str());
         DestroyWindow(mainWindow.Hwnd());
         PumpMessagesFor(100);
-
-        if (previousLength > 0)
-        {
-            SetEnvironmentVariableW(kSettingsUiEnvironment, previousValue);
-        }
-        else
-        {
-            SetEnvironmentVariableW(kSettingsUiEnvironment, nullptr);
-        }
     }
 
     void RunMultiViewerSettingsScenario(HINSTANCE instance)
@@ -4563,14 +4685,11 @@ namespace
         using hyperbrowse::ui::command_ids::ID_VIEW_SETTINGS;
         using hyperbrowse::viewer::InfoOverlayTextSize;
 
-        constexpr wchar_t kDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
-        constexpr wchar_t kSettingsUiEnvironment[] = L"HYPERBROWSE_SETTINGS_UI";
-        constexpr int kInfoOverlaysControlId = 5013;
-        constexpr int kOverlayTextSizeControlId = 5015;
-        constexpr int kWindowedFullMetadataControlId = 5037;
-        constexpr int kFullScreenFullMetadataControlId = 5038;
-        constexpr int kSlideshowDurationControlId = 5002;
-        constexpr int kApplyButtonId = 5500;
+        constexpr wchar_t kDialogClassName[] = L"HyperBrowseExperimentalSettingsDialog";
+        constexpr int kOverlayTextSizeControlId = 5815;
+        constexpr int kSlideshowDurationControlId = 5700;
+        constexpr int kApplyButtonId = 5600;
+        constexpr int kCancelButtonId = 5602;
         ScopedRegistryDwordBackup overlaySettingBackup(kRegistryPath, kRegistryValueViewerInfoOverlaysVisible);
         ScopedRegistryDwordBackup overlayTextSizeBackup(kRegistryPath, kRegistryValueViewerInfoOverlayTextSize);
         ScopedRegistryDwordBackup windowedFullMetadataBackup(kRegistryPath, kRegistryValueViewerWindowedFullMetadataVisible);
@@ -4582,13 +4701,6 @@ namespace
         DeleteRegistryValue(kRegistryPath, kRegistryValueViewerWindowedFullMetadataVisible);
         DeleteRegistryValue(kRegistryPath, kRegistryValueViewerFullScreenFullMetadataVisible);
         DeleteRegistryValue(kRegistryPath, kRegistryValueViewerFullMetadataVisible);
-
-        wchar_t previousValue[64]{};
-        const DWORD previousLength = GetEnvironmentVariableW(
-            kSettingsUiEnvironment,
-            previousValue,
-            static_cast<DWORD>(std::size(previousValue)));
-        SetEnvironmentVariableW(kSettingsUiEnvironment, L"legacy");
 
         TempFolder root(L"HyperBrowseMultiViewerSettings");
         const fs::path firstPath = root.Root() / L"first.png";
@@ -4644,7 +4756,7 @@ namespace
         {
             if (!PostMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_SETTINGS, 0), 0))
             {
-                failure = "Failed to post the legacy Settings command";
+                failure = "Failed to post the Settings command";
                 done.store(true, std::memory_order_release);
                 return;
             }
@@ -4657,7 +4769,7 @@ namespace
             }
             if (!dialog)
             {
-                failure = "Legacy Settings dialog did not open";
+                failure = "Settings dialog did not open";
                 done.store(true, std::memory_order_release);
                 return;
             }
@@ -4665,7 +4777,7 @@ namespace
             const auto failAndClose = [&](std::string message)
             {
                 failure = std::move(message);
-                SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
+                SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(kCancelButtonId, BN_CLICKED), 0);
                 done.store(true, std::memory_order_release);
             };
             HWND slideshowDuration = nullptr;
@@ -4677,25 +4789,41 @@ namespace
             }
             if (!slideshowDuration)
             {
-                failAndClose("Legacy Settings did not create the slideshow duration control");
+                failAndClose("Settings did not create the slideshow duration control");
                 return;
             }
             SetWindowTextW(slideshowDuration, L"4321");
             SendMessageW(dialog, WM_SYSKEYDOWN, L'V', 0);
-            const HWND infoOverlays = GetDlgItem(dialog, kInfoOverlaysControlId);
-            const HWND overlayTextSize = GetDlgItem(dialog, kOverlayTextSizeControlId);
-            const HWND windowedFullMetadata = GetDlgItem(dialog, kWindowedFullMetadataControlId);
-            const HWND fullScreenFullMetadata = GetDlgItem(dialog, kFullScreenFullMetadataControlId);
-            if (!infoOverlays || !overlayTextSize || !windowedFullMetadata || !fullScreenFullMetadata)
+            auto* experimentalState = reinterpret_cast<hyperbrowse::ui::dialog_detail::ExperimentalSettingsDialogState*>(
+                GetWindowLongPtrW(dialog, GWLP_USERDATA));
+            if (!experimentalState || !experimentalState->settings)
             {
-                failAndClose("Legacy Settings did not create the Viewer overlay controls");
+                failAndClose("Settings did not expose its measured dialog state");
                 return;
             }
-
-            SendMessageW(infoOverlays, BM_SETCHECK, BST_UNCHECKED, 0);
-            SendMessageW(windowedFullMetadata, BM_SETCHECK, BST_CHECKED, 0);
-            SendMessageW(fullScreenFullMetadata, BM_SETCHECK, BST_UNCHECKED, 0);
+            if (experimentalState->settings->infoOverlaysVisible)
+            {
+                SendMessageW(dialog, WM_SYSKEYDOWN, L'D', 0);
+                SendMessageW(dialog, WM_KEYDOWN, VK_SPACE, 0);
+            }
+            if (!experimentalState->settings->windowedFullMetadataVisible)
+            {
+                SendMessageW(dialog, WM_SYSKEYDOWN, L'G', 0);
+                SendMessageW(dialog, WM_KEYDOWN, VK_SPACE, 0);
+            }
+            if (experimentalState->settings->fullScreenFullMetadataVisible)
+            {
+                SendMessageW(dialog, WM_SYSKEYDOWN, L'F', 0);
+                SendMessageW(dialog, WM_KEYDOWN, VK_SPACE, 0);
+            }
+            const HWND overlayTextSize = GetDlgItem(dialog, kOverlayTextSizeControlId);
+            if (!overlayTextSize)
+            {
+                failAndClose("Settings did not create the Viewer overlay text size control");
+                return;
+            }
             SendMessageW(overlayTextSize, CB_SETCURSEL, static_cast<WPARAM>(InfoOverlayTextSize::Large), 0);
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(kOverlayTextSizeControlId, CBN_SELCHANGE), reinterpret_cast<LPARAM>(overlayTextSize));
             SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(kApplyButtonId, BN_CLICKED), 0);
 
             for (const auto* viewer : viewers)
@@ -4706,7 +4834,7 @@ namespace
                     || !viewer->IsSlideshowActive()
                     || viewer->SlideshowIntervalMs() != 4321)
                 {
-                    failAndClose("Legacy Settings did not update every open viewer");
+                    failAndClose("Settings did not update every open viewer");
                     return;
                 }
             }
@@ -4715,7 +4843,7 @@ namespace
             const HWND cancelledDuration = GetDlgItem(dialog, kSlideshowDurationControlId);
             if (!cancelledDuration)
             {
-                failAndClose("Legacy Settings did not restore the slideshow page before Cancel coverage");
+                failAndClose("Settings did not restore the slideshow page before Cancel coverage");
                 return;
             }
             SetWindowTextW(cancelledDuration, L"5555");
@@ -4727,7 +4855,7 @@ namespace
             }
             if (FindWindowW(kDialogClassName, nullptr))
             {
-                failure = "Legacy Settings did not close after cancelling an unapplied duration";
+                failure = "Settings did not close after cancelling an unapplied duration";
             }
             done.store(true, std::memory_order_release);
         });
@@ -4756,7 +4884,7 @@ namespace
                        && !viewer->IsFullMetadataVisible()
                        && viewer->IsSlideshowActive()
                        && viewer->SlideshowIntervalMs() == 4321,
-                   "Legacy Settings did not apply the full-screen metadata preference to every viewer");
+                   "Settings did not apply the full-screen metadata preference to every viewer");
         }
 
         for (HWND viewerHandle : viewerHandles)
@@ -4767,14 +4895,6 @@ namespace
         DestroyWindow(mainWindow.Hwnd());
         PumpMessagesFor(100);
 
-        if (previousLength > 0)
-        {
-            SetEnvironmentVariableW(kSettingsUiEnvironment, previousValue);
-        }
-        else
-        {
-            SetEnvironmentVariableW(kSettingsUiEnvironment, nullptr);
-        }
     }
 
     void RunMainWindowFolderTreeScenario(HINSTANCE instance)
@@ -5254,6 +5374,9 @@ int main(int argc, char* argv[])
         }
         else if (settingsOnly)
         {
+            RunDialogDpiHelperScenario();
+            RunDialogShellGeometryScenario();
+            RunSettingsLayoutGeometryScenario();
             RunDefaultSettingsScenario(instance);
         }
         else if (multiViewerSettingsOnly)

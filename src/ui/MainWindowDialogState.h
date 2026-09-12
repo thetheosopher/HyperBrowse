@@ -160,6 +160,7 @@ namespace hyperbrowse::ui::dialog_detail
     struct PerformanceSettingsDialogState
     {
         HWND ownerWindow{};
+        UINT dpi{96};
         HFONT titleFont{};
         HFONT bodyFont{};
         hyperbrowse::ui::DialogTheme theme{};
@@ -192,6 +193,7 @@ namespace hyperbrowse::ui::dialog_detail
     struct FileAssociationsDialogState
     {
         HWND ownerWindow{};
+        UINT dpi{96};
         HFONT bodyFont{};
         hyperbrowse::ui::DialogTheme theme{};
         HBRUSH backgroundBrush{};
@@ -292,6 +294,7 @@ namespace hyperbrowse::ui::dialog_detail
     struct SlideshowSettingsDialogState
     {
         HWND ownerWindow{};
+        UINT dpi{96};
         HWND transitionComboWindow{};
         HWND durationEditWindow{};
         HWND durationSpinWindow{};
@@ -317,6 +320,7 @@ namespace hyperbrowse::ui::dialog_detail
     struct ConsolidatedSettingsDialogState
     {
         HWND ownerWindow{};
+        UINT dpi{96};
         HINSTANCE instance{};
         HWND dialogWindow{};
         HWND tabWindow{};
@@ -405,6 +409,7 @@ namespace hyperbrowse::ui::dialog_detail
     struct ExperimentalSettingsDialogState
     {
         HWND ownerWindow{};
+        UINT dpi{96};
         HINSTANCE instance{};
         HWND dialogWindow{};
         ConsolidatedSettingsDialogState* settings{};
@@ -429,9 +434,13 @@ namespace hyperbrowse::ui::dialog_detail
         std::array<HWND, 5> numericSpins{};
         std::vector<ExperimentalSettingsLabel> labels;
         std::shared_ptr<hyperbrowse::ui::MainWindowAccessibility> accessibility;
+        RECT bodyViewport{};
         RECT applyButtonRect{};
         RECT okButtonRect{};
         RECT cancelButtonRect{};
+        int requiredContentHeight{};
+        int scrollExtent{};
+        int scrollOffset{};
         ConsolidatedSettingsPage page{ConsolidatedSettingsPage::Slideshow};
         ExperimentalSettingsFocusTarget focusedTarget{};
         int hoveredControl{-1};
@@ -469,6 +478,7 @@ namespace hyperbrowse::ui::dialog_detail
     struct ImageInformationDialogState
     {
         HWND ownerWindow{};
+        UINT dpi{96};
         HINSTANCE instance{};
         HWND filenameWindow{};
         HWND contentWindow{};

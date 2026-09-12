@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include "ui/DialogTheme.h"
+#include "ui/DialogDpi.h"
 
 namespace fs = std::filesystem;
 
@@ -42,7 +43,10 @@ namespace hyperbrowse::ui
         struct TextInputDialogState
         {
             HWND ownerWindow{};
+            UINT dpi{96};
+            HWND instructionWindow{};
             HWND editWindow{};
+            HWND dividerWindow{};
             HWND okButton{};
             HFONT bodyFont{};
             DialogTheme theme{};
@@ -84,6 +88,7 @@ namespace hyperbrowse::ui
         struct BatchRenameDialogState
         {
             HWND ownerWindow{};
+            UINT dpi{96};
             HWND patternEditWindow{};
             HWND previewListWindow{};
             HWND okButton{};
@@ -108,7 +113,8 @@ namespace hyperbrowse::ui
 
         HFONT CreateDialogUiFont(int pointSize,
                                  int weight,
-                                 hyperbrowse::util::AppTextSize size)
+                                 hyperbrowse::util::AppTextSize size,
+                                 UINT dpi = 0)
         {
             NONCLIENTMETRICSW metrics{};
             metrics.cbSize = sizeof(metrics);
@@ -124,7 +130,9 @@ namespace hyperbrowse::ui
             }
 
             HDC screenDc = GetDC(nullptr);
-            const int dpiY = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
+            const int dpiY = dpi != 0
+                ? static_cast<int>(dpi)
+                : (screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96);
             if (screenDc)
             {
                 ReleaseDC(nullptr, screenDc);
@@ -390,19 +398,23 @@ namespace hyperbrowse::ui
         TextInputDialogLayoutMetrics BuildTextInputDialogLayoutMetrics(const TextInputDialogState& state)
         {
             TextInputDialogLayoutMetrics metrics;
-            metrics.clientWidth = kTextInputDialogWidth;
+            const auto scale = [&state](int value)
+            {
+                return ScaleDialogDimension(value, state.dpi);
+            };
+            metrics.clientWidth = scale(kTextInputDialogWidth);
 
-            const auto measureButtonWidth = [&state](std::wstring_view label) -> int
+            const auto measureButtonWidth = [&state, &scale](std::wstring_view label) -> int
             {
                 if (label.empty())
                 {
-                    return kTextInputButtonWidth;
+                    return scale(kTextInputButtonWidth);
                 }
 
                 HDC screenDc = GetDC(nullptr);
                 if (!screenDc)
                 {
-                    return kTextInputButtonWidth;
+                    return scale(kTextInputButtonWidth);
                 }
 
                 const HFONT font = state.bodyFont
@@ -421,27 +433,65 @@ namespace hyperbrowse::ui
                 }
                 ReleaseDC(nullptr, screenDc);
 
-                return std::max(kTextInputButtonWidth, static_cast<int>(size.cx) + 24);
+                return std::max(scale(kTextInputButtonWidth), static_cast<int>(size.cx) + scale(24));
             };
 
             metrics.okButtonWidth = measureButtonWidth(state.confirmLabel);
             metrics.cancelButtonWidth = measureButtonWidth(L"Cancel");
 
-            const int buttonRowWidth = metrics.okButtonWidth + 8 + metrics.cancelButtonWidth;
-            const int minimumClientWidthForButtons = (kTextInputDialogMargin * 2) + buttonRowWidth;
+            const int buttonRowWidth = metrics.okButtonWidth + scale(8) + metrics.cancelButtonWidth;
+            const int minimumClientWidthForButtons = scale(kTextInputDialogMargin * 2) + buttonRowWidth;
             metrics.clientWidth = std::max(metrics.clientWidth, minimumClientWidthForButtons);
 
-            metrics.contentWidth = metrics.clientWidth - (kTextInputDialogMargin * 2);
+            metrics.contentWidth = metrics.clientWidth - scale(kTextInputDialogMargin * 2);
             metrics.instructionHeight = MeasureTextBlockHeight(state.bodyFont,
                                                                state.instruction,
                                                                metrics.contentWidth,
                                                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                                               kTextInputDialogInstructionMinHeight);
-            metrics.editTop = kTextInputDialogMargin + metrics.instructionHeight + kTextInputDialogEditTopGap;
-            metrics.dividerTop = metrics.editTop + kTextInputEditHeight + kTextInputDialogDividerTopGap;
-            metrics.buttonTop = metrics.dividerTop + kTextInputDialogButtonTopGap;
-            metrics.clientHeight = metrics.buttonTop + kTextInputButtonHeight + kTextInputDialogMargin;
+                                                               scale(kTextInputDialogInstructionMinHeight));
+            metrics.editTop = scale(kTextInputDialogMargin) + metrics.instructionHeight + scale(kTextInputDialogEditTopGap);
+            metrics.dividerTop = metrics.editTop + scale(kTextInputEditHeight) + scale(kTextInputDialogDividerTopGap);
+            metrics.buttonTop = metrics.dividerTop + scale(kTextInputDialogButtonTopGap);
+            metrics.clientHeight = metrics.buttonTop + scale(kTextInputButtonHeight + kTextInputDialogMargin);
             return metrics;
+        }
+
+        void LayoutTextInputDialogControls(HWND hwnd, const TextInputDialogState& state)
+        {
+            const auto scale = [&state](int value)
+            {
+                return ScaleDialogDimension(value, state.dpi);
+            };
+            RECT client{};
+            GetClientRect(hwnd, &client);
+            const int clientWidth = client.right - client.left;
+            const TextInputDialogLayoutMetrics metrics = BuildTextInputDialogLayoutMetrics(state);
+            const int margin = scale(kTextInputDialogMargin);
+            const int contentWidth = std::max(1, clientWidth - margin * 2);
+            const int cancelLeft = clientWidth - margin - metrics.cancelButtonWidth;
+            const int okLeft = cancelLeft - scale(8) - metrics.okButtonWidth;
+
+            if (state.instructionWindow)
+            {
+                MoveWindow(state.instructionWindow, margin, margin, contentWidth, metrics.instructionHeight, TRUE);
+            }
+            if (state.editWindow)
+            {
+                MoveWindow(state.editWindow, margin, metrics.editTop, contentWidth, scale(kTextInputEditHeight), TRUE);
+            }
+            if (state.dividerWindow)
+            {
+                MoveWindow(state.dividerWindow, margin, metrics.dividerTop, contentWidth, scale(2), TRUE);
+            }
+            if (state.okButton)
+            {
+                MoveWindow(state.okButton, okLeft, metrics.buttonTop, metrics.okButtonWidth, scale(kTextInputButtonHeight), TRUE);
+            }
+            const HWND cancelButton = GetDlgItem(hwnd, IDCANCEL);
+            if (cancelButton)
+            {
+                MoveWindow(cancelButton, cancelLeft, metrics.buttonTop, metrics.cancelButtonWidth, scale(kTextInputButtonHeight), TRUE);
+            }
         }
 
         int DefaultRenameSelectionEnd(std::wstring_view leafName, bool isFile)
@@ -469,21 +519,25 @@ namespace hyperbrowse::ui
 
             const int clientWidth = clientRect.right - clientRect.left;
             const int clientHeight = clientRect.bottom - clientRect.top;
-            const int contentWidth = clientWidth - (kTextInputDialogMargin * 2);
-            const int instructionHeight = 44;
-            const int helpHeight = 38;
-            const int buttonTop = clientHeight - kTextInputDialogMargin - kTextInputButtonHeight;
-            const int listTop = kTextInputDialogMargin + instructionHeight + 6 + kTextInputEditHeight + 10 + helpHeight + 8;
-            const int listHeight = std::max(120, buttonTop - 12 - listTop);
-            const int cancelLeft = clientWidth - kTextInputDialogMargin - kTextInputButtonWidth;
-            const int okLeft = cancelLeft - 8 - kTextInputButtonWidth;
+            const auto scale = [&state](int value)
+            {
+                return ScaleDialogDimension(value, state.dpi);
+            };
+            const int contentWidth = clientWidth - scale(kTextInputDialogMargin * 2);
+            const int instructionHeight = scale(44);
+            const int helpHeight = scale(38);
+            const int buttonTop = clientHeight - scale(kTextInputDialogMargin) - scale(kTextInputButtonHeight);
+            const int listTop = scale(kTextInputDialogMargin) + instructionHeight + scale(6) + scale(kTextInputEditHeight) + scale(10) + helpHeight + scale(8);
+            const int listHeight = std::max(scale(120), buttonTop - scale(12) - listTop);
+            const int cancelLeft = clientWidth - scale(kTextInputDialogMargin) - scale(kTextInputButtonWidth);
+            const int okLeft = cancelLeft - scale(8) - scale(kTextInputButtonWidth);
 
             const HWND instructionWindow = GetDlgItem(hwnd, kBatchRenameInstructionControlId);
             if (instructionWindow)
             {
                 MoveWindow(instructionWindow,
-                           kTextInputDialogMargin,
-                           kTextInputDialogMargin,
+                           scale(kTextInputDialogMargin),
+                           scale(kTextInputDialogMargin),
                            contentWidth,
                            instructionHeight,
                            TRUE);
@@ -492,10 +546,10 @@ namespace hyperbrowse::ui
             if (state.patternEditWindow)
             {
                 MoveWindow(state.patternEditWindow,
-                           kTextInputDialogMargin,
-                           kTextInputDialogMargin + instructionHeight + 6,
+                           scale(kTextInputDialogMargin),
+                           scale(kTextInputDialogMargin) + instructionHeight + scale(6),
                            contentWidth,
-                           kTextInputEditHeight,
+                           scale(kTextInputEditHeight),
                            TRUE);
             }
 
@@ -503,8 +557,8 @@ namespace hyperbrowse::ui
             if (helpWindow)
             {
                 MoveWindow(helpWindow,
-                           kTextInputDialogMargin,
-                           kTextInputDialogMargin + instructionHeight + 6 + kTextInputEditHeight + 10,
+                           scale(kTextInputDialogMargin),
+                           scale(kTextInputDialogMargin) + instructionHeight + scale(6) + scale(kTextInputEditHeight) + scale(10),
                            contentWidth,
                            helpHeight,
                            TRUE);
@@ -526,13 +580,13 @@ namespace hyperbrowse::ui
 
             if (state.okButton)
             {
-                MoveWindow(state.okButton, okLeft, buttonTop, kTextInputButtonWidth, kTextInputButtonHeight, TRUE);
+                MoveWindow(state.okButton, okLeft, buttonTop, scale(kTextInputButtonWidth), scale(kTextInputButtonHeight), TRUE);
             }
 
             const HWND cancelButton = GetDlgItem(hwnd, IDCANCEL);
             if (cancelButton)
             {
-                MoveWindow(cancelButton, cancelLeft, buttonTop, kTextInputButtonWidth, kTextInputButtonHeight, TRUE);
+                MoveWindow(cancelButton, cancelLeft, buttonTop, scale(kTextInputButtonWidth), scale(kTextInputButtonHeight), TRUE);
             }
         }
 
@@ -674,16 +728,17 @@ namespace hyperbrowse::ui
                 const int clientWidth = metrics.clientWidth;
                 const int contentWidth = metrics.contentWidth;
                 const int buttonTop = metrics.buttonTop;
-                const int cancelLeft = clientWidth - kTextInputDialogMargin - metrics.cancelButtonWidth;
-                const int okLeft = cancelLeft - 8 - metrics.okButtonWidth;
+                const int margin = ScaleDialogDimension(kTextInputDialogMargin, state->dpi);
+                const int cancelLeft = clientWidth - margin - metrics.cancelButtonWidth;
+                const int okLeft = cancelLeft - ScaleDialogDimension(8, state->dpi) - metrics.okButtonWidth;
 
-                HWND instructionWindow = CreateWindowExW(
+                state->instructionWindow = CreateWindowExW(
                     0,
                     L"STATIC",
                     state->instruction.c_str(),
                     WS_CHILD | WS_VISIBLE,
-                    kTextInputDialogMargin,
-                    kTextInputDialogMargin,
+                    margin,
+                    margin,
                     contentWidth,
                     metrics.instructionHeight,
                     hwnd,
@@ -695,23 +750,23 @@ namespace hyperbrowse::ui
                     L"EDIT",
                     state->initialText.c_str(),
                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                    kTextInputDialogMargin,
+                    margin,
                     metrics.editTop,
                     contentWidth,
-                    kTextInputEditHeight,
+                    ScaleDialogDimension(kTextInputEditHeight, state->dpi),
                     hwnd,
                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(kTextInputEditControlId)),
                     reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
                     nullptr);
-                HWND dividerWindow = CreateWindowExW(
+                state->dividerWindow = CreateWindowExW(
                     0,
                     L"STATIC",
                     nullptr,
                     WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
-                    kTextInputDialogMargin,
+                    margin,
                     metrics.dividerTop,
                     contentWidth,
-                    2,
+                    ScaleDialogDimension(2, state->dpi),
                     hwnd,
                     nullptr,
                     reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
@@ -724,7 +779,7 @@ namespace hyperbrowse::ui
                     okLeft,
                     buttonTop,
                     metrics.okButtonWidth,
-                    kTextInputButtonHeight,
+                    ScaleDialogDimension(kTextInputButtonHeight, state->dpi),
                     hwnd,
                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)),
                     reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
@@ -737,15 +792,15 @@ namespace hyperbrowse::ui
                     cancelLeft,
                     buttonTop,
                     metrics.cancelButtonWidth,
-                    kTextInputButtonHeight,
+                    ScaleDialogDimension(kTextInputButtonHeight, state->dpi),
                     hwnd,
                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)),
                     reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
                     nullptr);
 
-                if (instructionWindow) SendMessageW(instructionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                if (state->instructionWindow) SendMessageW(state->instructionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 if (state->editWindow) SendMessageW(state->editWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-                if (dividerWindow) SendMessageW(dividerWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                if (state->dividerWindow) SendMessageW(state->dividerWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 if (state->okButton) SendMessageW(state->okButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 if (cancelButton) SendMessageW(cancelButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
 
@@ -771,6 +826,45 @@ namespace hyperbrowse::ui
                     return FALSE;
                 }
                 break;
+            case WM_SIZE:
+                if (state)
+                {
+                    LayoutTextInputDialogControls(hwnd, *state);
+                }
+                return 0;
+            case WM_DPICHANGED:
+                if (state)
+                {
+                    state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                    DeleteFontIfOwned(state->bodyFont);
+                    state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                    const HFONT font = state->bodyFont
+                        ? state->bodyFont
+                        : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                    for (const HWND child : {state->instructionWindow,
+                                              state->editWindow,
+                                              state->dividerWindow,
+                                              state->okButton,
+                                              GetDlgItem(hwnd, IDCANCEL)})
+                    {
+                        if (child)
+                        {
+                            SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                        }
+                    }
+                    const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+                    if (suggestedRect)
+                    {
+                        SetWindowPos(hwnd, nullptr,
+                                     suggestedRect->left,
+                                     suggestedRect->top,
+                                     suggestedRect->right - suggestedRect->left,
+                                     suggestedRect->bottom - suggestedRect->top,
+                                     SWP_NOZORDER | SWP_NOACTIVATE);
+                    }
+                    LayoutTextInputDialogControls(hwnd, *state);
+                }
+                return 0;
             case WM_CTLCOLORDLG:
                 if (state && state->backgroundBrush)
                 {
@@ -1028,6 +1122,46 @@ namespace hyperbrowse::ui
                     LayoutBatchRenameDialogControls(hwnd, *state);
                 }
                 return 0;
+            case WM_DPICHANGED:
+                if (state)
+                {
+                    state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                    DeleteFontIfOwned(state->bodyFont);
+                    state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                    const HFONT font = state->bodyFont
+                        ? state->bodyFont
+                        : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                    for (const HWND child : {GetDlgItem(hwnd, kBatchRenameInstructionControlId),
+                                              state->patternEditWindow,
+                                              GetDlgItem(hwnd, kBatchRenameHelpControlId),
+                                              state->previewListWindow,
+                                              state->okButton,
+                                              GetDlgItem(hwnd, IDCANCEL)})
+                    {
+                        if (child)
+                        {
+                            SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                        }
+                    }
+                    if (state->previewListWindow)
+                    {
+                        ListView_SetColumnWidth(state->previewListWindow, 0, ScaleDialogDimension(220, state->dpi));
+                        ListView_SetColumnWidth(state->previewListWindow, 1, ScaleDialogDimension(300, state->dpi));
+                        ListView_SetColumnWidth(state->previewListWindow, 2, ScaleDialogDimension(140, state->dpi));
+                    }
+                    const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+                    if (suggestedRect)
+                    {
+                        SetWindowPos(hwnd, nullptr,
+                                     suggestedRect->left,
+                                     suggestedRect->top,
+                                     suggestedRect->right - suggestedRect->left,
+                                     suggestedRect->bottom - suggestedRect->top,
+                                     SWP_NOZORDER | SWP_NOACTIVATE);
+                    }
+                    LayoutBatchRenameDialogControls(hwnd, *state);
+                }
+                return 0;
             case WM_SHOWWINDOW:
                 if (wParam != FALSE && state && state->patternEditWindow)
                 {
@@ -1204,9 +1338,10 @@ namespace hyperbrowse::ui
 
         TextInputDialogState state;
         state.ownerWindow = ownerWindow;
+        state.dpi = DialogDpiForWindow(ownerWindow);
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
         state.theme = MakeDialogTheme(darkTheme);
-        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, state.dpi);
         if (!state.bodyFont)
         {
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -1219,8 +1354,12 @@ namespace hyperbrowse::ui
         state.selectionEnd = selectionEnd;
 
         const TextInputDialogLayoutMetrics layoutMetrics = BuildTextInputDialogLayoutMetrics(state);
-        RECT windowRect{0, 0, layoutMetrics.clientWidth, std::max(kTextInputDialogHeight, layoutMetrics.clientHeight)};
-        AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        RECT windowRect{0, 0, layoutMetrics.clientWidth, std::max(ScaleDialogDimension(kTextInputDialogHeight, state.dpi), layoutMetrics.clientHeight)};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                         WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                         FALSE,
+                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                         state.dpi);
 
         if (ownerWindow)
         {
@@ -1362,9 +1501,10 @@ namespace hyperbrowse::ui
 
         BatchRenameDialogState state;
         state.ownerWindow = ownerWindow;
+        state.dpi = DialogDpiForWindow(ownerWindow);
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
         state.theme = MakeDialogTheme(darkTheme);
-        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, state.dpi);
         if (!state.bodyFont)
         {
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -1375,11 +1515,14 @@ namespace hyperbrowse::ui
         state.items = std::move(items);
         state.numberWidth = std::max(3, CountDecimalDigits(state.items.size()));
 
-        RECT windowRect{0, 0, kBatchRenameDialogWidth, kBatchRenameDialogHeight};
-        AdjustWindowRectEx(&windowRect,
-                           WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
-                           FALSE,
-                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        RECT windowRect{0, 0,
+                ScaleDialogDimension(kBatchRenameDialogWidth, state.dpi),
+                ScaleDialogDimension(kBatchRenameDialogHeight, state.dpi)};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                         WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+                         FALSE,
+                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                         state.dpi);
 
         if (ownerWindow)
         {

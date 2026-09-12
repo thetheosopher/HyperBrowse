@@ -42,6 +42,8 @@
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
 #include "ui/DialogTheme.h"
+#include "ui/DialogDpi.h"
+#include "ui/DialogShell.h"
 #include "ui/BrowserItemScopeCollector.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/CommandIds.h"
@@ -64,6 +66,7 @@
 #include "ui/FolderWatchChangeCoordinator.h"
 #include "ui/MainWindowDialogs.h"
 #include "ui/MainWindowDialogState.h"
+#include "ui/SettingsLayout.h"
 #include "ui/MenuMessageHandling.h"
 #include "ui/QuickAccessDestinationBuilder.h"
 #include "ui/QuickAccessPathList.h"
@@ -126,6 +129,9 @@ namespace
     using hyperbrowse::ui::dialog_detail::ExperimentalSettingsFocusTarget;
     using hyperbrowse::ui::dialog_detail::ExperimentalSettingsFocusTargetKind;
     using hyperbrowse::ui::dialog_detail::ExperimentalSettingsLabel;
+    using hyperbrowse::ui::dialog_detail::MeasureSettingsLayout;
+    using hyperbrowse::ui::dialog_detail::SettingsLayoutLabel;
+    using hyperbrowse::ui::dialog_detail::SettingsLayoutResult;
     using hyperbrowse::ui::dialog_detail::FileAssociationsDialogLayoutMetrics;
     using hyperbrowse::ui::dialog_detail::FileAssociationsDialogState;
     using hyperbrowse::ui::dialog_detail::ImageInformationDialogState;
@@ -135,6 +141,14 @@ namespace
     using hyperbrowse::ui::dialog_detail::SlideshowSettingsDialogLayoutMetrics;
     using hyperbrowse::ui::dialog_detail::SlideshowSettingsDialogState;
     using hyperbrowse::ui::dialog_detail::SlideshowTransitionOption;
+    using hyperbrowse::ui::AdjustDialogWindowRectForDpi;
+    using hyperbrowse::ui::CenterDialogInWorkArea;
+    using hyperbrowse::ui::ClampDialogFrameToWorkArea;
+    using hyperbrowse::ui::DialogDpiForWindow;
+    using hyperbrowse::ui::DialogShellMetrics;
+    using hyperbrowse::ui::MeasureDialogShellMetrics;
+    using hyperbrowse::ui::ScaleDialogAppTextDimension;
+    using hyperbrowse::ui::ScaleDialogDimension;
 
     thread_local hyperbrowse::ui::MainWindow* g_commandBarMenuFilterWindow = nullptr;
 
@@ -945,17 +959,67 @@ namespace
         return CreateFontIndirectW(&logFont);
     }
 
-    HFONT CreateSystemUiFont(hyperbrowse::util::AppTextSize size)
+    void ScaleDialogChildWindows(HWND parentWindow, UINT fromDpi, UINT toDpi)
+    {
+        if (!parentWindow || fromDpi == 0 || toDpi == 0 || fromDpi == toDpi)
+        {
+            return;
+        }
+
+        struct ScaleContext
+        {
+            HWND parent{};
+            UINT fromDpi{};
+            UINT toDpi{};
+        } context{parentWindow, fromDpi, toDpi};
+
+        EnumChildWindows(parentWindow,
+                         [](HWND child, LPARAM parameter) -> BOOL
+                         {
+                             auto* context = reinterpret_cast<ScaleContext*>(parameter);
+                             RECT rect{};
+                             if (!GetWindowRect(child, &rect))
+                             {
+                                 return TRUE;
+                             }
+                             POINT points[] = {{rect.left, rect.top}, {rect.right, rect.bottom}};
+                             MapWindowPoints(nullptr, context->parent, points, 2);
+                             SetWindowPos(child,
+                                          nullptr,
+                                          MulDiv(points[0].x, static_cast<int>(context->toDpi), static_cast<int>(context->fromDpi)),
+                                          MulDiv(points[0].y, static_cast<int>(context->toDpi), static_cast<int>(context->fromDpi)),
+                                          MulDiv(points[1].x - points[0].x, static_cast<int>(context->toDpi), static_cast<int>(context->fromDpi)),
+                                          MulDiv(points[1].y - points[0].y, static_cast<int>(context->toDpi), static_cast<int>(context->fromDpi)),
+                                          SWP_NOZORDER | SWP_NOACTIVATE);
+                             return TRUE;
+                         },
+                         reinterpret_cast<LPARAM>(&context));
+    }
+
+    HFONT CreateSystemUiFont(hyperbrowse::util::AppTextSize size, UINT dpi = 0)
     {
         NONCLIENTMETRICSW metrics{};
         metrics.cbSize = sizeof(metrics);
         if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0) == FALSE)
         {
-            return CreateDialogUiFont(9, FW_NORMAL, size);
+            return CreateDialogUiFont(9, FW_NORMAL, size, dpi);
         }
 
         metrics.lfMessageFont.lfCharSet = DEFAULT_CHARSET;
         metrics.lfMessageFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
+        if (dpi != 0)
+        {
+            HDC screenDc = GetDC(nullptr);
+            const int systemDpi = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
+            if (screenDc)
+            {
+                ReleaseDC(nullptr, screenDc);
+            }
+            metrics.lfMessageFont.lfHeight = MulDiv(
+                metrics.lfMessageFont.lfHeight,
+                static_cast<int>(dpi),
+                std::max(1, systemDpi));
+        }
         metrics.lfMessageFont.lfHeight = static_cast<LONG>(
             static_cast<double>(metrics.lfMessageFont.lfHeight)
             * hyperbrowse::util::AppTextSizeScale(size));
@@ -1123,7 +1187,7 @@ namespace
 
     int ScaleAboutDialogDimension(int dimension, const AboutDialogState& state)
     {
-        return MulDiv(dimension, static_cast<int>(state.dpi == 0 ? 96 : state.dpi), 96);
+        return ScaleDialogAppTextDimension(dimension, state.appTextSize, state.dpi);
     }
 
     int MeasureAboutDialogLinkButtonWidth(HFONT font,
@@ -1708,17 +1772,8 @@ namespace
 
     void CenterWindowOnOwner(HWND window, HWND ownerWindow)
     {
-        RECT ownerRect{};
-        RECT dialogRect{};
-        const HWND referenceWindow = ownerWindow ? ownerWindow : GetDesktopWindow();
-        GetWindowRect(referenceWindow, &ownerRect);
-        GetWindowRect(window, &dialogRect);
-
-        const int width = dialogRect.right - dialogRect.left;
-        const int height = dialogRect.bottom - dialogRect.top;
-        const int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - width) / 2;
-        const int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - height) / 2;
-        SetWindowPos(window, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+        const DialogShellMetrics shell = MeasureDialogShellMetrics(ownerWindow, hyperbrowse::util::kDefaultAppTextSize);
+        CenterDialogInWorkArea(window, shell.workArea);
     }
 
     std::wstring TrimWhitespaceCopy(std::wstring value);
@@ -1918,107 +1973,107 @@ namespace
                                                                                       const PerformanceSettingsDialogState& state)
     {
         PerformanceSettingsDialogLayoutMetrics metrics;
-        metrics.margin = hyperbrowse::util::ScaleAppTextDimension(kTextInputDialogMargin, state.appTextSize);
+        metrics.margin = ScaleDialogAppTextDimension(kTextInputDialogMargin, state.appTextSize, state.dpi);
         metrics.contentLeft = metrics.margin + 2;
         metrics.contentWidth = std::max(0, clientWidth - (metrics.contentLeft * 2));
-        metrics.sectionInset = hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogSectionInset, state.appTextSize);
-        metrics.controlGap = hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogControlGap, state.appTextSize);
+        metrics.sectionInset = ScaleDialogAppTextDimension(kPerformanceSettingsDialogSectionInset, state.appTextSize, state.dpi);
+        metrics.controlGap = ScaleDialogAppTextDimension(kPerformanceSettingsDialogControlGap, state.appTextSize, state.dpi);
 
         const HFONT titleFont = state.titleFont ? state.titleFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         const HFONT bodyFont = state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         const int lineHeight = MeasureSingleLineTextHeight(bodyFont, 20);
 
-        metrics.titleTop = metrics.margin + hyperbrowse::util::ScaleAppTextDimension(4, state.appTextSize);
+        metrics.titleTop = metrics.margin + ScaleDialogAppTextDimension(4, state.appTextSize, state.dpi);
         metrics.titleHeight = MeasureTextBlockHeight(titleFont,
                                                      state.title,
                                                      metrics.contentWidth,
                                                      DT_LEFT | DT_NOPREFIX | DT_SINGLELINE,
-                                                     hyperbrowse::util::ScaleAppTextDimension(28, state.appTextSize));
+                                                     ScaleDialogAppTextDimension(28, state.appTextSize, state.dpi));
         metrics.instructionTop = metrics.titleTop + metrics.titleHeight
-            + hyperbrowse::util::ScaleAppTextDimension(6, state.appTextSize);
+            + ScaleDialogAppTextDimension(6, state.appTextSize, state.dpi);
         metrics.instructionHeight = MeasureTextBlockHeight(bodyFont,
                                                            state.instruction,
                                                            metrics.contentWidth,
                                                            DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                                           hyperbrowse::util::ScaleAppTextDimension(42, state.appTextSize));
+                                                           ScaleDialogAppTextDimension(42, state.appTextSize, state.dpi));
         metrics.summaryGroupTop = metrics.instructionTop + metrics.instructionHeight
-            + hyperbrowse::util::ScaleAppTextDimension(14, state.appTextSize);
+            + ScaleDialogAppTextDimension(14, state.appTextSize, state.dpi);
         metrics.summaryInnerWidth = std::max(0, metrics.contentWidth - (metrics.sectionInset * 2));
         metrics.summaryHeight = MeasureTextBlockHeight(bodyFont,
                                                        state.summary,
                                                        metrics.summaryInnerWidth,
                                                        DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                                       hyperbrowse::util::ScaleAppTextDimension(52, state.appTextSize));
+                                                       ScaleDialogAppTextDimension(52, state.appTextSize, state.dpi));
         metrics.summaryGroupHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(78, state.appTextSize),
-            metrics.summaryHeight + hyperbrowse::util::ScaleAppTextDimension(30, state.appTextSize));
+            ScaleDialogAppTextDimension(78, state.appTextSize, state.dpi),
+            metrics.summaryHeight + ScaleDialogAppTextDimension(30, state.appTextSize, state.dpi));
         metrics.cacheGroupTop = metrics.summaryGroupTop + metrics.summaryGroupHeight
-            + hyperbrowse::util::ScaleAppTextDimension(12, state.appTextSize);
+            + ScaleDialogAppTextDimension(12, state.appTextSize, state.dpi);
         metrics.labelWidth = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogLabelWidth, state.appTextSize),
+            ScaleDialogAppTextDimension(kPerformanceSettingsDialogLabelWidth, state.appTextSize, state.dpi),
             std::max(MeasureDialogButtonWidth(bodyFont, L"Thumbnail memory cache:", 0),
                      MeasureDialogButtonWidth(bodyFont, L"Metadata cache:", 0)));
-        metrics.editWidth = hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogEditWidth, state.appTextSize);
+        metrics.editWidth = ScaleDialogAppTextDimension(kPerformanceSettingsDialogEditWidth, state.appTextSize, state.dpi);
         metrics.unitWidth = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogUnitWidth, state.appTextSize),
+            ScaleDialogAppTextDimension(kPerformanceSettingsDialogUnitWidth, state.appTextSize, state.dpi),
             MeasureDialogButtonWidth(bodyFont, L"entries", 0));
         metrics.checkboxWidth = MeasureDialogButtonWidth(
             bodyFont,
             L"Follow profile",
-            hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogCheckboxWidth, state.appTextSize));
+            ScaleDialogAppTextDimension(kPerformanceSettingsDialogCheckboxWidth, state.appTextSize, state.dpi));
         metrics.rowHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kTextInputEditHeight, state.appTextSize),
-            lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+            ScaleDialogAppTextDimension(kTextInputEditHeight, state.appTextSize, state.dpi),
+            lineHeight + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi));
         metrics.checkboxHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(22, state.appTextSize),
-            lineHeight + hyperbrowse::util::ScaleAppTextDimension(2, state.appTextSize));
+            ScaleDialogAppTextDimension(22, state.appTextSize, state.dpi),
+            lineHeight + ScaleDialogAppTextDimension(2, state.appTextSize, state.dpi));
         metrics.rowLabelLeft = metrics.contentLeft + metrics.sectionInset;
         metrics.rowValueLeft = metrics.rowLabelLeft + metrics.labelWidth + metrics.controlGap;
-        metrics.rowUnitLeft = metrics.rowValueLeft + metrics.editWidth + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize);
+        metrics.rowUnitLeft = metrics.rowValueLeft + metrics.editWidth + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi);
         metrics.rowCheckboxLeft = metrics.contentLeft + metrics.contentWidth - metrics.sectionInset - metrics.checkboxWidth;
-        metrics.firstRowTop = metrics.cacheGroupTop + hyperbrowse::util::ScaleAppTextDimension(30, state.appTextSize);
+        metrics.firstRowTop = metrics.cacheGroupTop + ScaleDialogAppTextDimension(30, state.appTextSize, state.dpi);
         metrics.secondRowTop = metrics.firstRowTop + metrics.rowHeight
-            + hyperbrowse::util::ScaleAppTextDimension(kPerformanceSettingsDialogValueTopGap + 12, state.appTextSize);
+            + ScaleDialogAppTextDimension(kPerformanceSettingsDialogValueTopGap + 12, state.appTextSize, state.dpi);
         metrics.pressureStatusTop = metrics.secondRowTop + metrics.rowHeight
-            + hyperbrowse::util::ScaleAppTextDimension(18, state.appTextSize);
+            + ScaleDialogAppTextDimension(18, state.appTextSize, state.dpi);
         const int pressureStatusBottom = metrics.pressureStatusTop + metrics.checkboxHeight;
         metrics.cacheGroupHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(136, state.appTextSize),
-            pressureStatusBottom - metrics.cacheGroupTop + hyperbrowse::util::ScaleAppTextDimension(12, state.appTextSize));
+            ScaleDialogAppTextDimension(136, state.appTextSize, state.dpi),
+            pressureStatusBottom - metrics.cacheGroupTop + ScaleDialogAppTextDimension(12, state.appTextSize, state.dpi));
         metrics.footnoteTop = metrics.cacheGroupTop + metrics.cacheGroupHeight
-            + hyperbrowse::util::ScaleAppTextDimension(12, state.appTextSize);
+            + ScaleDialogAppTextDimension(12, state.appTextSize, state.dpi);
         metrics.minimumFootnoteHeight = MeasureTextBlockHeight(bodyFont,
                                                                state.footnote,
                                                                metrics.contentWidth,
                                                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                                               hyperbrowse::util::ScaleAppTextDimension(42, state.appTextSize));
+                                                               ScaleDialogAppTextDimension(42, state.appTextSize, state.dpi));
         metrics.buttonHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonHeight, state.appTextSize),
-            lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+            ScaleDialogAppTextDimension(kTextInputButtonHeight, state.appTextSize, state.dpi),
+            lineHeight + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi));
         metrics.applyButtonWidth = MeasureDialogButtonWidth(
             bodyFont,
             L"Apply",
-            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonWidth, state.appTextSize));
+            ScaleDialogAppTextDimension(kTextInputButtonWidth, state.appTextSize, state.dpi));
         metrics.cancelButtonWidth = MeasureDialogButtonWidth(
             bodyFont,
             L"Cancel",
-            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonWidth, state.appTextSize));
+            ScaleDialogAppTextDimension(kTextInputButtonWidth, state.appTextSize, state.dpi));
         const int leftRowWidth = metrics.labelWidth
             + metrics.controlGap
             + metrics.editWidth
-            + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize)
+            + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi)
             + metrics.unitWidth;
         metrics.minimumClientWidth = std::max(
             kPerformanceSettingsDialogWidth,
             metrics.contentLeft * 2
                 + metrics.sectionInset * 2
                 + leftRowWidth
-                + hyperbrowse::util::ScaleAppTextDimension(24, state.appTextSize)
+                + ScaleDialogAppTextDimension(24, state.appTextSize, state.dpi)
                 + metrics.checkboxWidth);
         metrics.minimumClientHeight = metrics.footnoteTop
             + metrics.minimumFootnoteHeight
-            + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize)
-            + hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize)
+            + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi)
+            + ScaleDialogAppTextDimension(16, state.appTextSize, state.dpi)
             + metrics.buttonHeight
             + metrics.margin;
         return metrics;
@@ -2037,7 +2092,7 @@ namespace
             : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         const int lineHeight = MeasureSingleLineTextHeight(bodyFont, 20);
         const int buttonTop = clientHeight - metrics.margin - metrics.buttonHeight;
-        const int dividerTop = buttonTop - hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
+        const int dividerTop = buttonTop - ScaleDialogAppTextDimension(16, state.appTextSize, state.dpi);
         const int cancelLeft = clientWidth - metrics.margin - metrics.cancelButtonWidth;
         const int okLeft = cancelLeft - metrics.controlGap - metrics.applyButtonWidth;
 
@@ -2063,8 +2118,8 @@ namespace
         if (summaryWindow)
         {
             MoveWindow(summaryWindow,
-                       metrics.contentLeft + kPerformanceSettingsDialogSectionInset,
-                       metrics.summaryGroupTop + 22,
+                       metrics.contentLeft + ScaleDialogAppTextDimension(kPerformanceSettingsDialogSectionInset, state.appTextSize, state.dpi),
+                       metrics.summaryGroupTop + ScaleDialogAppTextDimension(22, state.appTextSize, state.dpi),
                        metrics.summaryInnerWidth,
                        metrics.summaryHeight,
                        TRUE);
@@ -2159,7 +2214,7 @@ namespace
             MoveWindow(state.pressureStatusCheckWindow,
                        metrics.rowLabelLeft,
                        metrics.pressureStatusTop,
-                       metrics.contentWidth - (kPerformanceSettingsDialogSectionInset * 2),
+                       metrics.contentWidth - ScaleDialogAppTextDimension(kPerformanceSettingsDialogSectionInset * 2, state.appTextSize, state.dpi),
                        metrics.checkboxHeight,
                        TRUE);
         }
@@ -2571,6 +2626,45 @@ namespace
         case WM_SIZE:
             if (state)
             {
+                LayoutPerformanceSettingsDialogControls(hwnd, *state);
+            }
+            return 0;
+        case WM_DPICHANGED:
+            if (state)
+            {
+                state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+                if (suggestedRect)
+                {
+                    const RECT adjustedRect = ClampDialogFrameToWorkArea(
+                        *suggestedRect,
+                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
+                    SetWindowPos(hwnd, nullptr,
+                                 adjustedRect.left,
+                                 adjustedRect.top,
+                                 adjustedRect.right - adjustedRect.left,
+                                 adjustedRect.bottom - adjustedRect.top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                DeleteFontIfOwned(state->titleFont);
+                DeleteFontIfOwned(state->bodyFont);
+                state->titleFont = CreateDialogUiFont(16, FW_BOLD, state->appTextSize, state->dpi);
+                state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                const HFONT font = state->bodyFont
+                    ? state->bodyFont
+                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                EnumChildWindows(hwnd,
+                                 [](HWND child, LPARAM parameter) -> BOOL
+                                 {
+                                     SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(parameter), TRUE);
+                                     return TRUE;
+                                 },
+                                 reinterpret_cast<LPARAM>(font));
+                const HWND titleWindow = GetDlgItem(hwnd, kPerformanceSettingsDialogTitleControlId);
+                if (titleWindow && state->titleFont)
+                {
+                    SendMessageW(titleWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->titleFont), TRUE);
+                }
                 LayoutPerformanceSettingsDialogControls(hwnd, *state);
             }
             return 0;
@@ -3167,12 +3261,15 @@ namespace
                 const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
                 if (suggested)
                 {
+                    const RECT adjusted = ClampDialogFrameToWorkArea(
+                        *suggested,
+                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
                     SetWindowPos(hwnd,
                                  nullptr,
-                                 suggested->left,
-                                 suggested->top,
-                                 suggested->right - suggested->left,
-                                 suggested->bottom - suggested->top,
+                                 adjusted.left,
+                                 adjusted.top,
+                                 adjusted.right - adjusted.left,
+                                 adjusted.bottom - adjusted.top,
                                  SWP_NOZORDER | SWP_NOACTIVATE);
                 }
                 state->d2dRenderTarget.Reset();
@@ -3292,11 +3389,11 @@ namespace
         GetClientRect(hwnd, &client);
         const int clientWidth = static_cast<int>(client.right);
         const int clientHeight = static_cast<int>(client.bottom);
-        const int margin = MulDiv(kShortcutReferenceMargin, static_cast<int>(state.dpi), 96);
-        const int gap = MulDiv(kShortcutReferenceControlGap, static_cast<int>(state.dpi), 96);
-        const int subtitleHeight = MulDiv(kShortcutReferenceSubtitleHeight, static_cast<int>(state.dpi), 96);
-        const int buttonWidth = MulDiv(kShortcutReferenceButtonWidth, static_cast<int>(state.dpi), 96);
-        const int buttonHeight = MulDiv(kShortcutReferenceButtonHeight, static_cast<int>(state.dpi), 96);
+        const int margin = ScaleDialogAppTextDimension(kShortcutReferenceMargin, state.appTextSize, state.dpi);
+        const int gap = ScaleDialogAppTextDimension(kShortcutReferenceControlGap, state.appTextSize, state.dpi);
+        const int subtitleHeight = ScaleDialogAppTextDimension(kShortcutReferenceSubtitleHeight, state.appTextSize, state.dpi);
+        const int buttonWidth = ScaleDialogAppTextDimension(kShortcutReferenceButtonWidth, state.appTextSize, state.dpi);
+        const int buttonHeight = ScaleDialogAppTextDimension(kShortcutReferenceButtonHeight, state.appTextSize, state.dpi);
         const int listTop = margin + subtitleHeight + gap;
         const int buttonTop = std::max(listTop + 1, clientHeight - margin - buttonHeight);
         const int listBottom = std::max(listTop + 1, buttonTop - gap);
@@ -3492,12 +3589,28 @@ namespace
                 const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
                 if (suggested)
                 {
+                    const RECT adjusted = ClampDialogFrameToWorkArea(
+                        *suggested,
+                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
                     SetWindowPos(hwnd, nullptr,
-                                 suggested->left, suggested->top,
-                                 suggested->right - suggested->left,
-                                 suggested->bottom - suggested->top,
+                                 adjusted.left, adjusted.top,
+                                 adjusted.right - adjusted.left,
+                                 adjusted.bottom - adjusted.top,
                                  SWP_NOZORDER | SWP_NOACTIVATE);
                 }
+                DeleteFontIfOwned(state->bodyFont);
+                state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                const HFONT bodyFont = state->bodyFont
+                    ? state->bodyFont
+                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                for (HWND control : {state->subtitleWindow, state->listWindow, state->closeButton})
+                {
+                    if (control)
+                    {
+                        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont), TRUE);
+                    }
+                }
+                AutoSizeShortcutReferenceColumns(state->listWindow);
                 LayoutShortcutReferenceControls(hwnd, *state);
             }
             return 0;
@@ -4323,9 +4436,67 @@ namespace
                     SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 }
             }
+            ScaleDialogChildWindows(
+                hwnd,
+                96,
+                ScaleDialogAppTextDimension(96, state->appTextSize, state->dpi));
+            DeleteFontIfOwned(state->bodyFont);
+            state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+            const HFONT scaledFont = state->bodyFont
+                ? state->bodyFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            SendMessageW(state->tabWindow, WM_SETFONT, reinterpret_cast<WPARAM>(scaledFont), TRUE);
+            for (HWND control : state->controls)
+            {
+                if (control)
+                {
+                    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(scaledFont), TRUE);
+                }
+            }
+            for (HWND button : {applyButton, okButton, cancelButton})
+            {
+                if (button)
+                {
+                    SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(scaledFont), TRUE);
+                }
+            }
             CenterWindowOnOwner(hwnd, state->ownerWindow);
             return 0;
         }
+        case WM_DPICHANGED:
+            if (state)
+            {
+                const UINT oldDpi = state->dpi;
+                state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+                if (suggestedRect)
+                {
+                    const RECT adjustedRect = ClampDialogFrameToWorkArea(
+                        *suggestedRect,
+                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
+                    SetWindowPos(hwnd, nullptr,
+                                 adjustedRect.left,
+                                 adjustedRect.top,
+                                 adjustedRect.right - adjustedRect.left,
+                                 adjustedRect.bottom - adjustedRect.top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                ScaleDialogChildWindows(hwnd, oldDpi, state->dpi);
+                DeleteFontIfOwned(state->bodyFont);
+                state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                const HFONT font = state->bodyFont
+                    ? state->bodyFont
+                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                EnumChildWindows(hwnd,
+                                 [](HWND child, LPARAM parameter) -> BOOL
+                                 {
+                                     SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(parameter), TRUE);
+                                     return TRUE;
+                                 },
+                                 reinterpret_cast<LPARAM>(font));
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
         case WM_CTLCOLORDLG:
             return state && state->backgroundBrush
                 ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
@@ -4456,8 +4627,9 @@ namespace
                         }
                         if ((drawItem->itemState & ODS_SELECTED) != 0)
                         {
+                            const int underlineHeight = ScaleDialogDimension(2, state->dpi);
                             renderTarget->FillRectangle(
-                                D2D1::RectF(0.0f, static_cast<float>(std::max(0, height - 2)),
+                                D2D1::RectF(0.0f, static_cast<float>(std::max(0, height - underlineHeight)),
                                              static_cast<float>(width), static_cast<float>(height)),
                                 accentBrush.Get());
                         }
@@ -4633,8 +4805,14 @@ namespace
                 return false;
             }
         }
-        RECT windowRect{0, 0, kConsolidatedSettingsDialogWidth, kConsolidatedSettingsDialogHeight};
-        AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        RECT windowRect{0, 0,
+            ScaleDialogAppTextDimension(kConsolidatedSettingsDialogWidth, state->appTextSize, state->dpi),
+            ScaleDialogAppTextDimension(kConsolidatedSettingsDialogHeight, state->appTextSize, state->dpi)};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                         WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VSCROLL,
+                         FALSE,
+                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                         state->dpi);
         if (ownerWindow)
         {
             EnableWindow(ownerWindow, FALSE);
@@ -4693,11 +4871,104 @@ namespace
         return state->accepted;
     }
 
-    constexpr int kExperimentalSettingsDialogWidth = 980;
-    constexpr int kExperimentalSettingsDialogHeight = 680;
+    constexpr int kExperimentalSettingsDialogWidth = 1120;
+    constexpr int kExperimentalSettingsDialogHeight = 760;
     constexpr int kExperimentalSettingsApplyId = 5600;
     constexpr int kExperimentalSettingsOkId = 5601;
     constexpr int kExperimentalSettingsCancelId = 5602;
+    constexpr DWORD kExperimentalSettingsWindowStyle = WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN | WS_VSCROLL;
+    constexpr DWORD kExperimentalSettingsWindowExStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
+
+    int ExperimentalSettingsPreferredClientHeight(int logicalWidth,
+                                                  hyperbrowse::util::AppTextSize textSize)
+    {
+        const int fallbackCharacterWidth = hyperbrowse::util::ScaleAppTextDimension(8, textSize);
+        int requiredHeight = hyperbrowse::util::ScaleAppTextDimension(kExperimentalSettingsDialogHeight, textSize);
+        for (int pageIndex = 0; pageIndex < static_cast<int>(ConsolidatedSettingsPage::Count); ++pageIndex)
+        {
+            const SettingsLayoutResult layout = MeasureSettingsLayout({
+                static_cast<ConsolidatedSettingsPage>(pageIndex),
+                textSize,
+                logicalWidth,
+                1,
+                [fallbackCharacterWidth](std::wstring_view text)
+                {
+                    return fallbackCharacterWidth * static_cast<int>(text.size());
+                }});
+            requiredHeight = std::max(
+                requiredHeight,
+                layout.requiredContentHeight
+                    + layout.metrics.margin
+                    + layout.metrics.footerHeight
+                    + hyperbrowse::util::ScaleAppTextDimension(18, textSize));
+        }
+        return requiredHeight;
+    }
+
+    RECT ExperimentalSettingsInitialWindowRect(HWND ownerWindow,
+                                                hyperbrowse::util::AppTextSize textSize,
+                                                UINT dpi)
+    {
+        const int logicalWidth = hyperbrowse::util::ScaleAppTextDimension(kExperimentalSettingsDialogWidth, textSize);
+        const int logicalHeight = ExperimentalSettingsPreferredClientHeight(logicalWidth, textSize);
+        RECT windowRect{
+            0,
+            0,
+            ScaleDialogDimension(logicalWidth, dpi),
+            ScaleDialogDimension(logicalHeight, dpi)};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                                     kExperimentalSettingsWindowStyle,
+                                     FALSE,
+                                     kExperimentalSettingsWindowExStyle,
+                                     dpi);
+        const DialogShellMetrics shell = MeasureDialogShellMetrics(ownerWindow, textSize);
+        return ClampDialogFrameToWorkArea(windowRect, shell.workArea);
+    }
+
+    void CenterExperimentalSettingsOnWorkArea(HWND window,
+                                              HWND ownerWindow,
+                                              hyperbrowse::util::AppTextSize textSize)
+    {
+        if (!window)
+        {
+            return;
+        }
+        const DialogShellMetrics shell = MeasureDialogShellMetrics(ownerWindow, textSize);
+        CenterDialogInWorkArea(window, shell.workArea);
+    }
+
+    void ResizeExperimentalSettingsToContent(ExperimentalSettingsDialogState& state,
+                                             const RECT* suggestedFrame = nullptr)
+    {
+        if (!state.dialogWindow || !state.settings)
+        {
+            return;
+        }
+
+        RECT currentFrame{};
+        if (!GetWindowRect(state.dialogWindow, &currentFrame))
+        {
+            return;
+        }
+        const RECT measuredFrame = ExperimentalSettingsInitialWindowRect(
+            state.ownerWindow,
+            state.settings->appTextSize,
+            state.dpi);
+        RECT nextFrame = suggestedFrame ? *suggestedFrame : currentFrame;
+        nextFrame.right = nextFrame.left + (measuredFrame.right - measuredFrame.left);
+        nextFrame.bottom = nextFrame.top + (measuredFrame.bottom - measuredFrame.top);
+        const DialogShellMetrics shell = MeasureDialogShellMetrics(
+            state.ownerWindow,
+            state.settings->appTextSize);
+        nextFrame = ClampDialogFrameToWorkArea(nextFrame, shell.workArea);
+        SetWindowPos(state.dialogWindow,
+                     nullptr,
+                     nextFrame.left,
+                     nextFrame.top,
+                     nextFrame.right - nextFrame.left,
+                     nextFrame.bottom - nextFrame.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 
     const wchar_t* ExperimentalSettingsPageTitle(ConsolidatedSettingsPage page)
     {
@@ -4862,202 +5133,138 @@ namespace
 
     void LayoutExperimentalSettings(ExperimentalSettingsDialogState& state)
     {
+        if (!state.dialogWindow || !state.settings)
+        {
+            return;
+        }
         RECT client{};
         GetClientRect(state.dialogWindow, &client);
-        const int width = client.right;
-        const int height = client.bottom;
-        const int margin = 28;
-        const int tabTop = 14;
-        const int tabHeight = 46;
-        const int contentTop = tabTop + tabHeight + 18;
-        const int footerBottom = height - 20;
-        const int left = margin;
-        const int right = width - margin;
-        const int valueLeft = std::max(left + 310, width / 2);
-        const int valueRight = right - 18;
-        const int rowHeight = 38;
-        const int rowGap = 12;
+        const UINT dpi = std::max<UINT>(96, state.dpi);
+        const auto toLogical = [dpi](LONG value)
+        {
+            return MulDiv(value, 96, static_cast<int>(dpi));
+        };
+        const auto toPhysical = [dpi](const RECT& logical) -> RECT
+        {
+            return RECT{
+                ScaleDialogDimension(logical.left, dpi),
+                ScaleDialogDimension(logical.top, dpi),
+                ScaleDialogDimension(logical.right, dpi),
+                ScaleDialogDimension(logical.bottom, dpi)};
+        };
+        const auto measureTextWidth = [&](std::wstring_view text)
+        {
+            if (!state.controlFont)
+            {
+                return hyperbrowse::util::ScaleAppTextDimension(8, state.settings->appTextSize)
+                    * static_cast<int>(text.size());
+            }
+            HDC dc = GetDC(state.dialogWindow);
+            if (!dc)
+            {
+                return hyperbrowse::util::ScaleAppTextDimension(8, state.settings->appTextSize)
+                    * static_cast<int>(text.size());
+            }
+            const HGDIOBJ previousFont = SelectObject(dc, state.controlFont);
+            SIZE size{};
+            GetTextExtentPoint32W(dc, text.data(), static_cast<int>(text.size()), &size);
+            SelectObject(dc, previousFont);
+            ReleaseDC(state.dialogWindow, dc);
+            return toLogical(size.cx);
+        };
+        const SettingsLayoutResult layout = MeasureSettingsLayout({
+            state.page,
+            state.settings->appTextSize,
+            toLogical(client.right),
+            toLogical(client.bottom),
+            measureTextWidth});
 
+        state.bodyViewport = layout.metrics.bodyViewport;
+        state.requiredContentHeight = layout.requiredContentHeight;
+        state.scrollExtent = layout.scrollExtent;
+        state.scrollOffset = std::clamp(state.scrollOffset, 0, state.scrollExtent);
         state.labels.clear();
-        state.tabRects = {};
-        state.controlRects = {};
-        const int buttonWidth = 104;
-        const int buttonHeight = 38;
-        const int buttonGap = 12;
-        const int buttonTop = footerBottom - buttonHeight;
-        state.cancelButtonRect = {right - buttonWidth, buttonTop, right, buttonTop + buttonHeight};
+        state.labels.reserve(layout.labels.size());
+        for (const SettingsLayoutLabel& label : layout.labels)
+        {
+            RECT bounds = label.bounds;
+            OffsetRect(&bounds, 0, -state.scrollOffset);
+            ExperimentalSettingsAddLabel(state,
+                                         bounds.left,
+                                         bounds.top,
+                                         bounds.right,
+                                         bounds.bottom,
+                                         label.text.c_str(),
+                                         label.muted,
+                                         ExperimentalSettingsControlMnemonic(label.mnemonicControl));
+        }
+        state.tabRects = layout.tabRects;
+        state.controlRects = layout.controlRects;
+        for (RECT& bounds : state.controlRects)
+        {
+            if (bounds.right > bounds.left && bounds.bottom > bounds.top)
+            {
+                OffsetRect(&bounds, 0, -state.scrollOffset);
+            }
+        }
+        const int buttonTop = layout.metrics.footer.top;
+        const int right = layout.metrics.footer.right;
+        const int buttonWidth = layout.metrics.buttonWidth;
+        const int buttonGap = layout.metrics.buttonGap;
+        state.cancelButtonRect = {right - buttonWidth, buttonTop, right, buttonTop + layout.metrics.footerHeight};
         state.okButtonRect = {state.cancelButtonRect.left - buttonGap - buttonWidth, buttonTop,
-                      state.cancelButtonRect.left - buttonGap, buttonTop + buttonHeight};
+                      state.cancelButtonRect.left - buttonGap, buttonTop + layout.metrics.footerHeight};
         state.applyButtonRect = {state.okButtonRect.left - buttonGap - buttonWidth, buttonTop,
-                     state.okButtonRect.left - buttonGap, buttonTop + buttonHeight};
-        for (std::size_t index = 0; index < state.tabRects.size(); ++index)
-        {
-            const int tabLeft = margin + static_cast<int>(index) * ((width - (margin * 2)) / static_cast<int>(state.tabRects.size()));
-            const int tabRight = margin + static_cast<int>(index + 1) * ((width - (margin * 2)) / static_cast<int>(state.tabRects.size()));
-            state.tabRects[index] = {tabLeft, tabTop, tabRight, tabTop + tabHeight};
-        }
+                     state.okButtonRect.left - buttonGap, buttonTop + layout.metrics.footerHeight};
 
-        auto labelValue = [&](const wchar_t* labelText, ConsolidatedSettingsControl control, int y)
+        const int spinWidth = hyperbrowse::util::ScaleAppTextDimension(28, state.settings->appTextSize);
+        for (std::size_t index = 0; index < state.numericEdits.size(); ++index)
         {
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, labelText, false,
-                                         ExperimentalSettingsControlMnemonic(control));
-            ExperimentalSettingsSetControlRect(state, control, valueLeft, y, valueRight, y + rowHeight);
-        };
-        auto check = [&](ConsolidatedSettingsControl control, const wchar_t* text, int y)
-        {
-            ExperimentalSettingsSetControlRect(state, control, left, y, right, y + rowHeight);
-            ExperimentalSettingsAddLabel(state, left + 34, y, right, y + rowHeight, text, false,
-                                         ExperimentalSettingsControlMnemonic(control));
-        };
-        auto radio = [&](ConsolidatedSettingsControl control, const wchar_t* text, int x, int y)
-        {
-            ExperimentalSettingsSetControlRect(state, control, x, y, x + 190, y + rowHeight);
-            ExperimentalSettingsAddLabel(state, x + 34, y, x + 190, y + rowHeight, text, false,
-                                         ExperimentalSettingsControlMnemonic(control));
-        };
-
-        int y = contentTop;
-        switch (state.page)
-        {
-        case ConsolidatedSettingsPage::Slideshow:
-            labelValue(L"Transition style", ConsolidatedSettingsControl::TransitionStyle, y);
-            y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
-                                         L"Slide duration (milliseconds)", false,
-                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::SlideshowDuration));
-            y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
-                                         L"Transition duration (milliseconds)", false,
-                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::TransitionDuration));
-            y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, right, y + rowHeight, L"Slides: 250-60000 ms   |   Transitions: 100-5000 ms");
-            break;
-        case ConsolidatedSettingsPage::Viewer:
-            check(ConsolidatedSettingsControl::TransitionEnabled, L"Use slideshow transitions", y);
-            y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Mouse wheel");
-            radio(ConsolidatedSettingsControl::ViewerWheelZoom, L"Zoom", valueLeft, y);
-            radio(ConsolidatedSettingsControl::ViewerWheelNavigate, L"Navigate", valueLeft + 205, y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::InvertKeyboardPanning, L"Invert keyboard panning", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::RawPairingEnabled, L"Treat paired RAW+JPEG files as one operation", y);
-            y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Paired viewer preference");
-            radio(ConsolidatedSettingsControl::RawPreferRaw, L"Prefer RAW", valueLeft, y);
-            radio(ConsolidatedSettingsControl::RawPreferJpeg, L"Prefer JPEG", valueLeft + 205, y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::SecondaryMonitor, L"Open viewers on a secondary monitor when available", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::InfoOverlays, L"Show viewer detail overlays", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::WindowedFullMetadata, L"Show full metadata in windowed mode", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::FullScreenFullMetadata, L"Show full metadata in full-screen mode", y);
-            y += rowHeight + rowGap;
-            labelValue(L"Overlay text size", ConsolidatedSettingsControl::OverlayTextSize, y);
-            y += rowHeight + rowGap;
-            labelValue(L"ESC key behavior in full screen", ConsolidatedSettingsControl::EscapeKeyBehavior, y);
-            break;
-        case ConsolidatedSettingsPage::Appearance:
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight, L"Theme");
-            radio(ConsolidatedSettingsControl::ThemeLight, L"Light", valueLeft, y);
-            radio(ConsolidatedSettingsControl::ThemeDark, L"Dark", valueLeft + 205, y);
-            y += rowHeight + rowGap;
-            labelValue(L"Application text size", ConsolidatedSettingsControl::AppTextSize, y);
-            y += rowHeight + rowGap;
-            labelValue(L"Thumbnail size", ConsolidatedSettingsControl::ThumbnailSize, y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::ThumbnailDetails, L"Show thumbnail details", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::CompactLayout, L"Use compact thumbnail layout", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::DetailsPanel, L"Show the details panel", y);
-            break;
-        case ConsolidatedSettingsPage::Performance:
-            labelValue(L"Resource profile", ConsolidatedSettingsControl::ResourceProfile, y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::PersistentCache, L"Keep the persistent thumbnail cache enabled", y);
-            y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
-                                         L"Thumbnail cache cap (MB)", false,
-                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::ThumbnailCache));
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::ThumbnailCacheAutomatic, L"Follow profile", y);
-            y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
-                                         L"Metadata cache cap (entries)", false,
-                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::MetadataCache));
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y);
-            y += rowHeight + rowGap;
-            ExperimentalSettingsAddLabel(state, left, y, valueLeft - 20, y + rowHeight,
-                                         L"Prefetch depth (items)", false,
-                                         ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl::PrefetchDepth));
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::PrefetchDepthAutomatic, L"Follow profile", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::PressureStatus, L"Show memory pressure state in the status bar", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::NvJpeg, L"Use NVIDIA JPEG acceleration when available", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::LibRawOutOfProcess, L"Use out-of-process LibRaw fallback", y);
-            break;
-        case ConsolidatedSettingsPage::Behavior:
-            check(ConsolidatedSettingsControl::RecursiveBrowsing, L"Browse folders recursively", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::ShowSubfolders, L"Show subfolders in the browser", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when ESC is pressed", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
-            y += rowHeight + rowGap;
-            labelValue(L"New Quick Actions shortcut order", ConsolidatedSettingsControl::QuickSendShortcutOrder, y);
-            break;
-        default:
-            break;
-        }
-
-        const int editWidth = 170;
-        const int editHeight = 34;
-        const int spinWidth = 28;
-        const int slideshowDurationY = contentTop + rowHeight + rowGap;
-        const int transitionDurationY = slideshowDurationY + rowHeight + rowGap;
-        const int thumbnailCacheY = contentTop + (rowHeight + rowGap) * 2;
-        const int metadataCacheY = thumbnailCacheY + (rowHeight + rowGap) * 2;
-        const int prefetchDepthY = thumbnailCacheY + (rowHeight + rowGap) * 4;
-        const std::array<std::pair<HWND, RECT>, 5> edits{
-            std::pair{state.numericEdits[0], RECT{valueLeft, slideshowDurationY, valueLeft + editWidth, slideshowDurationY + editHeight}},
-            std::pair{state.numericEdits[1], RECT{valueLeft, transitionDurationY, valueLeft + editWidth, transitionDurationY + editHeight}},
-            std::pair{state.numericEdits[2], RECT{valueLeft, thumbnailCacheY, valueLeft + editWidth, thumbnailCacheY + editHeight}},
-            std::pair{state.numericEdits[3], RECT{valueLeft, metadataCacheY, valueLeft + editWidth, metadataCacheY + editHeight}},
-            std::pair{state.numericEdits[4], RECT{valueLeft, prefetchDepthY, valueLeft + editWidth, prefetchDepthY + editHeight}}};
-        for (const auto& [edit, bounds] : edits)
-        {
-            if (edit)
+            RECT logicalBounds = layout.numericEditRects[index];
+            RECT logicalSpinBounds = layout.numericSpinRects[index];
+            OffsetRect(&logicalBounds, 0, -state.scrollOffset);
+            OffsetRect(&logicalSpinBounds, 0, -state.scrollOffset);
+            if (state.numericEdits[index])
             {
-                const int adjustedRight = bounds.right - spinWidth;
-                SetWindowPos(edit, nullptr, bounds.left, bounds.top, adjustedRight - bounds.left, bounds.bottom - bounds.top,
+                const RECT physicalBounds = toPhysical(logicalBounds);
+                const int spinWidthPixels = ScaleDialogDimension(spinWidth, dpi);
+                const int editLeft = static_cast<int>(physicalBounds.left);
+                const int editTop = static_cast<int>(physicalBounds.top);
+                const int editRight = std::max(editLeft + 1, static_cast<int>(physicalBounds.right) - spinWidthPixels);
+                const int editHeight = std::max(1, static_cast<int>(physicalBounds.bottom - physicalBounds.top));
+                SetWindowPos(state.numericEdits[index], nullptr,
+                             editLeft,
+                             editTop,
+                             editRight - editLeft,
+                             editHeight,
                              SWP_NOZORDER | SWP_NOACTIVATE);
-                const bool visible = (state.page == ConsolidatedSettingsPage::Slideshow && (edit == state.numericEdits[0] || edit == state.numericEdits[1]))
-                    || (state.page == ConsolidatedSettingsPage::Performance && (edit == state.numericEdits[2] || edit == state.numericEdits[3] || edit == state.numericEdits[4]));
-                ShowWindow(edit, visible ? SW_SHOW : SW_HIDE);
+                const bool visible = (state.page == ConsolidatedSettingsPage::Slideshow && index < 2)
+                    || (state.page == ConsolidatedSettingsPage::Performance && index >= 2);
+                const bool inBody = logicalBounds.top >= state.bodyViewport.top
+                    && logicalBounds.bottom <= state.bodyViewport.bottom;
+                ShowWindow(state.numericEdits[index], visible && inBody ? SW_SHOW : SW_HIDE);
             }
-        }
-        for (std::size_t index = 0; index < state.numericSpins.size(); ++index)
-        {
-            if (!state.numericSpins[index])
+            if (state.numericSpins[index])
             {
-                continue;
+                const RECT physicalSpinBounds = toPhysical(logicalSpinBounds);
+                const int spinLeft = static_cast<int>(physicalSpinBounds.left);
+                const int spinTop = static_cast<int>(physicalSpinBounds.top);
+                const int spinWidthPixels = std::max(1, static_cast<int>(physicalSpinBounds.right - physicalSpinBounds.left));
+                const int spinHeight = std::max(1, static_cast<int>(physicalSpinBounds.bottom - physicalSpinBounds.top));
+                SetWindowPos(state.numericSpins[index], nullptr,
+                             spinLeft,
+                             spinTop,
+                             spinWidthPixels,
+                             spinHeight,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+                const bool visible = (state.page == ConsolidatedSettingsPage::Slideshow && index < 2)
+                    || (state.page == ConsolidatedSettingsPage::Performance && index >= 2);
+                const bool inBody = logicalSpinBounds.top >= state.bodyViewport.top
+                    && logicalSpinBounds.bottom <= state.bodyViewport.bottom;
+                ShowWindow(state.numericSpins[index], visible && inBody ? SW_SHOW : SW_HIDE);
             }
-            const RECT& editBounds = edits[index].second;
-            const int spinTop = editBounds.top;
-            SetWindowPos(state.numericSpins[index], nullptr, editBounds.right - spinWidth, spinTop,
-                         spinWidth, editBounds.bottom - spinTop, SWP_NOZORDER | SWP_NOACTIVATE);
-            const bool visible = (state.page == ConsolidatedSettingsPage::Slideshow && index < 2)
-                || (state.page == ConsolidatedSettingsPage::Performance && index >= 2);
-            ShowWindow(state.numericSpins[index], visible ? SW_SHOW : SW_HIDE);
         }
+
         const auto setChoiceVisibility = [&](ConsolidatedSettingsControl control, ConsolidatedSettingsPage page)
         {
             if (const HWND choice = state.nativeControls[static_cast<std::size_t>(control)])
@@ -5072,23 +5279,51 @@ namespace
         setChoiceVisibility(ConsolidatedSettingsControl::ThumbnailSize, ConsolidatedSettingsPage::Appearance);
         setChoiceVisibility(ConsolidatedSettingsControl::ResourceProfile, ConsolidatedSettingsPage::Performance);
         setChoiceVisibility(ConsolidatedSettingsControl::QuickSendShortcutOrder, ConsolidatedSettingsPage::Behavior);
-        const auto positionChoice = [&](ConsolidatedSettingsControl control)
+        for (const ConsolidatedSettingsControl control : {
+                 ConsolidatedSettingsControl::TransitionStyle,
+                 ConsolidatedSettingsControl::OverlayTextSize,
+                 ConsolidatedSettingsControl::EscapeKeyBehavior,
+                 ConsolidatedSettingsControl::AppTextSize,
+                 ConsolidatedSettingsControl::ThumbnailSize,
+                 ConsolidatedSettingsControl::ResourceProfile,
+                 ConsolidatedSettingsControl::QuickSendShortcutOrder})
         {
             if (const HWND choice = state.nativeControls[static_cast<std::size_t>(control)])
             {
-                const RECT& bounds = state.controlRects[static_cast<std::size_t>(control)];
-                SetWindowPos(choice, nullptr, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
+                const RECT physicalBounds = toPhysical(state.controlRects[static_cast<std::size_t>(control)]);
+                const int physicalWidth = std::max(1, static_cast<int>(physicalBounds.right - physicalBounds.left));
+                const int physicalHeight = std::max(1, static_cast<int>(physicalBounds.bottom - physicalBounds.top));
+                SetWindowPos(choice, nullptr,
+                             physicalBounds.left,
+                             physicalBounds.top,
+                             physicalWidth,
+                             physicalHeight,
                              SWP_NOZORDER | SWP_NOACTIVATE);
+                const RECT& logicalBounds = state.controlRects[static_cast<std::size_t>(control)];
+                const bool inBody = logicalBounds.top >= state.bodyViewport.top
+                    && logicalBounds.bottom <= state.bodyViewport.bottom;
+                ShowWindow(choice, inBody ? SW_SHOW : SW_HIDE);
             }
-        };
-        positionChoice(ConsolidatedSettingsControl::TransitionStyle);
-        positionChoice(ConsolidatedSettingsControl::OverlayTextSize);
-        positionChoice(ConsolidatedSettingsControl::EscapeKeyBehavior);
-        positionChoice(ConsolidatedSettingsControl::AppTextSize);
-        positionChoice(ConsolidatedSettingsControl::ThumbnailSize);
-        positionChoice(ConsolidatedSettingsControl::ResourceProfile);
-        positionChoice(ConsolidatedSettingsControl::QuickSendShortcutOrder);
+        }
+        const int bodyHeight = std::max(1, static_cast<int>(state.bodyViewport.bottom - state.bodyViewport.top));
+        SCROLLINFO scrollInfo{sizeof(scrollInfo), SIF_RANGE | SIF_PAGE | SIF_POS, 0,
+                              state.scrollExtent + bodyHeight, static_cast<UINT>(bodyHeight),
+                              state.scrollOffset, 0};
+        SetScrollInfo(state.dialogWindow, SB_VERT, &scrollInfo, TRUE);
+        ShowScrollBar(state.dialogWindow, SB_VERT, state.scrollExtent > 0 ? TRUE : FALSE);
         InvalidateRect(state.dialogWindow, nullptr, FALSE);
+    }
+
+    bool SetExperimentalSettingsScrollOffset(ExperimentalSettingsDialogState& state, int offset)
+    {
+        const int nextOffset = std::clamp(offset, 0, state.scrollExtent);
+        if (nextOffset == state.scrollOffset)
+        {
+            return false;
+        }
+        state.scrollOffset = nextOffset;
+        LayoutExperimentalSettings(state);
+        return true;
     }
 
     bool ExperimentalSettingsChecked(const ConsolidatedSettingsDialogState& settings, ConsolidatedSettingsControl control)
@@ -5126,6 +5361,8 @@ namespace
         }
     }
 
+    void RebuildExperimentalSettingsTextResources(ExperimentalSettingsDialogState& state);
+
     void ExperimentalSettingsToggle(ExperimentalSettingsDialogState& state, ConsolidatedSettingsControl control)
     {
         auto& settings = *state.settings;
@@ -5148,6 +5385,8 @@ namespace
             else if (control == ConsolidatedSettingsControl::AppTextSize)
             {
                 settings.appTextSize = static_cast<hyperbrowse::util::AppTextSize>((static_cast<int>(settings.appTextSize) + 1) % 3);
+                RebuildExperimentalSettingsTextResources(state);
+                LayoutExperimentalSettings(state);
             }
             else if (control == ConsolidatedSettingsControl::ThumbnailSize)
             {
@@ -5278,6 +5517,8 @@ namespace
         }
     }
 
+    std::vector<ConsolidatedSettingsControl> ExperimentalSettingsPageControlOrder(ConsolidatedSettingsPage page);
+
     bool ExperimentalSettingsControlAvailable(const ExperimentalSettingsDialogState& state,
                                               ConsolidatedSettingsControl control)
     {
@@ -5289,9 +5530,10 @@ namespace
 
         if (const HWND nativeWindow = ExperimentalSettingsNativeWindow(state, control))
         {
+            const auto pageControls = ExperimentalSettingsPageControlOrder(state.page);
             return IsWindow(nativeWindow) != FALSE
-                && IsWindowVisible(nativeWindow) != FALSE
-                && IsWindowEnabled(nativeWindow) != FALSE;
+                && IsWindowEnabled(nativeWindow) != FALSE
+                && std::find(pageControls.begin(), pageControls.end(), control) != pageControls.end();
         }
 
         const RECT& bounds = state.controlRects[index];
@@ -5463,6 +5705,51 @@ namespace
         return false;
     }
 
+    bool ScrollExperimentalSettingsTargetIntoView(ExperimentalSettingsDialogState& state,
+                                                  const ExperimentalSettingsFocusTarget& target)
+    {
+        if (target.kind != ExperimentalSettingsFocusTargetKind::CustomControl
+            && target.kind != ExperimentalSettingsFocusTargetKind::NativeControl)
+        {
+            return false;
+        }
+        if (target.index < 0 || target.index >= static_cast<int>(ConsolidatedSettingsControl::Count))
+        {
+            return false;
+        }
+
+        RECT bounds{};
+        const auto control = static_cast<ConsolidatedSettingsControl>(target.index);
+        if (target.kind == ExperimentalSettingsFocusTargetKind::NativeControl)
+        {
+            const HWND nativeWindow = ExperimentalSettingsNativeWindow(state, control);
+            if (!nativeWindow || !GetWindowRect(nativeWindow, &bounds))
+            {
+                return false;
+            }
+            POINT topLeft{bounds.left, bounds.top};
+            POINT bottomRight{bounds.right, bounds.bottom};
+            ScreenToClient(state.dialogWindow, &topLeft);
+            ScreenToClient(state.dialogWindow, &bottomRight);
+            bounds = {topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
+        }
+        else
+        {
+            bounds = state.controlRects[static_cast<std::size_t>(target.index)];
+        }
+
+        int nextOffset = state.scrollOffset;
+        if (bounds.top < state.bodyViewport.top)
+        {
+            nextOffset += bounds.top - state.bodyViewport.top;
+        }
+        else if (bounds.bottom > state.bodyViewport.bottom)
+        {
+            nextOffset += bounds.bottom - state.bodyViewport.bottom;
+        }
+        return SetExperimentalSettingsScrollOffset(state, nextOffset);
+    }
+
     bool FocusExperimentalSettingsTarget(ExperimentalSettingsDialogState& state,
                                          const ExperimentalSettingsFocusTarget& target)
     {
@@ -5478,6 +5765,8 @@ namespace
                 state,
                 static_cast<ConsolidatedSettingsControl>(target.index));
         }
+
+        ScrollExperimentalSettingsTargetIntoView(state, target);
 
         const ExperimentalSettingsFocusTarget previousTarget = state.focusedTarget;
         state.focusedTarget = target;
@@ -5567,6 +5856,7 @@ namespace
         {
         case ExperimentalSettingsFocusTargetKind::Tab:
             state.page = static_cast<ConsolidatedSettingsPage>(target.index);
+            state.scrollOffset = 0;
             LayoutExperimentalSettings(state);
             FocusFirstExperimentalSettingsPageControl(state);
             return;
@@ -5732,6 +6022,7 @@ namespace
             const int pageCount = static_cast<int>(state.tabRects.size());
             const int nextPage = (current.index + direction + pageCount) % pageCount;
             state.page = static_cast<ConsolidatedSettingsPage>(nextPage);
+            state.scrollOffset = 0;
             LayoutExperimentalSettings(state);
             FocusFirstExperimentalSettingsPageControl(state);
             return true;
@@ -5777,6 +6068,47 @@ namespace
         }
     }
 
+    void RebuildExperimentalSettingsTextResources(ExperimentalSettingsDialogState& state)
+    {
+        if (!state.settings)
+        {
+            return;
+        }
+
+        auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
+        const auto size = state.settings->appTextSize;
+        state.bodyFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(16.0f, size));
+        state.smallFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(13.0f, size));
+        state.buttonFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(15.0f, size), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        for (IDWriteTextFormat* format : {state.bodyFormat.Get(), state.smallFormat.Get(), state.buttonFormat.Get()})
+        {
+            if (format)
+            {
+                format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            }
+        }
+
+        DeleteFontIfOwned(state.controlFont);
+        state.controlFont = CreateSystemUiFont(size, state.dpi);
+        const HFONT font = state.controlFont
+            ? state.controlFont
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        for (const HWND control : state.nativeControls)
+        {
+            if (control)
+            {
+                SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            }
+        }
+        for (const HWND edit : state.numericEdits)
+        {
+            if (edit)
+            {
+                SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            }
+        }
+    }
     void DrawExperimentalSettingsText(ID2D1RenderTarget* target,
                                       IDWriteTextFormat* format,
                                       const std::wstring& text,
@@ -5869,6 +6201,17 @@ namespace
         }
         RECT client{};
         GetClientRect(state.dialogWindow, &client);
+        const UINT dpi = std::max<UINT>(96, state.dpi);
+        const auto textSize = state.settings->appTextSize;
+        const auto scale = [textSize](int value)
+        {
+            return hyperbrowse::util::ScaleAppTextDimension(value, textSize);
+        };
+        const auto scaleF = [textSize](float value)
+        {
+            return value * hyperbrowse::util::AppTextSizeScale(textSize);
+        };
+        const float logicalWidth = static_cast<float>(MulDiv(client.right, 96, static_cast<int>(dpi)));
         const COLORREF windowColor = hyperbrowse::ui::MakeDialogTheme(
             state.settings->darkTheme).windowBackground;
         const bool dialogHasSemanticFocus = GetFocus() == state.dialogWindow;
@@ -5880,7 +6223,10 @@ namespace
         };
         state.renderTarget->BeginDraw();
         state.renderTarget->Clear(hyperbrowse::render::ToD2DColor(windowColor));
-        state.renderTarget->FillRectangle(D2D1::RectF(20.0f, 14.0f, static_cast<float>(client.right - 20), 60.0f), state.panelBrush.Get());
+        state.renderTarget->FillRectangle(
+            D2D1::RectF(static_cast<float>(scale(20)), static_cast<float>(scale(14)),
+                        logicalWidth - static_cast<float>(scale(20)), static_cast<float>(scale(60))),
+            state.panelBrush.Get());
 
         for (std::size_t index = 0; index < state.tabRects.size(); ++index)
         {
@@ -5889,35 +6235,42 @@ namespace
             const bool hovered = state.hoveredTab == static_cast<int>(index);
             if (selected)
             {
-                const float underlineTop = static_cast<float>(tab.bottom - 3);
+                const float underlineTop = static_cast<float>(tab.bottom - scale(3));
                 state.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(static_cast<float>(tab.left + 18), underlineTop,
-                                                   static_cast<float>(tab.right - 18), static_cast<float>(tab.bottom)), 1.5f, 1.5f),
+                    D2D1::RoundedRect(D2D1::RectF(static_cast<float>(tab.left + scale(18)), underlineTop,
+                                                   static_cast<float>(tab.right - scale(18)), static_cast<float>(tab.bottom)),
+                                      scaleF(1.5f), scaleF(1.5f)),
                     state.accentBrush.Get());
             }
             else if (hovered)
             {
                 state.renderTarget->FillRoundedRectangle(
-                    hyperbrowse::render::ToD2DRoundedRect(tab, 6.0f, 6.0f), state.accentFillBrush.Get());
+                    hyperbrowse::render::ToD2DRoundedRect(tab, scaleF(6.0f), scaleF(6.0f)), state.accentFillBrush.Get());
             }
             if (customTargetFocused(ExperimentalSettingsFocusTargetKind::Tab, static_cast<int>(index)))
             {
                 RECT focusBounds = tab;
-                InflateRect(&focusBounds, -2, -2);
+                InflateRect(&focusBounds, -scale(2), -scale(2));
                 state.renderTarget->DrawRoundedRectangle(
-                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, 5.0f, 5.0f),
+                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, scaleF(5.0f), scaleF(5.0f)),
                     state.accentBrush.Get(),
-                    2.0f);
+                    scaleF(2.0f));
             }
             RECT textBounds = tab;
-            textBounds.left += 12;
-            textBounds.right -= 10;
+            textBounds.left += scale(12);
+            textBounds.right -= scale(10);
             DrawExperimentalSettingsText(state.renderTarget.Get(), state.bodyFormat.Get(),
                                          ExperimentalSettingsPageTitle(static_cast<ConsolidatedSettingsPage>(index)), textBounds,
                                          selected ? state.accentBrush.Get() : state.mutedTextBrush.Get(),
                                          ExperimentalSettingsPageMnemonic(static_cast<ConsolidatedSettingsPage>(index)));
         }
 
+        state.renderTarget->PushAxisAlignedClip(
+            D2D1::RectF(static_cast<float>(state.bodyViewport.left),
+                        static_cast<float>(state.bodyViewport.top),
+                        static_cast<float>(state.bodyViewport.right),
+                        static_cast<float>(state.bodyViewport.bottom)),
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         for (std::size_t index = 0; index < state.labels.size(); ++index)
         {
             const ExperimentalSettingsLabel& label = state.labels[index];
@@ -5937,48 +6290,68 @@ namespace
             const bool hovered = state.hoveredControl == static_cast<int>(index);
             if (ExperimentalSettingsControlIsChoice(control))
             {
-                state.renderTarget->FillRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f), hovered ? state.accentFillBrush.Get() : state.fieldBrush.Get());
-                state.renderTarget->DrawRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f), state.borderBrush.Get(), 1.0f);
+                state.renderTarget->FillRoundedRectangle(
+                    hyperbrowse::render::ToD2DRoundedRect(bounds, scaleF(5.0f), scaleF(5.0f)),
+                    hovered ? state.accentFillBrush.Get() : state.fieldBrush.Get());
+                state.renderTarget->DrawRoundedRectangle(
+                    hyperbrowse::render::ToD2DRoundedRect(bounds, scaleF(5.0f), scaleF(5.0f)),
+                    state.borderBrush.Get(), scaleF(1.0f));
                 RECT valueBounds = bounds;
-                valueBounds.left += 14;
+                valueBounds.left += scale(14);
                 DrawExperimentalSettingsText(state.renderTarget.Get(), state.bodyFormat.Get(), ExperimentalSettingsChoiceValue(*state.settings, control), valueBounds, state.textBrush.Get());
             }
             else
             {
-                const RECT indicator{bounds.left + 3, bounds.top + 7, bounds.left + 22, bounds.top + 26};
+                const RECT indicator{bounds.left + scale(3), bounds.top + scale(7), bounds.left + scale(22), bounds.top + scale(26)};
                 if (control == ConsolidatedSettingsControl::ViewerWheelZoom || control == ConsolidatedSettingsControl::ViewerWheelNavigate
                     || control == ConsolidatedSettingsControl::RawPreferRaw || control == ConsolidatedSettingsControl::RawPreferJpeg
                     || control == ConsolidatedSettingsControl::ThemeLight || control == ConsolidatedSettingsControl::ThemeDark)
                 {
-                    state.renderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F((indicator.left + indicator.right) / 2.0f, (indicator.top + indicator.bottom) / 2.0f), 8.0f, 8.0f), state.borderBrush.Get(), 1.5f);
+                    state.renderTarget->DrawEllipse(
+                        D2D1::Ellipse(D2D1::Point2F((indicator.left + indicator.right) / 2.0f, (indicator.top + indicator.bottom) / 2.0f),
+                                      scaleF(8.0f), scaleF(8.0f)),
+                        state.borderBrush.Get(), scaleF(1.5f));
                     if (checked)
                     {
-                        state.renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F((indicator.left + indicator.right) / 2.0f, (indicator.top + indicator.bottom) / 2.0f), 4.5f, 4.5f), state.accentBrush.Get());
+                        state.renderTarget->FillEllipse(
+                            D2D1::Ellipse(D2D1::Point2F((indicator.left + indicator.right) / 2.0f, (indicator.top + indicator.bottom) / 2.0f),
+                                          scaleF(4.5f), scaleF(4.5f)),
+                            state.accentBrush.Get());
                     }
                 }
                 else
                 {
-                    state.renderTarget->DrawRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(indicator, 3.0f, 3.0f), state.borderBrush.Get(), 1.5f);
+                    state.renderTarget->DrawRoundedRectangle(
+                        hyperbrowse::render::ToD2DRoundedRect(indicator, scaleF(3.0f), scaleF(3.0f)),
+                        state.borderBrush.Get(), scaleF(1.5f));
                     if (checked)
                     {
-                        state.renderTarget->FillRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(indicator, 3.0f, 3.0f), state.accentBrush.Get());
-                        state.renderTarget->DrawLine(D2D1::Point2F(static_cast<float>(indicator.left + 5), static_cast<float>(indicator.top + 10)),
-                                                     D2D1::Point2F(static_cast<float>(indicator.left + 9), static_cast<float>(indicator.top + 14)), state.panelBrush.Get(), 2.0f);
-                        state.renderTarget->DrawLine(D2D1::Point2F(static_cast<float>(indicator.left + 9), static_cast<float>(indicator.top + 14)),
-                                                     D2D1::Point2F(static_cast<float>(indicator.left + 16), static_cast<float>(indicator.top + 5)), state.panelBrush.Get(), 2.0f);
+                        state.renderTarget->FillRoundedRectangle(
+                            hyperbrowse::render::ToD2DRoundedRect(indicator, scaleF(3.0f), scaleF(3.0f)),
+                            state.accentBrush.Get());
+
+                        state.renderTarget->DrawLine(
+                            D2D1::Point2F(static_cast<float>(indicator.left + scale(5)), static_cast<float>(indicator.top + scale(10))),
+                            D2D1::Point2F(static_cast<float>(indicator.left + scale(9)), static_cast<float>(indicator.top + scale(14))),
+                            state.panelBrush.Get(), scaleF(2.0f));
+                        state.renderTarget->DrawLine(
+                            D2D1::Point2F(static_cast<float>(indicator.left + scale(9)), static_cast<float>(indicator.top + scale(14))),
+                            D2D1::Point2F(static_cast<float>(indicator.left + scale(16)), static_cast<float>(indicator.top + scale(5))),
+                            state.panelBrush.Get(), scaleF(2.0f));
                     }
                 }
             }
             if (customTargetFocused(ExperimentalSettingsFocusTargetKind::CustomControl, static_cast<int>(index)))
             {
                 RECT focusBounds = bounds;
-                InflateRect(&focusBounds, -2, -2);
+                InflateRect(&focusBounds, -scale(2), -scale(2));
                 state.renderTarget->DrawRoundedRectangle(
-                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, 5.0f, 5.0f),
+                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, scaleF(5.0f), scaleF(5.0f)),
                     state.accentBrush.Get(),
-                    2.0f);
+                    scaleF(2.0f));
             }
         }
+        state.renderTarget->PopAxisAlignedClip();
         const auto drawButton = [&](const RECT& bounds,
                                     const wchar_t* text,
                                     bool primary,
@@ -5986,27 +6359,27 @@ namespace
                                     ExperimentalSettingsFocusTargetKind focusKind)
         {
             const bool hovered = state.hoveredControl == hoverId;
-            state.renderTarget->FillRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f),
+            state.renderTarget->FillRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, scaleF(5.0f), scaleF(5.0f)),
                                                      primary ? state.accentBrush.Get() : hovered ? state.accentFillBrush.Get() : state.fieldBrush.Get());
             if (!primary)
             {
-                state.renderTarget->DrawRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, 5.0f, 5.0f),
-                                                         hovered ? state.accentBrush.Get() : state.borderBrush.Get(), 1.0f);
+                state.renderTarget->DrawRoundedRectangle(hyperbrowse::render::ToD2DRoundedRect(bounds, scaleF(5.0f), scaleF(5.0f)),
+                                                         hovered ? state.accentBrush.Get() : state.borderBrush.Get(), scaleF(1.0f));
             }
             RECT textBounds = bounds;
-            textBounds.left += 12;
-            textBounds.right -= 10;
+            textBounds.left += scale(12);
+            textBounds.right -= scale(10);
             DrawExperimentalSettingsText(state.renderTarget.Get(), state.buttonFormat.Get(), text, textBounds,
                                          primary ? state.buttonTextBrush.Get() : state.textBrush.Get(),
                                          text[0] == L'A' ? L'A' : text[0] == L'O' ? L'O' : L'C');
             if (customTargetFocused(focusKind, -1))
             {
                 RECT focusBounds = bounds;
-                InflateRect(&focusBounds, -2, -2);
+                InflateRect(&focusBounds, -scale(2), -scale(2));
                 state.renderTarget->DrawRoundedRectangle(
-                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, 5.0f, 5.0f),
+                    hyperbrowse::render::ToD2DRoundedRect(focusBounds, scaleF(5.0f), scaleF(5.0f)),
                     state.accentBrush.Get(),
-                    2.0f);
+                    scaleF(2.0f));
             }
         };
         drawButton(state.applyButtonRect, L"Apply", false, -10, ExperimentalSettingsFocusTargetKind::ApplyButton);
@@ -6144,8 +6517,9 @@ namespace
                          reinterpret_cast<LPARAM>(itemText));
         }
         RECT textRect = itemRect;
-        textRect.left += 8;
-        textRect.right -= 8;
+        const int dpi = static_cast<int>(std::max<UINT>(96, state.dpi));
+        textRect.left += ScaleDialogAppTextDimension(8, state.settings->appTextSize, static_cast<UINT>(dpi));
+        textRect.right -= ScaleDialogAppTextDimension(8, state.settings->appTextSize, static_cast<UINT>(dpi));
         SetBkMode(drawItem.hDC, TRANSPARENT);
         SetTextColor(drawItem.hDC, text);
         DrawTextW(drawItem.hDC,
@@ -6160,7 +6534,8 @@ namespace
             if (borderBrush)
             {
                 RECT focusRect = itemRect;
-                InflateRect(&focusRect, -1, -1);
+                const int focusInset = ScaleDialogDimension(1, static_cast<UINT>(dpi));
+                InflateRect(&focusRect, -focusInset, -focusInset);
                 FrameRect(drawItem.hDC, &focusRect, borderBrush);
                 DeleteObject(borderBrush);
             }
@@ -6187,7 +6562,7 @@ namespace
             }
             state->dialogWindow = hwnd;
             auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
-            state->renderTarget = renderer.CreateHwndRenderTarget(hwnd);
+            state->renderTarget = renderer.CreateHwndRenderTarget(hwnd, true);
             if (!state->renderTarget)
             {
                 return -1;
@@ -6196,7 +6571,7 @@ namespace
             state->bodyFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(16.0f, size));
             state->smallFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(13.0f, size));
             state->buttonFormat = renderer.CreateTextFormat(L"Segoe UI", hyperbrowse::util::ScaleAppTextPointSize(15.0f, size), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-            state->controlFont = CreateDialogUiFont(9, FW_NORMAL, size);
+            state->controlFont = CreateSystemUiFont(size, state->dpi);
             if (!state->controlFont)
             {
                 state->controlFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -6374,8 +6749,38 @@ namespace
         case WM_SIZE:
             if (state)
             {
-                hyperbrowse::render::D2DRenderer::Instance().ResizeRenderTarget(state->renderTarget.Get(), hwnd);
+                hyperbrowse::render::D2DRenderer::Instance().ResizeRenderTarget(state->renderTarget.Get(), hwnd, true);
                 LayoutExperimentalSettings(*state);
+            }
+            return 0;
+        case WM_DPICHANGED:
+            if (state)
+            {
+                state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+                ResizeExperimentalSettingsToContent(*state, suggestedRect);
+                hyperbrowse::render::D2DRenderer::Instance().ResizeRenderTarget(state->renderTarget.Get(), hwnd, true);
+                DeleteFontIfOwned(state->controlFont);
+                state->controlFont = CreateSystemUiFont(state->settings->appTextSize, state->dpi);
+                const HFONT font = state->controlFont
+                    ? state->controlFont
+                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                for (const HWND control : state->nativeControls)
+                {
+                    if (control)
+                    {
+                        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                    }
+                }
+                for (const HWND edit : state->numericEdits)
+                {
+                    if (edit)
+                    {
+                        SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                    }
+                }
+                LayoutExperimentalSettings(*state);
+                InvalidateRect(hwnd, nullptr, TRUE);
             }
             return 0;
         case WM_ERASEBKGND:
@@ -6393,7 +6798,8 @@ namespace
         case WM_MOUSEMOVE:
             if (state)
             {
-                const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                const int dpi = static_cast<int>(std::max<UINT>(96, state->dpi));
+                const POINT point{MulDiv(GET_X_LPARAM(lParam), 96, dpi), MulDiv(GET_Y_LPARAM(lParam), 96, dpi)};
                 int hovered = -1;
                 if (PtInRect(&state->applyButtonRect, point))
                 {
@@ -6418,7 +6824,9 @@ namespace
                 }
                 for (std::size_t index = 0; index < state->controlRects.size(); ++index)
                 {
-                    if (hovered == -1 && PtInRect(&state->controlRects[index], point))
+                    if (hovered == -1
+                        && PtInRect(&state->bodyViewport, point)
+                        && PtInRect(&state->controlRects[index], point))
                     {
                         hovered = static_cast<int>(index);
                         break;
@@ -6442,13 +6850,54 @@ namespace
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
+        case WM_MOUSEWHEEL:
+            if (state && state->scrollExtent > 0)
+            {
+                const int dpi = static_cast<int>(std::max<UINT>(96, state->dpi));
+                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                ScreenToClient(hwnd, &point);
+                point.x = MulDiv(point.x, 96, dpi);
+                point.y = MulDiv(point.y, 96, dpi);
+                if (PtInRect(&state->bodyViewport, point))
+                {
+                    const int wheelSteps = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+                    const int scrollStep = hyperbrowse::util::ScaleAppTextDimension(50, state->settings->appTextSize);
+                    SetExperimentalSettingsScrollOffset(*state, state->scrollOffset - wheelSteps * scrollStep);
+                    return 0;
+                }
+            }
+            break;
+        case WM_VSCROLL:
+            if (state && state->scrollExtent > 0)
+            {
+                const int scrollStep = hyperbrowse::util::ScaleAppTextDimension(50, state->settings->appTextSize);
+                int nextOffset = state->scrollOffset;
+                switch (LOWORD(wParam))
+                {
+                case SB_LINEUP: nextOffset -= scrollStep; break;
+                case SB_LINEDOWN: nextOffset += scrollStep; break;
+                case SB_PAGEUP: nextOffset -= static_cast<int>(state->bodyViewport.bottom - state->bodyViewport.top); break;
+                case SB_PAGEDOWN: nextOffset += static_cast<int>(state->bodyViewport.bottom - state->bodyViewport.top); break;
+                case SB_THUMBPOSITION:
+                case SB_THUMBTRACK: nextOffset = static_cast<int>(HIWORD(wParam)); break;
+                case SB_TOP: nextOffset = 0; break;
+                case SB_BOTTOM: nextOffset = state->scrollExtent; break;
+                default: break;
+                }
+                SetExperimentalSettingsScrollOffset(*state, nextOffset);
+                return 0;
+            }
+            break;
         case WM_MEASUREITEM:
-            if (state)
+            if (state && state->settings)
             {
                 auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
                 if (measureItem && measureItem->CtlType == ODT_COMBOBOX)
                 {
-                    measureItem->itemHeight = static_cast<UINT>(std::max(24, GetSystemMetrics(SM_CYMENU)));
+                    const UINT dpi = std::max<UINT>(96, state->dpi);
+                    measureItem->itemHeight = static_cast<UINT>(std::max(
+                        ScaleDialogAppTextDimension(24, state->settings->appTextSize, dpi),
+                        GetSystemMetricsForDpi(SM_CYMENU, dpi)));
                     return TRUE;
                 }
             }
@@ -6477,7 +6926,8 @@ namespace
         case WM_LBUTTONDOWN:
             if (state)
             {
-                const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                const int dpi = static_cast<int>(std::max<UINT>(96, state->dpi));
+                const POINT point{MulDiv(GET_X_LPARAM(lParam), 96, dpi), MulDiv(GET_Y_LPARAM(lParam), 96, dpi)};
                 SetFocus(hwnd);
                 if (PtInRect(&state->applyButtonRect, point))
                 {
@@ -6505,6 +6955,7 @@ namespace
                     if (PtInRect(&state->tabRects[index], point))
                     {
                         state->page = static_cast<ConsolidatedSettingsPage>(index);
+                        state->scrollOffset = 0;
                         LayoutExperimentalSettings(*state);
                         FocusExperimentalSettingsTarget(
                             *state,
@@ -6514,7 +6965,8 @@ namespace
                 }
                 for (std::size_t index = 0; index < state->controlRects.size(); ++index)
                 {
-                    if (PtInRect(&state->controlRects[index], point))
+                    if (PtInRect(&state->bodyViewport, point)
+                        && PtInRect(&state->controlRects[index], point))
                     {
                         const auto control = static_cast<ConsolidatedSettingsControl>(index);
                         if (!ExperimentalSettingsControlAvailable(*state, control))
@@ -6538,7 +6990,8 @@ namespace
                 const int pressed = state->pressedControl;
                 state->pressedControl = -1;
                 ReleaseCapture();
-                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                const int dpi = static_cast<int>(std::max<UINT>(96, state->dpi));
+                POINT point{MulDiv(GET_X_LPARAM(lParam), 96, dpi), MulDiv(GET_Y_LPARAM(lParam), 96, dpi)};
                 const auto& bounds = state->controlRects[static_cast<std::size_t>(pressed)];
                 if (PtInRect(&bounds, point))
                 {
@@ -6553,7 +7006,8 @@ namespace
                 const int pressed = state->pressedControl;
                 state->pressedControl = -1;
                 ReleaseCapture();
-                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                const int dpi = static_cast<int>(std::max<UINT>(96, state->dpi));
+                POINT point{MulDiv(GET_X_LPARAM(lParam), 96, dpi), MulDiv(GET_Y_LPARAM(lParam), 96, dpi)};
                 const RECT& bounds = pressed == -10 ? state->applyButtonRect : pressed == -11 ? state->okButtonRect : state->cancelButtonRect;
                 if (PtInRect(&bounds, point))
                 {
@@ -6648,6 +7102,9 @@ namespace
                 else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::AppTextSize)] && selected < 3)
                 {
                     state->settings->appTextSize = static_cast<hyperbrowse::util::AppTextSize>(selected);
+                    RebuildExperimentalSettingsTextResources(*state);
+                    ResizeExperimentalSettingsToContent(*state);
+                    LayoutExperimentalSettings(*state);
                 }
                 else if (selected >= 0 && source == state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::ThumbnailSize)]
                          && selected < static_cast<int>(kThumbnailSizePresets.size()))
@@ -6752,10 +7209,13 @@ namespace
         }
         ExperimentalSettingsDialogState state;
         state.ownerWindow = ownerWindow;
+        state.dpi = DialogDpiForWindow(ownerWindow);
         state.instance = instance;
         state.settings = settings;
-        RECT windowRect{0, 0, kExperimentalSettingsDialogWidth, kExperimentalSettingsDialogHeight};
-        AdjustWindowRectEx(&windowRect, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        const RECT windowRect = ExperimentalSettingsInitialWindowRect(
+            ownerWindow,
+            settings->appTextSize,
+            state.dpi);
         if (ownerWindow)
         {
             EnableWindow(ownerWindow, FALSE);
@@ -6763,7 +7223,7 @@ namespace
         HWND dialogWindow = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
                                             kExperimentalSettingsDialogClassName,
                                             settings->title.c_str(),
-                                            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+                                            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN | WS_VSCROLL,
                                             CW_USEDEFAULT, CW_USEDEFAULT,
                                             windowRect.right - windowRect.left,
                                             windowRect.bottom - windowRect.top,
@@ -6784,9 +7244,11 @@ namespace
                               dialogTheme.text,
                               dialogTheme.border);
         RefreshWindowNonClientArea(dialogWindow);
-        CenterWindowOnOwner(dialogWindow, ownerWindow);
+        CenterExperimentalSettingsOnWorkArea(dialogWindow, ownerWindow, settings->appTextSize);
         ShowWindow(dialogWindow, SW_SHOWNORMAL);
         UpdateWindow(dialogWindow);
+        SetForegroundWindow(dialogWindow);
+        SetActiveWindow(dialogWindow);
         const HWND initialFocus = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::TransitionStyle)];
         if (initialFocus)
         {
@@ -6808,6 +7270,20 @@ namespace
         {
             const bool keyMessage = message.message == WM_KEYDOWN || message.message == WM_SYSKEYDOWN;
             const bool dialogMessage = message.hwnd == dialogWindow || IsChild(dialogWindow, message.hwnd) != FALSE;
+            if (message.message == WM_MOUSEWHEEL
+                && dialogMessage
+                && state.scrollExtent > 0)
+            {
+                POINT point{GET_X_LPARAM(message.lParam), GET_Y_LPARAM(message.lParam)};
+                ScreenToClient(dialogWindow, &point);
+                point.x = MulDiv(point.x, 96, static_cast<int>(std::max<UINT>(96, state.dpi)));
+                point.y = MulDiv(point.y, 96, static_cast<int>(std::max<UINT>(96, state.dpi)));
+                if (PtInRect(&state.bodyViewport, point))
+                {
+                    SendMessageW(dialogWindow, message.message, message.wParam, message.lParam);
+                    continue;
+                }
+            }
             if (keyMessage && dialogMessage && HandleExperimentalSettingsKeyboardInput(state, message.message, message.wParam))
             {
                 continue;
@@ -6819,6 +7295,7 @@ namespace
                 const int direction = (GetKeyState(VK_SHIFT) & 0x8000) != 0 ? -1 : 1;
                 pageIndex = (pageIndex + direction + pageCount) % pageCount;
                 state.page = static_cast<ConsolidatedSettingsPage>(pageIndex);
+                state.scrollOffset = 0;
                 LayoutExperimentalSettings(state);
                 focusFirstControlOnPage();
                 continue;
@@ -6884,10 +7361,11 @@ namespace
 
         PerformanceSettingsDialogState state;
         state.ownerWindow = ownerWindow;
+        state.dpi = DialogDpiForWindow(ownerWindow);
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
         state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
-        state.titleFont = CreateDialogUiFont(16, FW_BOLD, state.appTextSize);
-        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        state.titleFont = CreateDialogUiFont(16, FW_BOLD, state.appTextSize, state.dpi);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, state.dpi);
         state.title = L"Performance Settings";
         state.instruction = L"Choose whether HyperBrowse should follow adaptive cache sizing or use explicit cache caps for the active profile.";
         state.summary = L"Profile: ";
@@ -6908,16 +7386,21 @@ namespace
             ? std::to_wstring(currentMetadataCacheCapacityEntries)
             : std::to_wstring(initialMetadataCacheCapacityOverrideEntries);
 
+        const int baseDialogWidth = ScaleDialogDimension(kPerformanceSettingsDialogWidth, state.dpi);
         const PerformanceSettingsDialogLayoutMetrics initialLayoutMetrics =
-            BuildPerformanceSettingsDialogLayoutMetrics(kPerformanceSettingsDialogWidth, state);
-        const int dialogWidth = std::max(kPerformanceSettingsDialogWidth, initialLayoutMetrics.minimumClientWidth);
+            BuildPerformanceSettingsDialogLayoutMetrics(baseDialogWidth, state);
+        const int dialogWidth = std::max(baseDialogWidth, initialLayoutMetrics.minimumClientWidth);
         const PerformanceSettingsDialogLayoutMetrics layoutMetrics =
             BuildPerformanceSettingsDialogLayoutMetrics(dialogWidth, state);
-        RECT windowRect{0, 0, dialogWidth, std::max(kPerformanceSettingsDialogHeight, layoutMetrics.minimumClientHeight)};
-        AdjustWindowRectEx(&windowRect,
-                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
-                           FALSE,
-                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        RECT windowRect{0, 0, dialogWidth, std::max(ScaleDialogDimension(kPerformanceSettingsDialogHeight, state.dpi), layoutMetrics.minimumClientHeight)};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                         WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                         FALSE,
+                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                         state.dpi);
+        windowRect = ClampDialogFrameToWorkArea(
+            windowRect,
+            MeasureDialogShellMetrics(ownerWindow, state.appTextSize).workArea);
 
         if (ownerWindow)
         {
@@ -6986,7 +7469,8 @@ namespace
     }
 
     int MeasureFileAssociationsCheckboxWidth(HFONT font,
-                                              hyperbrowse::util::AppTextSize appTextSize)
+                                              hyperbrowse::util::AppTextSize appTextSize,
+                                              UINT dpi)
     {
         int labelWidth = 0;
         for (const auto& fileType : hyperbrowse::decode::SupportedFileTypes())
@@ -6996,9 +7480,9 @@ namespace
             labelWidth = std::max(labelWidth, MeasureDialogButtonWidth(font, label, 0));
         }
 
-        const int checkboxPadding = hyperbrowse::util::ScaleAppTextDimension(30, appTextSize);
+        const int checkboxPadding = ScaleDialogAppTextDimension(30, appTextSize, dpi);
         return std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogFormatCheckboxWidth, appTextSize),
+            ScaleDialogAppTextDimension(kFileAssociationsDialogFormatCheckboxWidth, appTextSize, dpi),
             labelWidth + checkboxPadding);
     }
 
@@ -7008,13 +7492,13 @@ namespace
         std::size_t formatCount)
     {
         FileAssociationsDialogLayoutMetrics metrics;
-        metrics.margin = hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogMargin, state.appTextSize);
+        metrics.margin = ScaleDialogAppTextDimension(kFileAssociationsDialogMargin, state.appTextSize, state.dpi);
         metrics.contentWidth = std::max(0, clientWidth - (metrics.margin * 2));
         const int lineHeight = MeasureSingleLineTextHeight(state.bodyFont, 20);
-        const int scaledGap = hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize);
+        const int scaledGap = ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi);
         const int formatRowCount = std::max(1, static_cast<int>((formatCount + 1) / 2));
 
-        metrics.instructionTop = hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
+        metrics.instructionTop = ScaleDialogAppTextDimension(16, state.appTextSize, state.dpi);
         metrics.instructionHeight = MeasureTextBlockHeight(state.bodyFont,
                                                            state.instruction,
                                                            metrics.contentWidth,
@@ -7025,27 +7509,27 @@ namespace
         metrics.selectAllWidth = MeasureDialogButtonWidth(
             state.bodyFont,
             L"Select all",
-            hyperbrowse::util::ScaleAppTextDimension(92, state.appTextSize));
+            ScaleDialogAppTextDimension(92, state.appTextSize, state.dpi));
         metrics.clearAllWidth = MeasureDialogButtonWidth(
             state.bodyFont,
             L"Clear all",
-            hyperbrowse::util::ScaleAppTextDimension(92, state.appTextSize));
+            ScaleDialogAppTextDimension(92, state.appTextSize, state.dpi));
         metrics.defaultAppsButtonWidth = MeasureDialogButtonWidth(
             state.bodyFont,
             L"Default Apps...",
-            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogDefaultAppsButtonWidth, state.appTextSize));
+            ScaleDialogAppTextDimension(kFileAssociationsDialogDefaultAppsButtonWidth, state.appTextSize, state.dpi));
         metrics.buttonHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogButtonHeight, state.appTextSize),
-            lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+            ScaleDialogAppTextDimension(kFileAssociationsDialogButtonHeight, state.appTextSize, state.dpi),
+            lineHeight + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi));
         metrics.defaultAppsButtonHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogDefaultAppsButtonHeight, state.appTextSize),
-            lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+            ScaleDialogAppTextDimension(kFileAssociationsDialogDefaultAppsButtonHeight, state.appTextSize, state.dpi),
+            lineHeight + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi));
         metrics.formatGroupTop = metrics.actionTop + metrics.buttonHeight + metrics.actionGap;
         metrics.formatRowHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kFileAssociationsDialogFormatRowHeight, state.appTextSize),
-            lineHeight + hyperbrowse::util::ScaleAppTextDimension(6, state.appTextSize));
-        metrics.formatGroupContentTop = hyperbrowse::util::ScaleAppTextDimension(26, state.appTextSize);
-        metrics.formatCheckboxWidth = MeasureFileAssociationsCheckboxWidth(state.bodyFont, state.appTextSize);
+            ScaleDialogAppTextDimension(kFileAssociationsDialogFormatRowHeight, state.appTextSize, state.dpi),
+            lineHeight + ScaleDialogAppTextDimension(6, state.appTextSize, state.dpi));
+        metrics.formatGroupContentTop = ScaleDialogAppTextDimension(26, state.appTextSize, state.dpi);
+        metrics.formatCheckboxWidth = MeasureFileAssociationsCheckboxWidth(state.bodyFont, state.appTextSize, state.dpi);
         int descriptionWidth = 0;
         for (const auto& fileType : hyperbrowse::decode::SupportedFileTypes())
         {
@@ -7053,11 +7537,11 @@ namespace
                 descriptionWidth,
                 MeasureDialogButtonWidth(state.bodyFont, fileType.description, 0));
         }
-        const int columnGap = hyperbrowse::util::ScaleAppTextDimension(28, state.appTextSize);
-        const int descriptionRightInset = hyperbrowse::util::ScaleAppTextDimension(24, state.appTextSize);
+        const int columnGap = ScaleDialogAppTextDimension(28, state.appTextSize, state.dpi);
+        const int descriptionRightInset = ScaleDialogAppTextDimension(24, state.appTextSize, state.dpi);
         const int minimumColumnWidth = metrics.formatCheckboxWidth + descriptionWidth + descriptionRightInset;
         metrics.minimumClientWidth = metrics.margin * 2 + columnGap + minimumColumnWidth * 2;
-        const int formatGroupBottomInset = hyperbrowse::util::ScaleAppTextDimension(10, state.appTextSize);
+        const int formatGroupBottomInset = ScaleDialogAppTextDimension(10, state.appTextSize, state.dpi);
         metrics.formatGroupHeight = formatGroupBottomInset
             + metrics.formatGroupContentTop
             + formatRowCount * metrics.formatRowHeight;
@@ -7090,8 +7574,8 @@ namespace
         const int buttonRowTop = std::max(metrics.buttonTop, clientHeight - metrics.margin - metrics.buttonRowHeight);
         const int dividerTop = std::max(metrics.dividerTop, buttonRowTop - metrics.actionGap);
         const int buttonTop = buttonRowTop + (metrics.buttonRowHeight - metrics.buttonHeight) / 2;
-        const int cancelLeft = clientWidth - metrics.margin - kFileAssociationsDialogButtonWidth;
-        const int okLeft = cancelLeft - metrics.actionGap - kFileAssociationsDialogButtonWidth;
+        const int cancelLeft = clientWidth - metrics.margin - ScaleDialogAppTextDimension(kFileAssociationsDialogButtonWidth, state.appTextSize, state.dpi);
+        const int okLeft = cancelLeft - metrics.actionGap - ScaleDialogAppTextDimension(kFileAssociationsDialogButtonWidth, state.appTextSize, state.dpi);
         const int defaultAppsTop = buttonRowTop + (metrics.buttonRowHeight - metrics.defaultAppsButtonHeight) / 2;
 
         const HWND instructionWindow = GetDlgItem(hwnd, kFileAssociationsDialogInstructionControlId);
@@ -7122,10 +7606,10 @@ namespace
                        TRUE);
         }
 
-        const int columnGap = hyperbrowse::util::ScaleAppTextDimension(28, state.appTextSize);
+        const int columnGap = ScaleDialogAppTextDimension(28, state.appTextSize, state.dpi);
         const int columnWidth = std::max(0, (contentWidth - columnGap) / 2);
-        const int formatLeft = metrics.margin + hyperbrowse::util::ScaleAppTextDimension(16, state.appTextSize);
-        const int descriptionRightInset = hyperbrowse::util::ScaleAppTextDimension(24, state.appTextSize);
+        const int formatLeft = metrics.margin + ScaleDialogAppTextDimension(16, state.appTextSize, state.dpi);
+        const int descriptionRightInset = ScaleDialogAppTextDimension(24, state.appTextSize, state.dpi);
         const int formatColumnCount = std::max(1, static_cast<int>((state.formatCheckWindows.size() + 1) / 2));
         for (std::size_t index = 0; index < state.formatCheckWindows.size(); ++index)
         {
@@ -7171,7 +7655,7 @@ namespace
         const HWND dividerWindow = GetDlgItem(hwnd, kFileAssociationsDialogDividerControlId);
         if (dividerWindow)
         {
-            MoveWindow(dividerWindow, metrics.margin, dividerTop, contentWidth, 2, TRUE);
+            MoveWindow(dividerWindow, metrics.margin, dividerTop, contentWidth, ScaleDialogAppTextDimension(2, state.appTextSize, state.dpi), TRUE);
         }
 
         if (state.okButton)
@@ -7179,7 +7663,7 @@ namespace
             MoveWindow(state.okButton,
                        okLeft,
                        buttonTop,
-                       kFileAssociationsDialogButtonWidth,
+                       ScaleDialogAppTextDimension(kFileAssociationsDialogButtonWidth, state.appTextSize, state.dpi),
                        metrics.buttonHeight,
                        TRUE);
         }
@@ -7201,7 +7685,7 @@ namespace
             MoveWindow(cancelButton,
                        cancelLeft,
                        buttonTop,
-                       kFileAssociationsDialogButtonWidth,
+                       ScaleDialogAppTextDimension(kFileAssociationsDialogButtonWidth, state.appTextSize, state.dpi),
                        metrics.buttonHeight,
                        TRUE);
         }
@@ -7220,7 +7704,7 @@ namespace
             clientWidth,
             state,
             state.formatCheckWindows.size());
-        const int captionGap = hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize);
+        const int captionGap = ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi);
         const int captionHeight = MeasureSingleLineTextHeight(state.bodyFont, 20);
         RECT frameRect{
             metrics.margin,
@@ -7640,6 +8124,39 @@ namespace
                 LayoutFileAssociationsDialogControls(hwnd, *state);
             }
             return 0;
+        case WM_DPICHANGED:
+            if (state)
+            {
+                state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+                if (suggestedRect)
+                {
+                    const RECT adjustedRect = ClampDialogFrameToWorkArea(
+                        *suggestedRect,
+                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
+                    SetWindowPos(hwnd, nullptr,
+                                 adjustedRect.left,
+                                 adjustedRect.top,
+                                 adjustedRect.right - adjustedRect.left,
+                                 adjustedRect.bottom - adjustedRect.top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                DeleteFontIfOwned(state->bodyFont);
+                state->bodyFont = CreateDialogUiFont(10, FW_NORMAL, state->appTextSize, state->dpi);
+                const HFONT font = state->bodyFont
+                    ? state->bodyFont
+                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                EnumChildWindows(hwnd,
+                                 [](HWND child, LPARAM parameter) -> BOOL
+                                 {
+                                     SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(parameter), TRUE);
+                                     return TRUE;
+                                 },
+                                 reinterpret_cast<LPARAM>(font));
+                LayoutFileAssociationsDialogControls(hwnd, *state);
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
         case WM_PAINT:
             if (state)
             {
@@ -7818,10 +8335,11 @@ namespace
 
         FileAssociationsDialogState state;
         state.ownerWindow = ownerWindow;
+        state.dpi = DialogDpiForWindow(ownerWindow);
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
         state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
         state.darkMode = darkTheme;
-        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL, state.appTextSize);
+        state.bodyFont = CreateDialogUiFont(10, FW_NORMAL, state.appTextSize, state.dpi);
         state.title = L"File Associations";
         state.instruction = L"Select the formats HyperBrowse should open by default.";
         state.footnote = L"Checked formats become defaults; unchecked formats are left unchanged. Windows may protect an existing choice; use Default apps if a format is rejected.";
@@ -7829,16 +8347,20 @@ namespace
         state.checkedDefaults = initialDefaults;
 
         const FileAssociationsDialogLayoutMetrics layoutMetrics = BuildFileAssociationsDialogLayoutMetrics(
-            kFileAssociationsDialogWidth,
+            ScaleDialogDimension(kFileAssociationsDialogWidth, state.dpi),
             state,
             hyperbrowse::decode::SupportedFileTypes().size());
         RECT windowRect{0, 0,
-                        std::max(kFileAssociationsDialogWidth, layoutMetrics.minimumClientWidth),
-                        std::max(kFileAssociationsDialogHeight, layoutMetrics.minimumClientHeight)};
-        AdjustWindowRectEx(&windowRect,
-                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
-                           FALSE,
-                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+                        std::max(ScaleDialogDimension(kFileAssociationsDialogWidth, state.dpi), layoutMetrics.minimumClientWidth),
+                        std::max(ScaleDialogDimension(kFileAssociationsDialogHeight, state.dpi), layoutMetrics.minimumClientHeight)};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                                     WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                                     FALSE,
+                                     WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                                     state.dpi);
+        windowRect = ClampDialogFrameToWorkArea(
+            windowRect,
+            MeasureDialogShellMetrics(ownerWindow, state.appTextSize).workArea);
 
         if (ownerWindow)
         {
@@ -7973,36 +8495,36 @@ namespace
         const SlideshowSettingsDialogState& state)
     {
         SlideshowSettingsDialogLayoutMetrics metrics;
-        metrics.margin = hyperbrowse::util::ScaleAppTextDimension(kTextInputDialogMargin, state.appTextSize);
-        metrics.contentWidth = kSlideshowSettingsDialogWidth - metrics.margin * 2;
+        metrics.margin = ScaleDialogAppTextDimension(kTextInputDialogMargin, state.appTextSize, state.dpi);
+        metrics.contentWidth = ScaleDialogDimension(kSlideshowSettingsDialogWidth, state.dpi) - metrics.margin * 2;
         metrics.lineHeight = MeasureSingleLineTextHeight(state.bodyFont, 20);
         metrics.instructionHeight = MeasureTextBlockHeight(state.bodyFont,
                                                            state.instruction,
                                                            metrics.contentWidth,
                                                            DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
-                                                           metrics.lineHeight + hyperbrowse::util::ScaleAppTextDimension(4, state.appTextSize));
+                                                           metrics.lineHeight + ScaleDialogAppTextDimension(4, state.appTextSize, state.dpi));
         metrics.instructionHeight = std::max(
             metrics.instructionHeight,
-            hyperbrowse::util::ScaleAppTextDimension(44, state.appTextSize));
+            ScaleDialogAppTextDimension(44, state.appTextSize, state.dpi));
         metrics.labelWidth = std::max(
-            170,
+            ScaleDialogAppTextDimension(170, state.appTextSize, state.dpi),
             std::max(MeasureDialogButtonWidth(state.bodyFont, L"Transition type:", 0),
                      MeasureDialogButtonWidth(state.bodyFont, L"Transition duration:", 0)));
-        metrics.valueWidth = 300;
-        metrics.numericEditWidth = 120;
-        metrics.spinWidth = 22;
+        metrics.valueWidth = ScaleDialogAppTextDimension(300, state.appTextSize, state.dpi);
+        metrics.numericEditWidth = ScaleDialogAppTextDimension(120, state.appTextSize, state.dpi);
+        metrics.spinWidth = ScaleDialogAppTextDimension(22, state.appTextSize, state.dpi);
         metrics.controlHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kTextInputEditHeight, state.appTextSize),
-            metrics.lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
-        metrics.rowGap = hyperbrowse::util::ScaleAppTextDimension(10, state.appTextSize);
+            ScaleDialogAppTextDimension(kTextInputEditHeight, state.appTextSize, state.dpi),
+            metrics.lineHeight + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi));
+        metrics.rowGap = ScaleDialogAppTextDimension(10, state.appTextSize, state.dpi);
         metrics.transitionTop = metrics.margin + std::max(
-            hyperbrowse::util::ScaleAppTextDimension(56, state.appTextSize),
-            metrics.instructionHeight + hyperbrowse::util::ScaleAppTextDimension(12, state.appTextSize));
+            ScaleDialogAppTextDimension(56, state.appTextSize, state.dpi),
+            metrics.instructionHeight + ScaleDialogAppTextDimension(12, state.appTextSize, state.dpi));
         metrics.durationTop = metrics.transitionTop + metrics.controlHeight + metrics.rowGap;
         metrics.transitionDurationTop = metrics.durationTop + metrics.controlHeight + metrics.rowGap;
         metrics.footnoteTop = metrics.transitionDurationTop
             + metrics.controlHeight
-            + hyperbrowse::util::ScaleAppTextDimension(20, state.appTextSize);
+            + ScaleDialogAppTextDimension(20, state.appTextSize, state.dpi);
         metrics.footnoteHeight = MeasureTextBlockHeight(state.bodyFont,
                                                         state.footnote,
                                                         metrics.contentWidth,
@@ -8010,25 +8532,25 @@ namespace
                                                         metrics.lineHeight);
         metrics.footnoteHeight = std::max(
             metrics.footnoteHeight,
-            hyperbrowse::util::ScaleAppTextDimension(54, state.appTextSize));
+            ScaleDialogAppTextDimension(54, state.appTextSize, state.dpi));
         metrics.dividerTop = metrics.footnoteTop
             + metrics.footnoteHeight
-            + hyperbrowse::util::ScaleAppTextDimension(56, state.appTextSize);
+            + ScaleDialogAppTextDimension(56, state.appTextSize, state.dpi);
         metrics.buttonHeight = std::max(
-            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonHeight, state.appTextSize),
-            metrics.lineHeight + hyperbrowse::util::ScaleAppTextDimension(8, state.appTextSize));
+            ScaleDialogAppTextDimension(kTextInputButtonHeight, state.appTextSize, state.dpi),
+            metrics.lineHeight + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi));
         metrics.applyButtonWidth = MeasureDialogButtonWidth(
             state.bodyFont,
             L"Apply",
-            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonWidth, state.appTextSize));
+            ScaleDialogAppTextDimension(kTextInputButtonWidth, state.appTextSize, state.dpi));
         metrics.cancelButtonWidth = MeasureDialogButtonWidth(
             state.bodyFont,
             L"Cancel",
-            hyperbrowse::util::ScaleAppTextDimension(kTextInputButtonWidth, state.appTextSize));
-        metrics.buttonTop = metrics.dividerTop + hyperbrowse::util::ScaleAppTextDimension(20, state.appTextSize);
+            ScaleDialogAppTextDimension(kTextInputButtonWidth, state.appTextSize, state.dpi));
+        metrics.buttonTop = metrics.dividerTop + ScaleDialogAppTextDimension(20, state.appTextSize, state.dpi);
         metrics.minimumClientHeight = metrics.buttonTop
             + metrics.buttonHeight
-            + hyperbrowse::util::ScaleAppTextDimension(26, state.appTextSize);
+            + ScaleDialogAppTextDimension(26, state.appTextSize, state.dpi);
         return metrics;
     }
 
@@ -8069,7 +8591,7 @@ namespace
             const int footnoteTop = metrics.footnoteTop;
             const int dividerTop = metrics.dividerTop;
             const int buttonTop = metrics.buttonTop;
-            const int cancelLeft = kSlideshowSettingsDialogWidth - metrics.margin - metrics.cancelButtonWidth;
+            const int cancelLeft = ScaleDialogDimension(kSlideshowSettingsDialogWidth, state->dpi) - metrics.margin - metrics.cancelButtonWidth;
             const int okLeft = cancelLeft - metrics.rowGap - metrics.applyButtonWidth;
             const int numericEditWidth = metrics.numericEditWidth;
             const int spinWidth = metrics.spinWidth;
@@ -8110,7 +8632,7 @@ namespace
                 contentLeft + labelWidth,
                 transitionTop,
                 valueWidth,
-                140,
+                ScaleDialogAppTextDimension(140, state->appTextSize, state->dpi),
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionComboControlId)),
                 hInstance,
@@ -8161,7 +8683,7 @@ namespace
                 WS_CHILD | WS_VISIBLE,
                 contentLeft + labelWidth + numericEditWidth + spinWidth + 8,
                 durationTop + labelTopOffset,
-                36,
+                ScaleDialogAppTextDimension(36, state->appTextSize, state->dpi),
                 metrics.lineHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDurationUnitControlId)),
@@ -8211,9 +8733,9 @@ namespace
                 L"STATIC",
                 L"ms",
                 WS_CHILD | WS_VISIBLE,
-                contentLeft + labelWidth + numericEditWidth + spinWidth + 8,
+                contentLeft + labelWidth + numericEditWidth + spinWidth + ScaleDialogAppTextDimension(8, state->appTextSize, state->dpi),
                 transitionDurationTop + labelTopOffset,
-                36,
+                ScaleDialogAppTextDimension(36, state->appTextSize, state->dpi),
                 metrics.lineHeight,
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsTransitionDurationUnitControlId)),
@@ -8240,7 +8762,7 @@ namespace
                 contentLeft,
                 dividerTop,
                 contentWidth,
-                2,
+                ScaleDialogAppTextDimension(2, state->appTextSize, state->dpi),
                 hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kSlideshowSettingsDividerControlId)),
                 hInstance,
@@ -8374,6 +8896,36 @@ namespace
                 return FALSE;
             }
             break;
+        case WM_DPICHANGED:
+            if (state)
+            {
+                const UINT oldDpi = state->dpi;
+                state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+                if (suggestedRect)
+                {
+                    SetWindowPos(hwnd, nullptr,
+                                 suggestedRect->left,
+                                 suggestedRect->top,
+                                 suggestedRect->right - suggestedRect->left,
+                                 suggestedRect->bottom - suggestedRect->top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                ScaleDialogChildWindows(hwnd, oldDpi, state->dpi);
+                DeleteFontIfOwned(state->bodyFont);
+                state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                const HFONT font = state->bodyFont
+                    ? state->bodyFont
+                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                EnumChildWindows(hwnd,
+                                 [](HWND child, LPARAM parameter) -> BOOL
+                                 {
+                                     SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(parameter), TRUE);
+                                     return TRUE;
+                                 },
+                                 reinterpret_cast<LPARAM>(font));
+            }
+            return 0;
         case WM_CTLCOLORDLG:
             return state && state->backgroundBrush
                 ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
@@ -8543,9 +9095,10 @@ namespace
 
         SlideshowSettingsDialogState state;
         state.ownerWindow = ownerWindow;
+        state.dpi = DialogDpiForWindow(ownerWindow);
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
         state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
-        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, state.dpi);
         if (!state.bodyFont)
         {
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -8558,12 +9111,16 @@ namespace
         state.transitionStyle = initialTransitionStyle;
 
         const SlideshowSettingsDialogLayoutMetrics layoutMetrics = BuildSlideshowSettingsDialogLayoutMetrics(state);
-        state.dialogHeight = std::max(kSlideshowSettingsDialogHeight, layoutMetrics.minimumClientHeight);
-        RECT windowRect{0, 0, kSlideshowSettingsDialogWidth, state.dialogHeight};
-        AdjustWindowRectEx(&windowRect,
-                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
-                           FALSE,
-                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        state.dialogHeight = std::max(ScaleDialogDimension(kSlideshowSettingsDialogHeight, state.dpi), layoutMetrics.minimumClientHeight);
+        RECT windowRect{0, 0, ScaleDialogDimension(kSlideshowSettingsDialogWidth, state.dpi), state.dialogHeight};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                         WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                         FALSE,
+                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                         state.dpi);
+        windowRect = ClampDialogFrameToWorkArea(
+            windowRect,
+            MeasureDialogShellMetrics(ownerWindow, state.appTextSize).workArea);
 
         if (ownerWindow)
         {
@@ -16828,29 +17385,32 @@ namespace hyperbrowse::ui
         state->windowSlot = &shortcutReferenceWindow_;
         state->appTextSize = appTextSize_;
         state->darkMode = themeMode_ == ThemeMode::Dark;
-        state->dpi = hwnd_ ? GetDpiForWindow(hwnd_) : 96;
+        state->dpi = DialogDpiForWindow(hwnd_);
         state->background = palette.windowBackground;
         state->listBackground = palette.paneBackground;
         state->text = palette.text;
         state->mutedText = palette.mutedText;
         state->border = palette.actionStripBorder;
-        state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize);
+        state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
         if (!state->bodyFont)
         {
             state->bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
 
-        const int dpi = static_cast<int>(state->dpi == 0 ? 96 : state->dpi);
         constexpr DWORD shortcutReferenceWindowStyle =
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_CLIPCHILDREN;
         constexpr DWORD shortcutReferenceWindowExStyle = WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT;
         RECT windowRect{0, 0,
-                MulDiv(kShortcutReferenceWidth, dpi, 96),
-                MulDiv(kShortcutReferenceHeight, dpi, 96)};
-        AdjustWindowRectEx(&windowRect,
-                           shortcutReferenceWindowStyle,
-                           FALSE,
-                           shortcutReferenceWindowExStyle);
+            ScaleDialogAppTextDimension(kShortcutReferenceWidth, state->appTextSize, state->dpi),
+            ScaleDialogAppTextDimension(kShortcutReferenceHeight, state->appTextSize, state->dpi)};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                         shortcutReferenceWindowStyle,
+                         FALSE,
+                         shortcutReferenceWindowExStyle,
+                         state->dpi);
+        windowRect = ClampDialogFrameToWorkArea(
+            windowRect,
+            MeasureDialogShellMetrics(hwnd_, state->appTextSize).workArea);
 
         HWND dialogWindow = CreateWindowExW(
             shortcutReferenceWindowExStyle,
@@ -16943,10 +17503,14 @@ namespace hyperbrowse::ui
         const int aboutClientWidth = ScaleAboutDialogDimension(kAboutDialogWidth, state);
         const int aboutClientHeight = std::max(ScaleAboutDialogDimension(kAboutDialogHeight, state), MeasureAboutDialogClientHeight(state));
         RECT windowRect{0, 0, aboutClientWidth, aboutClientHeight};
-        AdjustWindowRectEx(&windowRect,
-                           WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
-                           FALSE,
-                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        AdjustDialogWindowRectForDpi(&windowRect,
+                         WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+                         FALSE,
+                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                         state.dpi);
+        windowRect = ClampDialogFrameToWorkArea(
+            windowRect,
+            MeasureDialogShellMetrics(hwnd_, state.appTextSize).workArea);
 
         if (hwnd_)
         {
@@ -17043,58 +17607,37 @@ namespace hyperbrowse::ui
 
     RECT ImageInformationDialogWorkArea(HWND ownerWindow)
     {
-        MONITORINFO monitorInfo{};
-        monitorInfo.cbSize = sizeof(monitorInfo);
-        const HMONITOR monitor = MonitorFromWindow(ownerWindow ? ownerWindow : GetDesktopWindow(),
-                                                   MONITOR_DEFAULTTONEAREST);
-        if (monitor && GetMonitorInfoW(monitor, &monitorInfo) != FALSE)
-        {
-            return monitorInfo.rcWork;
-        }
-
-        RECT workArea{};
-        SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
-        return workArea;
+        return MeasureDialogShellMetrics(ownerWindow, hyperbrowse::util::kDefaultAppTextSize).workArea;
     }
 
     void CenterImageInformationDialogOnWorkArea(HWND hwnd, const ImageInformationDialogState& state)
     {
-        RECT dialogRect{};
-        GetWindowRect(hwnd, &dialogRect);
-        const int width = dialogRect.right - dialogRect.left;
-        const int height = dialogRect.bottom - dialogRect.top;
-        const int workWidth = state.workArea.right - state.workArea.left;
-        const int workHeight = state.workArea.bottom - state.workArea.top;
-        const int x = state.workArea.left + std::max(0, (workWidth - width) / 2);
-        const int y = state.workArea.top + std::max(0, (workHeight - height) / 2);
-        SetWindowPos(hwnd,
-                     nullptr,
-                     x,
-                     y,
-                     0,
-                     0,
-                     SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+        CenterDialogInWorkArea(hwnd, state.workArea);
     }
 
     void LayoutImageInformationDialog(HWND hwnd, ImageInformationDialogState& state)
     {
+        const auto scale = [&state](int value)
+        {
+            return ScaleDialogDimension(value, state.dpi);
+        };
         RECT client{};
         GetClientRect(hwnd, &client);
         const int clientWidth = client.right - client.left;
         const int clientHeight = client.bottom - client.top;
-        const int contentLeft = kImageInformationDialogMargin;
-        const int contentWidth = clientWidth - (kImageInformationDialogMargin * 2);
+        const int contentLeft = scale(kImageInformationDialogMargin);
+        const int contentWidth = clientWidth - scale(kImageInformationDialogMargin * 2);
         const int buttonsTop = clientHeight
-            - kImageInformationDialogMargin
-            - kImageInformationDialogButtonHeight;
-        const int toggleTop = buttonsTop - kImageInformationDialogGap - kImageInformationDialogButtonHeight;
-        const int contentTop = kImageInformationDialogMargin + 34;
-        const int availableReportHeight = std::max(1, toggleTop - kImageInformationDialogGap - contentTop);
+            - scale(kImageInformationDialogMargin)
+            - scale(kImageInformationDialogButtonHeight);
+        const int toggleTop = buttonsTop - scale(kImageInformationDialogGap + kImageInformationDialogButtonHeight);
+        const int contentTop = scale(kImageInformationDialogMargin + 34);
+        const int availableReportHeight = std::max(1, toggleTop - scale(kImageInformationDialogGap) - contentTop);
         const int metadataHeight = state.expanded
             ? std::min(state.metadataHeight, std::max(1, availableReportHeight - 40))
             : 0;
-        const int metadataTop = toggleTop - kImageInformationDialogGap - metadataHeight;
-        const int contentBottom = metadataTop - (state.expanded ? kImageInformationDialogGap : 0);
+        const int metadataTop = toggleTop - scale(kImageInformationDialogGap) - metadataHeight;
+        const int contentBottom = metadataTop - (state.expanded ? scale(kImageInformationDialogGap) : 0);
         const int contentHeight = std::min(state.contentHeight, std::max(1, contentBottom - contentTop));
 
         if (state.filenameWindow)
@@ -17102,9 +17645,9 @@ namespace hyperbrowse::ui
             SetWindowPos(state.filenameWindow,
                          nullptr,
                          contentLeft,
-                         kImageInformationDialogMargin,
+                         scale(kImageInformationDialogMargin),
                          contentWidth,
-                         28,
+                         scale(28),
                          SWP_NOZORDER | SWP_NOACTIVATE);
         }
         if (state.contentWindow)
@@ -17137,49 +17680,54 @@ namespace hyperbrowse::ui
                          nullptr,
                          contentLeft,
                          toggleTop,
-                         kImageInformationDialogToggleWidth,
-                         kImageInformationDialogButtonHeight,
+                         scale(kImageInformationDialogToggleWidth),
+                         scale(kImageInformationDialogButtonHeight),
                          SWP_NOZORDER | SWP_NOACTIVATE);
         }
         if (state.copyPromptButton)
         {
             SetWindowPos(state.copyPromptButton,
                          nullptr,
-                         clientWidth - kImageInformationDialogMargin
-                             - kImageInformationDialogButtonWidth
-                             - kImageInformationDialogGap
-                             - kImageInformationDialogCopyPromptWidth,
+                         clientWidth - scale(kImageInformationDialogMargin
+                             + kImageInformationDialogButtonWidth
+                             + kImageInformationDialogGap
+                             + kImageInformationDialogCopyPromptWidth),
                          buttonsTop,
-                         kImageInformationDialogCopyPromptWidth,
-                         kImageInformationDialogButtonHeight,
+                         scale(kImageInformationDialogCopyPromptWidth),
+                         scale(kImageInformationDialogButtonHeight),
                          SWP_NOZORDER | SWP_NOACTIVATE);
         }
         if (state.okButton)
         {
             SetWindowPos(state.okButton,
                          nullptr,
-                         clientWidth - kImageInformationDialogMargin - kImageInformationDialogButtonWidth,
+                         clientWidth - scale(kImageInformationDialogMargin + kImageInformationDialogButtonWidth),
                          buttonsTop,
-                         kImageInformationDialogButtonWidth,
-                         kImageInformationDialogButtonHeight,
+                         scale(kImageInformationDialogButtonWidth),
+                         scale(kImageInformationDialogButtonHeight),
                          SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
 
     void ResizeImageInformationDialog(HWND hwnd, ImageInformationDialogState& state)
     {
+        const auto scale = [&state](int value)
+        {
+            return ScaleDialogDimension(value, state.dpi);
+        };
         const int clientHeight = std::min(state.expanded
                                               ? state.expandedWindowHeight
-                                              : kImageInformationDialogCollapsedHeight,
+                                              : scale(kImageInformationDialogCollapsedHeight),
                                           state.maximumWindowHeight);
         RECT windowRect{0,
                         0,
-                        kImageInformationDialogWidth,
+                        scale(kImageInformationDialogWidth),
                         clientHeight};
-        AdjustWindowRectEx(&windowRect,
-                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
-                           FALSE,
-                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        AdjustDialogWindowRectForDpi(&windowRect,
+                                     WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                                     FALSE,
+                                     WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                                     state.dpi);
         SetWindowPos(hwnd,
                      nullptr,
                      0,
@@ -17340,6 +17888,66 @@ namespace hyperbrowse::ui
                 LayoutImageInformationDialog(hwnd, *state);
             }
             return 0;
+        case WM_DPICHANGED:
+            if (state)
+            {
+                state->dpi = std::max<UINT>(96, HIWORD(wParam));
+                const auto scale = [state](int value)
+                {
+                    return ScaleDialogDimension(value, state->dpi);
+                };
+                state->workArea = ImageInformationDialogWorkArea(hwnd);
+                DeleteFontIfOwned(state->titleFont);
+                DeleteFontIfOwned(state->bodyFont);
+                state->titleFont = CreateDialogUiFont(12, FW_BOLD, state->appTextSize, state->dpi);
+                state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                const int contentWidth = scale(kImageInformationDialogWidth - kImageInformationDialogMargin * 2);
+                state->contentHeight = MeasureTextBlockHeight(state->bodyFont,
+                                                               state->content,
+                                                               contentWidth,
+                                                               DT_WORDBREAK | DT_EDITCONTROL,
+                                                               scale(40));
+                state->metadataHeight = MeasureTextBlockHeight(state->bodyFont,
+                                                                state->metadata,
+                                                                contentWidth,
+                                                                DT_WORDBREAK | DT_EDITCONTROL,
+                                                                scale(56));
+                state->expandedWindowHeight = scale(kImageInformationDialogMargin + 34)
+                    + state->contentHeight
+                    + scale(kImageInformationDialogGap)
+                    + state->metadataHeight
+                    + scale(kImageInformationDialogGap + kImageInformationDialogButtonHeight)
+                    + scale(kImageInformationDialogGap + kImageInformationDialogButtonHeight
+                           + kImageInformationDialogMargin);
+                const RECT frameRect{0, 0, 0, 0};
+                RECT adjustedFrame = frameRect;
+                AdjustDialogWindowRectForDpi(&adjustedFrame,
+                                             WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                                             FALSE,
+                                             WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                                             state->dpi);
+                const int frameHeight = adjustedFrame.bottom - adjustedFrame.top;
+                state->maximumWindowHeight = static_cast<int>(std::max<LONG>(
+                    1L,
+                    state->workArea.bottom - state->workArea.top - frameHeight));
+                state->expandedWindowHeight = std::min(state->expandedWindowHeight, state->maximumWindowHeight);
+                const HFONT font = state->bodyFont
+                    ? state->bodyFont
+                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                EnumChildWindows(hwnd,
+                                 [](HWND child, LPARAM parameter) -> BOOL
+                                 {
+                                     SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(parameter), TRUE);
+                                     return TRUE;
+                                 },
+                                 reinterpret_cast<LPARAM>(font));
+                if (state->filenameWindow && state->titleFont)
+                {
+                    SendMessageW(state->filenameWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->titleFont), TRUE);
+                }
+                ResizeImageInformationDialog(hwnd, *state);
+            }
+            return 0;
         case WM_CTLCOLORDLG:
             return state && state->backgroundBrush
                 ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
@@ -17468,22 +18076,24 @@ namespace hyperbrowse::ui
 
         ImageInformationDialogState state;
         state.ownerWindow = ownerWindow;
+        state.dpi = DialogDpiForWindow(ownerWindow);
         state.instance = instance;
         state.theme = hyperbrowse::ui::MakeDialogTheme(darkTheme);
         state.workArea = ImageInformationDialogWorkArea(ownerWindow);
         RECT frameRect{0, 0, 0, 0};
-        AdjustWindowRectEx(&frameRect,
-                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
-                           FALSE,
-                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        AdjustDialogWindowRectForDpi(&frameRect,
+                         WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                         FALSE,
+                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                         state.dpi);
         const LONG frameHeight = frameRect.bottom - frameRect.top;
         state.maximumWindowHeight = static_cast<int>(std::max<LONG>(1L,
                                                                      state.workArea.bottom
                                                                          - state.workArea.top
                                                                          - frameHeight));
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
-        state.titleFont = CreateDialogUiFont(12, FW_BOLD, state.appTextSize);
-        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        state.titleFont = CreateDialogUiFont(12, FW_BOLD, state.appTextSize, state.dpi);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, state.dpi);
         state.filename = std::move(filename);
         state.content = std::move(content);
         state.metadata = std::move(metadata);
@@ -17493,34 +18103,35 @@ namespace hyperbrowse::ui
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
 
-        const int contentWidth = kImageInformationDialogWidth - (kImageInformationDialogMargin * 2);
+        const int contentWidth = ScaleDialogDimension(kImageInformationDialogWidth - (kImageInformationDialogMargin * 2), state.dpi);
         state.contentHeight = MeasureTextBlockHeight(state.bodyFont,
                                                      state.content,
                                                      contentWidth,
                                                      DT_WORDBREAK | DT_EDITCONTROL,
-                                                     40);
+                                                     ScaleDialogDimension(40, state.dpi));
         state.metadataHeight = MeasureTextBlockHeight(state.bodyFont,
                                                       state.metadata,
                                                       contentWidth,
                                                       DT_WORDBREAK | DT_EDITCONTROL,
-                                                      56);
-        state.expandedWindowHeight = kImageInformationDialogMargin
-            + 34
+                                                      ScaleDialogDimension(56, state.dpi));
+        state.expandedWindowHeight = ScaleDialogDimension(kImageInformationDialogMargin + 34, state.dpi)
             + state.contentHeight
-            + kImageInformationDialogGap
+            + ScaleDialogDimension(kImageInformationDialogGap, state.dpi)
             + state.metadataHeight
-            + kImageInformationDialogGap
-            + kImageInformationDialogButtonHeight
-            + kImageInformationDialogGap
-            + kImageInformationDialogButtonHeight
-            + kImageInformationDialogMargin;
+            + ScaleDialogDimension(kImageInformationDialogGap + kImageInformationDialogButtonHeight, state.dpi)
+            + ScaleDialogDimension(kImageInformationDialogGap + kImageInformationDialogButtonHeight
+                                   + kImageInformationDialogMargin, state.dpi);
         state.expandedWindowHeight = std::min(state.expandedWindowHeight, state.maximumWindowHeight);
 
-        RECT windowRect{0, 0, kImageInformationDialogWidth, state.expandedWindowHeight};
-        AdjustWindowRectEx(&windowRect,
-                           WS_CAPTION | WS_SYSMENU | WS_POPUP,
-                           FALSE,
-                           WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        RECT windowRect{0, 0, ScaleDialogDimension(kImageInformationDialogWidth, state.dpi), state.expandedWindowHeight};
+        AdjustDialogWindowRectForDpi(&windowRect,
+                         WS_CAPTION | WS_SYSMENU | WS_POPUP,
+                         FALSE,
+                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                         state.dpi);
+        windowRect = ClampDialogFrameToWorkArea(
+            windowRect,
+            MeasureDialogShellMetrics(ownerWindow, state.appTextSize).workArea);
         if (ownerWindow)
         {
             EnableWindow(ownerWindow, FALSE);
@@ -18741,6 +19352,22 @@ namespace hyperbrowse::ui
     RECT ExperimentalSettingsAccessibleBounds(const ExperimentalSettingsDialogState& state,
                                                const ExperimentalSettingsFocusTarget& target)
     {
+        const UINT dpi = std::max<UINT>(96, state.dpi);
+        const auto toPhysical = [dpi](const RECT& logical)
+        {
+            return RECT{
+                ScaleDialogDimension(logical.left, dpi),
+                ScaleDialogDimension(logical.top, dpi),
+                ScaleDialogDimension(logical.right, dpi),
+                ScaleDialogDimension(logical.bottom, dpi)};
+        };
+        const RECT physicalBodyViewport = toPhysical(state.bodyViewport);
+        RECT viewport = physicalBodyViewport;
+        POINT viewportTopLeft{viewport.left, viewport.top};
+        POINT viewportBottomRight{viewport.right, viewport.bottom};
+        ClientToScreen(state.dialogWindow, &viewportTopLeft);
+        ClientToScreen(state.dialogWindow, &viewportBottomRight);
+        viewport = {viewportTopLeft.x, viewportTopLeft.y, viewportBottomRight.x, viewportBottomRight.y};
         if (target.kind == ExperimentalSettingsFocusTargetKind::NativeControl)
         {
             RECT bounds{};
@@ -18748,29 +19375,34 @@ namespace hyperbrowse::ui
                               state,
                               static_cast<ConsolidatedSettingsControl>(target.index)),
                           &bounds);
-            return bounds;
+            RECT visibleBounds{};
+            IntersectRect(&visibleBounds, &bounds, &viewport);
+            return visibleBounds;
         }
 
         RECT bounds{};
         if (target.kind == ExperimentalSettingsFocusTargetKind::Tab)
         {
-            bounds = state.tabRects[static_cast<std::size_t>(target.index)];
+            bounds = toPhysical(state.tabRects[static_cast<std::size_t>(target.index)]);
         }
         else if (target.kind == ExperimentalSettingsFocusTargetKind::CustomControl)
         {
-            bounds = state.controlRects[static_cast<std::size_t>(target.index)];
+            bounds = toPhysical(state.controlRects[static_cast<std::size_t>(target.index)]);
+            RECT visibleBounds{};
+            IntersectRect(&visibleBounds, &bounds, &physicalBodyViewport);
+            bounds = visibleBounds;
         }
         else if (target.kind == ExperimentalSettingsFocusTargetKind::ApplyButton)
         {
-            bounds = state.applyButtonRect;
+            bounds = toPhysical(state.applyButtonRect);
         }
         else if (target.kind == ExperimentalSettingsFocusTargetKind::OkButton)
         {
-            bounds = state.okButtonRect;
+            bounds = toPhysical(state.okButtonRect);
         }
         else if (target.kind == ExperimentalSettingsFocusTargetKind::CancelButton)
         {
-            bounds = state.cancelButtonRect;
+            bounds = toPhysical(state.cancelButtonRect);
         }
         POINT topLeft{bounds.left, bounds.top};
         POINT bottomRight{bounds.right, bounds.bottom};
@@ -21116,6 +21748,7 @@ namespace hyperbrowse::ui
     {
         ConsolidatedSettingsDialogState state;
         state.ownerWindow = hwnd_;
+        state.dpi = DialogDpiForWindow(hwnd_);
         state.instance = instance_;
         state.title = L"Settings";
         state.appTextSize = appTextSize_;
@@ -21170,7 +21803,7 @@ namespace hyperbrowse::ui
             }
         }
 
-        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize);
+        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, 96);
         if (!state.bodyFont)
         {
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -21311,24 +21944,13 @@ namespace hyperbrowse::ui
             SaveWindowState();
         };
 
-        wchar_t settingsUiOverride[32]{};
-        const DWORD settingsUiOverrideLength = GetEnvironmentVariableW(
-            L"HYPERBROWSE_SETTINGS_UI",
-            settingsUiOverride,
-            static_cast<DWORD>(std::size(settingsUiOverride)));
-        const bool useLegacySettings = settingsUiOverrideLength > 0
-            && _wcsicmp(settingsUiOverride, L"legacy") == 0;
-        if (!useLegacySettings)
+        const ExperimentalSettingsDialogResult result = PromptForExperimentalSettings(hwnd_, instance_, &state);
+        DeleteFontIfOwned(state.bodyFont);
+        state.bodyFont = nullptr;
+        if (result == ExperimentalSettingsDialogResult::Unavailable)
         {
-            const ExperimentalSettingsDialogResult result = PromptForExperimentalSettings(hwnd_, instance_, &state);
-            if (result != ExperimentalSettingsDialogResult::Unavailable)
-            {
-                DeleteFontIfOwned(state.bodyFont);
-                state.bodyFont = nullptr;
-                return;
-            }
+            return;
         }
-        PromptForConsolidatedSettings(hwnd_, instance_, &state);
     }
 
     void MainWindow::ShowSlideshowSettingsDialog()

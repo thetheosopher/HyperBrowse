@@ -29,9 +29,12 @@ namespace hyperbrowse::render
         ID2D1Factory* D2DFactory() const noexcept;
         IDWriteFactory* DWriteFactory() const noexcept;
 
-        ComPtr<ID2D1HwndRenderTarget> CreateHwndRenderTarget(HWND hwnd);
+        ComPtr<ID2D1HwndRenderTarget> CreateHwndRenderTarget(HWND hwnd,
+                                      bool useWindowDpi = false);
         ComPtr<ID2D1DCRenderTarget> CreateDCRenderTarget();
-        void ResizeRenderTarget(ID2D1HwndRenderTarget* renderTarget, HWND hwnd);
+        void ResizeRenderTarget(ID2D1HwndRenderTarget* renderTarget,
+                    HWND hwnd,
+                    bool useWindowDpi = false);
 
         ComPtr<ID2D1Bitmap> CreateBitmapFromHBITMAP(
             ID2D1RenderTarget* renderTarget,

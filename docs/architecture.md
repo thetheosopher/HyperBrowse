@@ -288,6 +288,12 @@ The current rendering split is intentional:
 
 When changing rendering code, preserve resource recovery on device/display loss, DPI-aware dimensions, and the distinction between content identity and list position. A numeric index alone is not a safe render-cache key across insertions, removals, or reordering.
 
+## Dialog Layout
+
+Application-owned dialog frames use `src/ui/DialogShell.*` for monitor work-area discovery, application text-size metrics, frame clamping, and centering. `src/ui/SettingsLayout.*` is the pure measured layout engine for the Settings pages; `MainWindow` converts its logical rectangles to physical pixels only when positioning Win32 child windows or drawing through Direct2D.
+
+The Settings dialog keeps its footer outside the scrollable body, recomputes its preferred frame on DPI and application text-size changes, and updates accessibility bounds from the same logical geometry. About, Shortcut Reference, Slideshow Settings, Performance Settings, File Associations, and Image Information retain their existing content procedures but use the shared frame-placement policy for DPI transitions and work-area containment. The framework decision remains deferred until the Win32 pilot has measured accessibility, startup, memory, rendering, and migration costs.
+
 ## State and persistence
 
 Application settings live under the per-user registry location described in the README, with an environment-variable override for isolated development/test runs. Window geometry is restored only when it fits the current monitor work area. Do not replace a valid persisted folder path with an empty value during shutdown or transient no-selection states.

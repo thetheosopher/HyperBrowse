@@ -78,7 +78,8 @@ namespace hyperbrowse::render
         return dwriteFactory_.Get();
     }
 
-    ComPtr<ID2D1HwndRenderTarget> D2DRenderer::CreateHwndRenderTarget(HWND hwnd)
+    ComPtr<ID2D1HwndRenderTarget> D2DRenderer::CreateHwndRenderTarget(HWND hwnd,
+                                                                       bool useWindowDpi)
     {
         if (!d2dFactory_ || !hwnd)
         {
@@ -94,8 +95,9 @@ namespace hyperbrowse::render
 
         D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties();
         rtProps.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
-        rtProps.dpiX = 96.0f;
-        rtProps.dpiY = 96.0f;
+        const UINT dpi = useWindowDpi ? GetDpiForWindow(hwnd) : 96;
+        rtProps.dpiX = static_cast<float>(dpi == 0 ? 96 : dpi);
+        rtProps.dpiY = static_cast<float>(dpi == 0 ? 96 : dpi);
 
         D2D1_HWND_RENDER_TARGET_PROPERTIES hwndRtProps = D2D1::HwndRenderTargetProperties(hwnd, size);
         hwndRtProps.presentOptions = D2D1_PRESENT_OPTIONS_NONE;
@@ -140,7 +142,9 @@ namespace hyperbrowse::render
         return renderTarget;
     }
 
-    void D2DRenderer::ResizeRenderTarget(ID2D1HwndRenderTarget* renderTarget, HWND hwnd)
+    void D2DRenderer::ResizeRenderTarget(ID2D1HwndRenderTarget* renderTarget,
+                                         HWND hwnd,
+                                         bool useWindowDpi)
     {
         if (!renderTarget || !hwnd)
         {
@@ -160,7 +164,9 @@ namespace hyperbrowse::render
             renderTarget->Resize(size);
         }
 
-        renderTarget->SetDpi(96.0f, 96.0f);
+        const UINT dpi = useWindowDpi ? GetDpiForWindow(hwnd) : 96;
+        const float resolvedDpi = static_cast<float>(dpi == 0 ? 96 : dpi);
+        renderTarget->SetDpi(resolvedDpi, resolvedDpi);
     }
 
     ComPtr<ID2D1Bitmap> D2DRenderer::CreateBitmapFromHBITMAP(

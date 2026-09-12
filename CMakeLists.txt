@@ -162,6 +162,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/DetailsPanelSurfacePainter.cpp
     src/ui/DetailsPanelTextPainter.cpp
     src/ui/DetailsPanelLayout.cpp
+    src/ui/DialogShell.cpp
     src/ui/DisplaySurfaceRecoveryPolicy.cpp
     src/ui/ImageWorkflowPersistence.cpp
     src/ui/MenuPainter.cpp
@@ -197,6 +198,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/ShellDragSource.cpp
     src/ui/ShellPainter.cpp
     src/ui/SelectionRatingPolicy.cpp
+    src/ui/SettingsLayout.cpp
     src/ui/SelectedPathPersistence.cpp
     src/ui/ViewerItemSelectionPolicy.cpp
     src/ui/ViewerPendingOperationState.cpp
