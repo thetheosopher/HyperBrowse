@@ -1,10 +1,12 @@
 #include "services/FolderTreeEnumerationService.h"
 
 #include <shlobj.h>
+#include <winioctl.h>
 
 #include <algorithm>
 #include <cwchar>
 #include <filesystem>
+#include <future>
 #include <system_error>
 
 #include "util/Diagnostics.h"
@@ -26,6 +28,7 @@ namespace
 {
     constexpr std::size_t kWorkerCount = 2;
     constexpr std::size_t kMaxPendingTaskCount = 8;
+    constexpr std::size_t kMinimumParallelProbeCount = 8;
 
     struct EnumerationSharedStateView
     {
@@ -126,30 +129,123 @@ namespace
                                   const fs::path& folderPath,
                                   bool showHiddenFolders)
     {
-        const fs::directory_options options = fs::directory_options::skip_permission_denied;
-        std::error_code iteratorError;
-        for (fs::directory_iterator iterator(folderPath, options, iteratorError), end;
-             iterator != end;
-             iterator.increment(iteratorError))
+        std::wstring searchPattern = folderPath.wstring();
+        if (!searchPattern.empty() && searchPattern.back() != L'\\' && searchPattern.back() != L'/')
+        {
+            searchPattern.push_back(L'\\');
+        }
+        searchPattern.push_back(L'*');
+
+        WIN32_FIND_DATAW findData{};
+        const HANDLE searchHandle = FindFirstFileExW(searchPattern.c_str(),
+                                                     FindExInfoBasic,
+                                                     &findData,
+                                                     FindExSearchLimitToDirectories,
+                                                     nullptr,
+                                                     FIND_FIRST_EX_LARGE_FETCH);
+        if (searchHandle == INVALID_HANDLE_VALUE)
+        {
+            return false;
+        }
+
+        bool hasVisibleChild = false;
+        do
         {
             if (ShouldStop(stateView))
             {
-                return false;
+                break;
             }
 
-            if (iteratorError)
+            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0
+                && wcscmp(findData.cFileName, L".") != 0
+                && wcscmp(findData.cFileName, L"..") != 0
+                && (showHiddenFolders
+                    || (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) == 0))
             {
-                iteratorError.clear();
-                continue;
+                hasVisibleChild = true;
+                break;
             }
+        } while (FindNextFileW(searchHandle, &findData) != FALSE);
 
-            if (IsVisibleChildFolder(*iterator, showHiddenFolders))
-            {
-                return true;
-            }
+        FindClose(searchHandle);
+        return hasVisibleChild;
+    }
+
+    bool IsLowSeekPenaltyFixedVolume(const std::wstring& folderPath)
+    {
+        wchar_t volumePath[MAX_PATH]{};
+        if (GetVolumePathNameW(folderPath.c_str(), volumePath, static_cast<DWORD>(std::size(volumePath))) == FALSE
+            || GetDriveTypeW(volumePath) != DRIVE_FIXED
+            || volumePath[0] == L'\0'
+            || volumePath[1] != L':'
+            || volumePath[2] != L'\\'
+            || volumePath[3] != L'\0')
+        {
+            return false;
         }
 
-        return false;
+        std::wstring devicePath = L"\\\\.\\";
+        devicePath.append(volumePath, 2);
+        const HANDLE volumeHandle = CreateFileW(devicePath.c_str(),
+                                                0,
+                                                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                                nullptr,
+                                                OPEN_EXISTING,
+                                                0,
+                                                nullptr);
+        if (volumeHandle == INVALID_HANDLE_VALUE)
+        {
+            return false;
+        }
+
+        STORAGE_PROPERTY_QUERY query{};
+        query.PropertyId = StorageDeviceSeekPenaltyProperty;
+        query.QueryType = PropertyStandardQuery;
+        DEVICE_SEEK_PENALTY_DESCRIPTOR descriptor{};
+        DWORD bytesReturned{};
+        const BOOL queried = DeviceIoControl(volumeHandle,
+                                              IOCTL_STORAGE_QUERY_PROPERTY,
+                                              &query,
+                                              sizeof(query),
+                                              &descriptor,
+                                              sizeof(descriptor),
+                                              &bytesReturned,
+                                              nullptr);
+        CloseHandle(volumeHandle);
+        return queried != FALSE && descriptor.IncursSeekPenalty == FALSE;
+    }
+
+    struct ChildPresenceProbeBatch
+    {
+        std::vector<hyperbrowse::services::FolderTreeChild> results;
+        bool cancelled{};
+    };
+
+    ChildPresenceProbeBatch ProbeChildDirectoryPresenceRange(
+        const EnumerationSharedStateView& stateView,
+        const std::vector<std::wstring>& folderPaths,
+        std::size_t begin,
+        std::size_t end,
+        bool showHiddenFolders)
+    {
+        ChildPresenceProbeBatch batch;
+        batch.results.reserve(end - begin);
+        for (std::size_t index = begin; index < end; ++index)
+        {
+            if (ShouldStop(stateView))
+            {
+                batch.cancelled = true;
+                return batch;
+            }
+
+            const fs::path basePath(folderPaths[index]);
+            hyperbrowse::services::FolderTreeChild childPresence;
+            childPresence.path = folderPaths[index];
+            childPresence.hasChildren = HasVisibleChildDirectory(stateView, basePath, showHiddenFolders);
+            batch.results.push_back(std::move(childPresence));
+        }
+
+        return batch;
     }
 
     void EnumerateChildDirectories(const EnumerationSharedStateView& stateView,
@@ -236,30 +332,60 @@ namespace
             SHELLFLAGSTATE shellState{};
             SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
             const bool showHiddenFolders = shellState.fShowAllObjects != FALSE;
-            std::vector<hyperbrowse::services::FolderTreeChild> childPresenceResults;
-            childPresenceResults.reserve(folderPaths.size());
-            for (const std::wstring& folderPath : folderPaths)
+            if (folderPaths.size() < kMinimumParallelProbeCount
+                || !IsLowSeekPenaltyFixedVolume(folderPaths.front()))
             {
-                if (ShouldStop(stateView))
+                ChildPresenceProbeBatch batch = ProbeChildDirectoryPresenceRange(
+                    stateView,
+                    folderPaths,
+                    0,
+                    folderPaths.size(),
+                    showHiddenFolders);
+                if (batch.cancelled)
                 {
                     return;
                 }
 
-                const fs::path basePath(folderPath);
-                std::error_code existsError;
-                std::error_code directoryError;
-                const bool isReadableFolder = fs::exists(basePath, existsError)
-                    && !existsError
-                    && fs::is_directory(basePath, directoryError)
-                    && !directoryError;
-
-                hyperbrowse::services::FolderTreeChild childPresence;
-                childPresence.path = folderPath;
-                childPresence.hasChildren = isReadableFolder
-                    && HasVisibleChildDirectory(stateView, basePath, showHiddenFolders);
-                childPresenceResults.push_back(std::move(childPresence));
+                PostChildPresenceCompletion(stateView, std::move(batch.results));
+                return;
             }
 
+            const std::size_t splitIndex = (folderPaths.size() + 1) / 2;
+            auto firstBatch = std::async(std::launch::async,
+                                         [&stateView, &folderPaths, splitIndex, showHiddenFolders]()
+                                         {
+                                             return ProbeChildDirectoryPresenceRange(
+                                                 stateView,
+                                                 folderPaths,
+                                                 0,
+                                                 splitIndex,
+                                                 showHiddenFolders);
+                                         });
+            auto secondBatch = std::async(std::launch::async,
+                                          [&stateView, &folderPaths, splitIndex, showHiddenFolders]()
+                                          {
+                                              return ProbeChildDirectoryPresenceRange(
+                                                  stateView,
+                                                  folderPaths,
+                                                  splitIndex,
+                                                  folderPaths.size(),
+                                                  showHiddenFolders);
+                                          });
+            ChildPresenceProbeBatch firstResults = firstBatch.get();
+            ChildPresenceProbeBatch secondResults = secondBatch.get();
+            if (firstResults.cancelled || secondResults.cancelled)
+            {
+                return;
+            }
+
+            std::vector<hyperbrowse::services::FolderTreeChild> childPresenceResults;
+            childPresenceResults.reserve(folderPaths.size());
+            childPresenceResults.insert(childPresenceResults.end(),
+                                        std::make_move_iterator(firstResults.results.begin()),
+                                        std::make_move_iterator(firstResults.results.end()));
+            childPresenceResults.insert(childPresenceResults.end(),
+                                        std::make_move_iterator(secondResults.results.begin()),
+                                        std::make_move_iterator(secondResults.results.end()));
             PostChildPresenceCompletion(stateView, std::move(childPresenceResults));
         }
         catch (const std::exception& exception)
