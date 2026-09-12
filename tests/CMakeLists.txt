@@ -58,6 +58,7 @@ add_test(NAME HyperBrowseMultiViewerSettingsSmoke COMMAND HyperBrowseTests --mul
 add_test(NAME HyperBrowseItemNumberNavigationSmoke COMMAND HyperBrowseTests --item-number-navigation)
 add_test(NAME HyperBrowseUserMetadataSmoke COMMAND HyperBrowseTests --user-metadata)
 add_test(NAME HyperBrowseMenuMetricsSmoke COMMAND HyperBrowseTests --menu-metrics)
+add_test(NAME HyperBrowseResponsivePanelSmoke COMMAND HyperBrowseTests --responsive-panel)
 
 if(HYPERBROWSE_BUILD_FUZZ_TESTS)
     add_executable(HyperBrowseBoundaryFuzz

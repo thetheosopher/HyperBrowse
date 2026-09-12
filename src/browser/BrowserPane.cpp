@@ -551,7 +551,7 @@ namespace
             iconSize);
     }
 
-    HFONT CreateSystemUiFont(hyperbrowse::util::AppTextSize size)
+    HFONT CreateSystemUiFont(hyperbrowse::util::AppTextSize size, int dpi)
     {
         NONCLIENTMETRICSW metrics{};
         metrics.cbSize = sizeof(metrics);
@@ -559,6 +559,16 @@ namespace
         {
             metrics.lfMessageFont.lfCharSet = DEFAULT_CHARSET;
             metrics.lfMessageFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
+            HDC screenDc = GetDC(nullptr);
+            const int systemDpi = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
+            if (screenDc)
+            {
+                ReleaseDC(nullptr, screenDc);
+            }
+            metrics.lfMessageFont.lfHeight = MulDiv(
+                metrics.lfMessageFont.lfHeight,
+                hyperbrowse::util::EffectiveTextDpi(dpi),
+                (std::max)(1, systemDpi));
             metrics.lfMessageFont.lfHeight = static_cast<LONG>(std::lround(
                 static_cast<double>(metrics.lfMessageFont.lfHeight)
                 * hyperbrowse::util::AppTextSizeScale(size)));
@@ -568,7 +578,7 @@ namespace
         return nullptr;
     }
 
-    HFONT CreateSizedUiFont(int pointSize, int weight)
+    HFONT CreateSizedUiFont(int pointSize, int weight, int dpi)
     {
         NONCLIENTMETRICSW metrics{};
         metrics.cbSize = sizeof(metrics);
@@ -583,18 +593,17 @@ namespace
             wcscpy_s(logFont.lfFaceName, L"Segoe UI");
         }
 
-        HDC screenDc = GetDC(nullptr);
-        const int dpiY = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
-        if (screenDc)
-        {
-            ReleaseDC(nullptr, screenDc);
-        }
-
-        logFont.lfHeight = -MulDiv(pointSize, dpiY, 72);
+        logFont.lfHeight = -MulDiv(pointSize, hyperbrowse::util::EffectiveTextDpi(dpi), 72);
         logFont.lfWeight = weight;
         logFont.lfCharSet = DEFAULT_CHARSET;
         logFont.lfQuality = CLEARTYPE_NATURAL_QUALITY;
         return CreateFontIndirectW(&logFont);
+    }
+
+    int BrowserTextDpi(HWND window) noexcept
+    {
+        return hyperbrowse::util::EffectiveTextDpi(
+            window ? static_cast<int>(GetDpiForWindow(window)) : 96);
     }
 
     int ThumbnailRatingForItem(const hyperbrowse::services::UserMetadataStore* userMetadataStore,
@@ -765,6 +774,11 @@ namespace hyperbrowse::browser
         if (hwnd_ && metadataService_)
         {
             metadataService_->BindTargetWindow(hwnd_);
+        }
+        if (hwnd_)
+        {
+            RebuildThumbnailFonts();
+            RebuildD2DTextFormats();
         }
 
         return hwnd_ != nullptr;
@@ -1701,28 +1715,36 @@ namespace hyperbrowse::browser
         const bool showDetails = thumbnailDetailsVisible_;
 
         ThumbnailLayoutMetrics layout;
+        layout.textDpi = BrowserTextDpi(hwnd_);
+        const auto scaleTextDimension = [this, &layout](int value)
+        {
+            return MulDiv(
+                hyperbrowse::util::ScaleAppTextDimension(value, appTextSize_),
+                layout.textDpi,
+                96);
+        };
+        const int referenceLineHeight = MulDiv(
+            hyperbrowse::util::AppTextTreeRowHeight(appTextSize_),
+            layout.textDpi,
+            96);
         layout.cellPadding = compact ? std::max(6, previewWidth / 20) : std::max(10, previewWidth / 14);
         layout.previewInset = compact ? std::max(4, previewWidth / 32) : std::max(8, previewWidth / 20);
         layout.previewWidth = previewWidth;
         layout.previewHeight = previewHeight;
         layout.textInset = compact ? std::max(8, previewWidth / 22) : std::max(12, previewWidth / 16);
         layout.titleTopGap = showDetails
-            ? hyperbrowse::util::ScaleAppTextDimension(std::max(4, previewWidth / 56), appTextSize_)
+            ? scaleTextDimension(2)
             : 0;
         layout.titleHeight = showDetails
-            ? hyperbrowse::util::ScaleAppTextDimension(
-                std::clamp(previewWidth / (compact ? 7 : 6), compact ? 20 : 22, compact ? 25 : 28),
-                appTextSize_)
+            ? referenceLineHeight
             : 0;
         layout.metaTopGap = 0;
         layout.metaHeight = 0;
         layout.infoBottomInset = showDetails
-            ? hyperbrowse::util::ScaleAppTextDimension(compact ? 6 : 8, appTextSize_)
+            ? scaleTextDimension(2)
             : 0;
         layout.infoHeight = showDetails
-            ? hyperbrowse::util::ScaleAppTextDimension(
-                std::clamp(previewWidth / (compact ? 10 : 9), compact ? 16 : 18, compact ? 20 : 22),
-                appTextSize_)
+            ? referenceLineHeight
             : 0;
         layout.badgeHorizontalPadding = compact ? 6 : 8;
         layout.badgeGap = compact ? 6 : 10;
@@ -1731,17 +1753,17 @@ namespace hyperbrowse::browser
         layout.previewCornerRadius = compact ? 10 : 12;
         layout.loadingIconSize = std::clamp(previewWidth / 5, 18, 40);
         layout.titlePointSize = hyperbrowse::util::ScaleAppTextDimension(
-            std::clamp(previewWidth / 20, 9, 10),
+            std::clamp(previewWidth / 24, 8, 9),
             appTextSize_);
         layout.metaPointSize = hyperbrowse::util::ScaleAppTextDimension(
-            std::clamp(previewWidth / 24, 8, 9),
+            std::clamp(previewWidth / 28, 7, 8),
             appTextSize_);
         layout.statusPointSize = hyperbrowse::util::ScaleAppTextDimension(
-            std::clamp(previewWidth / 24, 8, 9),
+            std::clamp(previewWidth / 28, 7, 8),
             appTextSize_);
         const int horizontalInset = std::max(layout.previewInset, layout.textInset);
         layout.itemWidth = layout.previewWidth + (horizontalInset * 2);
-        layout.itemHeight = layout.previewHeight + (layout.previewInset * 2);
+        layout.itemHeight = layout.previewHeight + (layout.previewInset * (showDetails ? 1 : 2));
         if (showDetails)
         {
             layout.itemHeight += layout.titleTopGap
@@ -2534,7 +2556,7 @@ namespace hyperbrowse::browser
             DeleteObject(detailsListFont_);
         }
 
-        detailsListFont_ = CreateSystemUiFont(appTextSize_);
+        detailsListFont_ = CreateSystemUiFont(appTextSize_, BrowserTextDpi(hwnd_));
         ownsDetailsListFont_ = detailsListFont_ != nullptr;
         if (!detailsListFont_)
         {
@@ -2555,18 +2577,23 @@ namespace hyperbrowse::browser
 
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
 
-        thumbnailTitleFont_ = CreateSizedUiFont(layout.titlePointSize, FW_SEMIBOLD);
+        thumbnailTitleFont_ = CreateSizedUiFont(layout.titlePointSize, FW_SEMIBOLD, layout.textDpi);
         folderTitleFont_ = CreateSizedUiFont(
             std::clamp(layout.titlePointSize + hyperbrowse::util::ScaleAppTextDimension(3, appTextSize_),
                        hyperbrowse::util::ScaleAppTextDimension(14, appTextSize_),
                        hyperbrowse::util::ScaleAppTextDimension(20, appTextSize_)),
-            FW_SEMIBOLD);
-        thumbnailMetaFont_ = CreateSizedUiFont(layout.metaPointSize, FW_NORMAL);
-        thumbnailStatusFont_ = CreateSizedUiFont(layout.statusPointSize, FW_SEMIBOLD);
+            FW_SEMIBOLD,
+            layout.textDpi);
+        thumbnailMetaFont_ = CreateSizedUiFont(layout.metaPointSize, FW_NORMAL, layout.textDpi);
+        thumbnailStatusFont_ = CreateSizedUiFont(layout.statusPointSize, FW_SEMIBOLD, layout.textDpi);
         placeholderTitleFont_ = CreateSizedUiFont(
-            hyperbrowse::util::ScaleAppTextDimension(kPlaceholderTitlePointSize, appTextSize_), FW_SEMIBOLD);
+            hyperbrowse::util::ScaleAppTextDimension(kPlaceholderTitlePointSize, appTextSize_),
+            FW_SEMIBOLD,
+            layout.textDpi);
         placeholderBodyFont_ = CreateSizedUiFont(
-            hyperbrowse::util::ScaleAppTextDimension(kPlaceholderBodyPointSize, appTextSize_), FW_NORMAL);
+            hyperbrowse::util::ScaleAppTextDimension(kPlaceholderBodyPointSize, appTextSize_),
+            FW_NORMAL,
+            layout.textDpi);
 
         if (!thumbnailTitleFont_)
         {

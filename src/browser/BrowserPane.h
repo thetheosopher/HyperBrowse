@@ -172,6 +172,7 @@ namespace hyperbrowse::browser
 
         struct ThumbnailLayoutMetrics
         {
+            int textDpi{};
             int cellPadding{};
             int itemWidth{};
             int itemHeight{};

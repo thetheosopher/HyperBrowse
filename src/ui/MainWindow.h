@@ -133,7 +133,7 @@ namespace hyperbrowse::ui
         static constexpr UINT kQuickSendConfirmationDurationMs = 2500;
         static constexpr UINT kDisplaySurfaceRecoveryIntervalMs = 400;
         static constexpr int kDisplaySurfaceRecoveryRetryLimit = 8;
-        static constexpr int kActionStripHeight = 44;
+        static constexpr int kDefaultActionStripHeight = 44;
         static constexpr int kMinLeftPaneWidth = 250;
         static constexpr int kMinRightPaneWidth = 240;
         static constexpr int kSplitterWidth = 6;
@@ -255,6 +255,7 @@ namespace hyperbrowse::ui
         void ApplyRawJpegPairingSettings();
         void ApplyAppTextSize();
         void RebuildAppTextFonts();
+        void ApplyFolderTreeMetrics();
         void RebuildThemeBrushes();
         void ApplyTheme();
         void QueueMemoryPressureSample();
@@ -538,7 +539,7 @@ namespace hyperbrowse::ui
         void OpenCommandBarMenu(int index);
         ThemePalette GetThemePalette() const;
         void InitToolbarItems();
-        void LayoutToolbar();
+        void LayoutToolbar(const MenuMetrics& menuMetrics);
         void PaintToolbar(HDC hdc, const RECT& stripRect);
         bool EnsureD2DResources();
         void ResetD2DResources();
@@ -614,6 +615,7 @@ namespace hyperbrowse::ui
         HACCEL accelerators_{};
         int leftPaneWidth_{kDefaultLeftPaneWidth};
         int detailsPanelWidth_{340};
+        int actionStripHeight_{kDefaultActionStripHeight};
         std::array<CommandBarMenuButton, 5>& commandBarMenuButtons_;
         int commandBarHotIndex_{-1};
         int commandBarPressedIndex_{-1};

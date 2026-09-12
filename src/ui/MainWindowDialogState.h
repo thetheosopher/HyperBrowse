@@ -233,7 +233,6 @@ namespace hyperbrowse::ui::dialog_detail
         int formatCheckboxWidth{};
         int footnoteTop{};
         int footnoteHeight{};
-        int dividerTop{};
         int buttonTop{};
         int buttonRowHeight{};
         int minimumClientWidth{};

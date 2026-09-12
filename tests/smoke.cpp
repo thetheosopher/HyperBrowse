@@ -3813,17 +3813,17 @@ namespace
     {
         using hyperbrowse::util::AppTextSize;
 
-        Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Small) == 0.90f,
+        Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Small) == 0.84f,
                "Small app text size did not use the configured scale factor");
         Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Medium) == 1.0f,
                "Medium app text size did not preserve the baseline scale factor");
-        Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Large) == 1.15f,
+        Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Large) == 1.20f,
                "Large app text size did not use the configured scale factor");
         Expect(hyperbrowse::util::NormalizeAppTextSize(99) == AppTextSize::Medium,
                "Invalid app text size values did not normalize to Medium");
-        Expect(hyperbrowse::util::ScaleAppTextDimension(100, AppTextSize::Small) == 90,
+         Expect(hyperbrowse::util::ScaleAppTextDimension(100, AppTextSize::Small) == 84,
                "Small app text dimensions were not rounded as configured");
-        Expect(hyperbrowse::util::ScaleAppTextDimension(100, AppTextSize::Large) == 115,
+         Expect(hyperbrowse::util::ScaleAppTextDimension(100, AppTextSize::Large) == 120,
                "Large app text dimensions were not rounded as configured");
 
         ScopedRegistryDwordBackup appTextSizeBackup(kRegistryPath, kRegistryValueAppTextSize);
@@ -3976,17 +3976,17 @@ namespace
              "Dialog DPI helper did not scale dimensions to 144 DPI");
          Expect(ScaleDialogDimension(100, 192) == 200,
              "Dialog DPI helper did not scale dimensions to 192 DPI");
-         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Small, 96) == 72,
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Small, 96) == 67,
              "Dialog DPI helper did not preserve Small text sizing at 100% DPI");
          Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Medium, 96) == 80,
              "Dialog DPI helper changed Medium text sizing at 100% DPI");
-         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 96) == 92,
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 96) == 96,
              "Dialog DPI helper did not apply Large text sizing at 100% DPI");
-         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Small, 144) == 108,
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Small, 144) == 101,
              "Dialog DPI helper did not compose Small text sizing with 150% DPI");
-         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 144) == 138,
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 144) == 144,
              "Dialog DPI helper did not compose app text size with monitor DPI");
-         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 192) == 184,
+         Expect(ScaleDialogAppTextDimension(80, hyperbrowse::util::AppTextSize::Large, 192) == 192,
              "Dialog DPI helper did not compose Large text sizing with 200% DPI");
         }
 

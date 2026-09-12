@@ -2,6 +2,7 @@
 
 #include <d2d1.h>
 
+#include <algorithm>
 #include <string_view>
 
 #include "render/D2DRenderer.h"
@@ -123,16 +124,21 @@ namespace hyperbrowse::ui
             if (sortBrush)
             {
                 const int centerX = (state.sortButtonRect.left + state.sortButtonRect.right) / 2;
-                renderTarget->DrawLine(render::ToD2DPoint(static_cast<float>(centerX - 6), static_cast<float>(state.sortButtonRect.top + 6)),
-                                       render::ToD2DPoint(static_cast<float>(centerX + 6), static_cast<float>(state.sortButtonRect.top + 6)),
+                const int buttonSize = std::min(state.sortButtonRect.right - state.sortButtonRect.left,
+                                                state.sortButtonRect.bottom - state.sortButtonRect.top);
+                const int iconSize = std::max(14, std::min(24, buttonSize - 8));
+                const int lineGap = std::max(3, iconSize / 4);
+                const int centerY = (state.sortButtonRect.top + state.sortButtonRect.bottom) / 2;
+                renderTarget->DrawLine(render::ToD2DPoint(static_cast<float>(centerX - iconSize / 2), static_cast<float>(centerY - lineGap)),
+                                       render::ToD2DPoint(static_cast<float>(centerX + iconSize / 2), static_cast<float>(centerY - lineGap)),
                                        sortBrush.Get(),
                                        1.5f);
-                renderTarget->DrawLine(render::ToD2DPoint(static_cast<float>(centerX - 4), static_cast<float>(state.sortButtonRect.top + 10)),
-                                       render::ToD2DPoint(static_cast<float>(centerX + 4), static_cast<float>(state.sortButtonRect.top + 10)),
+                renderTarget->DrawLine(render::ToD2DPoint(static_cast<float>(centerX - (iconSize * 2) / 5), static_cast<float>(centerY)),
+                                       render::ToD2DPoint(static_cast<float>(centerX + (iconSize * 2) / 5), static_cast<float>(centerY)),
                                        sortBrush.Get(),
                                        1.5f);
-                renderTarget->DrawLine(render::ToD2DPoint(static_cast<float>(centerX - 2), static_cast<float>(state.sortButtonRect.top + 14)),
-                                       render::ToD2DPoint(static_cast<float>(centerX + 2), static_cast<float>(state.sortButtonRect.top + 14)),
+                renderTarget->DrawLine(render::ToD2DPoint(static_cast<float>(centerX - iconSize / 3), static_cast<float>(centerY + lineGap)),
+                                       render::ToD2DPoint(static_cast<float>(centerX + iconSize / 3), static_cast<float>(centerY + lineGap)),
                                        sortBrush.Get(),
                                        1.5f);
             }
@@ -210,17 +216,17 @@ namespace hyperbrowse::ui
                         6.0f);
 
             RECT labelRect = row.rowRect;
-            labelRect.left += 10;
+            labelRect.left += state.metrics.textHorizontalInset;
             labelRect.top += state.metrics.labelTopInset;
-            labelRect.right = row.shortcutRect.left - 10;
+            labelRect.right = row.shortcutRect.left - state.metrics.textHorizontalInset;
             labelRect.bottom = labelRect.top + state.metrics.labelHeight;
             const auto rowTextBrush = createBrush(rowState.navigationEnabled ? palette.text : palette.mutedText);
             drawText(row.displayLabel, summaryFormat, labelRect, rowTextBrush.Get());
 
             RECT metadataRect = row.rowRect;
-            metadataRect.left += 10;
+            metadataRect.left += state.metrics.textHorizontalInset;
             metadataRect.top += state.metrics.metadataTopInset;
-            metadataRect.right = row.copyRect.left - 10;
+            metadataRect.right = row.shortcutRect.left - state.metrics.textHorizontalInset;
             metadataRect.bottom -= state.metrics.metadataBottomInset;
             drawText(row.metadataLabel, bodyFormat, metadataRect, mutedBrush.Get());
 
@@ -328,7 +334,9 @@ namespace hyperbrowse::ui
             if (iconLibrary && iconDc)
             {
                 const COLORREF iconColor = hot || pressed ? palette.accentText : palette.mutedText;
-                const int iconSize = 14;
+                const int buttonSize = std::min(state.sortButtonRect.right - state.sortButtonRect.left,
+                                                state.sortButtonRect.bottom - state.sortButtonRect.top);
+                const int iconSize = std::max(16, std::min(24, buttonSize - 8));
                 const int iconX = state.sortButtonRect.left
                     + ((state.sortButtonRect.right - state.sortButtonRect.left) - iconSize) / 2;
                 const int iconY = state.sortButtonRect.top
@@ -425,9 +433,9 @@ namespace hyperbrowse::ui
             DeleteObject(rowBrush);
 
             RECT labelRect = row.rowRect;
-            labelRect.left += 10;
+            labelRect.left += state.metrics.textHorizontalInset;
             labelRect.top += state.metrics.labelTopInset;
-            labelRect.right = row.shortcutRect.left - 10;
+            labelRect.right = row.shortcutRect.left - state.metrics.textHorizontalInset;
             labelRect.bottom = labelRect.top + state.metrics.labelHeight;
             render::DrawGdiText(hdc,
                                 resolvedSummaryFont,
@@ -439,9 +447,9 @@ namespace hyperbrowse::ui
                                 currentRowBackground);
 
             RECT metadataRect = row.rowRect;
-            metadataRect.left += 10;
+            metadataRect.left += state.metrics.textHorizontalInset;
             metadataRect.top += state.metrics.metadataTopInset;
-            metadataRect.right = row.copyRect.left - 10;
+            metadataRect.right = row.shortcutRect.left - state.metrics.textHorizontalInset;
             metadataRect.bottom -= state.metrics.metadataBottomInset;
             render::DrawGdiText(hdc,
                                 resolvedBodyFont,

@@ -189,8 +189,6 @@ namespace
     constexpr std::uint64_t kMemoryPressureRecoverUsedPercent = 70ULL;
     constexpr unsigned int kMemoryPressureRecoverySamplesRequired = 2;
 
-    constexpr int kActionStripPaddingX = 8;
-    constexpr int kActionStripPaddingY = 6;
     constexpr int kToolbarItemSize = 32;
     constexpr int kToolbarIconSize = 18;
     constexpr int kToolbarDropdownChevronSize = 10;
@@ -221,19 +219,18 @@ namespace
     constexpr int kQuickAccessPanelHeaderHeight = 18;
     constexpr int kQuickAccessPanelTopGap = 12;
     constexpr int kQuickAccessPanelRowHeight = 40;
-    constexpr int kQuickAccessPanelRowGap = 6;
+    constexpr int kQuickAccessPanelRowGap = 2;
     constexpr int kQuickAccessPanelButtonWidth = 56;
     constexpr int kQuickAccessPanelButtonGap = 8;
     constexpr int kQuickAccessPanelButtonRightInset = 8;
     constexpr int kQuickAccessPanelRemoveButtonWidth = 24;
     constexpr int kQuickAccessPanelHeaderVerticalPadding = 4;
-    constexpr int kQuickAccessPanelRowTextTopInset = 5;
-    constexpr int kQuickAccessPanelRowTextGap = 4;
-    constexpr int kQuickAccessPanelRowBottomInset = 6;
+    constexpr int kQuickAccessPanelRowTextTopInset = 2;
+    constexpr int kQuickAccessPanelRowTextGap = 2;
+    constexpr int kQuickAccessPanelRowBottomInset = 3;
     constexpr int kQuickAccessPanelButtonVerticalInset = 6;
     constexpr int kQuickAccessPanelShortcutWidth = 24;
     constexpr int kQuickAccessPanelShortcutGap = 8;
-    constexpr int kQuickAccessPanelSortButtonSize = 18;
     constexpr int kQuickAccessPanelSortButtonGap = 6;
     constexpr int kQuickAccessPanelScrollBarGap = 6;
     constexpr UINT kQuickAccessShortcutEditBaseId = 5200;
@@ -397,7 +394,6 @@ namespace
     constexpr int kFileAssociationsDialogSelectAllControlId = 363;
     constexpr int kFileAssociationsDialogClearAllControlId = 364;
     constexpr int kFileAssociationsDialogFootnoteControlId = 365;
-    constexpr int kFileAssociationsDialogDividerControlId = 366;
     constexpr int kFileAssociationsDialogDefaultAppsControlId = 367;
     constexpr int kFileAssociationsDialogFormatBaseControlId = 380;
     constexpr int kFileAssociationsDialogButtonWidth = 88;
@@ -464,12 +460,11 @@ namespace
         return true;
     }
 
-    std::wstring BuildQuickAccessDestinationMetadata(std::wstring_view folderPath, bool favorite, bool currentFolder)
+    std::wstring BuildQuickAccessDestinationMetadata(std::wstring_view folderPath, bool currentFolder)
     {
-        std::wstring metadata = favorite ? L"Quick action destination" : L"Recent destination";
+        std::wstring metadata;
 
         std::uintmax_t imageCount = 0;
-        metadata.append(L" | ");
         if (TryCountSupportedImagesInFolder(folderPath, &imageCount))
         {
             metadata.append(FormatQuickAccessImageCount(imageCount));
@@ -479,7 +474,10 @@ namespace
             metadata.append(L"folder unavailable");
         }
 
-        metadata.append(currentFolder ? L" | Current folder" : L" | Drop here");
+        if (currentFolder)
+        {
+            metadata.append(L" | Current folder");
+        }
         return metadata;
     }
 
@@ -1050,38 +1048,50 @@ namespace
                                       minimumHeight);
     }
 
-    QuickAccessPanelMetrics BuildQuickAccessPanelMetrics(HFONT summaryFont, HFONT bodyFont)
+    QuickAccessPanelMetrics BuildQuickAccessPanelMetrics(HFONT summaryFont,
+                                                         HFONT bodyFont,
+                                                         const hyperbrowse::ui::MenuMetrics& sizing)
     {
         const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         const HFONT effectiveSummaryFont = summaryFont ? summaryFont : defaultGuiFont;
         const HFONT effectiveBodyFont = bodyFont ? bodyFont : defaultGuiFont;
 
         QuickAccessPanelMetrics metrics;
-        metrics.headerHeight = kQuickAccessPanelHeaderHeight;
-        metrics.rowHeight = kQuickAccessPanelRowHeight;
-        metrics.labelTopInset = kQuickAccessPanelRowTextTopInset;
-        metrics.labelHeight = 15;
-        metrics.metadataTopInset = 21;
-        metrics.metadataBottomInset = kQuickAccessPanelRowBottomInset;
-        metrics.buttonHeight = kTextInputButtonHeight;
-        metrics.buttonTopInset = kQuickAccessPanelButtonVerticalInset;
-        metrics.rowGap = kQuickAccessPanelRowGap;
-        metrics.buttonWidth = kQuickAccessPanelButtonWidth;
-        metrics.buttonGap = kQuickAccessPanelButtonGap;
-        metrics.buttonRightInset = kQuickAccessPanelButtonRightInset;
-        metrics.removeButtonWidth = kQuickAccessPanelRemoveButtonWidth;
-        metrics.shortcutWidth = kQuickAccessPanelShortcutWidth;
-        metrics.shortcutGap = kQuickAccessPanelShortcutGap;
-        metrics.headerHeight = std::max(kQuickAccessPanelHeaderHeight,
-                                        MeasureSingleLineTextHeight(effectiveSummaryFont, kQuickAccessPanelHeaderHeight)
-                                            + kQuickAccessPanelHeaderVerticalPadding);
+        const auto scale = [&sizing](int value)
+        {
+            return sizing.ScaleDip(value);
+        };
+        metrics.headerHeight = scale(kQuickAccessPanelHeaderHeight);
+        metrics.rowHeight = scale(kQuickAccessPanelRowHeight);
+        metrics.textHorizontalInset = scale(10);
+        metrics.labelTopInset = scale(kQuickAccessPanelRowTextTopInset);
+        metrics.labelHeight = scale(15);
+        metrics.metadataTopInset = scale(21);
+        metrics.metadataBottomInset = scale(kQuickAccessPanelRowBottomInset);
+        metrics.buttonHeight = scale(kTextInputButtonHeight);
+        metrics.buttonTopInset = scale(kQuickAccessPanelButtonVerticalInset);
+        metrics.rowGap = scale(kQuickAccessPanelRowGap);
+        metrics.buttonWidth = scale(kQuickAccessPanelButtonWidth);
+        metrics.buttonGap = scale(kQuickAccessPanelButtonGap);
+        metrics.buttonRightInset = scale(kQuickAccessPanelButtonRightInset);
+        metrics.removeButtonWidth = scale(kQuickAccessPanelRemoveButtonWidth);
+        metrics.shortcutWidth = scale(kQuickAccessPanelShortcutWidth);
+        metrics.shortcutGap = scale(kQuickAccessPanelShortcutGap);
+        metrics.headerHeight = std::max(metrics.headerHeight,
+                                        MeasureSingleLineTextHeight(effectiveSummaryFont, 0)
+                                            + scale(kQuickAccessPanelHeaderVerticalPadding));
+        metrics.headerHeight = std::max(metrics.headerHeight, scale(28));
         metrics.labelHeight = MeasureSingleLineTextHeight(effectiveSummaryFont, metrics.labelHeight);
-        const int metadataHeight = MeasureSingleLineTextHeight(effectiveBodyFont, 14);
-        metrics.metadataTopInset = metrics.labelTopInset + metrics.labelHeight + kQuickAccessPanelRowTextGap;
-        metrics.rowHeight = std::max(kQuickAccessPanelRowHeight,
+        metrics.buttonHeight = std::max(metrics.buttonHeight, metrics.labelHeight);
+        const int metadataHeight = MeasureSingleLineTextHeight(effectiveBodyFont, scale(14));
+        metrics.metadataTopInset = metrics.labelTopInset + metrics.labelHeight + scale(kQuickAccessPanelRowTextGap);
+        metrics.rowHeight = std::max(metrics.rowHeight,
                                      metrics.metadataTopInset + metadataHeight + metrics.metadataBottomInset);
-        metrics.buttonHeight = std::min(kTextInputButtonHeight,
-                                        std::max(0, metrics.rowHeight - (kQuickAccessPanelButtonVerticalInset * 2)));
+        metrics.buttonWidth = std::max(metrics.buttonWidth,
+                                       std::max(MeasureDialogButtonWidth(effectiveBodyFont, L"Copy", 0),
+                                                MeasureDialogButtonWidth(effectiveBodyFont, L"Move", 0)));
+        metrics.buttonHeight = std::min(metrics.buttonHeight,
+                        std::max(0, metrics.rowHeight - (metrics.buttonTopInset * 2)));
         metrics.buttonTopInset = std::max(0, (metrics.rowHeight - metrics.buttonHeight) / 2);
         return metrics;
     }
@@ -1125,9 +1135,21 @@ namespace
         return std::max(ScaleAboutDialogDimension(180, state), textWidth + ScaleAboutDialogDimension(40, state));
     }
 
-    int MeasureAboutDialogClientHeight(const AboutDialogState& state)
+    int MeasureAboutDialogFooterActionWidth(const AboutDialogState& state);
+
+    int MeasureAboutDialogClientWidth(const AboutDialogState& state)
     {
-        const int clientWidth = ScaleAboutDialogDimension(kAboutDialogWidth, state);
+        const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
+        const int minimumFooterTextWidth = ScaleAboutDialogDimension(200, state);
+        const int minimumWidth = margin * 2
+            + MeasureAboutDialogFooterActionWidth(state)
+            + ScaleAboutDialogDimension(20, state)
+            + minimumFooterTextWidth;
+        return std::max(ScaleAboutDialogDimension(kAboutDialogWidth, state), minimumWidth);
+    }
+
+    int MeasureAboutDialogClientHeight(const AboutDialogState& state, int clientWidth)
+    {
         const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
         const int brandArtSize = ScaleAboutDialogDimension(kAboutDialogBrandArtSize, state);
         const int contentRight = clientWidth - margin;
@@ -1136,7 +1158,7 @@ namespace
         const int iconSize = ScaleAboutDialogDimension(48, state);
         const int textLeft = iconLeft + iconSize + ScaleAboutDialogDimension(20, state);
         const int textRight = artLeft - ScaleAboutDialogDimension(28, state);
-        const int textWidth = std::max(ScaleAboutDialogDimension(320, state), textRight - textLeft);
+        const int textWidth = std::max(1, textRight - textLeft);
 
         const int titleTop = margin - ScaleAboutDialogDimension(2, state);
         const int titleHeight = MeasureTextBlockHeight(state.titleFont, state.title, textWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(44, state));
@@ -1149,7 +1171,7 @@ namespace
                                           std::max(artFrameBottom + margin - ScaleAboutDialogDimension(8, state),
                                                    introTop + introHeight + margin - ScaleAboutDialogDimension(8, state)));
 
-        const int bodyWidth = clientWidth - (margin * 2);
+        const int bodyWidth = std::max(1, clientWidth - (margin * 2));
         const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(28, state));
         const int bodyTextHeight = MeasureTextBlockHeight(state.bodyFont, state.bodyContent, bodyWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
         const int bodyHeight = ScaleAboutDialogDimension(24, state) + headingHeight + ScaleAboutDialogDimension(12, state) + bodyTextHeight + ScaleAboutDialogDimension(26, state);
@@ -1158,7 +1180,8 @@ namespace
             + state.supportButtonWidth
             + ScaleAboutDialogDimension(kAboutDialogButtonWidth, state)
             + ScaleAboutDialogDimension(kAboutDialogButtonGap * 2, state);
-        const int footerTextWidth = std::max(ScaleAboutDialogDimension(320, state), clientWidth - (margin * 2) - footerActionWidth - ScaleAboutDialogDimension(20, state));
+        const int footerTextWidth = std::max(ScaleAboutDialogDimension(200, state),
+                             clientWidth - (margin * 2) - footerActionWidth - ScaleAboutDialogDimension(20, state));
         const int footerTextHeight = MeasureTextBlockHeight(state.footerFont, state.footer, footerTextWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
         const int footerHeight = std::max(ScaleAboutDialogDimension(kAboutDialogFooterHeight, state),
                                           std::max(footerTextHeight + ScaleAboutDialogDimension(34, state),
@@ -1178,7 +1201,7 @@ namespace
     int MeasureAboutDialogFooterTextWidth(const AboutDialogState& state, int clientWidth)
     {
         const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
-        return std::max(ScaleAboutDialogDimension(320, state),
+        return std::max(ScaleAboutDialogDimension(200, state),
                         clientWidth - (margin * 2) - MeasureAboutDialogFooterActionWidth(state) - ScaleAboutDialogDimension(20, state));
     }
 
@@ -3185,11 +3208,29 @@ namespace
                     SendMessageW(state->okButton, WM_SETFONT, reinterpret_cast<WPARAM>(state->bodyFont), TRUE);
                 }
                 const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
-                if (suggested)
+                const int aboutClientWidth = MeasureAboutDialogClientWidth(*state);
+                const int aboutClientHeight = std::max(ScaleAboutDialogDimension(kAboutDialogHeight, *state),
+                                                        MeasureAboutDialogClientHeight(*state, aboutClientWidth));
+                RECT desiredFrame{0, 0, aboutClientWidth, aboutClientHeight};
+                AdjustDialogWindowRectForDpi(
+                    &desiredFrame,
+                    WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+                    FALSE,
+                    WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                    state->dpi);
+
+                RECT adjusted = suggested ? *suggested : RECT{};
+                if (!suggested)
                 {
-                    const RECT adjusted = ClampDialogFrameToWorkArea(
-                        *suggested,
-                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
+                    GetWindowRect(hwnd, &adjusted);
+                }
+                adjusted.right = adjusted.left + (desiredFrame.right - desiredFrame.left);
+                adjusted.bottom = adjusted.top + (desiredFrame.bottom - desiredFrame.top);
+                adjusted = ClampDialogFrameToWorkArea(
+                    adjusted,
+                    MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
+                if (adjusted.right > adjusted.left && adjusted.bottom > adjusted.top)
+                {
                     SetWindowPos(hwnd,
                                  nullptr,
                                  adjusted.left,
@@ -6347,13 +6388,39 @@ namespace
                                                         metrics.contentWidth,
                                                         DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
                                                         lineHeight);
-        metrics.dividerTop = metrics.footnoteTop + metrics.footnoteHeight + metrics.actionGap;
         metrics.buttonRowHeight = std::max(metrics.buttonHeight, metrics.defaultAppsButtonHeight);
-        metrics.buttonTop = metrics.dividerTop + metrics.actionGap;
+        metrics.buttonTop = metrics.footnoteTop + metrics.footnoteHeight + metrics.actionGap * 2;
         metrics.minimumClientHeight = metrics.buttonTop
             + metrics.buttonRowHeight
             + metrics.margin;
         return metrics;
+    }
+
+    int MeasureFileAssociationsDialogClientWidth(const FileAssociationsDialogState& state,
+                                                 std::size_t formatCount)
+    {
+        const int defaultWidth = ScaleDialogAppTextDimension(
+            kFileAssociationsDialogWidth,
+            state.appTextSize,
+            state.dpi);
+        const FileAssociationsDialogLayoutMetrics metrics = BuildFileAssociationsDialogLayoutMetrics(
+            defaultWidth,
+            state,
+            formatCount);
+        return std::max(defaultWidth, metrics.minimumClientWidth);
+    }
+
+    int MeasureFileAssociationsDialogClientHeight(const FileAssociationsDialogState& state,
+                                                  int clientWidth,
+                                                  std::size_t formatCount)
+    {
+        const FileAssociationsDialogLayoutMetrics metrics = BuildFileAssociationsDialogLayoutMetrics(
+            clientWidth,
+            state,
+            formatCount);
+        return std::max(
+            ScaleDialogAppTextDimension(kFileAssociationsDialogHeight, state.appTextSize, state.dpi),
+            metrics.minimumClientHeight);
     }
 
     void LayoutFileAssociationsDialogControls(HWND hwnd, const FileAssociationsDialogState& state)
@@ -6368,7 +6435,6 @@ namespace
             state.formatCheckWindows.size());
         const int contentWidth = metrics.contentWidth;
         const int buttonRowTop = std::max(metrics.buttonTop, clientHeight - metrics.margin - metrics.buttonRowHeight);
-        const int dividerTop = std::max(metrics.dividerTop, buttonRowTop - metrics.actionGap);
         const int buttonTop = buttonRowTop + (metrics.buttonRowHeight - metrics.buttonHeight) / 2;
         const int cancelLeft = clientWidth - metrics.margin - ScaleDialogAppTextDimension(kFileAssociationsDialogButtonWidth, state.appTextSize, state.dpi);
         const int okLeft = cancelLeft - metrics.actionGap - ScaleDialogAppTextDimension(kFileAssociationsDialogButtonWidth, state.appTextSize, state.dpi);
@@ -6444,14 +6510,8 @@ namespace
                        metrics.margin,
                        metrics.footnoteTop,
                        contentWidth,
-                       std::max(metrics.footnoteHeight, dividerTop - metrics.footnoteTop - metrics.actionGap),
+                       metrics.footnoteHeight,
                        TRUE);
-        }
-
-        const HWND dividerWindow = GetDlgItem(hwnd, kFileAssociationsDialogDividerControlId);
-        if (dividerWindow)
-        {
-            MoveWindow(dividerWindow, metrics.margin, dividerTop, contentWidth, ScaleDialogAppTextDimension(2, state.appTextSize, state.dpi), TRUE);
         }
 
         if (state.okButton)
@@ -6817,19 +6877,6 @@ namespace
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogFootnoteControlId)),
                 hInstance,
                 nullptr);
-            const HWND dividerWindow = CreateWindowExW(
-                0,
-                L"STATIC",
-                nullptr,
-                WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
-                0,
-                0,
-                100,
-                2,
-                hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kFileAssociationsDialogDividerControlId)),
-                hInstance,
-                nullptr);
             state->okButton = CreateWindowExW(
                 0,
                 L"BUTTON",
@@ -6860,7 +6907,6 @@ namespace
             const HWND windows[] = {
                 instructionWindow,
                 footnoteWindow,
-                dividerWindow,
             };
             for (HWND window : windows)
             {
@@ -6925,18 +6971,6 @@ namespace
             {
                 state->dpi = std::max<UINT>(96, HIWORD(wParam));
                 const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
-                if (suggestedRect)
-                {
-                    const RECT adjustedRect = ClampDialogFrameToWorkArea(
-                        *suggestedRect,
-                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
-                    SetWindowPos(hwnd, nullptr,
-                                 adjustedRect.left,
-                                 adjustedRect.top,
-                                 adjustedRect.right - adjustedRect.left,
-                                 adjustedRect.bottom - adjustedRect.top,
-                                 SWP_NOZORDER | SWP_NOACTIVATE);
-                }
                 DeleteFontIfOwned(state->bodyFont);
                 state->bodyFont = CreateDialogUiFont(10, FW_NORMAL, state->appTextSize, state->dpi);
                 const HFONT font = state->bodyFont
@@ -6949,6 +6983,38 @@ namespace
                                      return TRUE;
                                  },
                                  reinterpret_cast<LPARAM>(font));
+
+                const std::size_t formatCount = state->formatCheckWindows.size();
+                const int clientWidth = MeasureFileAssociationsDialogClientWidth(*state, formatCount);
+                const int clientHeight = MeasureFileAssociationsDialogClientHeight(*state, clientWidth, formatCount);
+                RECT desiredFrame{0, 0, clientWidth, clientHeight};
+                AdjustDialogWindowRectForDpi(
+                    &desiredFrame,
+                    WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
+                    FALSE,
+                    WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                    state->dpi);
+
+                RECT adjustedRect = suggestedRect ? *suggestedRect : RECT{};
+                if (!suggestedRect)
+                {
+                    GetWindowRect(hwnd, &adjustedRect);
+                }
+                adjustedRect.right = adjustedRect.left + (desiredFrame.right - desiredFrame.left);
+                adjustedRect.bottom = adjustedRect.top + (desiredFrame.bottom - desiredFrame.top);
+                adjustedRect = ClampDialogFrameToWorkArea(
+                    adjustedRect,
+                    MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
+                if (adjustedRect.right > adjustedRect.left && adjustedRect.bottom > adjustedRect.top)
+                {
+                    SetWindowPos(hwnd,
+                                 nullptr,
+                                 adjustedRect.left,
+                                 adjustedRect.top,
+                                 adjustedRect.right - adjustedRect.left,
+                                 adjustedRect.bottom - adjustedRect.top,
+                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                }
                 LayoutFileAssociationsDialogControls(hwnd, *state);
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
@@ -7142,13 +7208,10 @@ namespace
         state.initialDefaults = initialDefaults;
         state.checkedDefaults = initialDefaults;
 
-        const FileAssociationsDialogLayoutMetrics layoutMetrics = BuildFileAssociationsDialogLayoutMetrics(
-            ScaleDialogAppTextDimension(kFileAssociationsDialogWidth, state.appTextSize, state.dpi),
-            state,
-            hyperbrowse::decode::SupportedFileTypes().size());
-        RECT windowRect{0, 0,
-                        std::max(ScaleDialogAppTextDimension(kFileAssociationsDialogWidth, state.appTextSize, state.dpi), layoutMetrics.minimumClientWidth),
-                        std::max(ScaleDialogAppTextDimension(kFileAssociationsDialogHeight, state.appTextSize, state.dpi), layoutMetrics.minimumClientHeight)};
+        const std::size_t formatCount = hyperbrowse::decode::SupportedFileTypes().size();
+        const int clientWidth = MeasureFileAssociationsDialogClientWidth(state, formatCount);
+        const int clientHeight = MeasureFileAssociationsDialogClientHeight(state, clientWidth, formatCount);
+        RECT windowRect{0, 0, clientWidth, clientHeight};
         AdjustDialogWindowRectForDpi(&windowRect,
                                      WS_CAPTION | WS_SYSMENU | WS_POPUP,
                                      FALSE,
@@ -10461,6 +10524,7 @@ namespace hyperbrowse::ui
             ImageList_SetBkColor(treeImageList_, CLR_NONE);
             TreeView_SetImageList(treePane_, treeImageList_, TVSIL_NORMAL);
         }
+        ApplyFolderTreeMetrics();
 
         browserPaneController_->SetModel(browserModel_.get());
         browserPaneController_->SetViewMode(browserMode_ == BrowserMode::Thumbnails
@@ -11349,8 +11413,12 @@ namespace hyperbrowse::ui
         const RECT previousDetailsPanelRect = detailsPanelRect_;
         RECT client{};
         GetClientRect(hwnd_, &client);
+        const MenuMetrics menuMetrics = MakeMenuMetrics(
+            appTextSize_,
+            hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u);
+        actionStripHeight_ = menuMetrics.CommandBarHeight();
 
-        const int statusHeight = std::min(kStatusStripHeight, std::max(0, static_cast<int>(client.bottom - client.top) - kActionStripHeight));
+        const int statusHeight = std::min(kStatusStripHeight, std::max(0, static_cast<int>(client.bottom - client.top) - actionStripHeight_));
 
         const int clientWidth = client.right - client.left;
         const int detailsSplitterWidth = detailsStripVisible_ ? kSplitterWidth : 0;
@@ -11361,8 +11429,8 @@ namespace hyperbrowse::ui
         const int desiredDetailsPanelWidth = detailsStripVisible_
             ? std::clamp(detailsPanelWidth_, minDetailsPanelWidth, maxDetailsPanelWidth)
             : 0;
-        const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top) - statusHeight - kActionStripHeight);
-        const int contentTop = kActionStripHeight;
+        const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top) - statusHeight - actionStripHeight_);
+        const int contentTop = actionStripHeight_;
 
         const int maxLeft = std::max(kMinLeftPaneWidth,
                                      clientWidth - desiredDetailsPanelWidth - kMinRightPaneWidth - kSplitterWidth - detailsSplitterWidth);
@@ -11434,14 +11502,16 @@ namespace hyperbrowse::ui
                 DetailsPanelLayout::Input layoutInput;
                 layoutInput.panelRect = detailsPanelRect_;
                 layoutInput.margin = kDetailsPanelMargin;
-                layoutInput.tabHeight = kDetailsPanelTabHeight;
-                layoutInput.tabGap = kDetailsPanelTabGap;
-                layoutInput.tabButtonGap = kDetailsPanelTabButtonGap;
-                layoutInput.tabButtonHorizontalPadding = kDetailsPanelTabButtonHorizontalPadding;
-                layoutInput.tabMinButtonWidth = kDetailsPanelTabMinButtonWidth;
-                layoutInput.closeButtonSize = kDetailsPanelCloseButtonSize;
-                layoutInput.closeButtonMargin = kDetailsPanelCloseButtonMargin;
-                layoutInput.closeButtonGap = kDetailsPanelCloseButtonGap;
+                layoutInput.tabHeight = std::max(
+                    menuMetrics.ScaleDip(kDetailsPanelTabHeight),
+                    MeasureSingleLineTextHeight(tabFont, 0) + menuMetrics.ScaleDip(8));
+                layoutInput.tabGap = menuMetrics.ScaleDip(kDetailsPanelTabGap);
+                layoutInput.tabButtonGap = menuMetrics.ScaleDip(kDetailsPanelTabButtonGap);
+                layoutInput.tabButtonHorizontalPadding = menuMetrics.ScaleDip(kDetailsPanelTabButtonHorizontalPadding);
+                layoutInput.tabMinButtonWidth = menuMetrics.ScaleDip(kDetailsPanelTabMinButtonWidth);
+                layoutInput.closeButtonSize = menuMetrics.ScaleDip(kDetailsPanelCloseButtonSize);
+                layoutInput.closeButtonMargin = menuMetrics.ScaleDip(kDetailsPanelCloseButtonMargin);
+                layoutInput.closeButtonGap = menuMetrics.ScaleDip(kDetailsPanelCloseButtonGap);
                 layoutInput.tabLabelWidth = maxLabelWidth;
                 layoutInput.fileDetailsActive = activeRightPaneTab_ == RightPaneTab::FileDetails;
 
@@ -11452,16 +11522,16 @@ namespace hyperbrowse::ui
                                                                       title,
                                                                       innerWidth,
                                                                       DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                                      22);
+                                                                      menuMetrics.ScaleDip(22));
                     layoutInput.summaryHeight = detailsPanelSummaryText_.empty()
                         ? 0
                         : MeasureTextBlockHeight(detailsPanelSummaryFont_,
                                                  detailsPanelSummaryText_,
                                                  innerWidth,
                                                  DT_LEFT | DT_NOPREFIX | DT_WORDBREAK,
-                                                 18);
-                    layoutInput.histogramHeight = kDetailsPanelHistogramHeight;
-                    layoutInput.textTopGap = kDetailsPanelTextTopGap;
+                                                 menuMetrics.ScaleDip(18));
+                    layoutInput.histogramHeight = menuMetrics.ScaleDip(kDetailsPanelHistogramHeight);
+                    layoutInput.textTopGap = menuMetrics.ScaleDip(kDetailsPanelTextTopGap);
                     layoutInput.histogramVisible = detailsPanelHistogramVisible_ || detailsPanelHistogramLoading_;
                 }
 
@@ -11529,14 +11599,14 @@ namespace hyperbrowse::ui
             SendMessageW(tooltipControl_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&toolInfo));
         }
 
-        LayoutToolbar();
+        LayoutToolbar(menuMetrics);
 
-        RECT splitterRect{leftPaneWidth_, kActionStripHeight, leftPaneWidth_ + kSplitterWidth, client.bottom};
+        RECT splitterRect{leftPaneWidth_, actionStripHeight_, leftPaneWidth_ + kSplitterWidth, client.bottom};
         InvalidateRect(hwnd_, &splitterRect, FALSE);
         if (previousLeftPaneWidth != leftPaneWidth_)
         {
             RECT previousSplitterRect{previousLeftPaneWidth,
-                                      kActionStripHeight,
+                                      actionStripHeight_,
                                       previousLeftPaneWidth + kSplitterWidth,
                                       client.bottom};
             InvalidateRect(hwnd_, &previousSplitterRect, FALSE);
@@ -11546,7 +11616,7 @@ namespace hyperbrowse::ui
             if (!IsRectEmpty(&detailsPanelRect_))
             {
                 RECT detailsSplitterRect{detailsPanelRect_.left - kSplitterWidth,
-                                         kActionStripHeight,
+                                         actionStripHeight_,
                                          detailsPanelRect_.left,
                                          client.bottom};
                 InvalidateRect(hwnd_, &detailsSplitterRect, FALSE);
@@ -11556,7 +11626,7 @@ namespace hyperbrowse::ui
             if (!IsRectEmpty(&previousDetailsPanelRect))
             {
                 RECT previousDetailsSplitterRect{previousDetailsPanelRect.left - kSplitterWidth,
-                                                 kActionStripHeight,
+                                                 actionStripHeight_,
                                                  previousDetailsPanelRect.left,
                                                  client.bottom};
                 InvalidateRect(hwnd_, &previousDetailsSplitterRect, FALSE);
@@ -11757,8 +11827,8 @@ namespace hyperbrowse::ui
         const int clientWidth = std::max(0, static_cast<int>(client.right - client.left));
         const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top));
         const int statusHeight = std::min(kStatusStripHeight,
-                                          std::max(0, clientHeight - kActionStripHeight));
-        const int contentHeight = std::max(0, clientHeight - statusHeight - kActionStripHeight);
+                                          std::max(0, clientHeight - actionStripHeight_));
+        const int contentHeight = std::max(0, clientHeight - statusHeight - actionStripHeight_);
         if (clientWidth <= 0 || contentHeight <= 0)
         {
             ShowWindow(quickSendConfirmationToastWindow_, SW_HIDE);
@@ -11776,7 +11846,7 @@ namespace hyperbrowse::ui
             hyperbrowse::util::ScaleAppTextDimension(64, appTextSize_));
         const int toastHeight = std::min(requestedToastHeight, contentHeight);
         const int toastLeft = std::max(scaleForDpi(8), (clientWidth - toastWidth) / 2);
-        const int toastTop = kActionStripHeight
+        const int toastTop = actionStripHeight_
             + std::min(scaleForDpi(16), std::max(0, contentHeight - toastHeight));
         const int cornerRadius = std::min(scaleForDpi(16), std::max(2, toastHeight / 2));
         HRGN region = CreateRoundRectRgn(0,
@@ -12616,9 +12686,12 @@ namespace hyperbrowse::ui
             nextOffset += rowRect.bottom - quickAccessDestinationViewportRect_.bottom;
         }
 
-        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(
+            detailsPanelSummaryFont_,
+            detailsPanelBodyFont_,
+            MakeMenuMetrics(appTextSize_, hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u));
         const int totalRowsHeight = static_cast<int>(quickAccessDestinationRows_.size()) * metrics.rowHeight
-            + static_cast<int>((quickAccessDestinationRows_.size() - 1) * kQuickAccessPanelRowGap);
+            + static_cast<int>((quickAccessDestinationRows_.size() - 1) * metrics.rowGap);
         const int maximumScrollOffset = std::max(
             0,
             totalRowsHeight - static_cast<int>(quickAccessDestinationViewportRect_.bottom
@@ -13177,6 +13250,10 @@ namespace hyperbrowse::ui
         std::vector<std::unique_ptr<MenuDrawItemData>> refreshedItems;
         PrepareMenuForOwnerDraw(menu_, refreshedItems, false);
         menuDrawItems_ = std::move(refreshedItems);
+        if (hwnd_)
+        {
+            DrawMenuBar(hwnd_);
+        }
     }
 
     void MainWindow::PrepareMenuForOwnerDraw(HMENU menu,
@@ -13941,7 +14018,10 @@ namespace hyperbrowse::ui
         if (activeRightPaneTab_ == RightPaneTab::QuickSend && !quickAccessDestinationRows_.empty()
             && !IsRectEmpty(&quickAccessDestinationPanelRect_))
         {
-            const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(
+            detailsPanelSummaryFont_,
+            detailsPanelBodyFont_,
+            MakeMenuMetrics(appTextSize_, hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u));
             std::vector<QuickAccessPainter::RowState> rowStates;
             const QuickAccessPainter::State quickAccessState = BuildQuickAccessPainterState(metrics, rowStates);
             const QuickAccessPainter::Palette quickAccessPalette = BuildQuickAccessPainterPalette(palette);
@@ -14071,7 +14151,10 @@ namespace hyperbrowse::ui
 
         if (activeRightPaneTab_ == RightPaneTab::QuickSend && !quickAccessDestinationRows_.empty() && !IsRectEmpty(&quickAccessDestinationPanelRect_))
         {
-            const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+            const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(
+                detailsPanelSummaryFont_,
+                detailsPanelBodyFont_,
+                MakeMenuMetrics(appTextSize_, hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u));
             std::vector<QuickAccessPainter::RowState> rowStates;
             const QuickAccessPainter::State quickAccessState = BuildQuickAccessPainterState(metrics, rowStates);
             const QuickAccessPainter::Palette quickAccessPalette = BuildQuickAccessPainterPalette(palette);
@@ -14558,7 +14641,6 @@ namespace hyperbrowse::ui
                 {
                     return BuildQuickAccessDestinationMetadata(
                         favoritePath,
-                        true,
                         IsQuickAccessDestinationCurrentFolder(favoritePath));
                 },
                 [this](std::wstring_view favoritePath)
@@ -14576,7 +14658,10 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(
+            detailsPanelSummaryFont_,
+            detailsPanelBodyFont_,
+            MakeMenuMetrics(appTextSize_, hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u));
         const int panelBottom = detailsPanelContentRect_.bottom;
         const int viewportTop = top + metrics.headerHeight;
         if (panelBottom <= viewportTop)
@@ -14590,7 +14675,7 @@ namespace hyperbrowse::ui
         }
 
         const int totalRowsHeight = static_cast<int>(destinations.size()) * metrics.rowHeight
-            + static_cast<int>((destinations.size() - 1) * kQuickAccessPanelRowGap);
+            + static_cast<int>((destinations.size() - 1) * metrics.rowGap);
         const int viewportHeight = panelBottom - viewportTop;
         const int maximumScrollOffset = std::max(0, totalRowsHeight - viewportHeight);
         int contentRight = innerRight;
@@ -14643,8 +14728,10 @@ namespace hyperbrowse::ui
         layoutInput.contentRight = contentRight;
         layoutInput.scrollOffset = quickAccessScrollOffset_;
         layoutInput.sortLabelWidth = MeasureTextWidth(headerFont, L"Quick Actions");
-        layoutInput.sortButtonGap = kQuickAccessPanelSortButtonGap;
-        layoutInput.sortButtonSize = std::min(kQuickAccessPanelSortButtonSize, metrics.headerHeight);
+        layoutInput.sortButtonGap = MakeMenuMetrics(
+            appTextSize_,
+            hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u).ScaleDip(kQuickAccessPanelSortButtonGap);
+        layoutInput.sortButtonSize = metrics.headerHeight;
         layoutInput.metrics = metrics;
         layoutInput.destinations = std::move(destinations);
 
@@ -16310,8 +16397,9 @@ namespace hyperbrowse::ui
                                          state);
         state.supportButtonWidth = state.githubButtonWidth;
 
-        const int aboutClientWidth = ScaleAboutDialogDimension(kAboutDialogWidth, state);
-        const int aboutClientHeight = std::max(ScaleAboutDialogDimension(kAboutDialogHeight, state), MeasureAboutDialogClientHeight(state));
+        const int aboutClientWidth = MeasureAboutDialogClientWidth(state);
+        const int aboutClientHeight = std::max(ScaleAboutDialogDimension(kAboutDialogHeight, state),
+                            MeasureAboutDialogClientHeight(state, aboutClientWidth));
         RECT windowRect{0, 0, aboutClientWidth, aboutClientHeight};
         AdjustDialogWindowRectForDpi(&windowRect,
                          WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
@@ -16405,8 +16493,10 @@ namespace hyperbrowse::ui
 
     constexpr wchar_t kImageInformationDialogClassName[] = L"HyperBrowseImageInformationDialog";
     constexpr int kImageInformationDialogWidth = 640;
-    constexpr int kImageInformationDialogCollapsedHeight = 370;
     constexpr int kImageInformationDialogMargin = 18;
+    constexpr int kImageInformationDialogTitlePointSize = 16;
+    constexpr int kImageInformationDialogBodyPointSize = 10;
+    constexpr int kImageInformationDialogEditVerticalPadding = 10;
     constexpr int kImageInformationDialogButtonHeight = 30;
     constexpr int kImageInformationDialogButtonWidth = 96;
     constexpr int kImageInformationDialogCopyPromptWidth = 120;
@@ -16425,6 +16515,49 @@ namespace hyperbrowse::ui
         CenterDialogInWorkArea(hwnd, state.workArea);
     }
 
+    void MeasureImageInformationDialogContent(ImageInformationDialogState& state)
+    {
+        const auto scale = [&state](int value)
+        {
+            return ScaleDialogAppTextDimension(value, state.appTextSize, state.dpi);
+        };
+        const int contentWidth = scale(kImageInformationDialogWidth - kImageInformationDialogMargin * 2);
+        const int editVerticalPadding = scale(kImageInformationDialogEditVerticalPadding);
+        const int contentTextHeight = MeasureTextBlockHeight(state.bodyFont,
+                                                             state.content,
+                                                             contentWidth,
+                                                             DT_WORDBREAK | DT_EDITCONTROL,
+                                                             0);
+        const int metadataTextHeight = MeasureTextBlockHeight(state.bodyFont,
+                                                              state.metadata,
+                                                              contentWidth,
+                                                              DT_WORDBREAK | DT_EDITCONTROL,
+                                                              0);
+        state.contentHeight = std::max(scale(40), contentTextHeight + editVerticalPadding);
+        state.metadataHeight = std::max(scale(56), metadataTextHeight + editVerticalPadding);
+        state.expandedWindowHeight = scale(kImageInformationDialogMargin + 34)
+            + state.contentHeight
+            + scale(kImageInformationDialogGap)
+            + state.metadataHeight
+            + scale(kImageInformationDialogGap + kImageInformationDialogButtonHeight
+                   + kImageInformationDialogMargin);
+    }
+
+    void ApplyImageInformationEditMargins(const ImageInformationDialogState& state)
+    {
+        const int editMargin = ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi);
+        for (const HWND editWindow : {state.contentWindow, state.metadataWindow})
+        {
+            if (editWindow)
+            {
+                SendMessageW(editWindow,
+                             EM_SETMARGINS,
+                             EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                             MAKELPARAM(editMargin, editMargin));
+            }
+        }
+    }
+
     void LayoutImageInformationDialog(HWND hwnd, ImageInformationDialogState& state)
     {
         const auto scale = [&state](int value)
@@ -16440,14 +16573,15 @@ namespace hyperbrowse::ui
         const int buttonsTop = clientHeight
             - scale(kImageInformationDialogMargin)
             - scale(kImageInformationDialogButtonHeight);
-        const int toggleTop = buttonsTop - scale(kImageInformationDialogGap + kImageInformationDialogButtonHeight);
         const int contentTop = scale(kImageInformationDialogMargin + 34);
-        const int availableReportHeight = std::max(1, toggleTop - scale(kImageInformationDialogGap) - contentTop);
+        const int availableReportHeight = std::max(1, buttonsTop - scale(kImageInformationDialogGap) - contentTop);
         const int metadataHeight = state.expanded
-            ? std::min(state.metadataHeight, std::max(1, availableReportHeight - 40))
+            ? std::min(state.metadataHeight, std::max(1, availableReportHeight - scale(40)))
             : 0;
-        const int metadataTop = toggleTop - scale(kImageInformationDialogGap) - metadataHeight;
-        const int contentBottom = metadataTop - (state.expanded ? scale(kImageInformationDialogGap) : 0);
+        const int metadataTop = buttonsTop - scale(kImageInformationDialogGap) - metadataHeight;
+        const int contentBottom = state.expanded
+            ? metadataTop - scale(kImageInformationDialogGap)
+            : buttonsTop - scale(kImageInformationDialogGap);
         const int contentHeight = std::min(state.contentHeight, std::max(1, contentBottom - contentTop));
 
         if (state.filenameWindow)
@@ -16489,7 +16623,7 @@ namespace hyperbrowse::ui
             SetWindowPos(state.metadataToggleButton,
                          nullptr,
                          contentLeft,
-                         toggleTop,
+                         buttonsTop,
                          scale(kImageInformationDialogToggleWidth),
                          scale(kImageInformationDialogButtonHeight),
                          SWP_NOZORDER | SWP_NOACTIVATE);
@@ -16525,9 +16659,13 @@ namespace hyperbrowse::ui
         {
             return ScaleDialogAppTextDimension(value, state.appTextSize, state.dpi);
         };
+        const int collapsedWindowHeight = scale(kImageInformationDialogMargin + 34)
+            + state.contentHeight
+            + scale(kImageInformationDialogGap + kImageInformationDialogButtonHeight
+                   + kImageInformationDialogMargin);
         const int clientHeight = std::min(state.expanded
                                               ? state.expandedWindowHeight
-                                              : scale(kImageInformationDialogCollapsedHeight),
+                                              : collapsedWindowHeight,
                                           state.maximumWindowHeight);
         RECT windowRect{0,
                         0,
@@ -16683,9 +16821,9 @@ namespace hyperbrowse::ui
                 if (editWindow)
                 {
                     SendMessageW(editWindow, EM_SETBKGNDCOLOR, 0, static_cast<LPARAM>(state->theme.fieldBackground));
-                    SendMessageW(editWindow, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
                 }
             }
+            ApplyImageInformationEditMargins(*state);
 
             LayoutImageInformationDialog(hwnd, *state);
             CenterImageInformationDialogOnWorkArea(hwnd, *state);
@@ -16702,33 +16840,18 @@ namespace hyperbrowse::ui
             if (state)
             {
                 state->dpi = std::max<UINT>(96, HIWORD(wParam));
-                const auto scale = [state](int value)
-                {
-                    return ScaleDialogAppTextDimension(value, state->appTextSize, state->dpi);
-                };
                 state->workArea = ImageInformationDialogWorkArea(hwnd);
                 DeleteFontIfOwned(state->titleFont);
                 DeleteFontIfOwned(state->bodyFont);
-                state->titleFont = CreateDialogUiFont(12, FW_BOLD, state->appTextSize, state->dpi);
-                state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
-                const int contentWidth = scale(kImageInformationDialogWidth - kImageInformationDialogMargin * 2);
-                state->contentHeight = MeasureTextBlockHeight(state->bodyFont,
-                                                               state->content,
-                                                               contentWidth,
-                                                               DT_WORDBREAK | DT_EDITCONTROL,
-                                                               scale(40));
-                state->metadataHeight = MeasureTextBlockHeight(state->bodyFont,
-                                                                state->metadata,
-                                                                contentWidth,
-                                                                DT_WORDBREAK | DT_EDITCONTROL,
-                                                                scale(56));
-                state->expandedWindowHeight = scale(kImageInformationDialogMargin + 34)
-                    + state->contentHeight
-                    + scale(kImageInformationDialogGap)
-                    + state->metadataHeight
-                    + scale(kImageInformationDialogGap + kImageInformationDialogButtonHeight)
-                    + scale(kImageInformationDialogGap + kImageInformationDialogButtonHeight
-                           + kImageInformationDialogMargin);
+                state->titleFont = CreateDialogUiFont(kImageInformationDialogTitlePointSize,
+                                                      FW_BOLD,
+                                                      state->appTextSize,
+                                                      state->dpi);
+                state->bodyFont = CreateDialogUiFont(kImageInformationDialogBodyPointSize,
+                                                     FW_NORMAL,
+                                                     state->appTextSize,
+                                                     state->dpi);
+                MeasureImageInformationDialogContent(*state);
                 const RECT frameRect{0, 0, 0, 0};
                 RECT adjustedFrame = frameRect;
                 AdjustDialogWindowRectForDpi(&adjustedFrame,
@@ -16755,6 +16878,7 @@ namespace hyperbrowse::ui
                 {
                     SendMessageW(state->filenameWindow, WM_SETFONT, reinterpret_cast<WPARAM>(state->titleFont), TRUE);
                 }
+                ApplyImageInformationEditMargins(*state);
                 ResizeImageInformationDialog(hwnd, *state);
             }
             return 0;
@@ -16902,8 +17026,14 @@ namespace hyperbrowse::ui
                                                                          - state.workArea.top
                                                                          - frameHeight));
         state.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
-        state.titleFont = CreateDialogUiFont(12, FW_BOLD, state.appTextSize, state.dpi);
-        state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, state.dpi);
+        state.titleFont = CreateDialogUiFont(kImageInformationDialogTitlePointSize,
+                                             FW_BOLD,
+                                             state.appTextSize,
+                                             state.dpi);
+        state.bodyFont = CreateDialogUiFont(kImageInformationDialogBodyPointSize,
+                                            FW_NORMAL,
+                                            state.appTextSize,
+                                            state.dpi);
         state.filename = std::move(filename);
         state.content = std::move(content);
         state.metadata = std::move(metadata);
@@ -16913,31 +17043,7 @@ namespace hyperbrowse::ui
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
 
-        const int contentWidth = ScaleDialogAppTextDimension(
-            kImageInformationDialogWidth - (kImageInformationDialogMargin * 2),
-            state.appTextSize,
-            state.dpi);
-        state.contentHeight = MeasureTextBlockHeight(state.bodyFont,
-                                                     state.content,
-                                                     contentWidth,
-                                                     DT_WORDBREAK | DT_EDITCONTROL,
-                                                     ScaleDialogAppTextDimension(40, state.appTextSize, state.dpi));
-        state.metadataHeight = MeasureTextBlockHeight(state.bodyFont,
-                                                      state.metadata,
-                                                      contentWidth,
-                                                      DT_WORDBREAK | DT_EDITCONTROL,
-                                                      ScaleDialogAppTextDimension(56, state.appTextSize, state.dpi));
-        state.expandedWindowHeight = ScaleDialogAppTextDimension(
-            kImageInformationDialogMargin + 34, state.appTextSize, state.dpi)
-            + state.contentHeight
-            + ScaleDialogAppTextDimension(kImageInformationDialogGap, state.appTextSize, state.dpi)
-            + state.metadataHeight
-            + ScaleDialogAppTextDimension(
-                kImageInformationDialogGap + kImageInformationDialogButtonHeight, state.appTextSize, state.dpi)
-            + ScaleDialogAppTextDimension(
-                kImageInformationDialogGap + kImageInformationDialogButtonHeight + kImageInformationDialogMargin,
-                state.appTextSize,
-                state.dpi);
+        MeasureImageInformationDialogContent(state);
         state.expandedWindowHeight = std::min(state.expandedWindowHeight, state.maximumWindowHeight);
 
         RECT windowRect{
@@ -19862,7 +19968,7 @@ namespace hyperbrowse::ui
 
         RECT client{};
         GetClientRect(hwnd_, &client);
-        RECT stripRect{0, 0, client.right, kActionStripHeight};
+        RECT stripRect{0, 0, client.right, actionStripHeight_};
         InvalidateRect(hwnd_, &stripRect, FALSE);
     }
 
@@ -19957,7 +20063,8 @@ namespace hyperbrowse::ui
     void MainWindow::RebuildAppTextFonts()
     {
         const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        const UINT dpi = hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u;
+        const UINT dpi = static_cast<UINT>(hyperbrowse::util::EffectiveTextDpi(
+            hwnd_ ? static_cast<int>(GetDpiForWindow(hwnd_)) : 96));
 
         DeleteFontIfOwned(appTextUiFont_);
         appTextUiFont_ = CreateSystemUiFont(appTextSize_, dpi);
@@ -19984,6 +20091,7 @@ namespace hyperbrowse::ui
                 SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(appTextUiFont_), TRUE);
             }
         }
+        ApplyFolderTreeMetrics();
 
         if (tooltipControl_)
         {
@@ -20008,6 +20116,58 @@ namespace hyperbrowse::ui
         }
 
         RefreshDetailsPanelBodyPresentation();
+    }
+
+    void MainWindow::ApplyFolderTreeMetrics()
+    {
+        if (!treePane_)
+        {
+            return;
+        }
+
+        const UINT dpi = static_cast<UINT>(hyperbrowse::util::EffectiveTextDpi(
+            hwnd_ ? static_cast<int>(GetDpiForWindow(hwnd_)) : 96));
+        const int verticalPadding = MulDiv(
+            hyperbrowse::util::ScaleAppTextDimension(2, appTextSize_),
+            static_cast<int>(dpi),
+            96);
+        int rowHeight = MulDiv(
+            hyperbrowse::util::AppTextTreeRowHeight(appTextSize_),
+            static_cast<int>(dpi),
+            96);
+
+        HDC treeDc = GetDC(treePane_);
+        if (treeDc)
+        {
+            const HGDIOBJ previousFont = appTextUiFont_ ? SelectObject(treeDc, appTextUiFont_) : nullptr;
+            TEXTMETRICW textMetrics{};
+            if (GetTextMetricsW(treeDc, &textMetrics) != FALSE)
+            {
+                const int textHeight = static_cast<int>(textMetrics.tmHeight - textMetrics.tmInternalLeading);
+                rowHeight = (std::max)(1, textHeight) + verticalPadding;
+            }
+            if (previousFont)
+            {
+                SelectObject(treeDc, previousFont);
+            }
+            ReleaseDC(treePane_, treeDc);
+        }
+
+        if (treeImageList_)
+        {
+            int iconWidth = 0;
+            int iconHeight = 0;
+            if (ImageList_GetIconSize(treeImageList_, &iconWidth, &iconHeight) != FALSE)
+            {
+                rowHeight = (std::max)(rowHeight,
+                                       iconHeight + verticalPadding);
+            }
+        }
+
+        rowHeight = (std::max)(1, rowHeight);
+        rowHeight = (rowHeight + 1) & ~1;
+        TreeView_SetItemHeight(treePane_, rowHeight);
+        InvalidateRect(treePane_, nullptr, TRUE);
     }
 
     void MainWindow::ApplyAppTextSize()
@@ -22493,15 +22653,12 @@ namespace hyperbrowse::ui
         commandBarController_.InitializeItems();
     }
 
-    void MainWindow::LayoutToolbar()
+    void MainWindow::LayoutToolbar(const MenuMetrics& menuMetrics)
     {
         RECT client{};
         GetClientRect(hwnd_, &client);
         const int clientWidth = client.right - client.left;
-        const MenuMetrics menuMetrics = MakeMenuMetrics(
-            appTextSize_,
-            hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u);
-        const int itemTop = menuMetrics.ScaleDip(kActionStripPaddingY);
+        const int itemTop = menuMetrics.ScaleDip(menuMetrics.commandBarPaddingYDip);
         const HFONT menuFont = detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         commandBarController_.Layout(
             clientWidth,
@@ -22547,7 +22704,7 @@ namespace hyperbrowse::ui
         }
 
         // Invalidate the strip area
-        RECT stripRect{0, 0, clientWidth, kActionStripHeight};
+        RECT stripRect{0, 0, clientWidth, actionStripHeight_};
         InvalidateRect(hwnd_, &stripRect, FALSE);
     }
 
@@ -22790,7 +22947,7 @@ namespace hyperbrowse::ui
 
     bool MainWindow::IsOverSplitter(int x, int y) const
     {
-        if (y < kActionStripHeight)
+        if (y < actionStripHeight_)
         {
             return false;
         }
@@ -22826,14 +22983,14 @@ namespace hyperbrowse::ui
             }
         };
 
-        const int commandBarMenuHit = y < kActionStripHeight ? CommandBarMenuHitTest(x, y) : -1;
+        const int commandBarMenuHit = y < actionStripHeight_ ? CommandBarMenuHitTest(x, y) : -1;
         if (commandBarKeyboardActive_ && commandBarMenuHit < 0)
         {
             DeactivateCommandBarKeyboardMode(false);
         }
 
         // Toolbar hit test
-        if (y < kActionStripHeight)
+        if (y < actionStripHeight_)
         {
             const int menuHit = commandBarMenuHit;
             if (menuHit >= 0)
@@ -23205,7 +23362,7 @@ namespace hyperbrowse::ui
         }
 
         // Toolbar hover
-        if (y < kActionStripHeight && dragMode_ == DragMode::None)
+        if (y < actionStripHeight_ && dragMode_ == DragMode::None)
         {
             if (detailsPanelHotTabIndex_ >= 0)
             {
@@ -23366,13 +23523,16 @@ namespace hyperbrowse::ui
             return true;
         }
 
-        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_);
+            const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(
+                detailsPanelSummaryFont_,
+                detailsPanelBodyFont_,
+                MakeMenuMetrics(appTextSize_, hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u));
         const int totalRowsHeight = static_cast<int>(quickAccessDestinationRows_.size()) * metrics.rowHeight
-            + static_cast<int>((quickAccessDestinationRows_.size() - 1) * kQuickAccessPanelRowGap);
+            + static_cast<int>((quickAccessDestinationRows_.size() - 1) * metrics.rowGap);
         const int maximumScrollOffset = std::max(
             0,
             totalRowsHeight - static_cast<int>(quickAccessDestinationViewportRect_.bottom - quickAccessDestinationViewportRect_.top));
-        const int scrollStep = metrics.rowHeight + kQuickAccessPanelRowGap;
+        const int scrollStep = metrics.rowHeight + metrics.rowGap;
         quickAccessScrollOffset_ = std::clamp(quickAccessScrollOffset_ - (wheelSteps * scrollStep * 2),
                                               0,
                                               maximumScrollOffset);
@@ -23395,11 +23555,14 @@ namespace hyperbrowse::ui
             return;
         }
 
+        const QuickAccessPanelMetrics metrics = BuildQuickAccessPanelMetrics(
+            detailsPanelSummaryFont_,
+            detailsPanelBodyFont_,
+            MakeMenuMetrics(appTextSize_, hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u));
         const int maximumScrollOffset = std::max(0,
                                                   scrollInfo.nMax
                                                       - std::max(0, static_cast<int>(scrollInfo.nPage) - 1));
-        const int scrollStep = BuildQuickAccessPanelMetrics(detailsPanelSummaryFont_, detailsPanelBodyFont_).rowHeight
-            + kQuickAccessPanelRowGap;
+        const int scrollStep = metrics.rowHeight + metrics.rowGap;
         int nextOffset = quickAccessScrollOffset_;
         switch (LOWORD(wParam))
         {
@@ -23981,12 +24144,12 @@ namespace hyperbrowse::ui
                         palette.actionStripBorder};
                     const ShellPainterGeometry shellGeometry{
                         leftPaneWidth_,
-                        kActionStripHeight,
+                                                 actionStripHeight_,
                         kSplitterWidth,
                         detailsStripVisible_,
                         detailsPanelRect_};
                     ShellPainter::PaintD2D(bufferedRenderTarget.Get(), client, shellPalette, shellGeometry);
-                    const RECT stripRect{0, 0, client.right, kActionStripHeight};
+                    const RECT stripRect{0, 0, client.right, actionStripHeight_};
                     PaintToolbarD2D(bufferedRenderTarget.Get(), stripRect);
                     const HRESULT drawResult = bufferedRenderTarget->EndDraw();
                     paintedWithD2D = SUCCEEDED(drawResult);
@@ -24023,13 +24186,13 @@ namespace hyperbrowse::ui
             palette.actionStripBorder};
         const ShellPainterGeometry shellGeometry{
             leftPaneWidth_,
-            kActionStripHeight,
+            actionStripHeight_,
             kSplitterWidth,
             detailsStripVisible_,
             detailsPanelRect_};
         ShellPainter::PaintGdi(memDC, client, shellPalette, shellGeometry);
 
-        const RECT stripRect{0, 0, client.right, kActionStripHeight};
+        const RECT stripRect{0, 0, client.right, actionStripHeight_};
         PaintToolbar(memDC, stripRect);
 
         PaintDetailsPanel(memDC, client);
@@ -24133,7 +24296,7 @@ namespace hyperbrowse::ui
                          suggested->bottom - suggested->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
             RebuildAppTextFonts();
-            LayoutToolbar();
+            LayoutChildren();
             RefreshPersistentMenuOwnerDraw();
             ResetD2DResources();
             ApplyTheme();
@@ -24316,7 +24479,7 @@ namespace hyperbrowse::ui
             GetClientRect(hwnd_, &client);
             HDC eraseDC = reinterpret_cast<HDC>(wParam);
             // Exclude the action strip — PaintToolbar handles it
-            RECT below{0, kActionStripHeight, client.right, client.bottom};
+            RECT below{0, actionStripHeight_, client.right, client.bottom};
             FillRect(
                 eraseDC,
                 &below,

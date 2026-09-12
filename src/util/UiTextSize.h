@@ -12,6 +12,12 @@ namespace hyperbrowse::util
     };
 
     constexpr AppTextSize kDefaultAppTextSize = AppTextSize::Medium;
+    constexpr int kReferenceTextDpi = 144;
+
+    constexpr int EffectiveTextDpi(int dpi) noexcept
+    {
+        return dpi < kReferenceTextDpi ? kReferenceTextDpi : dpi;
+    }
 
     constexpr bool IsValidAppTextSizeValue(std::uint32_t value) noexcept
     {
@@ -30,9 +36,9 @@ namespace hyperbrowse::util
         switch (size)
         {
         case AppTextSize::Small:
-            return 0.90f;
+            return 0.84f;
         case AppTextSize::Large:
-            return 1.15f;
+            return 1.20f;
         case AppTextSize::Medium:
         default:
             return 1.0f;
@@ -47,5 +53,10 @@ namespace hyperbrowse::util
     constexpr int ScaleAppTextDimension(int dimension, AppTextSize size) noexcept
     {
         return static_cast<int>(static_cast<float>(dimension) * AppTextSizeScale(size) + 0.5f);
+    }
+
+    constexpr int AppTextTreeRowHeight(AppTextSize size) noexcept
+    {
+        return ScaleAppTextDimension(22, size);
     }
 }

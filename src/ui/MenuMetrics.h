@@ -20,6 +20,7 @@ namespace hyperbrowse::ui
         int popupArrowWidthDip{12};
 
         int commandBarPaddingXDip{8};
+        int commandBarPaddingYDip{6};
         int commandBarItemSizeDip{32};
         int commandBarSeparatorWidthDip{9};
         int commandBarSeparatorGapDip{4};
@@ -38,6 +39,11 @@ namespace hyperbrowse::ui
             const int appScaled = hyperbrowse::util::ScaleAppTextDimension(value, appTextSize);
             return MulDiv(appScaled, static_cast<int>(dpi), 96);
         }
+
+        int CommandBarHeight() const noexcept
+        {
+            return ScaleDip(commandBarItemSizeDip + (commandBarPaddingYDip * 2));
+        }
     };
 
     inline MenuMetrics MakeMenuMetrics(
@@ -46,7 +52,7 @@ namespace hyperbrowse::ui
     {
         MenuMetrics metrics;
         metrics.appTextSize = hyperbrowse::util::NormalizeAppTextSize(static_cast<std::uint32_t>(appTextSize));
-        metrics.dpi = (std::max)(96u, dpi);
+        metrics.dpi = static_cast<UINT>(hyperbrowse::util::EffectiveTextDpi(static_cast<int>(dpi)));
         return metrics;
     }
 }

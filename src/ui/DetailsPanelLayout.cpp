@@ -15,6 +15,10 @@ namespace hyperbrowse::ui
         const int availableTabHeight = (std::max)(0,
                                                   static_cast<int>(input.panelRect.bottom) - tabTop - input.margin);
         const int actualTabHeight = (std::min)(input.tabHeight, availableTabHeight);
+        const int closeButtonRight = input.panelRect.right - input.closeButtonMargin;
+        const int closeButtonLeft = closeButtonRight - input.closeButtonSize;
+        const int closeButtonTop = input.panelRect.top + input.closeButtonMargin;
+        const int closeButtonBottom = closeButtonTop + input.closeButtonSize;
 
         if (innerWidth > 0 && actualTabHeight > 0)
         {
@@ -22,7 +26,19 @@ namespace hyperbrowse::ui
                 input.tabMinButtonWidth,
                 input.tabLabelWidth + (input.tabButtonHorizontalPadding * 2));
             const int maxButtonWidth = (std::max)(1, (std::max)(0, innerWidth - input.tabButtonGap) / 2);
-            const int buttonWidth = (std::min)(desiredButtonWidth, maxButtonWidth);
+            const int reservedTabRight = closeButtonLeft - input.closeButtonGap;
+            const int reservedTabWidth = (std::max)(0, reservedTabRight - innerLeft);
+            const int maxButtonWidthBeforeClose = (std::max)(
+                1,
+                (std::max)(0, reservedTabWidth - input.tabButtonGap) / 2);
+            const int reservedButtonWidth = (std::min)(desiredButtonWidth, maxButtonWidthBeforeClose);
+            const int reservedTabStripRight = innerLeft
+                + (reservedButtonWidth * 2)
+                + input.tabButtonGap;
+            const bool canReserveCloseButton = closeButtonLeft > reservedTabStripRight + input.closeButtonGap;
+            const int buttonWidth = canReserveCloseButton
+                ? reservedButtonWidth
+                : (std::min)(desiredButtonWidth, maxButtonWidth);
             const int secondButtonLeft = innerLeft + buttonWidth + input.tabButtonGap;
 
             result.tabRects[0] = RECT{innerLeft, tabTop, innerLeft + buttonWidth, tabTop + actualTabHeight};
@@ -41,10 +57,6 @@ namespace hyperbrowse::ui
                                   innerRight,
                                   input.panelRect.bottom - input.margin};
 
-        const int closeButtonRight = input.panelRect.right - input.closeButtonMargin;
-        const int closeButtonLeft = closeButtonRight - input.closeButtonSize;
-        const int closeButtonTop = input.panelRect.top + input.closeButtonMargin;
-        const int closeButtonBottom = closeButtonTop + input.closeButtonSize;
         if (closeButtonLeft > result.tabStripRect.right + input.closeButtonGap)
         {
             result.closeButtonRect = RECT{closeButtonLeft,

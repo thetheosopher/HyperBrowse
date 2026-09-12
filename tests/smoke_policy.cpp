@@ -41,6 +41,7 @@
 #include "ui/QuickAccessShortcutEditPolicy.h"
 #include "ui/QuickSendConfirmation.h"
 #include "ui/RightPaneHitTester.h"
+#include "ui/MenuMetrics.h"
 #include "ui/SelectedPathPersistence.h"
 #include "ui/SelectionRatingPolicy.h"
 #include "ui/ViewCommandController.h"
@@ -483,6 +484,28 @@ namespace hyperbrowse::tests
             const auto smallMetrics = MakeMenuMetrics(AppTextSize::Small, 96);
             const auto mediumMetrics = MakeMenuMetrics(AppTextSize::Medium, 144);
             const auto largeMetrics = MakeMenuMetrics(AppTextSize::Large, 192);
+                 const auto mediumReferenceMetrics = MakeMenuMetrics(AppTextSize::Medium, 96);
+                 Expect(hyperbrowse::util::EffectiveTextDpi(96) == hyperbrowse::util::kReferenceTextDpi
+                      && hyperbrowse::util::EffectiveTextDpi(120) == hyperbrowse::util::kReferenceTextDpi
+                      && hyperbrowse::util::EffectiveTextDpi(144) == hyperbrowse::util::kReferenceTextDpi
+                      && hyperbrowse::util::EffectiveTextDpi(192) == 192,
+                     "Effective text DPI did not preserve the shared tree reference policy");
+                 Expect(mediumReferenceMetrics.dpi == mediumMetrics.dpi
+                      && mediumReferenceMetrics.ScaleDip(mediumReferenceMetrics.popupItemHeightDip)
+                          == mediumMetrics.ScaleDip(mediumMetrics.popupItemHeightDip)
+                      && mediumReferenceMetrics.CommandBarHeight() == mediumMetrics.CommandBarHeight()
+                      && largeMetrics.dpi > mediumMetrics.dpi,
+                     "Menu metrics did not consume the shared effective text DPI");
+            Expect(hyperbrowse::util::AppTextSizeScale(AppTextSize::Small)
+                       < hyperbrowse::util::AppTextSizeScale(AppTextSize::Medium)
+                       && hyperbrowse::util::AppTextSizeScale(AppTextSize::Medium)
+                       < hyperbrowse::util::AppTextSizeScale(AppTextSize::Large),
+                   "Application text-size scale factors were not ordered");
+            Expect(hyperbrowse::util::AppTextTreeRowHeight(AppTextSize::Small)
+                       < hyperbrowse::util::AppTextTreeRowHeight(AppTextSize::Medium)
+                       && hyperbrowse::util::AppTextTreeRowHeight(AppTextSize::Medium)
+                       < hyperbrowse::util::AppTextTreeRowHeight(AppTextSize::Large),
+                   "Folder-tree row height did not scale with application text size");
             Expect(smallMetrics.ScaleDip(smallMetrics.popupItemHeightDip)
                        < mediumMetrics.ScaleDip(mediumMetrics.popupItemHeightDip)
                        && mediumMetrics.ScaleDip(mediumMetrics.popupItemHeightDip)
@@ -491,6 +514,16 @@ namespace hyperbrowse::tests
             Expect(smallMetrics.ScaleDip(smallMetrics.popupTextPaddingDip)
                        < largeMetrics.ScaleDip(largeMetrics.popupTextPaddingDip),
                    "Menu text padding did not compose DPI and application text size");
+                 Expect(mediumMetrics.CommandBarHeight() > mediumMetrics.ScaleDip(mediumMetrics.commandBarItemSizeDip),
+                     "Command-bar strip height did not leave vertical room around controls");
+                 const auto smallTextMetrics = MakeMenuMetrics(AppTextSize::Small, 144);
+                 const auto mediumTextMetrics = MakeMenuMetrics(AppTextSize::Medium, 144);
+                 const auto largeTextMetrics = MakeMenuMetrics(AppTextSize::Large, 144);
+                 Expect(smallTextMetrics.CommandBarHeight() < mediumTextMetrics.CommandBarHeight()
+                            && mediumTextMetrics.CommandBarHeight() < largeTextMetrics.CommandBarHeight(),
+                        "Command-bar strip height did not refresh for application text size");
+                 Expect(smallMetrics.CommandBarHeight() < largeMetrics.CommandBarHeight(),
+                     "Command-bar strip height did not scale with DPI and application text size");
 
             CommandBarController controller;
             controller.InitializeItems();
@@ -514,6 +547,69 @@ namespace hyperbrowse::tests
                 Expect(item.rect.right >= item.rect.left && item.rect.bottom >= item.rect.top,
                        "Command-bar item received an invalid scaled rectangle");
             }
+        }
+
+        void RunResponsivePanelSizingScenario()
+        {
+            using hyperbrowse::ui::MakeMenuMetrics;
+            using hyperbrowse::ui::QuickAccessLayout;
+            using hyperbrowse::util::AppTextSize;
+
+            const auto smallMetrics = MakeMenuMetrics(AppTextSize::Small, 144);
+            const auto mediumMetrics = MakeMenuMetrics(AppTextSize::Medium, 144);
+            const auto largeMetrics = MakeMenuMetrics(AppTextSize::Large, 144);
+            const int smallTabHeight = smallMetrics.ScaleDip(30);
+            const int mediumTabHeight = mediumMetrics.ScaleDip(30);
+            const int largeTabHeight = largeMetrics.ScaleDip(30);
+            const int smallHistogramHeight = smallMetrics.ScaleDip(88);
+            const int mediumHistogramHeight = mediumMetrics.ScaleDip(88);
+            const int largeHistogramHeight = largeMetrics.ScaleDip(88);
+            Expect(smallTabHeight < mediumTabHeight && mediumTabHeight < largeTabHeight
+                       && smallHistogramHeight < mediumHistogramHeight
+                       && mediumHistogramHeight < largeHistogramHeight,
+                   "Details-panel tab and histogram dimensions did not scale with application text size");
+
+            const auto buildLayout = [](int scale)
+            {
+                QuickAccessLayout::Input input;
+                input.innerLeft = 10;
+                input.innerRight = 360;
+                input.top = 40;
+                input.viewportTop = 80;
+                input.panelBottom = 200;
+                input.contentRight = 340;
+                input.sortLabelWidth = 80;
+                input.sortButtonGap = scale;
+                input.sortButtonSize = scale * 4;
+                input.metrics.headerHeight = scale * 4;
+                input.metrics.rowHeight = scale * 10;
+                input.metrics.labelTopInset = scale;
+                input.metrics.labelHeight = scale * 3;
+                input.metrics.metadataTopInset = scale * 5;
+                input.metrics.metadataBottomInset = scale;
+                input.metrics.buttonHeight = scale * 4;
+                input.metrics.buttonTopInset = scale * 3;
+                input.metrics.rowGap = scale;
+                input.metrics.buttonWidth = scale * 8;
+                input.metrics.buttonGap = scale;
+                input.metrics.buttonRightInset = scale;
+                input.metrics.removeButtonWidth = scale * 4;
+                input.metrics.shortcutWidth = scale * 4;
+                input.metrics.shortcutGap = scale;
+                input.destinations = {
+                    QuickAccessLayout::Destination{L"C:\\One", L"One", L"1 image", 2, true}};
+                return QuickAccessLayout::Build(input);
+            };
+
+            const QuickAccessLayout::Result smallLayout = buildLayout(4);
+            const QuickAccessLayout::Result largeLayout = buildLayout(7);
+            Expect((smallLayout.sortButtonRect.bottom - smallLayout.sortButtonRect.top) == 16
+                       && (largeLayout.sortButtonRect.bottom - largeLayout.sortButtonRect.top) == 28
+                       && (smallLayout.rows[0].copyRect.bottom - smallLayout.rows[0].copyRect.top) == 16
+                       && (largeLayout.rows[0].copyRect.bottom - largeLayout.rows[0].copyRect.top) == 28
+                       && (largeLayout.rows[0].copyRect.right - largeLayout.rows[0].copyRect.left)
+                              > (smallLayout.rows[0].copyRect.right - smallLayout.rows[0].copyRect.left),
+                   "Quick Actions controls did not preserve scaled header and action dimensions");
         }
 
         void RunQuickAccessMenuBuilderScenario()
@@ -2017,6 +2113,7 @@ namespace hyperbrowse::tests
         RunViewCommandControllerScenario();
         RunCommandBarControllerScenario();
         RunMenuMetricsScenario();
+        RunResponsivePanelSizingScenario();
         RunQuickAccessMenuBuilderScenario();
         RunDetailsPanelHistogramScenario();
         RunRightPaneHitTesterScenario();
@@ -2172,6 +2269,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--menu-metrics")
         {
             RunMenuMetricsScenario();
+        }
+        else if (scenario == "--responsive-panel")
+        {
+            RunResponsivePanelSizingScenario();
         }
         else
         {

@@ -164,6 +164,7 @@ namespace hyperbrowse::ui
             const bool selected = (drawItem.itemState & ODS_SELECTED) != 0;
             const bool disabled = (drawItem.itemState & ODS_DISABLED) != 0;
             const bool checked = (drawItem.itemState & ODS_CHECKED) != 0;
+            const bool showMnemonics = (drawItem.itemState & ODS_NOACCEL) == 0;
             const COLORREF backgroundColor = selected
                 ? BlendColor(palette.accentFill, palette.actionStripBackground, darkTheme ? 28 : 12)
                 : BlendColor(palette.paneBackground, palette.windowBackground, darkTheme ? 26 : 12);
@@ -263,7 +264,9 @@ namespace hyperbrowse::ui
             {
                 labelRect.right -= static_cast<int>(renderer.MeasureTextWidth(shortcut, menuFormat.Get()) + 0.5f) + shortcutGap;
             }
-            const bool hasMnemonic = mnemonicIndex >= 0 && mnemonicIndex < static_cast<int>(label.size());
+            const bool hasMnemonic = showMnemonics
+                && mnemonicIndex >= 0
+                && mnemonicIndex < static_cast<int>(label.size());
             if (hasMnemonic)
             {
                 const auto labelLayout = renderer.CreateTextLayout(
@@ -522,6 +525,7 @@ namespace hyperbrowse::ui
         const bool selected = (drawItem.itemState & ODS_SELECTED) != 0;
         const bool disabled = (drawItem.itemState & ODS_DISABLED) != 0;
         const bool checked = (drawItem.itemState & ODS_CHECKED) != 0;
+        const bool showMnemonics = (drawItem.itemState & ODS_NOACCEL) == 0;
         const COLORREF backgroundColor = selected
             ? BlendColor(palette.accentFill, palette.actionStripBackground, darkTheme ? 28 : 12)
             : BlendColor(palette.paneBackground, palette.windowBackground, darkTheme ? 26 : 12);
@@ -605,7 +609,7 @@ namespace hyperbrowse::ui
         {
             labelFormat |= DT_NOPREFIX;
         }
-        else if (mnemonicIndex >= 0 && mnemonicIndex < static_cast<int>(gdiLabel.size()))
+        else if (showMnemonics && mnemonicIndex >= 0 && mnemonicIndex < static_cast<int>(gdiLabel.size()))
         {
             gdiLabel.insert(
                 static_cast<std::wstring::size_type>(mnemonicIndex),
@@ -621,7 +625,7 @@ namespace hyperbrowse::ui
                             labelColor,
                             backgroundColor);
 
-        if (drawData->mnemonic == L'&' && !label.empty())
+        if (showMnemonics && drawData->mnemonic == L'&' && !label.empty())
         {
             const int savedDc = SaveDC(drawItem.hDC);
             if (savedDc != 0)

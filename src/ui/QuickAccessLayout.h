@@ -14,6 +14,7 @@ namespace hyperbrowse::ui
         {
             int headerHeight{};
             int rowHeight{};
+            int textHorizontalInset{};
             int labelTopInset{};
             int labelHeight{};
             int metadataTopInset{};
