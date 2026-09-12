@@ -52,10 +52,12 @@ add_test(NAME HyperBrowseThumbnailFailureSmoke COMMAND HyperBrowseTests --thumbn
 add_test(NAME HyperBrowseFileRenameSmoke COMMAND HyperBrowseTests --file-rename)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)
 add_test(NAME HyperBrowseAccessibilitySmoke COMMAND HyperBrowseTests --accessibility)
+add_test(NAME HyperBrowseDialogGeometrySmoke COMMAND HyperBrowseTests --dialog-geometry)
 add_test(NAME HyperBrowseSettingsSmoke COMMAND HyperBrowseTests --settings)
 add_test(NAME HyperBrowseMultiViewerSettingsSmoke COMMAND HyperBrowseTests --multi-viewer-settings)
 add_test(NAME HyperBrowseItemNumberNavigationSmoke COMMAND HyperBrowseTests --item-number-navigation)
 add_test(NAME HyperBrowseUserMetadataSmoke COMMAND HyperBrowseTests --user-metadata)
+add_test(NAME HyperBrowseMenuMetricsSmoke COMMAND HyperBrowseTests --menu-metrics)
 
 if(HYPERBROWSE_BUILD_FUZZ_TESTS)
     add_executable(HyperBrowseBoundaryFuzz

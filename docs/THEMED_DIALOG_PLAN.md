@@ -20,7 +20,7 @@ The app theme currently applies to the main window and several custom surfaces, 
 - [x] Wire the palette into the single-line text dialog.
 - [ ] Extract the remaining shared control-color helper once the other dialog control differences are characterized.
 - [x] Wire the palette into batch rename, performance settings, file associations, and slideshow settings.
-- [x] Update consolidated settings background, controls, and owner-drawn tabs to use the palette.
+- [x] Update Experimental Settings background, controls, and custom-rendered tabs to use the palette.
 - [x] Replace `ShowImageInformation` / `TaskDialogIndirect` with an ordinary themed dialog that preserves expandable metadata.
 - [x] Re-audit custom dialog code for `COLOR_WINDOW`, `COLOR_WINDOWTEXT`, `COLOR_HIGHLIGHT`, and `COLOR_WINDOW + 1` dependencies.
 - [ ] Add focused automated seams where practical and complete light/dark, metadata expand/collapse, theme-change, and DPI validation.

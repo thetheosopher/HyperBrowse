@@ -189,7 +189,7 @@ Exit criterion: all application-owned dialogs use the same shell and design toke
 
 ### Phase 5: Remove duplicate paths
 
-- [ ] Remove the legacy consolidated Settings fallback after the replacement path is validated.
+- [x] Remove the legacy consolidated Settings fallback after the replacement path was validated.
 - [ ] Remove obsolete fixed-coordinate layout code.
 - [ ] Remove unused dialog-specific scaling helpers.
 - [ ] Update `docs/THEMED_DIALOG_PLAN.md` and architecture documentation.
@@ -282,6 +282,6 @@ The UI layout effort is complete when:
 
 ## Current Recommendation
 
-The Settings pilot now has a pure measured layout engine, a scrollable body with pinned footer, shared work-area frame helpers, accessibility geometry conversion, and focused geometry/interaction smoke coverage. The application no longer routes through the legacy Settings environment override, and the fixed-coordinate Settings layout routine has been removed. Sibling dialogs use the shared frame-clamping policy on DPI transitions while retaining their existing content procedures.
+The Settings pilot now has a pure measured layout engine, a scrollable body with pinned footer, shared work-area frame helpers, accessibility geometry conversion, and focused geometry/interaction smoke coverage. The application no longer routes through the legacy Settings environment override, and the fixed-coordinate Settings layout routine and unreachable consolidated-dialog implementation have been removed. Sibling dialogs use the shared frame-clamping policy on DPI transitions while retaining their existing content procedures.
 
-Remaining work is intentionally bounded: migrate sibling content layout onto shared measured metrics where their current procedures still own dialog-specific tokens, add broader light/dark and non-96-DPI runtime coverage, remove the now-unreachable consolidated-dialog implementation, and record framework-decision measurements before considering Qt or WinUI.
+Remaining work is intentionally bounded: migrate sibling content layout onto shared measured metrics where their current procedures still own dialog-specific tokens, add broader light/dark and non-96-DPI runtime coverage, and record framework-decision measurements before considering Qt or WinUI.

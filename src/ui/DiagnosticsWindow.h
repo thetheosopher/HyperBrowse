@@ -46,6 +46,7 @@ namespace hyperbrowse::ui
         bool CreateChildWindows();
         void CreateFonts();
         void ApplyFonts();
+        void ApplyListColumnWidths();
         void ReleaseFonts();
         void ReleaseBrushes();
         void LayoutChildren();
@@ -63,6 +64,7 @@ namespace hyperbrowse::ui
         HINSTANCE instance_{};
         HWND hwnd_{};
         HWND owner_{};
+        UINT dpi_{96};
         HWND titleLabel_{};
         HWND summaryLabel_{};
         HWND timingsLabel_{};

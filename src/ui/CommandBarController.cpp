@@ -10,14 +10,6 @@ namespace hyperbrowse::ui
 {
     namespace
     {
-        constexpr int kActionStripPaddingX = 8;
-        constexpr int kToolbarItemSize = 32;
-        constexpr int kToolbarSeparatorWidth = 9;
-        constexpr int kToolbarSeparatorGap = 4;
-        constexpr int kCommandBarMenuButtonGap = 4;
-        constexpr int kCommandBarMenuButtonPadding = 12;
-        constexpr int kCommandBarMenuButtonMinWidth = 56;
-        constexpr int kCommandBarMenuChevronWidth = 8;
     }
 
     using namespace command_ids;
@@ -91,8 +83,30 @@ namespace hyperbrowse::ui
                                       HFONT menuFont,
                                       const TextWidthHandler& measureTextWidth)
     {
-        int leftCursor = kActionStripPaddingX;
-        int rightCursor = clientWidth - kActionStripPaddingX;
+        Layout(clientWidth,
+               itemTop,
+               MakeMenuMetrics(hyperbrowse::util::kDefaultAppTextSize),
+               menuFont,
+               measureTextWidth);
+    }
+
+    void CommandBarController::Layout(int clientWidth,
+                                      int itemTop,
+                                      const MenuMetrics& metrics,
+                                      HFONT menuFont,
+                                      const TextWidthHandler& measureTextWidth)
+    {
+        const int actionStripPaddingX = metrics.ScaleDip(metrics.commandBarPaddingXDip);
+        const int itemSize = metrics.ScaleDip(metrics.commandBarItemSizeDip);
+        const int separatorWidth = metrics.ScaleDip(metrics.commandBarSeparatorWidthDip);
+        const int separatorGap = metrics.ScaleDip(metrics.commandBarSeparatorGapDip);
+        const int menuButtonGap = metrics.ScaleDip(metrics.commandBarMenuButtonGapDip);
+        const int menuButtonPadding = metrics.ScaleDip(metrics.commandBarMenuButtonPaddingDip);
+        const int menuButtonMinWidth = metrics.ScaleDip(metrics.commandBarMenuButtonMinWidthDip);
+        const int menuChevronWidth = metrics.ScaleDip(metrics.commandBarMenuChevronWidthDip);
+
+        int leftCursor = actionStripPaddingX;
+        int rightCursor = clientWidth - actionStripPaddingX;
         int filterItemIndex = -1;
 
         for (auto& button : menuButtons_)
@@ -104,14 +118,14 @@ namespace hyperbrowse::ui
             }
 
             const int textWidth = measureTextWidth ? measureTextWidth(menuFont, button.label) : 0;
-            const int buttonWidth = std::max(kCommandBarMenuButtonMinWidth,
-                                             textWidth + (kCommandBarMenuButtonPadding * 2)
-                                                 + kCommandBarMenuChevronWidth + 8);
-            button.rect = RECT{leftCursor, itemTop, leftCursor + buttonWidth, itemTop + kToolbarItemSize};
-            leftCursor += buttonWidth + kCommandBarMenuButtonGap;
+            const int buttonWidth = std::max(menuButtonMinWidth,
+                                             textWidth + (menuButtonPadding * 2)
+                                                 + menuChevronWidth + metrics.ScaleDip(8));
+            button.rect = RECT{leftCursor, itemTop, leftCursor + buttonWidth, itemTop + itemSize};
+            leftCursor += buttonWidth + menuButtonGap;
         }
 
-        leftCursor += 8;
+        leftCursor += metrics.ScaleDip(8);
 
         for (int index = 0; index < static_cast<int>(items_.size()); ++index)
         {
@@ -123,11 +137,11 @@ namespace hyperbrowse::ui
 
             if (item.kind == ToolbarItemKind::Separator)
             {
-                item.rect = RECT{leftCursor + kToolbarSeparatorGap,
+                item.rect = RECT{leftCursor + separatorGap,
                                  itemTop,
-                                 leftCursor + kToolbarSeparatorGap + 1,
-                                 itemTop + kToolbarItemSize};
-                leftCursor += kToolbarSeparatorWidth;
+                                 leftCursor + separatorGap + metrics.ScaleDip(1),
+                                 itemTop + itemSize};
+                leftCursor += separatorWidth;
                 continue;
             }
 
@@ -137,8 +151,8 @@ namespace hyperbrowse::ui
                 continue;
             }
 
-            item.rect = RECT{leftCursor, itemTop, leftCursor + kToolbarItemSize, itemTop + kToolbarItemSize};
-            leftCursor += kToolbarItemSize + 2;
+            item.rect = RECT{leftCursor, itemTop, leftCursor + itemSize, itemTop + itemSize};
+            leftCursor += itemSize + metrics.ScaleDip(2);
         }
 
         for (int index = static_cast<int>(items_.size()) - 1; index >= 0; --index)
@@ -151,26 +165,26 @@ namespace hyperbrowse::ui
 
             if (item.kind == ToolbarItemKind::Separator)
             {
-                rightCursor -= kToolbarSeparatorWidth;
-                item.rect = RECT{rightCursor + kToolbarSeparatorGap,
+                rightCursor -= separatorWidth;
+                item.rect = RECT{rightCursor + separatorGap,
                                  itemTop,
-                                 rightCursor + kToolbarSeparatorGap + 1,
-                                 itemTop + kToolbarItemSize};
+                                 rightCursor + separatorGap + metrics.ScaleDip(1),
+                                 itemTop + itemSize};
                 continue;
             }
 
-            rightCursor -= kToolbarItemSize;
-            item.rect = RECT{rightCursor, itemTop, rightCursor + kToolbarItemSize, itemTop + kToolbarItemSize};
-            rightCursor -= 2;
+            rightCursor -= itemSize;
+            item.rect = RECT{rightCursor, itemTop, rightCursor + itemSize, itemTop + itemSize};
+            rightCursor -= metrics.ScaleDip(2);
         }
 
         if (filterItemIndex >= 0)
         {
-            const int filterLeft = leftCursor + 6;
-            const int filterRight = rightCursor - 6;
+            const int filterLeft = leftCursor + metrics.ScaleDip(6);
+            const int filterRight = rightCursor - metrics.ScaleDip(6);
             const int filterWidth = std::max(0, filterRight - filterLeft);
             items_[static_cast<std::size_t>(filterItemIndex)].rect =
-                RECT{filterLeft, itemTop, filterLeft + filterWidth, itemTop + kToolbarItemSize};
+                RECT{filterLeft, itemTop, filterLeft + filterWidth, itemTop + itemSize};
         }
     }
 

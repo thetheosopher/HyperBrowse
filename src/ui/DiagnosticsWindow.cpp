@@ -8,6 +8,8 @@
 #include <sstream>
 
 #include "app/resource.h"
+#include "ui/DialogDpi.h"
+#include "ui/DialogShell.h"
 #include "ui/SystemTheme.h"
 
 namespace
@@ -42,10 +44,13 @@ namespace
 
     HFONT CreateUiFont(int pointSize,
                        int weight,
-                       hyperbrowse::util::AppTextSize size = hyperbrowse::util::kDefaultAppTextSize)
+                       hyperbrowse::util::AppTextSize size,
+                       UINT dpi)
     {
         HDC screenDc = GetDC(nullptr);
-        const int logPixelsY = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96;
+        const int logPixelsY = dpi != 0
+            ? static_cast<int>(dpi)
+            : (screenDc ? GetDeviceCaps(screenDc, LOGPIXELSY) : 96);
         if (screenDc)
         {
             ReleaseDC(nullptr, screenDc);
@@ -221,9 +226,11 @@ namespace hyperbrowse::ui
         appTextSize_ = size;
         if (hwnd_)
         {
+            dpi_ = DialogDpiForWindow(hwnd_);
             ReleaseFonts();
             CreateFonts();
             ApplyFonts();
+            ApplyListColumnWidths();
             LayoutChildren();
             InvalidateRect(hwnd_, nullptr, TRUE);
         }
@@ -268,6 +275,22 @@ namespace hyperbrowse::ui
             return false;
         }
 
+        dpi_ = DialogDpiForWindow(owner_);
+        RECT windowRect{
+            0,
+            0,
+            ScaleDialogAppTextDimension(1040, appTextSize_, dpi_),
+            ScaleDialogAppTextDimension(760, appTextSize_, dpi_)};
+        AdjustDialogWindowRectForDpi(
+            &windowRect,
+            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+            FALSE,
+            WS_EX_DLGMODALFRAME,
+            dpi_);
+        windowRect = ClampDialogFrameToWorkArea(
+            windowRect,
+            MeasureDialogShellMetrics(owner_, appTextSize_).workArea);
+
         hwnd_ = CreateWindowExW(
             WS_EX_DLGMODALFRAME,
             kWindowClassName,
@@ -275,12 +298,18 @@ namespace hyperbrowse::ui
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            1040,
-            760,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top,
             owner,
             nullptr,
             instance_,
             this);
+
+        if (hwnd_)
+        {
+            const DialogShellMetrics shell = MeasureDialogShellMetrics(owner_, appTextSize_);
+            CenterDialogInWorkArea(hwnd_, shell.workArea);
+        }
 
         return hwnd_ != nullptr;
     }
@@ -332,18 +361,19 @@ namespace hyperbrowse::ui
         ListView_SetExtendedListViewStyle(countersList_, extendedStyle);
         ListView_SetExtendedListViewStyle(derivedList_, extendedStyle);
 
-        AddListColumn(timingsList_, 0, 270, L"Metric");
-        AddListColumn(timingsList_, 1, 90, L"Count");
-        AddListColumn(timingsList_, 2, 100, L"Avg (ms)");
-        AddListColumn(timingsList_, 3, 100, L"Last (ms)");
-        AddListColumn(timingsList_, 4, 100, L"Min (ms)");
-        AddListColumn(timingsList_, 5, 100, L"Max (ms)");
+        AddListColumn(timingsList_, 0, 1, L"Metric");
+        AddListColumn(timingsList_, 1, 1, L"Count");
+        AddListColumn(timingsList_, 2, 1, L"Avg (ms)");
+        AddListColumn(timingsList_, 3, 1, L"Last (ms)");
+        AddListColumn(timingsList_, 4, 1, L"Min (ms)");
+        AddListColumn(timingsList_, 5, 1, L"Max (ms)");
 
-        AddListColumn(countersList_, 0, 300, L"Counter");
-        AddListColumn(countersList_, 1, 120, L"Value");
+        AddListColumn(countersList_, 0, 1, L"Counter");
+        AddListColumn(countersList_, 1, 1, L"Value");
 
-        AddListColumn(derivedList_, 0, 320, L"Metric");
-        AddListColumn(derivedList_, 1, 160, L"Value");
+        AddListColumn(derivedList_, 0, 1, L"Metric");
+        AddListColumn(derivedList_, 1, 1, L"Value");
+        ApplyListColumnWidths();
 
         return true;
     }
@@ -352,15 +382,15 @@ namespace hyperbrowse::ui
     {
         if (!titleFont_)
         {
-            titleFont_ = CreateUiFont(16, FW_SEMIBOLD, appTextSize_);
+            titleFont_ = CreateUiFont(16, FW_SEMIBOLD, appTextSize_, dpi_);
         }
         if (!sectionFont_)
         {
-            sectionFont_ = CreateUiFont(10, FW_SEMIBOLD, appTextSize_);
+            sectionFont_ = CreateUiFont(10, FW_SEMIBOLD, appTextSize_, dpi_);
         }
         if (!bodyFont_)
         {
-            bodyFont_ = CreateUiFont(9, FW_NORMAL, appTextSize_);
+            bodyFont_ = CreateUiFont(9, FW_NORMAL, appTextSize_, dpi_);
         }
     }
 
@@ -382,6 +412,33 @@ namespace hyperbrowse::ui
             SendMessageW(timingsList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
             SendMessageW(countersList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
             SendMessageW(derivedList_, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
+        }
+    }
+
+    void DiagnosticsWindow::ApplyListColumnWidths()
+    {
+        const auto scale = [this](int value)
+        {
+            return ScaleDialogAppTextDimension(value, appTextSize_, dpi_);
+        };
+        if (timingsList_)
+        {
+            ListView_SetColumnWidth(timingsList_, 0, scale(270));
+            ListView_SetColumnWidth(timingsList_, 1, scale(90));
+            ListView_SetColumnWidth(timingsList_, 2, scale(100));
+            ListView_SetColumnWidth(timingsList_, 3, scale(100));
+            ListView_SetColumnWidth(timingsList_, 4, scale(100));
+            ListView_SetColumnWidth(timingsList_, 5, scale(100));
+        }
+        if (countersList_)
+        {
+            ListView_SetColumnWidth(countersList_, 0, scale(300));
+            ListView_SetColumnWidth(countersList_, 1, scale(120));
+        }
+        if (derivedList_)
+        {
+            ListView_SetColumnWidth(derivedList_, 0, scale(320));
+            ListView_SetColumnWidth(derivedList_, 1, scale(160));
         }
     }
 
@@ -424,39 +481,45 @@ namespace hyperbrowse::ui
         GetClientRect(hwnd_, &client);
         const int clientWidth = client.right - client.left;
         const int clientHeight = client.bottom - client.top;
+        const auto scale = [this](int value)
+        {
+            return ScaleDialogAppTextDimension(value, appTextSize_, dpi_);
+        };
 
-        const int topWidth = clientWidth - (kMargin * 2);
-        int top = kMargin;
+        const int margin = scale(kMargin);
+        const int sectionGap = scale(kSectionGap);
+        const int topWidth = clientWidth - (margin * 2);
+        int top = margin;
 
-        const int titleHeight = MeasureWindowTextHeight(titleLabel_, titleFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, kTitleHeight);
-        const int summaryHeight = MeasureWindowTextHeight(summaryLabel_, bodyFont_, topWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, kSummaryHeight);
-        const int sectionLabelHeight = std::max({MeasureWindowTextHeight(timingsLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, kSectionLabelHeight),
-                             MeasureWindowTextHeight(countersLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, kSectionLabelHeight),
-                             MeasureWindowTextHeight(derivedLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, kSectionLabelHeight)});
+        const int titleHeight = MeasureWindowTextHeight(titleLabel_, titleFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, scale(kTitleHeight));
+        const int summaryHeight = MeasureWindowTextHeight(summaryLabel_, bodyFont_, topWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, scale(kSummaryHeight));
+        const int sectionLabelHeight = std::max({MeasureWindowTextHeight(timingsLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, scale(kSectionLabelHeight)),
+                             MeasureWindowTextHeight(countersLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, scale(kSectionLabelHeight)),
+                             MeasureWindowTextHeight(derivedLabel_, sectionFont_, topWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, scale(kSectionLabelHeight))});
 
-        MoveWindow(titleLabel_, kMargin, top, topWidth, titleHeight, TRUE);
-        top += titleHeight + 6;
-        MoveWindow(summaryLabel_, kMargin, top, topWidth, summaryHeight, TRUE);
-        top += summaryHeight + kSectionGap;
+        MoveWindow(titleLabel_, margin, top, topWidth, titleHeight, TRUE);
+        top += titleHeight + scale(6);
+        MoveWindow(summaryLabel_, margin, top, topWidth, summaryHeight, TRUE);
+        top += summaryHeight + sectionGap;
 
-        MoveWindow(timingsLabel_, kMargin, top, topWidth, sectionLabelHeight, TRUE);
-        top += sectionLabelHeight + 4;
+        MoveWindow(timingsLabel_, margin, top, topWidth, sectionLabelHeight, TRUE);
+        top += sectionLabelHeight + scale(4);
 
-        const int remainingHeight = clientHeight - top - kMargin;
-        const int bottomSectionHeight = std::max(150, (remainingHeight - kSectionGap - sectionLabelHeight) / 2);
-        const int timingsHeight = std::max(180, remainingHeight - bottomSectionHeight - kSectionGap - sectionLabelHeight - 4);
+        const int remainingHeight = clientHeight - top - margin;
+        const int bottomSectionHeight = std::max(scale(150), (remainingHeight - sectionGap - sectionLabelHeight) / 2);
+        const int timingsHeight = std::max(scale(180), remainingHeight - bottomSectionHeight - sectionGap - sectionLabelHeight - scale(4));
 
-        MoveWindow(timingsList_, kMargin, top, topWidth, timingsHeight, TRUE);
-        top += timingsHeight + kSectionGap;
+        MoveWindow(timingsList_, margin, top, topWidth, timingsHeight, TRUE);
+        top += timingsHeight + sectionGap;
 
-        const int halfWidth = (topWidth - kSectionGap) / 2;
-        MoveWindow(countersLabel_, kMargin, top, halfWidth, sectionLabelHeight, TRUE);
-        MoveWindow(derivedLabel_, kMargin + halfWidth + kSectionGap, top, halfWidth, sectionLabelHeight, TRUE);
-        top += sectionLabelHeight + 4;
+        const int halfWidth = (topWidth - sectionGap) / 2;
+        MoveWindow(countersLabel_, margin, top, halfWidth, sectionLabelHeight, TRUE);
+        MoveWindow(derivedLabel_, margin + halfWidth + sectionGap, top, halfWidth, sectionLabelHeight, TRUE);
+        top += sectionLabelHeight + scale(4);
 
-        const int bottomHeight = clientHeight - top - kMargin;
-        MoveWindow(countersList_, kMargin, top, halfWidth, bottomHeight, TRUE);
-        MoveWindow(derivedList_, kMargin + halfWidth + kSectionGap, top, halfWidth, bottomHeight, TRUE);
+        const int bottomHeight = clientHeight - top - margin;
+        MoveWindow(countersList_, margin, top, halfWidth, bottomHeight, TRUE);
+        MoveWindow(derivedList_, margin + halfWidth + sectionGap, top, halfWidth, bottomHeight, TRUE);
     }
 
     void DiagnosticsWindow::ApplyTheme()
@@ -656,8 +719,32 @@ namespace hyperbrowse::ui
         case WM_GETMINMAXINFO:
         {
             auto* minMaxInfo = reinterpret_cast<MINMAXINFO*>(lParam);
-            minMaxInfo->ptMinTrackSize.x = kMinWindowWidth;
-            minMaxInfo->ptMinTrackSize.y = kMinWindowHeight;
+            minMaxInfo->ptMinTrackSize.x = ScaleDialogAppTextDimension(kMinWindowWidth, appTextSize_, dpi_);
+            minMaxInfo->ptMinTrackSize.y = ScaleDialogAppTextDimension(kMinWindowHeight, appTextSize_, dpi_);
+            return 0;
+        }
+        case WM_DPICHANGED:
+        {
+            dpi_ = std::max<UINT>(96, HIWORD(wParam));
+            const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
+            if (suggestedRect)
+            {
+                const RECT adjustedRect = ClampDialogFrameToWorkArea(
+                    *suggestedRect,
+                    MeasureDialogShellMetrics(hwnd_, appTextSize_).workArea);
+                SetWindowPos(hwnd_, nullptr,
+                             adjustedRect.left,
+                             adjustedRect.top,
+                             adjustedRect.right - adjustedRect.left,
+                             adjustedRect.bottom - adjustedRect.top,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            ReleaseFonts();
+            CreateFonts();
+            ApplyFonts();
+            ApplyListColumnWidths();
+            LayoutChildren();
+            InvalidateRect(hwnd_, nullptr, TRUE);
             return 0;
         }
         case WM_CTLCOLORSTATIC:

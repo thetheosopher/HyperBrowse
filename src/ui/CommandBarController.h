@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "ui/MenuMetrics.h"
+
 namespace hyperbrowse::ui
 {
     class CommandBarController final
@@ -95,6 +97,11 @@ namespace hyperbrowse::ui
         void InitializeItems();
         void SetMenuButton(std::size_t index, std::wstring label, wchar_t mnemonic, HMENU menu);
         void Layout(int clientWidth, int itemTop, HFONT menuFont, const TextWidthHandler& measureTextWidth);
+        void Layout(int clientWidth,
+                int itemTop,
+                const MenuMetrics& metrics,
+                HFONT menuFont,
+                const TextWidthHandler& measureTextWidth);
         void UpdateItemStates(const ToolbarState& state);
         KeyboardInputResult HandleKeyboardInput(UINT message,
                              WPARAM wParam,

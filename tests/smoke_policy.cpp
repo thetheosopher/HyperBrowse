@@ -377,6 +377,7 @@ namespace hyperbrowse::tests
         void RunCommandBarControllerScenario()
         {
             using hyperbrowse::ui::CommandBarController;
+            using hyperbrowse::ui::MakeMenuMetrics;
             using namespace hyperbrowse::ui::command_ids;
 
             CommandBarController controller;
@@ -388,6 +389,7 @@ namespace hyperbrowse::tests
             controller.SetMenuButton(4, L"Help", L'H', reinterpret_cast<HMENU>(static_cast<INT_PTR>(5)));
             controller.Layout(900,
                               6,
+                              MakeMenuMetrics(hyperbrowse::util::kDefaultAppTextSize),
                               nullptr,
                               [](HFONT, std::wstring_view text)
                               {
@@ -470,6 +472,48 @@ namespace hyperbrowse::tests
             Expect(escapeResult.handled
                        && escapeResult.action == CommandBarController::KeyboardAction::Deactivate,
                    "Command-bar controller did not deactivate keyboard mode with Escape");
+        }
+
+        void RunMenuMetricsScenario()
+        {
+            using hyperbrowse::ui::CommandBarController;
+            using hyperbrowse::ui::MakeMenuMetrics;
+            using hyperbrowse::util::AppTextSize;
+
+            const auto smallMetrics = MakeMenuMetrics(AppTextSize::Small, 96);
+            const auto mediumMetrics = MakeMenuMetrics(AppTextSize::Medium, 144);
+            const auto largeMetrics = MakeMenuMetrics(AppTextSize::Large, 192);
+            Expect(smallMetrics.ScaleDip(smallMetrics.popupItemHeightDip)
+                       < mediumMetrics.ScaleDip(mediumMetrics.popupItemHeightDip)
+                       && mediumMetrics.ScaleDip(mediumMetrics.popupItemHeightDip)
+                       < largeMetrics.ScaleDip(largeMetrics.popupItemHeightDip),
+                   "Menu item height did not increase monotonically with DPI and text size");
+            Expect(smallMetrics.ScaleDip(smallMetrics.popupTextPaddingDip)
+                       < largeMetrics.ScaleDip(largeMetrics.popupTextPaddingDip),
+                   "Menu text padding did not compose DPI and application text size");
+
+            CommandBarController controller;
+            controller.InitializeItems();
+            controller.SetMenuButton(0, L"File", L'F', reinterpret_cast<HMENU>(static_cast<INT_PTR>(1)));
+            controller.Layout(2400,
+                              largeMetrics.ScaleDip(6),
+                              largeMetrics,
+                              nullptr,
+                              [](HFONT, std::wstring_view text)
+                              {
+                                  return static_cast<int>(text.size() * 8);
+                              });
+
+            const auto& buttons = controller.MenuButtons();
+            Expect(buttons[0].rect.bottom - buttons[0].rect.top == largeMetrics.ScaleDip(largeMetrics.commandBarItemSizeDip),
+                   "Command-bar item height did not use shared menu metrics");
+            Expect(buttons[0].rect.right > buttons[0].rect.left,
+                   "Command-bar menu button received an invalid rectangle");
+            for (const auto& item : controller.Items())
+            {
+                Expect(item.rect.right >= item.rect.left && item.rect.bottom >= item.rect.top,
+                       "Command-bar item received an invalid scaled rectangle");
+            }
         }
 
         void RunQuickAccessMenuBuilderScenario()
@@ -1972,6 +2016,7 @@ namespace hyperbrowse::tests
         RunFileCommandControllerScenario();
         RunViewCommandControllerScenario();
         RunCommandBarControllerScenario();
+        RunMenuMetricsScenario();
         RunQuickAccessMenuBuilderScenario();
         RunDetailsPanelHistogramScenario();
         RunRightPaneHitTesterScenario();
@@ -2123,6 +2168,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--async-router")
         {
             RunWindowAsyncMessageRouterScenario();
+        }
+        else if (scenario == "--menu-metrics")
+        {
+            RunMenuMetricsScenario();
         }
         else
         {

@@ -18,11 +18,6 @@ namespace hyperbrowse::ui
 {
     namespace
     {
-        constexpr int kToolbarIconSize = 18;
-        constexpr int kToolbarDropdownChevronSize = 10;
-        constexpr int kCommandBarMenuButtonPadding = 12;
-        constexpr int kCommandBarMenuChevronWidth = 8;
-
         COLORREF BlendColor(COLORREF baseColor, COLORREF mixColor, BYTE mixAmount)
         {
             const BYTE baseAmount = static_cast<BYTE>(255 - mixAmount);
@@ -55,6 +50,7 @@ namespace hyperbrowse::ui
         const std::array<CommandBarController::CommandBarMenuButton, 5>& menuButtons,
         const std::vector<CommandBarController::ToolbarItem>& toolbarItems,
         const CommandBarPalette& palette,
+        const MenuMetrics& metrics,
         IDWriteTextFormat* textFormat,
         ToolbarIconLibrary* iconLibrary,
         const CommandBarPaintState& state) const
@@ -63,6 +59,13 @@ namespace hyperbrowse::ui
         {
             return;
         }
+
+        const int menuButtonPadding = metrics.ScaleDip(metrics.commandBarMenuButtonPaddingDip);
+        const int menuChevronWidth = metrics.ScaleDip(metrics.commandBarMenuChevronWidthDip);
+        const int toolbarIconSize = metrics.ScaleDip(metrics.commandBarToolbarIconSizeDip);
+        const int dropdownChevronSize = metrics.ScaleDip(metrics.commandBarDropdownChevronSizeDip);
+        const int buttonRadius = metrics.ScaleDip(metrics.commandBarButtonRadiusDip);
+        const int focusRingRadius = metrics.ScaleDip(metrics.commandBarFocusRingRadiusDip);
 
         auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
         const auto createBrush = [renderTarget](COLORREF color)
@@ -120,7 +123,8 @@ namespace hyperbrowse::ui
             InflateRect(&buttonRect, -1, -1);
             const auto fillBrush = createBrush(fillColor);
             const auto buttonBorderBrush = createBrush(borderColor);
-            const D2D1_ROUNDED_RECT roundedRect = hyperbrowse::render::ToD2DRoundedRect(buttonRect, 10.0f, 10.0f);
+            const D2D1_ROUNDED_RECT roundedRect = hyperbrowse::render::ToD2DRoundedRect(
+                buttonRect, static_cast<float>(buttonRadius), static_cast<float>(buttonRadius));
             if (fillBrush)
             {
                 renderTarget->FillRoundedRectangle(&roundedRect, fillBrush.Get());
@@ -137,7 +141,8 @@ namespace hyperbrowse::ui
             const auto focusBrush = createBrush(palette.accent);
             if (focusBrush)
             {
-                const auto roundedRect = hyperbrowse::render::ToD2DRoundedRect(focusRect, 10.0f, 10.0f);
+                const auto roundedRect = hyperbrowse::render::ToD2DRoundedRect(
+                    focusRect, static_cast<float>(focusRingRadius), static_cast<float>(focusRingRadius));
                 renderTarget->DrawRoundedRectangle(&roundedRect, focusBrush.Get(), 2.0f);
             }
         };
@@ -163,8 +168,8 @@ namespace hyperbrowse::ui
             drawRoundedButton(button.rect, fillColor, borderColor);
 
             RECT textRect = button.rect;
-            InflateRect(&textRect, -kCommandBarMenuButtonPadding, 0);
-            textRect.right -= kCommandBarMenuChevronWidth + 4;
+            InflateRect(&textRect, -menuButtonPadding, 0);
+            textRect.right -= menuChevronWidth + metrics.ScaleDip(4);
             if (state.keyboardActive && button.mnemonic != L'\0')
             {
                 const auto mnemonicIt = std::find_if(button.label.begin(), button.label.end(), [&button](wchar_t character)
@@ -202,19 +207,19 @@ namespace hyperbrowse::ui
                 drawText(button.label, textRect, palette.text);
             }
 
-            const int chevronX = button.rect.right - kCommandBarMenuButtonPadding - kCommandBarMenuChevronWidth;
-            const int chevronY = button.rect.top + ((button.rect.bottom - button.rect.top) - kCommandBarMenuChevronWidth) / 2;
+            const int chevronX = button.rect.right - menuButtonPadding - menuChevronWidth;
+            const int chevronY = button.rect.top + ((button.rect.bottom - button.rect.top) - menuChevronWidth) / 2;
             const auto chevronBrush = createBrush(palette.mutedText);
             if (chevronBrush)
             {
                 renderTarget->DrawLine(
-                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX), static_cast<float>(chevronY + 2)),
-                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + (kCommandBarMenuChevronWidth / 2)), static_cast<float>(chevronY + 6)),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX), static_cast<float>(chevronY + metrics.ScaleDip(2))),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + (menuChevronWidth / 2)), static_cast<float>(chevronY + metrics.ScaleDip(6))),
                     chevronBrush.Get(),
                     2.0f);
                 renderTarget->DrawLine(
-                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + (kCommandBarMenuChevronWidth / 2)), static_cast<float>(chevronY + 6)),
-                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + kCommandBarMenuChevronWidth), static_cast<float>(chevronY + 2)),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + (menuChevronWidth / 2)), static_cast<float>(chevronY + metrics.ScaleDip(6))),
+                    hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + menuChevronWidth), static_cast<float>(chevronY + metrics.ScaleDip(2))),
                     chevronBrush.Get(),
                     2.0f);
             }
@@ -227,9 +232,9 @@ namespace hyperbrowse::ui
             {
                 if (borderBrush)
                 {
-                    renderTarget->DrawLine(
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(item.rect.left), static_cast<float>(item.rect.top + 4)),
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(item.rect.left), static_cast<float>(item.rect.bottom - 4)),
+                        renderTarget->DrawLine(
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(item.rect.left), static_cast<float>(item.rect.top + metrics.ScaleDip(4))),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(item.rect.left), static_cast<float>(item.rect.bottom - metrics.ScaleDip(4))),
                         borderBrush.Get());
                 }
                 continue;
@@ -240,13 +245,14 @@ namespace hyperbrowse::ui
                 if (state.filterEditPresent)
                 {
                     RECT filterRect = item.rect;
-                    InflateRect(&filterRect, 0, -2);
+                    InflateRect(&filterRect, 0, -metrics.ScaleDip(2));
                     const COLORREF borderColor = state.filterFocused ? palette.accent : palette.actionStripBorder;
                     drawRoundedButton(filterRect, palette.actionFieldBackground, borderColor);
 
                     if (iconLibrary)
                     {
-                        const HBITMAP bitmap = iconLibrary->GetBitmap("search", 14, palette.mutedText);
+                        const int filterIconSize = metrics.ScaleDip(14);
+                        const HBITMAP bitmap = iconLibrary->GetBitmap("search", filterIconSize, palette.mutedText);
                         BITMAP bitmapInfo{};
                         if (bitmap && GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) == sizeof(bitmapInfo))
                         {
@@ -257,15 +263,15 @@ namespace hyperbrowse::ui
                                 std::abs(bitmapInfo.bmHeight));
                             if (icon)
                             {
-                                const int iconLeft = filterRect.left + 7;
-                                const int iconTop = filterRect.top + 5;
+                                const int iconLeft = filterRect.left + metrics.ScaleDip(7);
+                                const int iconTop = filterRect.top + metrics.ScaleDip(5);
                                 hyperbrowse::render::DrawBitmapHighQuality(
                                     renderTarget,
                                     icon.Get(),
                                     D2D1::RectF(static_cast<float>(iconLeft),
                                                 static_cast<float>(iconTop),
-                                                static_cast<float>(iconLeft + 14),
-                                                static_cast<float>(iconTop + 14)));
+                                                static_cast<float>(iconLeft + filterIconSize),
+                                                static_cast<float>(iconTop + filterIconSize)));
                             }
                         }
                     }
@@ -319,11 +325,11 @@ namespace hyperbrowse::ui
                 RECT iconRect = item.rect;
                 if (item.kind == CommandBarController::ToolbarItemKind::IconDropdown)
                 {
-                    iconRect.right -= kToolbarDropdownChevronSize + 2;
+                    iconRect.right -= dropdownChevronSize + metrics.ScaleDip(2);
                 }
-                const int iconLeft = iconRect.left + ((iconRect.right - iconRect.left) - kToolbarIconSize) / 2;
-                const int iconTop = iconRect.top + ((iconRect.bottom - iconRect.top) - kToolbarIconSize) / 2;
-                const HBITMAP bitmap = iconLibrary->GetBitmap(item.iconName, kToolbarIconSize, iconColor);
+                const int iconLeft = iconRect.left + ((iconRect.right - iconRect.left) - toolbarIconSize) / 2;
+                const int iconTop = iconRect.top + ((iconRect.bottom - iconRect.top) - toolbarIconSize) / 2;
+                const HBITMAP bitmap = iconLibrary->GetBitmap(item.iconName, toolbarIconSize, iconColor);
                 BITMAP bitmapInfo{};
                 if (bitmap && GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) == sizeof(bitmapInfo))
                 {
@@ -339,27 +345,27 @@ namespace hyperbrowse::ui
                             icon.Get(),
                             D2D1::RectF(static_cast<float>(iconLeft),
                                         static_cast<float>(iconTop),
-                                        static_cast<float>(iconLeft + kToolbarIconSize),
-                                        static_cast<float>(iconTop + kToolbarIconSize)));
+                                        static_cast<float>(iconLeft + toolbarIconSize),
+                                        static_cast<float>(iconTop + toolbarIconSize)));
                     }
                 }
             }
 
             if (item.kind == CommandBarController::ToolbarItemKind::IconDropdown && isEnabled)
             {
-                const int chevronX = item.rect.right - kToolbarDropdownChevronSize - 6;
-                const int chevronY = item.rect.top + ((item.rect.bottom - item.rect.top) - kToolbarDropdownChevronSize) / 2;
+                const int chevronX = item.rect.right - dropdownChevronSize - metrics.ScaleDip(6);
+                const int chevronY = item.rect.top + ((item.rect.bottom - item.rect.top) - dropdownChevronSize) / 2;
                 const auto chevronBrush = createBrush(palette.mutedText);
                 if (chevronBrush)
                 {
                     renderTarget->DrawLine(
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX), static_cast<float>(chevronY + 3)),
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + 5), static_cast<float>(chevronY + 7)),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX), static_cast<float>(chevronY + metrics.ScaleDip(3))),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + metrics.ScaleDip(5)), static_cast<float>(chevronY + metrics.ScaleDip(7))),
                         chevronBrush.Get(),
                         1.5f);
                     renderTarget->DrawLine(
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + 5), static_cast<float>(chevronY + 7)),
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + 10), static_cast<float>(chevronY + 3)),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + metrics.ScaleDip(5)), static_cast<float>(chevronY + metrics.ScaleDip(7))),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(chevronX + dropdownChevronSize), static_cast<float>(chevronY + metrics.ScaleDip(3))),
                         chevronBrush.Get(),
                         1.5f);
                 }
@@ -378,10 +384,18 @@ namespace hyperbrowse::ui
         const std::array<CommandBarController::CommandBarMenuButton, 5>& menuButtons,
         const std::vector<CommandBarController::ToolbarItem>& toolbarItems,
         const CommandBarPalette& palette,
+        const MenuMetrics& metrics,
         HFONT menuFont,
         ToolbarIconLibrary* iconLibrary,
         const CommandBarPaintState& state) const
     {
+        const int menuButtonPadding = metrics.ScaleDip(metrics.commandBarMenuButtonPaddingDip);
+        const int menuChevronWidth = metrics.ScaleDip(metrics.commandBarMenuChevronWidthDip);
+        const int toolbarIconSize = metrics.ScaleDip(metrics.commandBarToolbarIconSizeDip);
+        const int dropdownChevronSize = metrics.ScaleDip(metrics.commandBarDropdownChevronSizeDip);
+        const int buttonRadius = metrics.ScaleDip(metrics.commandBarButtonRadiusDip);
+        const int focusRingRadius = metrics.ScaleDip(metrics.commandBarFocusRingRadiusDip);
+        const int filterRadius = metrics.ScaleDip(metrics.commandBarFilterRadiusDip);
         HDC iconDC = iconLibrary ? CreateCompatibleDC(hdc) : nullptr;
 
         const HBRUSH stripBrush = CreateSolidBrush(palette.actionStripBackground);
@@ -402,7 +416,8 @@ namespace hyperbrowse::ui
             const HPEN focusPen = CreatePen(PS_SOLID, 2, palette.accent);
             const HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
             const HGDIOBJ oldPen = SelectObject(hdc, focusPen);
-            RoundRect(hdc, focusRect.left, focusRect.top, focusRect.right, focusRect.bottom, 10, 10);
+            RoundRect(hdc, focusRect.left, focusRect.top, focusRect.right, focusRect.bottom,
+                      focusRingRadius, focusRingRadius);
             SelectObject(hdc, oldPen);
             SelectObject(hdc, oldBrush);
             DeleteObject(focusPen);
@@ -434,15 +449,15 @@ namespace hyperbrowse::ui
             const HPEN buttonPen = CreatePen(PS_SOLID, 1, borderColor);
             const HGDIOBJ oldBrush = SelectObject(hdc, buttonBrush);
             const HGDIOBJ oldButtonPen = SelectObject(hdc, buttonPen);
-            RoundRect(hdc, buttonRect.left, buttonRect.top, buttonRect.right, buttonRect.bottom, 10, 10);
+            RoundRect(hdc, buttonRect.left, buttonRect.top, buttonRect.right, buttonRect.bottom, buttonRadius, buttonRadius);
             SelectObject(hdc, oldButtonPen);
             SelectObject(hdc, oldBrush);
             DeleteObject(buttonPen);
             DeleteObject(buttonBrush);
 
             RECT textRect = buttonRect;
-            textRect.left += kCommandBarMenuButtonPadding;
-            textRect.right -= kCommandBarMenuButtonPadding + kCommandBarMenuChevronWidth + 4;
+            textRect.left += menuButtonPadding;
+            textRect.right -= menuButtonPadding + menuChevronWidth + metrics.ScaleDip(4);
             std::wstring buttonLabel = button.label;
             if (state.keyboardActive && button.mnemonic != L'\0')
             {
@@ -467,13 +482,13 @@ namespace hyperbrowse::ui
                                 palette.text,
                                 fillColor);
 
-            const int chevronX = buttonRect.right - kCommandBarMenuButtonPadding - kCommandBarMenuChevronWidth;
-            const int chevronY = buttonRect.top + ((buttonRect.bottom - buttonRect.top) - kCommandBarMenuChevronWidth) / 2;
+            const int chevronX = buttonRect.right - menuButtonPadding - menuChevronWidth;
+            const int chevronY = buttonRect.top + ((buttonRect.bottom - buttonRect.top) - menuChevronWidth) / 2;
             const HPEN chevronPen = CreatePen(PS_SOLID, 2, palette.mutedText);
             const HGDIOBJ oldChevronPen = SelectObject(hdc, chevronPen);
-            MoveToEx(hdc, chevronX, chevronY + 2, nullptr);
-            LineTo(hdc, chevronX + (kCommandBarMenuChevronWidth / 2), chevronY + 6);
-            LineTo(hdc, chevronX + kCommandBarMenuChevronWidth, chevronY + 2);
+            MoveToEx(hdc, chevronX, chevronY + metrics.ScaleDip(2), nullptr);
+            LineTo(hdc, chevronX + (menuChevronWidth / 2), chevronY + metrics.ScaleDip(6));
+            LineTo(hdc, chevronX + menuChevronWidth, chevronY + metrics.ScaleDip(2));
             SelectObject(hdc, oldChevronPen);
             DeleteObject(chevronPen);
         }
@@ -486,8 +501,8 @@ namespace hyperbrowse::ui
             {
                 const HPEN sepPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
                 const HGDIOBJ savedPen = SelectObject(hdc, sepPen);
-                MoveToEx(hdc, item.rect.left, item.rect.top + 4, nullptr);
-                LineTo(hdc, item.rect.left, item.rect.bottom - 4);
+                MoveToEx(hdc, item.rect.left, item.rect.top + metrics.ScaleDip(4), nullptr);
+                LineTo(hdc, item.rect.left, item.rect.bottom - metrics.ScaleDip(4));
                 SelectObject(hdc, savedPen);
                 DeleteObject(sepPen);
                 continue;
@@ -498,13 +513,13 @@ namespace hyperbrowse::ui
                 if (state.filterEditPresent)
                 {
                     RECT filterBg = item.rect;
-                    InflateRect(&filterBg, 0, -2);
+                    InflateRect(&filterBg, 0, -metrics.ScaleDip(2));
                     const HBRUSH fieldBrush = CreateSolidBrush(palette.actionFieldBackground);
                     const HPEN fieldPen = CreatePen(PS_SOLID, 1,
                                                     state.filterFocused ? palette.accent : palette.actionStripBorder);
                     const HGDIOBJ oldb = SelectObject(hdc, fieldBrush);
                     const HGDIOBJ oldp = SelectObject(hdc, fieldPen);
-                    RoundRect(hdc, filterBg.left, filterBg.top, filterBg.right, filterBg.bottom, 14, 14);
+                    RoundRect(hdc, filterBg.left, filterBg.top, filterBg.right, filterBg.bottom, filterRadius, filterRadius);
                     SelectObject(hdc, oldp);
                     SelectObject(hdc, oldb);
                     DeleteObject(fieldPen);
@@ -512,8 +527,15 @@ namespace hyperbrowse::ui
 
                     if (iconLibrary && iconDC)
                     {
-                        const HBITMAP searchBitmap = iconLibrary->GetBitmap("search", 14, palette.mutedText);
-                        AlphaBlendBitmap(hdc, iconDC, searchBitmap, filterBg.left + 7, filterBg.top + 7, 14, 14);
+                        const int filterIconSize = metrics.ScaleDip(14);
+                        const HBITMAP searchBitmap = iconLibrary->GetBitmap("search", filterIconSize, palette.mutedText);
+                        AlphaBlendBitmap(hdc,
+                                         iconDC,
+                                         searchBitmap,
+                                         filterBg.left + metrics.ScaleDip(7),
+                                         filterBg.top + metrics.ScaleDip(7),
+                                         filterIconSize,
+                                         filterIconSize);
                     }
                 }
                 continue;
@@ -566,7 +588,8 @@ namespace hyperbrowse::ui
                 const HPEN bgPen = CreatePen(PS_SOLID, 1, bgColor);
                 const HGDIOBJ oldb = SelectObject(hdc, bgBrush);
                 const HGDIOBJ oldp = SelectObject(hdc, bgPen);
-                RoundRect(hdc, bgRect.left, bgRect.top, bgRect.right, bgRect.bottom, 10, 10);
+                const int backgroundRadius = metrics.ScaleDip(10);
+                RoundRect(hdc, bgRect.left, bgRect.top, bgRect.right, bgRect.bottom, backgroundRadius, backgroundRadius);
                 SelectObject(hdc, oldp);
                 SelectObject(hdc, oldb);
                 DeleteObject(bgPen);
@@ -578,29 +601,29 @@ namespace hyperbrowse::ui
                 RECT iconRect = item.rect;
                 if (item.kind == CommandBarController::ToolbarItemKind::IconDropdown)
                 {
-                    iconRect.right -= kToolbarDropdownChevronSize + 2;
+                    iconRect.right -= dropdownChevronSize + metrics.ScaleDip(2);
                 }
 
-                const int iconX = iconRect.left + ((iconRect.right - iconRect.left) - kToolbarIconSize) / 2;
-                const int iconY = iconRect.top + ((iconRect.bottom - iconRect.top) - kToolbarIconSize) / 2;
-                const HBITMAP iconBitmap = iconLibrary->GetBitmap(item.iconName, kToolbarIconSize, iconColor);
-                AlphaBlendBitmap(hdc, iconDC, iconBitmap, iconX, iconY, kToolbarIconSize, kToolbarIconSize);
+                const int iconX = iconRect.left + ((iconRect.right - iconRect.left) - toolbarIconSize) / 2;
+                const int iconY = iconRect.top + ((iconRect.bottom - iconRect.top) - toolbarIconSize) / 2;
+                const HBITMAP iconBitmap = iconLibrary->GetBitmap(item.iconName, toolbarIconSize, iconColor);
+                AlphaBlendBitmap(hdc, iconDC, iconBitmap, iconX, iconY, toolbarIconSize, toolbarIconSize);
             }
 
             if (item.kind == CommandBarController::ToolbarItemKind::IconDropdown && isEnabled && iconLibrary && iconDC)
             {
-                const int chevronX = item.rect.right - kToolbarDropdownChevronSize - 6;
-                const int chevronY = item.rect.top + ((item.rect.bottom - item.rect.top) - kToolbarDropdownChevronSize) / 2;
+                const int chevronX = item.rect.right - dropdownChevronSize - metrics.ScaleDip(6);
+                const int chevronY = item.rect.top + ((item.rect.bottom - item.rect.top) - dropdownChevronSize) / 2;
                 const HBITMAP chevronBitmap = iconLibrary->GetBitmap("chevron-down",
-                                                                       kToolbarDropdownChevronSize,
+                                                                       dropdownChevronSize,
                                                                        palette.mutedText);
                 AlphaBlendBitmap(hdc,
                                  iconDC,
                                  chevronBitmap,
                                  chevronX,
                                  chevronY,
-                                 kToolbarDropdownChevronSize,
-                                 kToolbarDropdownChevronSize);
+                                 dropdownChevronSize,
+                                 dropdownChevronSize);
             }
 
             if (isEnabled && isFocused)

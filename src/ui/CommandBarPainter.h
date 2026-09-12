@@ -46,6 +46,7 @@ namespace hyperbrowse::ui
                       const std::array<CommandBarController::CommandBarMenuButton, 5>& menuButtons,
                       const std::vector<CommandBarController::ToolbarItem>& toolbarItems,
                       const CommandBarPalette& palette,
+                      const MenuMetrics& metrics,
                       HFONT menuFont,
                       ToolbarIconLibrary* iconLibrary,
                       const CommandBarPaintState& state) const;
@@ -55,6 +56,7 @@ namespace hyperbrowse::ui
                       const std::array<CommandBarController::CommandBarMenuButton, 5>& menuButtons,
                       const std::vector<CommandBarController::ToolbarItem>& toolbarItems,
                       const CommandBarPalette& palette,
+                      const MenuMetrics& metrics,
                       IDWriteTextFormat* textFormat,
                       ToolbarIconLibrary* iconLibrary,
                       const CommandBarPaintState& state) const;

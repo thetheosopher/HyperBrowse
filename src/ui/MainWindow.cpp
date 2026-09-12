@@ -169,6 +169,7 @@ namespace
     constexpr int kDetailsPanelCloseButtonGap = 8;
     constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
     constexpr UINT kPersistentThumbnailCacheMaintenanceMessage = WM_APP + 75;
+    constexpr UINT kAppTextSizeChangedMessage = WM_APP + 78;
     constexpr UINT kCommandBarMenuTrackingIntervalMs = 50;
     enum class PersistentThumbnailCacheMaintenanceOperation : unsigned int
     {
@@ -380,47 +381,12 @@ namespace
     constexpr UINT kSlideshowMaximumTransitionDurationMs = 5000U;
     constexpr UINT kDefaultSlideshowDurationMs = 3000U;
     constexpr UINT kDefaultSlideshowTransitionDurationMs = 350U;
-    constexpr wchar_t kConsolidatedSettingsDialogClassName[] = L"HyperBrowseConsolidatedSettingsDialog";
     constexpr wchar_t kExperimentalSettingsDialogClassName[] = L"HyperBrowseExperimentalSettingsDialog";
-    constexpr int kConsolidatedSettingsDialogWidth = 900;
-    constexpr int kConsolidatedSettingsDialogHeight = 600;
-    constexpr int kConsolidatedSettingsTabControlId = 360;
-    constexpr int kConsolidatedSettingsFirstControlId = 5000;
-    constexpr int kConsolidatedSettingsMargin = 18;
-    constexpr int kConsolidatedSettingsPagePadding = 8;
-    constexpr int kConsolidatedSettingsButtonWidth = 84;
-    constexpr int kConsolidatedSettingsButtonHeight = 30;
-    constexpr int kConsolidatedSettingsButtonGap = 10;
-
-    constexpr int ConsolidatedSettingsControlId(ConsolidatedSettingsControl control)
-    {
-        return kConsolidatedSettingsFirstControlId + static_cast<int>(control);
-    }
 
     wchar_t ExperimentalSettingsPageMnemonic(ConsolidatedSettingsPage page);
     wchar_t ExperimentalSettingsControlMnemonic(ConsolidatedSettingsControl control);
     int ExperimentalSettingsMnemonicIndex(std::wstring_view text, wchar_t mnemonic);
     std::vector<ConsolidatedSettingsControl> ExperimentalSettingsPageControlOrder(ConsolidatedSettingsPage page);
-
-    std::wstring AddConsolidatedSettingsMnemonicMarker(const wchar_t* text, wchar_t mnemonic)
-    {
-        std::wstring markedText = text ? text : L"";
-        if (mnemonic == 0)
-        {
-            return markedText;
-        }
-
-        const wchar_t normalized = static_cast<wchar_t>(towupper(mnemonic));
-        for (std::size_t index = 0; index < markedText.size(); ++index)
-        {
-            if (static_cast<wchar_t>(towupper(markedText[index])) == normalized)
-            {
-                markedText.insert(index, 1, L'&');
-                break;
-            }
-        }
-        return markedText;
-    }
 
     constexpr wchar_t kFileAssociationsDialogClassName[] = L"HyperBrowseFileAssociationsDialog";
     constexpr int kFileAssociationsDialogWidth = 760;
@@ -572,46 +538,6 @@ namespace
     bool LaunchShellTarget(HWND ownerWindow, const wchar_t* verb, std::wstring_view target);
     bool IsWindows11OrGreater();
     bool LaunchDefaultAppsSettings(HWND ownerWindow);
-
-    HWND CreateConsolidatedSettingsControl(ConsolidatedSettingsDialogState& state,
-                                           ConsolidatedSettingsPage page,
-                                           const wchar_t* className,
-                                           const wchar_t* text,
-                                           DWORD style,
-                                           int x,
-                                           int y,
-                                           int width,
-                                           int height,
-                                           int controlId = 0,
-                                           ConsolidatedSettingsControl control = ConsolidatedSettingsControl::Count)
-    {
-        HWND window = CreateWindowExW(
-            0,
-            className,
-            text,
-            style | WS_CHILD | WS_VISIBLE,
-            x,
-            y,
-            width,
-            height,
-            state.dialogWindow,
-            reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
-            state.instance,
-            nullptr);
-        if (window)
-        {
-            const std::size_t pageIndex = static_cast<std::size_t>(page);
-            if (pageIndex < state.pageControls.size())
-            {
-                state.pageControls[pageIndex].push_back(window);
-            }
-            if (control != ConsolidatedSettingsControl::Count)
-            {
-                state.controls[static_cast<std::size_t>(control)] = window;
-            }
-        }
-        return window;
-    }
 
     bool TryReadDwordValue(HKEY key, const wchar_t* valueName, DWORD* value)
     {
@@ -2064,7 +1990,7 @@ namespace
             + ScaleDialogAppTextDimension(8, state.appTextSize, state.dpi)
             + metrics.unitWidth;
         metrics.minimumClientWidth = std::max(
-            kPerformanceSettingsDialogWidth,
+            ScaleDialogAppTextDimension(kPerformanceSettingsDialogWidth, state.appTextSize, state.dpi),
             metrics.contentLeft * 2
                 + metrics.sectionInset * 2
                 + leftRowWidth
@@ -3419,6 +3345,41 @@ namespace
 
     }
 
+    void ReflowShortcutReferenceWindow(HWND hwnd, ShortcutReferenceState& state)
+    {
+        constexpr DWORD windowStyle =
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_CLIPCHILDREN;
+        constexpr DWORD windowExStyle = WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT;
+        RECT clientRect{0,
+                        0,
+                        ScaleDialogAppTextDimension(kShortcutReferenceWidth, state.appTextSize, state.dpi),
+                        ScaleDialogAppTextDimension(kShortcutReferenceHeight, state.appTextSize, state.dpi)};
+        AdjustDialogWindowRectForDpi(
+            &clientRect, windowStyle, FALSE, windowExStyle, state.dpi);
+
+        RECT currentRect{};
+        GetWindowRect(hwnd, &currentRect);
+        const int width = clientRect.right - clientRect.left;
+        const int height = clientRect.bottom - clientRect.top;
+        const int centerX = (currentRect.left + currentRect.right) / 2;
+        const int centerY = (currentRect.top + currentRect.bottom) / 2;
+        RECT desiredRect{
+            centerX - width / 2,
+            centerY - height / 2,
+            centerX - width / 2 + width,
+            centerY - height / 2 + height};
+        desiredRect = ClampDialogFrameToWorkArea(
+            desiredRect, MeasureDialogShellMetrics(hwnd, state.appTextSize).workArea);
+        SetWindowPos(hwnd,
+                     nullptr,
+                     desiredRect.left,
+                     desiredRect.top,
+                     desiredRect.right - desiredRect.left,
+                     desiredRect.bottom - desiredRect.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        LayoutShortcutReferenceControls(hwnd, state);
+    }
+
     void AutoSizeShortcutReferenceColumns(HWND listWindow)
     {
         if (!listWindow)
@@ -3433,7 +3394,7 @@ namespace
         }
     }
 
-    void AddShortcutReferenceRows(HWND listWindow)
+    void AddShortcutReferenceRows(HWND listWindow, const ShortcutReferenceState& state)
     {
         if (!listWindow)
         {
@@ -3442,16 +3403,16 @@ namespace
 
         LVCOLUMNW column{};
         column.mask = LVCF_TEXT | LVCF_WIDTH;
-        column.cx = 170;
+        column.cx = ScaleDialogAppTextDimension(170, state.appTextSize, state.dpi);
         column.pszText = const_cast<LPWSTR>(L"Category");
         ListView_InsertColumn(listWindow, 0, &column);
-        column.cx = 130;
+        column.cx = ScaleDialogAppTextDimension(130, state.appTextSize, state.dpi);
         column.pszText = const_cast<LPWSTR>(L"Shortcut");
         ListView_InsertColumn(listWindow, 1, &column);
-        column.cx = 430;
+        column.cx = ScaleDialogAppTextDimension(430, state.appTextSize, state.dpi);
         column.pszText = const_cast<LPWSTR>(L"Action");
         ListView_InsertColumn(listWindow, 2, &column);
-        column.cx = 110;
+        column.cx = ScaleDialogAppTextDimension(110, state.appTextSize, state.dpi);
         column.pszText = const_cast<LPWSTR>(L"Context");
         ListView_InsertColumn(listWindow, 3, &column);
 
@@ -3550,7 +3511,7 @@ namespace
                 ListView_SetBkColor(state->listWindow, state->listBackground);
                 ListView_SetTextBkColor(state->listWindow, state->listBackground);
                 ListView_SetTextColor(state->listWindow, state->text);
-                AddShortcutReferenceRows(state->listWindow);
+                AddShortcutReferenceRows(state->listWindow, *state);
             }
             if (state->closeButton)
             {
@@ -3612,6 +3573,29 @@ namespace
                 }
                 AutoSizeShortcutReferenceColumns(state->listWindow);
                 LayoutShortcutReferenceControls(hwnd, *state);
+            }
+            return 0;
+        case kAppTextSizeChangedMessage:
+            if (state)
+            {
+                state->appTextSize = hyperbrowse::util::NormalizeAppTextSize(
+                    static_cast<std::uint32_t>(wParam));
+                state->dpi = DialogDpiForWindow(hwnd);
+                DeleteFontIfOwned(state->bodyFont);
+                state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                const HFONT bodyFont = state->bodyFont
+                    ? state->bodyFont
+                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                for (HWND control : {state->subtitleWindow, state->listWindow, state->closeButton})
+                {
+                    if (control)
+                    {
+                        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont), TRUE);
+                    }
+                }
+                AutoSizeShortcutReferenceColumns(state->listWindow);
+                ReflowShortcutReferenceWindow(hwnd, *state);
+                InvalidateRect(hwnd, nullptr, TRUE);
             }
             return 0;
         case WM_CTLCOLORSTATIC:
@@ -3676,1199 +3660,6 @@ namespace
         }
 
         return DefWindowProcW(hwnd, message, wParam, lParam);
-    }
-
-    HWND ConsolidatedSettingsControlHandle(const ConsolidatedSettingsDialogState& state,
-                                            ConsolidatedSettingsControl control)
-    {
-        return state.controls[static_cast<std::size_t>(control)];
-    }
-
-    void SetConsolidatedSettingsCheck(const ConsolidatedSettingsDialogState& state,
-                                      ConsolidatedSettingsControl control,
-                                      bool checked)
-    {
-        if (const HWND window = ConsolidatedSettingsControlHandle(state, control))
-        {
-            SendMessageW(window, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
-        }
-    }
-
-    void UpdateConsolidatedSettingsDependencies(const ConsolidatedSettingsDialogState& state)
-    {
-        const bool rawPairingEnabled = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPairingEnabled)
-            && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPairingEnabled), BM_GETCHECK, 0, 0) == BST_CHECKED;
-        const bool thumbnailAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
-            && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic), BM_GETCHECK, 0, 0) == BST_CHECKED;
-        const bool metadataAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic)
-            && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic), BM_GETCHECK, 0, 0) == BST_CHECKED;
-        const bool prefetchAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::PrefetchDepthAutomatic)
-            && SendMessageW(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::PrefetchDepthAutomatic), BM_GETCHECK, 0, 0) == BST_CHECKED;
-        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPreferJpeg), rawPairingEnabled);
-        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::RawPreferRaw), rawPairingEnabled);
-        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCache), !thumbnailAutomatic);
-        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCache), !metadataAutomatic);
-        EnableWindow(ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::PrefetchDepth), !prefetchAutomatic);
-    }
-
-    void UpdateConsolidatedSettingsCacheValues(
-        const ConsolidatedSettingsDialogState& state,
-        ConsolidatedSettingsControl changedAutomaticControl = ConsolidatedSettingsControl::Count)
-    {
-        const HWND profileCombo = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ResourceProfile);
-        const HWND thumbnailAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic);
-        const HWND metadataAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::MetadataCacheAutomatic);
-        const HWND prefetchAutomatic = ConsolidatedSettingsControlHandle(state, ConsolidatedSettingsControl::PrefetchDepthAutomatic);
-        if (!profileCombo || !thumbnailAutomatic || !metadataAutomatic || !prefetchAutomatic)
-        {
-            return;
-        }
-
-        const int profileIndex = static_cast<int>(SendMessageW(profileCombo, CB_GETCURSEL, 0, 0));
-        if (profileIndex < 0 || profileIndex > 3)
-        {
-            return;
-        }
-
-        const auto profile = static_cast<hyperbrowse::util::ResourceProfile>(profileIndex);
-        const auto updateCacheValue = [&](ConsolidatedSettingsControl automaticControl,
-                                          ConsolidatedSettingsControl cacheControl,
-                                          std::size_t capacity)
-        {
-            const HWND automatic = ConsolidatedSettingsControlHandle(state, automaticControl);
-            if (SendMessageW(automatic, BM_GETCHECK, 0, 0) == BST_CHECKED
-                || changedAutomaticControl == automaticControl)
-            {
-                SetWindowTextW(ConsolidatedSettingsControlHandle(state, cacheControl), std::to_wstring(capacity).c_str());
-            }
-        };
-
-        updateCacheValue(
-            ConsolidatedSettingsControl::ThumbnailCacheAutomatic,
-            ConsolidatedSettingsControl::ThumbnailCache,
-            hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, profile) / (1024ULL * 1024ULL));
-        updateCacheValue(
-            ConsolidatedSettingsControl::MetadataCacheAutomatic,
-            ConsolidatedSettingsControl::MetadataCache,
-            hyperbrowse::services::ImageMetadataService::ResolveCacheCapacityEntries(0, profile));
-        updateCacheValue(
-            ConsolidatedSettingsControl::PrefetchDepthAutomatic,
-            ConsolidatedSettingsControl::PrefetchDepth,
-            static_cast<std::size_t>(hyperbrowse::util::ResolvePrefetchDepth(profile, hyperbrowse::util::kAutomaticPrefetchDepth)));
-    }
-
-    void ShowConsolidatedSettingsPage(ConsolidatedSettingsDialogState& state, ConsolidatedSettingsPage page)
-    {
-        for (std::size_t index = 0; index < state.pageControls.size(); ++index)
-        {
-            const int command = index == static_cast<std::size_t>(page) ? SW_SHOW : SW_HIDE;
-            for (HWND control : state.pageControls[index])
-            {
-                ShowWindow(control, command);
-            }
-        }
-    }
-
-    void FocusConsolidatedSettingsPage(ConsolidatedSettingsDialogState& state,
-                                       ConsolidatedSettingsPage page)
-    {
-        if (state.tabWindow)
-        {
-            TabCtrl_SetCurSel(state.tabWindow, static_cast<int>(page));
-        }
-        ShowConsolidatedSettingsPage(state, page);
-        for (const ConsolidatedSettingsControl control : ExperimentalSettingsPageControlOrder(page))
-        {
-            const HWND window = ConsolidatedSettingsControlHandle(state, control);
-            if (window && IsWindowVisible(window) != FALSE && IsWindowEnabled(window) != FALSE)
-            {
-                SetFocus(window);
-                return;
-            }
-        }
-        if (state.tabWindow)
-        {
-            SetFocus(state.tabWindow);
-        }
-    }
-
-    bool HandleConsolidatedSettingsMnemonic(ConsolidatedSettingsDialogState& state,
-                                            WPARAM wParam)
-    {
-        wchar_t mnemonic = static_cast<wchar_t>(wParam);
-        if (mnemonic >= L'a' && mnemonic <= L'z')
-        {
-            mnemonic = static_cast<wchar_t>(mnemonic - (L'a' - L'A'));
-        }
-
-        for (int index = 0; index < static_cast<int>(ConsolidatedSettingsPage::Count); ++index)
-        {
-            const auto page = static_cast<ConsolidatedSettingsPage>(index);
-            if (ExperimentalSettingsPageMnemonic(page) == mnemonic)
-            {
-                FocusConsolidatedSettingsPage(state, page);
-                return true;
-            }
-        }
-
-        int selectedPage = state.tabWindow ? TabCtrl_GetCurSel(state.tabWindow) : 0;
-        if (selectedPage < 0 || selectedPage >= static_cast<int>(ConsolidatedSettingsPage::Count))
-        {
-            selectedPage = 0;
-        }
-        for (const ConsolidatedSettingsControl control : ExperimentalSettingsPageControlOrder(
-                 static_cast<ConsolidatedSettingsPage>(selectedPage)))
-        {
-            if (ExperimentalSettingsControlMnemonic(control) != mnemonic)
-            {
-                continue;
-            }
-
-            const HWND window = ConsolidatedSettingsControlHandle(state, control);
-            if (window && IsWindowVisible(window) != FALSE && IsWindowEnabled(window) != FALSE)
-            {
-                SetFocus(window);
-                return true;
-            }
-        }
-
-        if (mnemonic == L'A')
-        {
-            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(5500, BN_CLICKED), 0);
-            return true;
-        }
-        if (mnemonic == L'O')
-        {
-            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
-            return true;
-        }
-        if (mnemonic == L'C')
-        {
-            SendMessageW(state.dialogWindow, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
-            return true;
-        }
-        return false;
-    }
-
-    bool CollectConsolidatedSettings(HWND hwnd, ConsolidatedSettingsDialogState* state)
-    {
-        if (!hwnd || !state)
-        {
-            return false;
-        }
-
-        const auto comboIndex = [&](ConsolidatedSettingsControl control) -> int
-        {
-            const HWND combo = ConsolidatedSettingsControlHandle(*state, control);
-            return combo ? static_cast<int>(SendMessageW(combo, CB_GETCURSEL, 0, 0)) : -1;
-        };
-        const auto isChecked = [&](ConsolidatedSettingsControl control) -> bool
-        {
-            const HWND button = ConsolidatedSettingsControlHandle(*state, control);
-            return button && SendMessageW(button, BM_GETCHECK, 0, 0) == BST_CHECKED;
-        };
-
-        const int transitionIndex = comboIndex(ConsolidatedSettingsControl::TransitionStyle);
-        if (transitionIndex < 0 || transitionIndex >= static_cast<int>(kSlideshowTransitionOptions.size()))
-        {
-            MessageBoxW(hwnd, L"Select a transition type.", state->title.c_str(), MB_OK | MB_ICONWARNING);
-            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionStyle));
-            return false;
-        }
-
-        UINT slideshowDurationMs = 0;
-        if (!TryReadDialogUInt(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration),
-                               kSlideshowMinimumDurationMs,
-                               kSlideshowMaximumDurationMs,
-                               &slideshowDurationMs))
-        {
-            MessageBoxW(hwnd, L"Slide duration must be between 250 and 60000 milliseconds.", state->title.c_str(), MB_OK | MB_ICONWARNING);
-            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration));
-            return false;
-        }
-
-        UINT transitionDurationMs = 0;
-        if (!TryReadDialogUInt(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration),
-                               kSlideshowMinimumTransitionDurationMs,
-                               kSlideshowMaximumTransitionDurationMs,
-                               &transitionDurationMs))
-        {
-            MessageBoxW(hwnd, L"Transition duration must be between 100 and 5000 milliseconds.", state->title.c_str(), MB_OK | MB_ICONWARNING);
-            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration));
-            return false;
-        }
-
-        const bool thumbnailAutomatic = isChecked(ConsolidatedSettingsControl::ThumbnailCacheAutomatic);
-        const bool metadataAutomatic = isChecked(ConsolidatedSettingsControl::MetadataCacheAutomatic);
-        std::size_t thumbnailMegabytes = 0;
-        if (!thumbnailAutomatic
-            && (!TryParsePositiveSizeValue(ReadWindowText(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ThumbnailCache)), &thumbnailMegabytes)
-                || thumbnailMegabytes > std::numeric_limits<std::uint64_t>::max() / (1024ULL * 1024ULL)))
-        {
-            MessageBoxW(hwnd, L"Enter a positive thumbnail cache size in megabytes, or keep Follow profile enabled.", state->title.c_str(), MB_OK | MB_ICONWARNING);
-            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ThumbnailCache));
-            return false;
-        }
-
-        std::size_t metadataEntries = 0;
-        if (!metadataAutomatic
-            && !TryParsePositiveSizeValue(ReadWindowText(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::MetadataCache)), &metadataEntries))
-        {
-            MessageBoxW(hwnd, L"Enter a positive metadata cache capacity in entries, or keep Follow profile enabled.", state->title.c_str(), MB_OK | MB_ICONWARNING);
-            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::MetadataCache));
-            return false;
-        }
-
-        const bool prefetchAutomatic = isChecked(ConsolidatedSettingsControl::PrefetchDepthAutomatic);
-        UINT prefetchDepth = 0;
-        if (!prefetchAutomatic
-            && !TryReadDialogUInt(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::PrefetchDepth),
-                                  static_cast<UINT>(hyperbrowse::util::kMinimumPrefetchDepth),
-                                  static_cast<UINT>(hyperbrowse::util::kMaximumPrefetchDepth),
-                                  &prefetchDepth))
-        {
-            MessageBoxW(hwnd, L"Prefetch depth must be between 1 and 16, or keep Follow profile enabled.", state->title.c_str(), MB_OK | MB_ICONWARNING);
-            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::PrefetchDepth));
-            return false;
-        }
-
-        std::wstring normalizedQuickSendShortcutOrder;
-        if (!hyperbrowse::ui::QuickSendModel::TryNormalizeShortcutOrder(
-                ReadWindowText(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::QuickSendShortcutOrder)),
-                &normalizedQuickSendShortcutOrder))
-        {
-            MessageBoxW(hwnd,
-                        L"Enter each supported Quick Actions key at most once; unsupported characters are not allowed.",
-                        state->title.c_str(),
-                        MB_OK | MB_ICONWARNING);
-            SetFocus(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::QuickSendShortcutOrder));
-            return false;
-        }
-
-        const int wheelIndex = isChecked(ConsolidatedSettingsControl::ViewerWheelNavigate) ? 1 : 0;
-        const int overlaySizeIndex = comboIndex(ConsolidatedSettingsControl::OverlayTextSize);
-        const int escapeKeyBehaviorIndex = comboIndex(ConsolidatedSettingsControl::EscapeKeyBehavior);
-        const int appTextSizeIndex = comboIndex(ConsolidatedSettingsControl::AppTextSize);
-        const int thumbnailSizeIndex = comboIndex(ConsolidatedSettingsControl::ThumbnailSize);
-        const int resourceProfileIndex = comboIndex(ConsolidatedSettingsControl::ResourceProfile);
-        if (overlaySizeIndex < 0 || overlaySizeIndex > 2
-            || escapeKeyBehaviorIndex < 0 || escapeKeyBehaviorIndex >= static_cast<int>(kEscapeKeyBehaviorOptions.size())
-            || appTextSizeIndex < 0 || appTextSizeIndex > 2
-            || thumbnailSizeIndex < 0 || thumbnailSizeIndex >= static_cast<int>(kThumbnailSizePresets.size())
-            || resourceProfileIndex < 0 || resourceProfileIndex > 3)
-        {
-            MessageBoxW(hwnd, L"Select a value for every settings list.", state->title.c_str(), MB_OK | MB_ICONWARNING);
-            return false;
-        }
-
-        state->slideshowIntervalMs = slideshowDurationMs;
-        state->slideshowTransitionDurationMs = transitionDurationMs;
-        state->slideshowTransitionStyle = kSlideshowTransitionOptions[static_cast<std::size_t>(transitionIndex)].style;
-        state->useSlideshowTransition = isChecked(ConsolidatedSettingsControl::TransitionEnabled);
-        state->viewerMouseWheelBehavior = static_cast<hyperbrowse::viewer::MouseWheelBehavior>(wheelIndex);
-        state->viewerEscapeKeyBehavior = kEscapeKeyBehaviorOptions[static_cast<std::size_t>(escapeKeyBehaviorIndex)].behavior;
-            state->invertKeyboardPanning = isChecked(ConsolidatedSettingsControl::InvertKeyboardPanning);
-        state->rawJpegPairedOperationsEnabled = isChecked(ConsolidatedSettingsControl::RawPairingEnabled);
-        state->pairedRawJpegViewerPreference = isChecked(ConsolidatedSettingsControl::RawPreferJpeg)
-            ? hyperbrowse::browser::RawJpegDisplayPreference::Jpeg
-            : hyperbrowse::browser::RawJpegDisplayPreference::Raw;
-        state->defaultViewerToSecondaryMonitor = isChecked(ConsolidatedSettingsControl::SecondaryMonitor);
-        state->infoOverlaysVisible = isChecked(ConsolidatedSettingsControl::InfoOverlays);
-        state->windowedFullMetadataVisible = isChecked(ConsolidatedSettingsControl::WindowedFullMetadata);
-        state->fullScreenFullMetadataVisible = isChecked(ConsolidatedSettingsControl::FullScreenFullMetadata);
-        state->overlayTextSize = static_cast<hyperbrowse::viewer::InfoOverlayTextSize>(overlaySizeIndex);
-        state->darkTheme = isChecked(ConsolidatedSettingsControl::ThemeDark);
-        state->appTextSize = static_cast<hyperbrowse::util::AppTextSize>(appTextSizeIndex);
-        state->thumbnailSizePreset = kThumbnailSizePresets[static_cast<std::size_t>(thumbnailSizeIndex)];
-        state->thumbnailDetailsVisible = isChecked(ConsolidatedSettingsControl::ThumbnailDetails);
-        state->compactThumbnailLayout = isChecked(ConsolidatedSettingsControl::CompactLayout);
-        state->detailsStripVisible = isChecked(ConsolidatedSettingsControl::DetailsPanel);
-        state->resourceProfile = static_cast<hyperbrowse::util::ResourceProfile>(resourceProfileIndex);
-        state->persistentThumbnailCacheEnabled = isChecked(ConsolidatedSettingsControl::PersistentCache);
-        state->thumbnailCacheCapacityOverrideBytes = thumbnailAutomatic
-            ? 0
-            : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(thumbnailMegabytes) * 1024ULL * 1024ULL);
-        state->metadataCacheCapacityOverrideEntries = metadataAutomatic ? 0 : metadataEntries;
-        state->prefetchDepthOverride = prefetchAutomatic
-            ? hyperbrowse::util::kAutomaticPrefetchDepth
-            : static_cast<int>(prefetchDepth);
-        state->quickSendShortcutOrder = std::move(normalizedQuickSendShortcutOrder);
-        state->showPressureStateInStatusBar = isChecked(ConsolidatedSettingsControl::PressureStatus);
-        state->nvJpegEnabled = isChecked(ConsolidatedSettingsControl::NvJpeg);
-        state->libRawOutOfProcessEnabled = isChecked(ConsolidatedSettingsControl::LibRawOutOfProcess);
-        state->recursiveBrowsingEnabled = isChecked(ConsolidatedSettingsControl::RecursiveBrowsing);
-        state->showSubfoldersInBrowser = isChecked(ConsolidatedSettingsControl::ShowSubfolders);
-        state->closeMainWindowOnEscape = isChecked(ConsolidatedSettingsControl::CloseOnEscape);
-        state->singleInstanceEnabled = isChecked(ConsolidatedSettingsControl::SingleInstance);
-        return true;
-    }
-
-    LRESULT CALLBACK ConsolidatedSettingsDialogProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
-    {
-        auto* state = reinterpret_cast<ConsolidatedSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-        switch (message)
-        {
-        case WM_NCCREATE:
-        {
-            const auto* createStruct = reinterpret_cast<const CREATESTRUCTW*>(lParam);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createStruct->lpCreateParams));
-            return TRUE;
-        }
-        case WM_CREATE:
-        {
-            state = reinterpret_cast<ConsolidatedSettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-            if (!state)
-            {
-                return -1;
-            }
-            state->dialogWindow = hwnd;
-            state->theme = hyperbrowse::ui::MakeDialogTheme(state->darkTheme);
-            state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
-            state->fieldBrush = CreateSolidBrush(state->theme.fieldBackground);
-            const HFONT font = state->bodyFont ? state->bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-            const int tabLeft = kConsolidatedSettingsMargin;
-            const int tabTop = kConsolidatedSettingsMargin;
-            const int tabWidth = kConsolidatedSettingsDialogWidth - (kConsolidatedSettingsMargin * 2);
-            const int buttonTop = kConsolidatedSettingsDialogHeight
-                - kConsolidatedSettingsMargin
-                - kConsolidatedSettingsButtonHeight;
-            const int tabHeight = buttonTop - kConsolidatedSettingsMargin - tabTop;
-            state->tabWindow = CreateWindowExW(
-                0, WC_TABCONTROLW, nullptr,
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_FOCUSNEVER | TCS_OWNERDRAWFIXED,
-                tabLeft, tabTop, tabWidth, tabHeight, hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kConsolidatedSettingsTabControlId)),
-                state->instance, nullptr);
-            constexpr UINT kTabControlSetBackgroundColorMessage = TCM_FIRST + 1;
-            SendMessageW(state->tabWindow,
-                         kTabControlSetBackgroundColorMessage,
-                         0,
-                         static_cast<LPARAM>(state->theme.windowBackground));
-            const wchar_t* tabNames[] = {L"Slideshow", L"Viewer", L"Appearance", L"Performance", L"Behavior"};
-            for (std::size_t tabIndex = 0; tabIndex < std::size(tabNames); ++tabIndex)
-            {
-                TCITEMW item{};
-                item.mask = TCIF_TEXT;
-                item.pszText = const_cast<wchar_t*>(tabNames[tabIndex]);
-                TabCtrl_InsertItem(state->tabWindow, static_cast<int>(tabIndex), &item);
-            }
-
-            RECT displayRect{};
-            GetClientRect(state->tabWindow, &displayRect);
-            TabCtrl_AdjustRect(state->tabWindow, FALSE, &displayRect);
-            const int pageLeft = tabLeft + displayRect.left;
-            const int pageTop = tabTop + displayRect.top;
-            const int pageRight = tabLeft + displayRect.right;
-            const int pageContentLeft = pageLeft + kConsolidatedSettingsPagePadding;
-            const int pageContentRight = pageRight - kConsolidatedSettingsPagePadding;
-            HDC measureDc = GetDC(hwnd);
-            HFONT oldMeasureFont = nullptr;
-            if (measureDc)
-            {
-                oldMeasureFont = static_cast<HFONT>(SelectObject(measureDc, font));
-            }
-            TEXTMETRICW textMetrics{};
-            if (measureDc)
-            {
-                GetTextMetricsW(measureDc, &textMetrics);
-            }
-            const auto measureTextWidth = [&](const wchar_t* text)
-            {
-                if (!measureDc || !text)
-                {
-                    return 0;
-                }
-                SIZE size{};
-                GetTextExtentPoint32W(measureDc, text, static_cast<int>(wcslen(text)), &size);
-                return static_cast<int>(size.cx);
-            };
-            const std::array labelTexts{
-                L"Transition style",
-                L"Slide duration (milliseconds)",
-                L"Transition duration (milliseconds)",
-                L"Timing bounds",
-                L"Mouse wheel",
-                L"Paired viewer preference",
-                L"Overlay text size",
-                L"ESC key behavior in full screen",
-                L"Application text size",
-                L"Thumbnail size",
-                L"Theme",
-                L"Resource profile",
-                L"Thumbnail cache cap (MB)",
-                L"Metadata cache cap (entries)",
-                L"Prefetch depth (items)",
-                L"New Quick Actions shortcut order"};
-            const std::array checkboxTexts{
-                L"Use slideshow transitions",
-                L"Treat paired RAW+JPEG files as one operation",
-                L"Open viewers on a secondary monitor when available",
-                L"Show viewer detail overlays",
-                L"Show full metadata",
-                L"Show thumbnail details",
-                L"Use compact thumbnail layout",
-                L"Show the details panel",
-                L"Keep the persistent thumbnail cache enabled",
-                L"Follow profile",
-                L"Show memory pressure state in the status bar",
-                L"Use NVIDIA JPEG acceleration when available",
-                L"Use out-of-process LibRaw fallback",
-                L"Browse folders recursively",
-                L"Show subfolders in the browser",
-                L"Close the main window when ESC is pressed",
-                L"Use a single application instance"};
-            const std::array comboTexts{
-                L"Crossfade",
-                L"Horizontal Blinds",
-                L"Venetian Blinds",
-                L"Monochrome Reveal",
-                L"250-60000 ms slides; 100-5000 ms transitions",
-                L"Small",
-                L"Medium",
-                L"Large",
-                L"Actual Size",
-                L"640 px",
-                L"Conservative",
-                L"Balanced",
-                L"Performance",
-                L"Aggressive"};
-            int measuredLabelWidth = 0;
-            for (const wchar_t* text : labelTexts)
-            {
-                measuredLabelWidth = std::max(measuredLabelWidth, measureTextWidth(text));
-            }
-            int measuredValueWidth = 0;
-            for (const wchar_t* text : comboTexts)
-            {
-                measuredValueWidth = std::max(measuredValueWidth, measureTextWidth(text));
-            }
-            int measuredCheckboxWidth = 0;
-            for (const wchar_t* text : checkboxTexts)
-            {
-                measuredCheckboxWidth = std::max(measuredCheckboxWidth, measureTextWidth(text));
-            }
-            if (measureDc)
-            {
-                SelectObject(measureDc, oldMeasureFont);
-                ReleaseDC(hwnd, measureDc);
-            }
-            const int labelWidth = std::max(300, measuredLabelWidth + 18);
-            const int valueLeft = pageContentLeft + labelWidth;
-            const int valueWidth = std::max(360, measuredValueWidth + 48);
-            const int radioColumnWidth = valueWidth / 2;
-            const int rowHeight = std::max(32, static_cast<int>(textMetrics.tmHeight) + 12);
-            const int rowGap = std::max(10, rowHeight / 3);
-            const int checkboxWidth = std::max(measuredCheckboxWidth + 38, pageContentRight - pageContentLeft);
-            auto label = [&](ConsolidatedSettingsPage page,
-                             ConsolidatedSettingsControl control,
-                             const wchar_t* text,
-                             int y)
-            {
-                const std::wstring markedText = AddConsolidatedSettingsMnemonicMarker(
-                    text,
-                    ExperimentalSettingsControlMnemonic(control));
-                return CreateConsolidatedSettingsControl(*state, page, L"STATIC", markedText.c_str(), SS_LEFT | SS_CENTERIMAGE,
-                                                          pageContentLeft, y, labelWidth - 12, rowHeight, 0);
-            };
-            auto check = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int y, DWORD extraStyle = 0)
-            {
-                const std::wstring markedText = AddConsolidatedSettingsMnemonicMarker(
-                    text,
-                    ExperimentalSettingsControlMnemonic(control));
-                return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", markedText.c_str(), BS_AUTOCHECKBOX | WS_TABSTOP | extraStyle,
-                                                          pageContentLeft, y, checkboxWidth, rowHeight, ConsolidatedSettingsControlId(control), control);
-            };
-            auto combo = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, int y)
-            {
-                return CreateConsolidatedSettingsControl(*state, page, L"COMBOBOX", nullptr, CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL,
-                                                          valueLeft, y, valueWidth, 180, ConsolidatedSettingsControlId(control), control);
-            };
-            auto edit = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, int y)
-            {
-                return CreateConsolidatedSettingsControl(*state, page, L"EDIT", nullptr, WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
-                                                          valueLeft, y, 140, rowHeight, ConsolidatedSettingsControlId(control), control);
-            };
-            auto spin = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, int y)
-            {
-                return CreateConsolidatedSettingsControl(*state, page, UPDOWN_CLASSW, nullptr, UDS_ALIGNRIGHT | UDS_ARROWKEYS,
-                                                          valueLeft + 140, y, 22, rowHeight, ConsolidatedSettingsControlId(control), control);
-            };
-            auto radio = [&](ConsolidatedSettingsPage page, ConsolidatedSettingsControl control, const wchar_t* text, int x, int y, DWORD extraStyle = 0)
-            {
-                const std::wstring markedText = AddConsolidatedSettingsMnemonicMarker(
-                    text,
-                    ExperimentalSettingsControlMnemonic(control));
-                return CreateConsolidatedSettingsControl(*state, page, L"BUTTON", markedText.c_str(), BS_AUTORADIOBUTTON | WS_TABSTOP | extraStyle,
-                                                          x, y, radioColumnWidth, rowHeight, ConsolidatedSettingsControlId(control), control);
-            };
-
-            int y = pageTop + 16;
-            label(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionStyle, L"Transition style", y);
-            combo(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionStyle, y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::SlideshowDuration, L"Slide duration (milliseconds)", y);
-            edit(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::SlideshowDuration, y);
-            spin(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::SlideshowDurationSpin, y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionDuration, L"Transition duration (milliseconds)", y);
-            edit(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionDuration, y);
-            spin(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::TransitionDurationSpin, y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Slideshow, ConsolidatedSettingsControl::Count, L"Timing bounds", y);
-            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Slideshow, L"STATIC", L"250-60000 ms slides; 100-5000 ms transitions",
-                                              SS_LEFT | SS_NOPREFIX, valueLeft, y + 4, valueWidth, rowHeight, 0);
-
-            y = pageTop + 16;
-            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::TransitionEnabled, L"Use slideshow transitions", y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::Count, L"Mouse wheel", y);
-            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelZoom, L"Zoom", valueLeft, y, WS_GROUP);
-            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::ViewerWheelNavigate, L"Navigate", valueLeft + radioColumnWidth, y);
-            y += rowHeight + rowGap;
-                check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::InvertKeyboardPanning, L"Invert Keyboard Panning", y);
-                y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPairingEnabled, L"Treat paired RAW+JPEG files as one operation", y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::Count, L"Paired viewer preference", y);
-            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferRaw, L"Prefer RAW", valueLeft, y, WS_GROUP);
-            radio(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::RawPreferJpeg, L"Prefer JPEG", valueLeft + radioColumnWidth, y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::SecondaryMonitor, L"Open viewers on a secondary monitor when available", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::InfoOverlays, L"Show viewer detail overlays", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::WindowedFullMetadata, L"Show full metadata in windowed mode", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::FullScreenFullMetadata, L"Show full metadata in full-screen mode", y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::OverlayTextSize, L"Overlay text size", y);
-            combo(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::OverlayTextSize, y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::EscapeKeyBehavior, L"ESC key behavior in full screen", y);
-            combo(ConsolidatedSettingsPage::Viewer, ConsolidatedSettingsControl::EscapeKeyBehavior, y);
-
-            y = pageTop + 16;
-            label(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::Count, L"Theme", y);
-            radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeLight, L"Light", valueLeft, y, WS_GROUP);
-            radio(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThemeDark, L"Dark", valueLeft + radioColumnWidth, y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::AppTextSize, L"Application text size", y);
-            combo(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::AppTextSize, y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThumbnailSize, L"Thumbnail size", y);
-            combo(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThumbnailSize, y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::ThumbnailDetails, L"Show thumbnail details", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::CompactLayout, L"Use compact thumbnail layout", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Appearance, ConsolidatedSettingsControl::DetailsPanel, L"Show the details panel", y);
-
-            y = pageTop + 16;
-            label(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ResourceProfile, L"Resource profile", y);
-            combo(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ResourceProfile, y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PersistentCache, L"Keep the persistent thumbnail cache enabled", y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ThumbnailCache, L"Thumbnail cache cap (MB)", y);
-            edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ThumbnailCache, y);
-            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::ThumbnailCacheAutomatic, L"Follow profile", y + 30);
-            y += rowHeight + rowGap + 34;
-            label(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCache, L"Metadata cache cap (entries)", y);
-            edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCache, y);
-            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y + 30);
-            y += rowHeight + rowGap + 34;
-            label(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PrefetchDepth, L"Prefetch depth (items)", y);
-            edit(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PrefetchDepth, y);
-            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PrefetchDepthAutomatic, L"Follow profile", y + 30);
-            y += rowHeight + rowGap + 34;
-            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::PressureStatus, L"Show memory pressure state in the status bar", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::NvJpeg, L"Use NVIDIA JPEG acceleration when available", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Performance, ConsolidatedSettingsControl::LibRawOutOfProcess, L"Use out-of-process LibRaw fallback", y);
-
-            y = pageTop + 16;
-            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::RecursiveBrowsing, L"Browse folders recursively", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::ShowSubfolders, L"Show subfolders in the browser", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when ESC is pressed", y);
-            y += rowHeight + rowGap;
-            check(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
-            y += rowHeight + rowGap;
-            label(ConsolidatedSettingsPage::Behavior, ConsolidatedSettingsControl::QuickSendShortcutOrder, L"New Quick Actions shortcut order", y);
-            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Behavior, L"EDIT", nullptr,
-                                              WS_TABSTOP | ES_AUTOHSCROLL, valueLeft, y, valueWidth, rowHeight,
-                                              ConsolidatedSettingsControlId(ConsolidatedSettingsControl::QuickSendShortcutOrder),
-                                              ConsolidatedSettingsControl::QuickSendShortcutOrder);
-
-            for (HWND control : state->controls)
-            {
-                if (control)
-                {
-                    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-                }
-            }
-
-            const auto addComboText = [&](ConsolidatedSettingsControl control, const wchar_t* text)
-            {
-                SendMessageW(ConsolidatedSettingsControlHandle(*state, control), CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
-            };
-            for (const SlideshowTransitionOption& option : kSlideshowTransitionOptions)
-            {
-                addComboText(ConsolidatedSettingsControl::TransitionStyle, option.label);
-            }
-            addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Small");
-            addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Medium");
-            addComboText(ConsolidatedSettingsControl::OverlayTextSize, L"Large");
-            for (const EscapeKeyBehaviorOption& option : kEscapeKeyBehaviorOptions)
-            {
-                addComboText(ConsolidatedSettingsControl::EscapeKeyBehavior, option.label);
-            }
-            addComboText(ConsolidatedSettingsControl::AppTextSize, L"Small");
-            addComboText(ConsolidatedSettingsControl::AppTextSize, L"Medium");
-            addComboText(ConsolidatedSettingsControl::AppTextSize, L"Large");
-            for (const auto preset : kThumbnailSizePresets)
-            {
-                const std::wstring text = std::to_wstring(static_cast<int>(preset)) + L" px";
-                addComboText(ConsolidatedSettingsControl::ThumbnailSize, text.c_str());
-            }
-            addComboText(ConsolidatedSettingsControl::ResourceProfile, L"Conservative");
-            addComboText(ConsolidatedSettingsControl::ResourceProfile, L"Balanced");
-            addComboText(ConsolidatedSettingsControl::ResourceProfile, L"Performance");
-            addComboText(ConsolidatedSettingsControl::ResourceProfile, L"Aggressive");
-
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionStyle), CB_SETCURSEL,
-                         SlideshowTransitionComboIndex(state->slideshowTransitionStyle), 0);
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::OverlayTextSize), CB_SETCURSEL,
-                         static_cast<int>(state->overlayTextSize), 0);
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::EscapeKeyBehavior), CB_SETCURSEL,
-                         EscapeKeyBehaviorComboIndex(state->viewerEscapeKeyBehavior), 0);
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::AppTextSize), CB_SETCURSEL,
-                         static_cast<int>(state->appTextSize), 0);
-            const auto thumbnailIterator = std::find(kThumbnailSizePresets.begin(), kThumbnailSizePresets.end(), state->thumbnailSizePreset);
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ThumbnailSize), CB_SETCURSEL,
-                         thumbnailIterator == kThumbnailSizePresets.end() ? 0 : static_cast<int>(thumbnailIterator - kThumbnailSizePresets.begin()), 0);
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ResourceProfile), CB_SETCURSEL,
-                         static_cast<int>(state->resourceProfile), 0);
-            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration), std::to_wstring(state->slideshowIntervalMs).c_str());
-            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration), std::to_wstring(state->slideshowTransitionDurationMs).c_str());
-            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::ThumbnailCache),
-                           std::to_wstring(state->thumbnailCacheCapacityOverrideBytes / (1024ULL * 1024ULL)).c_str());
-            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::MetadataCache),
-                           std::to_wstring(state->metadataCacheCapacityOverrideEntries).c_str());
-            const int prefetchDepth = state->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth
-                ? hyperbrowse::util::ResolvePrefetchDepth(state->resourceProfile, hyperbrowse::util::kAutomaticPrefetchDepth)
-                : state->prefetchDepthOverride;
-            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::PrefetchDepth),
-                           std::to_wstring(prefetchDepth).c_str());
-            SetWindowTextW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::QuickSendShortcutOrder),
-                           state->quickSendShortcutOrder.c_str());
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin), UDM_SETBUDDY,
-                         reinterpret_cast<WPARAM>(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration)), 0);
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin), UDM_SETRANGE32,
-                         kSlideshowMinimumDurationMs, kSlideshowMaximumDurationMs);
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDurationSpin), UDM_SETBUDDY,
-                         reinterpret_cast<WPARAM>(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration)), 0);
-            SendMessageW(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDurationSpin), UDM_SETRANGE32,
-                         kSlideshowMinimumTransitionDurationMs, kSlideshowMaximumTransitionDurationMs);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::TransitionEnabled, state->useSlideshowTransition);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ViewerWheelZoom, state->viewerMouseWheelBehavior == hyperbrowse::viewer::MouseWheelBehavior::Zoom);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ViewerWheelNavigate, state->viewerMouseWheelBehavior == hyperbrowse::viewer::MouseWheelBehavior::Navigate);
-                SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::InvertKeyboardPanning, state->invertKeyboardPanning);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RawPairingEnabled, state->rawJpegPairedOperationsEnabled);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RawPreferJpeg, state->pairedRawJpegViewerPreference == hyperbrowse::browser::RawJpegDisplayPreference::Jpeg);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RawPreferRaw, state->pairedRawJpegViewerPreference == hyperbrowse::browser::RawJpegDisplayPreference::Raw);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::SecondaryMonitor, state->defaultViewerToSecondaryMonitor);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::InfoOverlays, state->infoOverlaysVisible);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::WindowedFullMetadata, state->windowedFullMetadataVisible);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::FullScreenFullMetadata, state->fullScreenFullMetadataVisible);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThemeDark, state->darkTheme);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThemeLight, !state->darkTheme);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThumbnailDetails, state->thumbnailDetailsVisible);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::CompactLayout, state->compactThumbnailLayout);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::DetailsPanel, state->detailsStripVisible);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::PersistentCache, state->persistentThumbnailCacheEnabled);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ThumbnailCacheAutomatic, state->thumbnailCacheCapacityOverrideBytes == 0);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::MetadataCacheAutomatic, state->metadataCacheCapacityOverrideEntries == 0);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::PrefetchDepthAutomatic,
-                                         state->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::PressureStatus, state->showPressureStateInStatusBar);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::NvJpeg, state->nvJpegEnabled);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::LibRawOutOfProcess, state->libRawOutOfProcessEnabled);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::RecursiveBrowsing, state->recursiveBrowsingEnabled);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::ShowSubfolders, state->showSubfoldersInBrowser);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::CloseOnEscape, state->closeMainWindowOnEscape);
-            SetConsolidatedSettingsCheck(*state, ConsolidatedSettingsControl::SingleInstance, state->singleInstanceEnabled);
-            UpdateConsolidatedSettingsDependencies(*state);
-            UpdateConsolidatedSettingsCacheValues(*state);
-            EnableWindow(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SecondaryMonitor), state->secondaryMonitorAvailable);
-            EnableWindow(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::NvJpeg), state->nvJpegAvailable);
-            EnableWindow(ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::LibRawOutOfProcess), state->libRawAvailable);
-            ShowConsolidatedSettingsPage(*state, ConsolidatedSettingsPage::Slideshow);
-
-            const int cancelButtonLeft = kConsolidatedSettingsDialogWidth
-                - kConsolidatedSettingsMargin
-                - kConsolidatedSettingsButtonWidth;
-            const int okButtonLeft = cancelButtonLeft
-                - kConsolidatedSettingsButtonGap
-                - kConsolidatedSettingsButtonWidth;
-            const int applyButtonLeft = okButtonLeft
-                - kConsolidatedSettingsButtonGap
-                - kConsolidatedSettingsButtonWidth;
-            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"&Apply",
-                                              BS_DEFPUSHBUTTON | WS_TABSTOP, applyButtonLeft, buttonTop,
-                                              kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, 5500);
-            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"&OK",
-                                              BS_DEFPUSHBUTTON | WS_TABSTOP, okButtonLeft, buttonTop,
-                                              kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, IDOK);
-            CreateConsolidatedSettingsControl(*state, ConsolidatedSettingsPage::Count, L"BUTTON", L"&Cancel",
-                                              WS_TABSTOP, cancelButtonLeft, buttonTop,
-                                              kConsolidatedSettingsButtonWidth, kConsolidatedSettingsButtonHeight, IDCANCEL);
-            const HWND applyButton = GetDlgItem(hwnd, 5500);
-            const HWND okButton = GetDlgItem(hwnd, IDOK);
-            const HWND cancelButton = GetDlgItem(hwnd, IDCANCEL);
-            for (HWND button : {applyButton, okButton, cancelButton})
-            {
-                if (button)
-                {
-                    SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-                }
-            }
-            ScaleDialogChildWindows(
-                hwnd,
-                96,
-                ScaleDialogAppTextDimension(96, state->appTextSize, state->dpi));
-            DeleteFontIfOwned(state->bodyFont);
-            state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
-            const HFONT scaledFont = state->bodyFont
-                ? state->bodyFont
-                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-            SendMessageW(state->tabWindow, WM_SETFONT, reinterpret_cast<WPARAM>(scaledFont), TRUE);
-            for (HWND control : state->controls)
-            {
-                if (control)
-                {
-                    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(scaledFont), TRUE);
-                }
-            }
-            for (HWND button : {applyButton, okButton, cancelButton})
-            {
-                if (button)
-                {
-                    SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(scaledFont), TRUE);
-                }
-            }
-            CenterWindowOnOwner(hwnd, state->ownerWindow);
-            return 0;
-        }
-        case WM_DPICHANGED:
-            if (state)
-            {
-                const UINT oldDpi = state->dpi;
-                state->dpi = std::max<UINT>(96, HIWORD(wParam));
-                const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
-                if (suggestedRect)
-                {
-                    const RECT adjustedRect = ClampDialogFrameToWorkArea(
-                        *suggestedRect,
-                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
-                    SetWindowPos(hwnd, nullptr,
-                                 adjustedRect.left,
-                                 adjustedRect.top,
-                                 adjustedRect.right - adjustedRect.left,
-                                 adjustedRect.bottom - adjustedRect.top,
-                                 SWP_NOZORDER | SWP_NOACTIVATE);
-                }
-                ScaleDialogChildWindows(hwnd, oldDpi, state->dpi);
-                DeleteFontIfOwned(state->bodyFont);
-                state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
-                const HFONT font = state->bodyFont
-                    ? state->bodyFont
-                    : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-                EnumChildWindows(hwnd,
-                                 [](HWND child, LPARAM parameter) -> BOOL
-                                 {
-                                     SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(parameter), TRUE);
-                                     return TRUE;
-                                 },
-                                 reinterpret_cast<LPARAM>(font));
-                InvalidateRect(hwnd, nullptr, TRUE);
-            }
-            return 0;
-        case WM_CTLCOLORDLG:
-            return state && state->backgroundBrush
-                ? reinterpret_cast<INT_PTR>(state->backgroundBrush)
-                : 0;
-        case WM_CTLCOLORSTATIC:
-        {
-            if (!state)
-            {
-                break;
-            }
-            const HDC dc = reinterpret_cast<HDC>(wParam);
-            SetBkMode(dc, OPAQUE);
-            SetTextColor(dc, state->theme.text);
-            SetBkColor(dc, state->theme.windowBackground);
-            return reinterpret_cast<INT_PTR>(state->backgroundBrush);
-        }
-        case WM_CTLCOLORBTN:
-        case WM_CTLCOLORLISTBOX:
-        {
-            if (!state)
-            {
-                break;
-            }
-            const HDC dc = reinterpret_cast<HDC>(wParam);
-            SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, state->theme.text);
-            SetBkColor(dc, state->theme.windowBackground);
-            return reinterpret_cast<INT_PTR>(state->backgroundBrush);
-        }
-        case WM_CTLCOLOREDIT:
-            if (state)
-            {
-                const HDC dc = reinterpret_cast<HDC>(wParam);
-                SetBkMode(dc, OPAQUE);
-                SetTextColor(dc, state->theme.text);
-                SetBkColor(dc, state->theme.fieldBackground);
-                return reinterpret_cast<INT_PTR>(state->fieldBrush);
-            }
-            break;
-        case WM_ERASEBKGND:
-            if (state && state->backgroundBrush)
-            {
-                RECT client{};
-                GetClientRect(hwnd, &client);
-                FillRect(reinterpret_cast<HDC>(wParam), &client, state->backgroundBrush);
-                return 1;
-            }
-            break;
-        case WM_DRAWITEM:
-            if (state && wParam == static_cast<WPARAM>(kConsolidatedSettingsTabControlId))
-            {
-                const auto* drawItem = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
-                if (!drawItem || drawItem->CtlType != ODT_TAB || !drawItem->hDC)
-                {
-                    return FALSE;
-                }
-
-                RECT itemRect = drawItem->rcItem;
-                const int width = itemRect.right - itemRect.left;
-                const int height = itemRect.bottom - itemRect.top;
-                if (width <= 0 || height <= 0)
-                {
-                    return TRUE;
-                }
-
-                wchar_t tabText[64]{};
-                TCITEMW item{};
-                item.mask = TCIF_TEXT;
-                item.pszText = tabText;
-                item.cchTextMax = static_cast<int>(std::size(tabText));
-                TabCtrl_GetItem(state->tabWindow, static_cast<int>(drawItem->itemID), &item);
-
-                auto& renderer = hyperbrowse::render::D2DRenderer::Instance();
-                const auto renderTarget = renderer.CreateDCRenderTarget();
-                const auto textFormat = renderer.CreateTextFormatFromFont(state->bodyFont);
-                if (renderTarget && textFormat && SUCCEEDED(renderTarget->BindDC(drawItem->hDC, &itemRect)))
-                {
-                    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> backgroundBrush;
-                    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> textBrush;
-                    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> accentBrush;
-                    renderTarget->CreateSolidColorBrush(
-                        hyperbrowse::render::ToD2DColor(state->theme.surfaceBackground),
-                        backgroundBrush.GetAddressOf());
-                    renderTarget->CreateSolidColorBrush(
-                        hyperbrowse::render::ToD2DColor(state->theme.text),
-                        textBrush.GetAddressOf());
-                    renderTarget->CreateSolidColorBrush(
-                        hyperbrowse::render::ToD2DColor(state->theme.accentFill),
-                        accentBrush.GetAddressOf());
-                    if (backgroundBrush && textBrush && accentBrush)
-                    {
-                        const auto page = static_cast<ConsolidatedSettingsPage>(drawItem->itemID);
-                        const int mnemonicIndex = ExperimentalSettingsMnemonicIndex(
-                            tabText,
-                            ExperimentalSettingsPageMnemonic(page));
-                        renderTarget->BeginDraw();
-                        renderTarget->Clear(hyperbrowse::render::ToD2DColor(state->theme.surfaceBackground));
-                        renderTarget->FillRectangle(
-                            D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
-                            backgroundBrush.Get());
-                        bool drewMnemonicText = false;
-                        if (mnemonicIndex >= 0)
-                        {
-                            const auto textLayout = renderer.CreateTextLayout(
-                                tabText,
-                                textFormat.Get(),
-                                static_cast<float>(width),
-                                static_cast<float>(height));
-                            if (textLayout)
-                            {
-                                textLayout->SetUnderline(TRUE, DWRITE_TEXT_RANGE{
-                                    static_cast<UINT32>(mnemonicIndex), 1});
-                                renderTarget->DrawTextLayout(
-                                    D2D1::Point2F(0.0f, 0.0f),
-                                    textLayout.Get(),
-                                    textBrush.Get());
-                                drewMnemonicText = true;
-                            }
-                        }
-                        if (!drewMnemonicText)
-                        {
-                            renderTarget->DrawText(
-                                tabText,
-                                static_cast<UINT32>(wcslen(tabText)),
-                                textFormat.Get(),
-                                D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
-                                textBrush.Get());
-                        }
-                        if ((drawItem->itemState & ODS_SELECTED) != 0)
-                        {
-                            const int underlineHeight = ScaleDialogDimension(2, state->dpi);
-                            renderTarget->FillRectangle(
-                                D2D1::RectF(0.0f, static_cast<float>(std::max(0, height - underlineHeight)),
-                                             static_cast<float>(width), static_cast<float>(height)),
-                                accentBrush.Get());
-                        }
-                        renderTarget->EndDraw();
-                    }
-                }
-                else
-                {
-                    const HBRUSH tabBrush = CreateSolidBrush(
-                        (drawItem->itemState & ODS_SELECTED) != 0
-                            ? state->theme.accentFill
-                            : state->theme.surfaceBackground);
-                    if (tabBrush)
-                    {
-                        FillRect(drawItem->hDC, &itemRect, tabBrush);
-                        DeleteObject(tabBrush);
-                    }
-                    SetBkMode(drawItem->hDC, TRANSPARENT);
-                    SetTextColor(drawItem->hDC, state->theme.text);
-                    const std::wstring markedTabText = AddConsolidatedSettingsMnemonicMarker(
-                        tabText,
-                        ExperimentalSettingsPageMnemonic(static_cast<ConsolidatedSettingsPage>(drawItem->itemID)));
-                    DrawTextW(drawItem->hDC, markedTabText.c_str(), -1, &itemRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                }
-                return TRUE;
-            }
-            break;
-        case WM_NOTIFY:
-            if (state)
-            {
-                const auto* notify = reinterpret_cast<const NMHDR*>(lParam);
-                if (notify && notify->code == UDN_DELTAPOS)
-                {
-                    const auto* upDown = reinterpret_cast<const NMUPDOWN*>(lParam);
-                    if (notify->idFrom == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::SlideshowDurationSpin))
-                    {
-                        const UINT nextValue = ComputeNextSpinValue(
-                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration),
-                            upDown->iPos,
-                            upDown->iDelta,
-                            kSlideshowMinimumDurationMs,
-                            kSlideshowMaximumDurationMs);
-                        SetDialogUIntEditAndSpin(
-                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDuration),
-                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::SlideshowDurationSpin),
-                            nextValue);
-                        return TRUE;
-                    }
-                    if (notify->idFrom == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::TransitionDurationSpin))
-                    {
-                        const UINT nextValue = ComputeNextSpinValue(
-                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration),
-                            upDown->iPos,
-                            upDown->iDelta,
-                            kSlideshowMinimumTransitionDurationMs,
-                            kSlideshowMaximumTransitionDurationMs);
-                        SetDialogUIntEditAndSpin(
-                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDuration),
-                            ConsolidatedSettingsControlHandle(*state, ConsolidatedSettingsControl::TransitionDurationSpin),
-                            nextValue);
-                        return TRUE;
-                    }
-                }
-                if (notify && notify->idFrom == kConsolidatedSettingsTabControlId && notify->code == TCN_SELCHANGE)
-                {
-                    const int selectedIndex = TabCtrl_GetCurSel(state->tabWindow);
-                    if (selectedIndex >= 0 && selectedIndex < static_cast<int>(ConsolidatedSettingsPage::Count))
-                    {
-                        ShowConsolidatedSettingsPage(*state, static_cast<ConsolidatedSettingsPage>(selectedIndex));
-                    }
-                    return 0;
-                }
-            }
-            break;
-        case WM_SYSKEYDOWN:
-            if (state && HandleConsolidatedSettingsMnemonic(*state, wParam))
-            {
-                return 0;
-            }
-            break;
-        case WM_COMMAND:
-            if (!state)
-            {
-                break;
-            }
-            if (LOWORD(wParam) == 5500 || LOWORD(wParam) == IDOK)
-            {
-                if (CollectConsolidatedSettings(hwnd, state))
-                {
-                    if (state->apply)
-                    {
-                        state->apply(*state);
-                    }
-                    if (LOWORD(wParam) == IDOK)
-                    {
-                        state->accepted = true;
-                        DestroyWindow(hwnd);
-                    }
-                }
-                return 0;
-            }
-            if (LOWORD(wParam) == IDCANCEL)
-            {
-                DestroyWindow(hwnd);
-                return 0;
-            }
-            if (HIWORD(wParam) == BN_CLICKED
-                && (LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::RawPairingEnabled)
-                    || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
-                    || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::MetadataCacheAutomatic)
-                    || LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::PrefetchDepthAutomatic)))
-            {
-                UpdateConsolidatedSettingsDependencies(*state);
-                const auto changedControl = LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::ThumbnailCacheAutomatic)
-                    ? ConsolidatedSettingsControl::ThumbnailCacheAutomatic
-                    : LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::MetadataCacheAutomatic)
-                        ? ConsolidatedSettingsControl::MetadataCacheAutomatic
-                        : LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::PrefetchDepthAutomatic)
-                            ? ConsolidatedSettingsControl::PrefetchDepthAutomatic
-                        : ConsolidatedSettingsControl::Count;
-                UpdateConsolidatedSettingsCacheValues(*state, changedControl);
-            }
-            if (HIWORD(wParam) == CBN_SELCHANGE
-                && LOWORD(wParam) == ConsolidatedSettingsControlId(ConsolidatedSettingsControl::ResourceProfile))
-            {
-                UpdateConsolidatedSettingsCacheValues(*state);
-            }
-            break;
-        case WM_CLOSE:
-            DestroyWindow(hwnd);
-            return 0;
-        case WM_DESTROY:
-            if (state)
-            {
-                if (state->backgroundBrush)
-                {
-                    DeleteObject(state->backgroundBrush);
-                    state->backgroundBrush = nullptr;
-                }
-                if (state->fieldBrush)
-                {
-                    DeleteObject(state->fieldBrush);
-                    state->fieldBrush = nullptr;
-                }
-                state->done = true;
-            }
-            return 0;
-        default:
-            break;
-        }
-        return DefWindowProcW(hwnd, message, wParam, lParam);
-    }
-
-    bool PromptForConsolidatedSettings(HWND ownerWindow,
-                                       HINSTANCE instance,
-                                       ConsolidatedSettingsDialogState* state)
-    {
-        if (!state)
-        {
-            return false;
-        }
-        WNDCLASSEXW windowClass{};
-        if (GetClassInfoExW(instance, kConsolidatedSettingsDialogClassName, &windowClass) == FALSE)
-        {
-            windowClass.cbSize = sizeof(windowClass);
-            windowClass.lpfnWndProc = &ConsolidatedSettingsDialogProc;
-            windowClass.hInstance = instance;
-            windowClass.lpszClassName = kConsolidatedSettingsDialogClassName;
-            windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-            windowClass.hbrBackground = nullptr;
-            if (RegisterClassExW(&windowClass) == 0)
-            {
-                return false;
-            }
-        }
-        RECT windowRect{0, 0,
-            ScaleDialogAppTextDimension(kConsolidatedSettingsDialogWidth, state->appTextSize, state->dpi),
-            ScaleDialogAppTextDimension(kConsolidatedSettingsDialogHeight, state->appTextSize, state->dpi)};
-        AdjustDialogWindowRectForDpi(&windowRect,
-                         WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VSCROLL,
-                         FALSE,
-                         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
-                         state->dpi);
-        if (ownerWindow)
-        {
-            EnableWindow(ownerWindow, FALSE);
-        }
-        HWND dialogWindow = CreateWindowExW(
-            WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
-            kConsolidatedSettingsDialogClassName,
-            state->title.c_str(),
-            WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_CLIPCHILDREN,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            windowRect.right - windowRect.left,
-            windowRect.bottom - windowRect.top,
-            ownerWindow,
-            nullptr,
-            instance,
-            state);
-        if (!dialogWindow)
-        {
-            if (ownerWindow)
-            {
-                EnableWindow(ownerWindow, TRUE);
-            }
-            DeleteFontIfOwned(state->bodyFont);
-            state->bodyFont = nullptr;
-            return false;
-        }
-
-        SetWindowTextW(dialogWindow, state->title.c_str());
-
-        ShowWindow(dialogWindow, SW_SHOWNORMAL);
-        UpdateWindow(dialogWindow);
-        MSG message{};
-        while (!state->done && GetMessageW(&message, nullptr, 0, 0) > 0)
-        {
-            if (message.message == WM_SYSKEYDOWN
-                && (message.hwnd == dialogWindow || IsChild(dialogWindow, message.hwnd) != FALSE)
-                && HandleConsolidatedSettingsMnemonic(*state, message.wParam))
-            {
-                continue;
-            }
-            if (!IsDialogMessageW(dialogWindow, &message))
-            {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-        }
-        if (ownerWindow)
-        {
-            EnableWindow(ownerWindow, TRUE);
-            SetForegroundWindow(ownerWindow);
-            SetActiveWindow(ownerWindow);
-        }
-        DeleteFontIfOwned(state->bodyFont);
-        state->bodyFont = nullptr;
-        return state->accepted;
     }
 
     constexpr int kExperimentalSettingsDialogWidth = 1120;
@@ -7386,13 +6177,18 @@ namespace
             ? std::to_wstring(currentMetadataCacheCapacityEntries)
             : std::to_wstring(initialMetadataCacheCapacityOverrideEntries);
 
-        const int baseDialogWidth = ScaleDialogDimension(kPerformanceSettingsDialogWidth, state.dpi);
+        const int baseDialogWidth = ScaleDialogAppTextDimension(
+            kPerformanceSettingsDialogWidth,
+            state.appTextSize,
+            state.dpi);
         const PerformanceSettingsDialogLayoutMetrics initialLayoutMetrics =
             BuildPerformanceSettingsDialogLayoutMetrics(baseDialogWidth, state);
         const int dialogWidth = std::max(baseDialogWidth, initialLayoutMetrics.minimumClientWidth);
         const PerformanceSettingsDialogLayoutMetrics layoutMetrics =
             BuildPerformanceSettingsDialogLayoutMetrics(dialogWidth, state);
-        RECT windowRect{0, 0, dialogWidth, std::max(ScaleDialogDimension(kPerformanceSettingsDialogHeight, state.dpi), layoutMetrics.minimumClientHeight)};
+        RECT windowRect{0, 0, dialogWidth, std::max(
+            ScaleDialogAppTextDimension(kPerformanceSettingsDialogHeight, state.appTextSize, state.dpi),
+            layoutMetrics.minimumClientHeight)};
         AdjustDialogWindowRectForDpi(&windowRect,
                          WS_CAPTION | WS_SYSMENU | WS_POPUP,
                          FALSE,
@@ -8347,12 +7143,12 @@ namespace
         state.checkedDefaults = initialDefaults;
 
         const FileAssociationsDialogLayoutMetrics layoutMetrics = BuildFileAssociationsDialogLayoutMetrics(
-            ScaleDialogDimension(kFileAssociationsDialogWidth, state.dpi),
+            ScaleDialogAppTextDimension(kFileAssociationsDialogWidth, state.appTextSize, state.dpi),
             state,
             hyperbrowse::decode::SupportedFileTypes().size());
         RECT windowRect{0, 0,
-                        std::max(ScaleDialogDimension(kFileAssociationsDialogWidth, state.dpi), layoutMetrics.minimumClientWidth),
-                        std::max(ScaleDialogDimension(kFileAssociationsDialogHeight, state.dpi), layoutMetrics.minimumClientHeight)};
+                        std::max(ScaleDialogAppTextDimension(kFileAssociationsDialogWidth, state.appTextSize, state.dpi), layoutMetrics.minimumClientWidth),
+                        std::max(ScaleDialogAppTextDimension(kFileAssociationsDialogHeight, state.appTextSize, state.dpi), layoutMetrics.minimumClientHeight)};
         AdjustDialogWindowRectForDpi(&windowRect,
                                      WS_CAPTION | WS_SYSMENU | WS_POPUP,
                                      FALSE,
@@ -8496,7 +7292,10 @@ namespace
     {
         SlideshowSettingsDialogLayoutMetrics metrics;
         metrics.margin = ScaleDialogAppTextDimension(kTextInputDialogMargin, state.appTextSize, state.dpi);
-        metrics.contentWidth = ScaleDialogDimension(kSlideshowSettingsDialogWidth, state.dpi) - metrics.margin * 2;
+        metrics.contentWidth = ScaleDialogAppTextDimension(
+            kSlideshowSettingsDialogWidth,
+            state.appTextSize,
+            state.dpi) - metrics.margin * 2;
         metrics.lineHeight = MeasureSingleLineTextHeight(state.bodyFont, 20);
         metrics.instructionHeight = MeasureTextBlockHeight(state.bodyFont,
                                                            state.instruction,
@@ -8591,7 +7390,10 @@ namespace
             const int footnoteTop = metrics.footnoteTop;
             const int dividerTop = metrics.dividerTop;
             const int buttonTop = metrics.buttonTop;
-            const int cancelLeft = ScaleDialogDimension(kSlideshowSettingsDialogWidth, state->dpi) - metrics.margin - metrics.cancelButtonWidth;
+            const int cancelLeft = ScaleDialogAppTextDimension(
+                kSlideshowSettingsDialogWidth,
+                state->appTextSize,
+                state->dpi) - metrics.margin - metrics.cancelButtonWidth;
             const int okLeft = cancelLeft - metrics.rowGap - metrics.applyButtonWidth;
             const int numericEditWidth = metrics.numericEditWidth;
             const int spinWidth = metrics.spinWidth;
@@ -8904,11 +7706,14 @@ namespace
                 const auto* suggestedRect = reinterpret_cast<const RECT*>(lParam);
                 if (suggestedRect)
                 {
+                    const RECT adjustedRect = ClampDialogFrameToWorkArea(
+                        *suggestedRect,
+                        MeasureDialogShellMetrics(hwnd, state->appTextSize).workArea);
                     SetWindowPos(hwnd, nullptr,
-                                 suggestedRect->left,
-                                 suggestedRect->top,
-                                 suggestedRect->right - suggestedRect->left,
-                                 suggestedRect->bottom - suggestedRect->top,
+                                 adjustedRect.left,
+                                 adjustedRect.top,
+                                 adjustedRect.right - adjustedRect.left,
+                                 adjustedRect.bottom - adjustedRect.top,
                                  SWP_NOZORDER | SWP_NOACTIVATE);
                 }
                 ScaleDialogChildWindows(hwnd, oldDpi, state->dpi);
@@ -9111,8 +7916,12 @@ namespace
         state.transitionStyle = initialTransitionStyle;
 
         const SlideshowSettingsDialogLayoutMetrics layoutMetrics = BuildSlideshowSettingsDialogLayoutMetrics(state);
-        state.dialogHeight = std::max(ScaleDialogDimension(kSlideshowSettingsDialogHeight, state.dpi), layoutMetrics.minimumClientHeight);
-        RECT windowRect{0, 0, ScaleDialogDimension(kSlideshowSettingsDialogWidth, state.dpi), state.dialogHeight};
+        state.dialogHeight = std::max(
+            ScaleDialogAppTextDimension(kSlideshowSettingsDialogHeight, state.appTextSize, state.dpi),
+            layoutMetrics.minimumClientHeight);
+        RECT windowRect{0, 0,
+                        ScaleDialogAppTextDimension(kSlideshowSettingsDialogWidth, state.appTextSize, state.dpi),
+                        state.dialogHeight};
         AdjustDialogWindowRectForDpi(&windowRect,
                          WS_CAPTION | WS_SYSMENU | WS_POPUP,
                          FALSE,
@@ -13130,7 +11939,8 @@ namespace hyperbrowse::ui
 
     void MainWindow::MeasureOwnerDrawMenuItem(MEASUREITEMSTRUCT* measureItem) const
     {
-        menuPainter_.MeasureOwnerDrawMenuItem(measureItem, appTextSize_, appTextUiFont_);
+        const UINT dpi = hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u;
+        menuPainter_.MeasureOwnerDrawMenuItem(measureItem, MakeMenuMetrics(appTextSize_, dpi), appTextUiFont_);
     }
 
     void MainWindow::DrawOwnerDrawMenuItem(const DRAWITEMSTRUCT& drawItem) const
@@ -13149,7 +11959,7 @@ namespace hyperbrowse::ui
         menuPainter_.DrawOwnerDrawMenuItem(
             drawItem,
             painterPalette,
-            appTextSize_,
+            MakeMenuMetrics(appTextSize_, hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u),
             appTextUiFont_,
             themeMode_ == ThemeMode::Dark);
     }
@@ -17619,7 +16429,7 @@ namespace hyperbrowse::ui
     {
         const auto scale = [&state](int value)
         {
-            return ScaleDialogDimension(value, state.dpi);
+            return ScaleDialogAppTextDimension(value, state.appTextSize, state.dpi);
         };
         RECT client{};
         GetClientRect(hwnd, &client);
@@ -17713,7 +16523,7 @@ namespace hyperbrowse::ui
     {
         const auto scale = [&state](int value)
         {
-            return ScaleDialogDimension(value, state.dpi);
+            return ScaleDialogAppTextDimension(value, state.appTextSize, state.dpi);
         };
         const int clientHeight = std::min(state.expanded
                                               ? state.expandedWindowHeight
@@ -17894,7 +16704,7 @@ namespace hyperbrowse::ui
                 state->dpi = std::max<UINT>(96, HIWORD(wParam));
                 const auto scale = [state](int value)
                 {
-                    return ScaleDialogDimension(value, state->dpi);
+                    return ScaleDialogAppTextDimension(value, state->appTextSize, state->dpi);
                 };
                 state->workArea = ImageInformationDialogWorkArea(hwnd);
                 DeleteFontIfOwned(state->titleFont);
@@ -18103,27 +16913,38 @@ namespace hyperbrowse::ui
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
 
-        const int contentWidth = ScaleDialogDimension(kImageInformationDialogWidth - (kImageInformationDialogMargin * 2), state.dpi);
+        const int contentWidth = ScaleDialogAppTextDimension(
+            kImageInformationDialogWidth - (kImageInformationDialogMargin * 2),
+            state.appTextSize,
+            state.dpi);
         state.contentHeight = MeasureTextBlockHeight(state.bodyFont,
                                                      state.content,
                                                      contentWidth,
                                                      DT_WORDBREAK | DT_EDITCONTROL,
-                                                     ScaleDialogDimension(40, state.dpi));
+                                                     ScaleDialogAppTextDimension(40, state.appTextSize, state.dpi));
         state.metadataHeight = MeasureTextBlockHeight(state.bodyFont,
                                                       state.metadata,
                                                       contentWidth,
                                                       DT_WORDBREAK | DT_EDITCONTROL,
-                                                      ScaleDialogDimension(56, state.dpi));
-        state.expandedWindowHeight = ScaleDialogDimension(kImageInformationDialogMargin + 34, state.dpi)
+                                                      ScaleDialogAppTextDimension(56, state.appTextSize, state.dpi));
+        state.expandedWindowHeight = ScaleDialogAppTextDimension(
+            kImageInformationDialogMargin + 34, state.appTextSize, state.dpi)
             + state.contentHeight
-            + ScaleDialogDimension(kImageInformationDialogGap, state.dpi)
+            + ScaleDialogAppTextDimension(kImageInformationDialogGap, state.appTextSize, state.dpi)
             + state.metadataHeight
-            + ScaleDialogDimension(kImageInformationDialogGap + kImageInformationDialogButtonHeight, state.dpi)
-            + ScaleDialogDimension(kImageInformationDialogGap + kImageInformationDialogButtonHeight
-                                   + kImageInformationDialogMargin, state.dpi);
+            + ScaleDialogAppTextDimension(
+                kImageInformationDialogGap + kImageInformationDialogButtonHeight, state.appTextSize, state.dpi)
+            + ScaleDialogAppTextDimension(
+                kImageInformationDialogGap + kImageInformationDialogButtonHeight + kImageInformationDialogMargin,
+                state.appTextSize,
+                state.dpi);
         state.expandedWindowHeight = std::min(state.expandedWindowHeight, state.maximumWindowHeight);
 
-        RECT windowRect{0, 0, ScaleDialogDimension(kImageInformationDialogWidth, state.dpi), state.expandedWindowHeight};
+        RECT windowRect{
+            0,
+            0,
+            ScaleDialogAppTextDimension(kImageInformationDialogWidth, state.appTextSize, state.dpi),
+            state.expandedWindowHeight};
         AdjustDialogWindowRectForDpi(&windowRect,
                          WS_CAPTION | WS_SYSMENU | WS_POPUP,
                          FALSE,
@@ -21136,9 +19957,10 @@ namespace hyperbrowse::ui
     void MainWindow::RebuildAppTextFonts()
     {
         const HFONT defaultGuiFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const UINT dpi = hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u;
 
         DeleteFontIfOwned(appTextUiFont_);
-        appTextUiFont_ = CreateSystemUiFont(appTextSize_);
+        appTextUiFont_ = CreateSystemUiFont(appTextSize_, dpi);
         if (!appTextUiFont_)
         {
             appTextUiFont_ = defaultGuiFont;
@@ -21147,9 +19969,9 @@ namespace hyperbrowse::ui
         DeleteFontIfOwned(detailsPanelTitleFont_);
         DeleteFontIfOwned(detailsPanelSummaryFont_);
         DeleteFontIfOwned(detailsPanelBodyFont_);
-        detailsPanelTitleFont_ = CreateDialogUiFont(11, FW_SEMIBOLD, appTextSize_);
-        detailsPanelSummaryFont_ = CreateDialogUiFont(9, FW_NORMAL, appTextSize_);
-        detailsPanelBodyFont_ = CreateDialogUiFont(9, FW_NORMAL, appTextSize_);
+        detailsPanelTitleFont_ = CreateDialogUiFont(11, FW_SEMIBOLD, appTextSize_, dpi);
+        detailsPanelSummaryFont_ = CreateDialogUiFont(9, FW_NORMAL, appTextSize_, dpi);
+        detailsPanelBodyFont_ = CreateDialogUiFont(9, FW_NORMAL, appTextSize_, dpi);
         if (!detailsPanelTitleFont_) detailsPanelTitleFont_ = defaultGuiFont;
         if (!detailsPanelSummaryFont_) detailsPanelSummaryFont_ = defaultGuiFont;
         if (!detailsPanelBodyFont_) detailsPanelBodyFont_ = defaultGuiFont;
@@ -21200,6 +20022,13 @@ namespace hyperbrowse::ui
         if (diagnosticsWindow_)
         {
             diagnosticsWindow_->SetAppTextSize(appTextSize_);
+        }
+        if (shortcutReferenceWindow_ && IsWindow(shortcutReferenceWindow_))
+        {
+            PostMessageW(shortcutReferenceWindow_,
+                         kAppTextSizeChangedMessage,
+                         static_cast<WPARAM>(appTextSize_),
+                         0);
         }
         for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
@@ -23669,11 +22498,15 @@ namespace hyperbrowse::ui
         RECT client{};
         GetClientRect(hwnd_, &client);
         const int clientWidth = client.right - client.left;
-        const int itemTop = kActionStripPaddingY;
+        const MenuMetrics menuMetrics = MakeMenuMetrics(
+            appTextSize_,
+            hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u);
+        const int itemTop = menuMetrics.ScaleDip(kActionStripPaddingY);
         const HFONT menuFont = detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         commandBarController_.Layout(
             clientWidth,
             itemTop,
+            menuMetrics,
             menuFont,
             [](HFONT font, std::wstring_view text)
             {
@@ -23687,13 +22520,15 @@ namespace hyperbrowse::ui
         if (filterItem != toolbarItems_.end() && filterEdit_)
         {
             const RECT& filterRect = filterItem->rect;
-            const int filterTop = itemTop + std::max(0, (kToolbarItemSize - kToolbarFilterEditHeight) / 2);
-            const int filterWidth = std::max(0, static_cast<int>(filterRect.right - filterRect.left) - 20);
+            const int toolbarItemSize = menuMetrics.ScaleDip(kToolbarItemSize);
+            const int filterEditHeight = menuMetrics.ScaleDip(kToolbarFilterEditHeight);
+            const int filterTop = itemTop + std::max(0, (toolbarItemSize - filterEditHeight) / 2);
+            const int filterWidth = std::max(0, static_cast<int>(filterRect.right - filterRect.left) - menuMetrics.ScaleDip(20));
             MoveWindow(filterEdit_,
-                       static_cast<int>(filterRect.left) + 10,
+                       static_cast<int>(filterRect.left) + menuMetrics.ScaleDip(10),
                        filterTop,
                        filterWidth,
-                       kToolbarFilterEditHeight,
+                       filterEditHeight,
                        TRUE);
         }
 
@@ -23773,11 +22608,15 @@ namespace hyperbrowse::ui
             filterEdit_ != nullptr,
             GetFocus() == filterEdit_,
         };
+        const MenuMetrics menuMetrics = MakeMenuMetrics(
+            appTextSize_,
+            hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u);
         commandBarPainter_.PaintD2D(renderTarget,
                                     stripRect,
                                     commandBarMenuButtons_,
                                     toolbarItems_,
                                     palette,
+                                    menuMetrics,
                                     d2dToolbarTextFormat_.Get(),
                                     toolbarIconLibrary_.get(),
                                     state);
@@ -23808,11 +22647,15 @@ namespace hyperbrowse::ui
             filterEdit_ != nullptr,
             GetFocus() == filterEdit_,
         };
+        const MenuMetrics menuMetrics = MakeMenuMetrics(
+            appTextSize_,
+            hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u);
         commandBarPainter_.PaintGdi(hdc,
                                     stripRect,
                                     commandBarMenuButtons_,
                                     toolbarItems_,
                                     palette,
+                                    menuMetrics,
                                     detailsPanelSummaryFont_
                                         ? detailsPanelSummaryFont_
                                         : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
@@ -25289,6 +24132,9 @@ namespace hyperbrowse::ui
                          suggested->right - suggested->left,
                          suggested->bottom - suggested->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+            RebuildAppTextFonts();
+            LayoutToolbar();
+            RefreshPersistentMenuOwnerDraw();
             ResetD2DResources();
             ApplyTheme();
             return 0;

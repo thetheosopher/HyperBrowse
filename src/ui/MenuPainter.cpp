@@ -14,14 +14,6 @@ namespace hyperbrowse::ui
 {
     namespace
     {
-        constexpr int kMenuPopupItemHeight = 28;
-        constexpr int kMenuPopupSeparatorHeight = 10;
-        constexpr int kMenuPopupCheckColumnWidth = 24;
-        constexpr int kMenuPopupTextPadding = 12;
-        constexpr int kMenuPopupShortcutGap = 24;
-        constexpr int kMenuPopupMeasurementAllowance = 8;
-        constexpr int kMenuPopupArrowWidth = 12;
-
         COLORREF BlendColor(COLORREF baseColor, COLORREF mixColor, BYTE mixAmount)
         {
             const BYTE baseAmount = static_cast<BYTE>(255 - mixAmount);
@@ -144,7 +136,7 @@ namespace hyperbrowse::ui
         bool DrawOwnerDrawMenuItemD2D(
             const DRAWITEMSTRUCT& drawItem,
             const MenuPainterPalette& palette,
-            hyperbrowse::util::AppTextSize appTextSize,
+            const MenuMetrics& metrics,
             HFONT menuFont,
             bool darkTheme)
         {
@@ -196,13 +188,9 @@ namespace hyperbrowse::ui
                 D2D1::RectF(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
                 backgroundBrush.Get());
 
-            const auto scaleMenuDimension = [appTextSize](int dimension)
-            {
-                return hyperbrowse::util::ScaleAppTextDimension(dimension, appTextSize);
-            };
-            const int checkColumnWidth = scaleMenuDimension(kMenuPopupCheckColumnWidth);
-            const int textPadding = scaleMenuDimension(kMenuPopupTextPadding);
-            const int shortcutGap = scaleMenuDimension(kMenuPopupShortcutGap);
+            const int checkColumnWidth = metrics.ScaleDip(metrics.popupCheckColumnWidthDip);
+            const int textPadding = metrics.ScaleDip(metrics.popupTextPaddingDip);
+            const int shortcutGap = metrics.ScaleDip(metrics.popupShortcutGapDip);
 
             if (drawData->separator)
             {
@@ -221,7 +209,7 @@ namespace hyperbrowse::ui
 
             if (checked)
             {
-                const int checkInset = scaleMenuDimension(4);
+                const int checkInset = metrics.ScaleDip(4);
                 const RECT checkRect{checkInset,
                                      checkInset,
                                      (std::max)(checkInset, checkColumnWidth - checkInset),
@@ -233,18 +221,18 @@ namespace hyperbrowse::ui
                 {
                     const D2D1_ROUNDED_RECT roundedCheck = hyperbrowse::render::ToD2DRoundedRect(
                         checkRect,
-                        static_cast<float>(scaleMenuDimension(8)),
-                        static_cast<float>(scaleMenuDimension(8)));
+                        static_cast<float>(metrics.ScaleDip(8)),
+                        static_cast<float>(metrics.ScaleDip(8)));
                     renderTarget->FillRoundedRectangle(&roundedCheck, checkBrush.Get());
-                    const int checkMarkInset = scaleMenuDimension(5);
+                    const int checkMarkInset = metrics.ScaleDip(5);
                     renderTarget->DrawLine(
                         hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.left + checkMarkInset), static_cast<float>(height / 2)),
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.left + scaleMenuDimension(9)), static_cast<float>(checkRect.bottom - scaleMenuDimension(6))),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.left + metrics.ScaleDip(9)), static_cast<float>(checkRect.bottom - metrics.ScaleDip(6))),
                         markBrush.Get(),
                         2.0f);
                     renderTarget->DrawLine(
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.left + scaleMenuDimension(9)), static_cast<float>(checkRect.bottom - scaleMenuDimension(6))),
-                        hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.right - checkMarkInset), static_cast<float>(checkRect.top + scaleMenuDimension(6))),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.left + metrics.ScaleDip(9)), static_cast<float>(checkRect.bottom - metrics.ScaleDip(6))),
+                        hyperbrowse::render::ToD2DPoint(static_cast<float>(checkRect.right - checkMarkInset), static_cast<float>(checkRect.top + metrics.ScaleDip(6))),
                         markBrush.Get(),
                         2.0f);
                 }
@@ -451,7 +439,7 @@ namespace hyperbrowse::ui
 
     void MenuPainter::MeasureOwnerDrawMenuItem(
         MEASUREITEMSTRUCT* measureItem,
-        hyperbrowse::util::AppTextSize appTextSize,
+        const MenuMetrics& metrics,
         HFONT menuFont) const
     {
         if (!measureItem)
@@ -463,14 +451,14 @@ namespace hyperbrowse::ui
         if (!drawData)
         {
             measureItem->itemWidth = 0;
-            measureItem->itemHeight = kMenuPopupItemHeight;
+            measureItem->itemHeight = static_cast<UINT>(metrics.ScaleDip(metrics.popupItemHeightDip));
             return;
         }
 
         if (drawData->separator)
         {
             measureItem->itemWidth = 0;
-            measureItem->itemHeight = kMenuPopupSeparatorHeight;
+            measureItem->itemHeight = static_cast<UINT>(metrics.ScaleDip(metrics.popupSeparatorHeightDip));
             return;
         }
 
@@ -478,16 +466,12 @@ namespace hyperbrowse::ui
         std::wstring shortcut;
         SplitMenuDisplayText(drawData->text, &label, &shortcut);
 
-        const auto scaleMenuDimension = [appTextSize](int dimension)
-        {
-            return hyperbrowse::util::ScaleAppTextDimension(dimension, appTextSize);
-        };
-        const int itemHeight = scaleMenuDimension(kMenuPopupItemHeight);
-        const int checkColumnWidth = scaleMenuDimension(kMenuPopupCheckColumnWidth);
-        const int textPadding = scaleMenuDimension(kMenuPopupTextPadding);
-        const int shortcutGap = scaleMenuDimension(kMenuPopupShortcutGap);
-        const int measurementAllowance = scaleMenuDimension(kMenuPopupMeasurementAllowance);
-        const int arrowWidth = scaleMenuDimension(kMenuPopupArrowWidth);
+        const int itemHeight = metrics.ScaleDip(metrics.popupItemHeightDip);
+        const int checkColumnWidth = metrics.ScaleDip(metrics.popupCheckColumnWidthDip);
+        const int textPadding = metrics.ScaleDip(metrics.popupTextPaddingDip);
+        const int shortcutGap = metrics.ScaleDip(metrics.popupShortcutGapDip);
+        const int measurementAllowance = metrics.ScaleDip(metrics.popupMeasurementAllowanceDip);
+        const int arrowWidth = metrics.ScaleDip(metrics.popupArrowWidthDip);
         const HFONT effectiveMenuFont = menuFont ? menuFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         const auto d2dMenuFormat = hyperbrowse::render::D2DRenderer::Instance().CreateTextFormatFromFont(effectiveMenuFont);
         const int labelWidth = d2dMenuFormat
@@ -519,7 +503,7 @@ namespace hyperbrowse::ui
     void MenuPainter::DrawOwnerDrawMenuItem(
         const DRAWITEMSTRUCT& drawItem,
         const MenuPainterPalette& palette,
-        hyperbrowse::util::AppTextSize appTextSize,
+        const MenuMetrics& metrics,
         HFONT menuFont,
         bool darkTheme) const
     {
@@ -529,7 +513,7 @@ namespace hyperbrowse::ui
             return;
         }
 
-        if (DrawOwnerDrawMenuItemD2D(drawItem, palette, appTextSize, menuFont, darkTheme))
+        if (DrawOwnerDrawMenuItemD2D(drawItem, palette, metrics, menuFont, darkTheme))
         {
             return;
         }
@@ -551,8 +535,8 @@ namespace hyperbrowse::ui
             const HPEN separatorPen = CreatePen(PS_SOLID, 1, palette.actionStripBorder);
             const HGDIOBJ oldPen = SelectObject(drawItem.hDC, separatorPen);
             const int y = itemRect.top + ((itemRect.bottom - itemRect.top) / 2);
-            MoveToEx(drawItem.hDC, itemRect.left + kMenuPopupCheckColumnWidth, y, nullptr);
-            LineTo(drawItem.hDC, itemRect.right - kMenuPopupTextPadding, y);
+            MoveToEx(drawItem.hDC, itemRect.left + metrics.ScaleDip(metrics.popupCheckColumnWidthDip), y, nullptr);
+            LineTo(drawItem.hDC, itemRect.right - metrics.ScaleDip(metrics.popupTextPaddingDip), y);
             SelectObject(drawItem.hDC, oldPen);
             DeleteObject(separatorPen);
             return;
@@ -563,17 +547,13 @@ namespace hyperbrowse::ui
         SplitMenuDisplayText(drawData->text, &label, &shortcut);
         const int mnemonicIndex = drawData->mnemonicDisplayIndex;
 
-        const auto scaleMenuDimension = [appTextSize](int dimension)
-        {
-            return hyperbrowse::util::ScaleAppTextDimension(dimension, appTextSize);
-        };
-        const int checkColumnWidth = scaleMenuDimension(kMenuPopupCheckColumnWidth);
-        const int textPadding = scaleMenuDimension(kMenuPopupTextPadding);
-        const int shortcutGap = scaleMenuDimension(kMenuPopupShortcutGap);
+        const int checkColumnWidth = metrics.ScaleDip(metrics.popupCheckColumnWidthDip);
+        const int textPadding = metrics.ScaleDip(metrics.popupTextPaddingDip);
+        const int shortcutGap = metrics.ScaleDip(metrics.popupShortcutGapDip);
 
         if (checked)
         {
-            const int checkInset = scaleMenuDimension(4);
+            const int checkInset = metrics.ScaleDip(4);
             RECT checkRect{itemRect.left + checkInset,
                            itemRect.top + checkInset,
                            itemRect.left + checkColumnWidth - checkInset,
@@ -583,7 +563,7 @@ namespace hyperbrowse::ui
             const HPEN checkPen = CreatePen(PS_SOLID, 1, selected ? palette.accent : palette.accentFill);
             const HGDIOBJ oldBrush = SelectObject(drawItem.hDC, checkBrush);
             const HGDIOBJ oldCheckPen = SelectObject(drawItem.hDC, checkPen);
-            const int checkCorner = scaleMenuDimension(8);
+            const int checkCorner = metrics.ScaleDip(8);
             RoundRect(drawItem.hDC, checkRect.left, checkRect.top, checkRect.right, checkRect.bottom, checkCorner, checkCorner);
             SelectObject(drawItem.hDC, oldCheckPen);
             SelectObject(drawItem.hDC, oldBrush);
@@ -592,13 +572,13 @@ namespace hyperbrowse::ui
 
             const HPEN markPen = CreatePen(PS_SOLID, 2, palette.accentText);
             const HGDIOBJ oldMarkPen = SelectObject(drawItem.hDC, markPen);
-            const int checkMarkInset = scaleMenuDimension(5);
+            const int checkMarkInset = metrics.ScaleDip(5);
             MoveToEx(drawItem.hDC,
                      checkRect.left + checkMarkInset,
                      checkRect.top + ((checkRect.bottom - checkRect.top) / 2),
                      nullptr);
-            LineTo(drawItem.hDC, checkRect.left + scaleMenuDimension(9), checkRect.bottom - scaleMenuDimension(6));
-            LineTo(drawItem.hDC, checkRect.right - checkMarkInset, checkRect.top + scaleMenuDimension(6));
+            LineTo(drawItem.hDC, checkRect.left + metrics.ScaleDip(9), checkRect.bottom - metrics.ScaleDip(6));
+            LineTo(drawItem.hDC, checkRect.right - checkMarkInset, checkRect.top + metrics.ScaleDip(6));
             SelectObject(drawItem.hDC, oldMarkPen);
             DeleteObject(markPen);
         }

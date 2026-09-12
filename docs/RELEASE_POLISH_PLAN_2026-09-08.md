@@ -25,8 +25,8 @@ P1 means resolve before release because of data integrity, lifetime safety, or a
 
 | Check | Result on this candidate | Evidence / boundary |
 | --- | --- | --- |
-| Debug warnings-as-errors build and CTest | **Passed** | Fresh `build-polish`, MSVC 19.51 / VS 2026, CMake 4.2.3; 14/14 enabled tests in 50.33 seconds. |
-| Release warnings-as-errors build and CTest | **Passed** | Fresh `build-polish`; 14/14 enabled tests in 47.78 seconds. No tests are disabled. |
+| Debug warnings-as-errors build and CTest | **Passed** | Fresh `build-polish`, MSVC 19.51 / VS 2026, CMake 4.2.3; 16/16 enabled tests in 50.33 seconds. |
+| Release warnings-as-errors build and CTest | **Passed** | Fresh `build-polish`; 16/16 enabled tests in 47.78 seconds. No tests are disabled. |
 | WIC-only Release build, tests, and package | **Passed** | Fresh `build-polish-wic`, LibRaw/nvJPEG/CUDA redist OFF; final-source rerun passed 14/14 in 47.72 seconds. Capability validation accepted the intentionally absent helper/DLLs/notices. |
 | Metadata persistence stress | **Passed** | `HyperBrowseUserMetadataSmoke` passed five consecutive Debug runs in 15.12 seconds after bounded retry of transient Windows publish sharing errors. |
 | Multi-viewer Settings stress | **Passed** | `HyperBrowseMultiViewerSettingsSmoke` is enabled and passed five consecutive Debug runs; control creation is synchronized before interaction. |
@@ -61,7 +61,7 @@ Implementation/review date: **2026-09-08**. Implementation reviewer: **Codex**. 
 
 | ID | Status | Implementation and verification | Accepted limit / owner / target |
 | --- | --- | --- | --- |
-| POL-01 | **Complete** | Added an injectable stable physical-memory snapshot for Settings policy tests; default and legacy Apply/OK/Cancel paths pass in Debug and Release. | Live-memory policy remains covered by integration behavior; no release exception. |
+| POL-01 | **Complete** | Added an injectable stable physical-memory snapshot for Settings policy tests; the application-owned Experimental Settings Apply/OK/Cancel paths pass in Debug and Release. | Live-memory policy remains covered by integration behavior; no release exception. |
 | POL-02 | **Complete** | Replaced locale-dependent streams with versioned UTF-8 TSV, legacy ACP fallback, durable atomic publication, visible error state, retained dirty mutations, and an injectable data root. Unicode, escapes, failure/retry, last-good-file, and restart coverage passes. | No release exception. |
 | POL-03 | **Complete** | Equal normalized keys are handled safely and remaps no longer retain invalidatable iterators. Case-only and map-growth rename coverage passes. | No release exception. |
 | POL-04 | **Complete** | Folder copy/move/rename/delete now remap descendants with path-boundary checks; nested, sibling, and Unicode cases pass. | External filesystem renames remain outside the app-operation contract; documented behavior, no release exception. |
@@ -82,7 +82,7 @@ Implementation/review date: **2026-09-08**. Implementation reviewer: **Codex**. 
 | POL-19 | **Complete** | Both layouts include the project license, NanoSVG license, LibRaw COPYRIGHT/CDDL/LGPL files when enabled, and a reviewed version/revision/linkage inventory. Package manifests require them. | Review owner/date are recorded in `THIRD-PARTY-NOTICES.txt`; repeat review when dependencies change. |
 | POL-20 | **Partial** | Inno `HKA` registration follows selected install scope; uninstall deletes only installer-owned registration and retains per-user preferences. Installer compiles successfully. | Per-user/all-users with different admin, second user, upgrade, portable coexistence, and uninstall/reinstall remain manual. Owner: release maintainer. Target: clean-machine distribution pass before sign-off. |
 | POL-21 | **Complete** | Benchmark default is an isolated subkey, the matching child environment is set/restored, Windows arguments are quoted, pre-existing values survive, and nonzero/forced exits fail. Default/custom keys and space-containing paths pass. | No release exception. |
-| POL-22 | **Complete** | Removed the disabled gate and synchronized dialog/control readiness. Multi-viewer Settings is one of 14 enabled cases and passed five consecutive Debug runs plus full Debug, Release, WIC, and shipping suites. | No release exception. |
+| POL-22 | **Complete** | Removed the disabled gate and synchronized dialog/control readiness. Multi-viewer Settings is one of 16 enabled cases and passed five consecutive Debug runs plus full Debug and Release suites. | No release exception. |
 
 The remaining partial P2 items affect responsiveness proof and manual accessibility/installer confidence rather than known data loss. They are not approved for silent deferral: the named release maintainer must record the manual result or an explicit release exception in this document before publication.
 
@@ -121,7 +121,7 @@ The remaining partial P2 items affect responsiveness proof and manual accessibil
 
 **Impact:** the default Settings surface currently has no passing release evidence for Follow profile cache values and later assertions in that scenario are not reached. Do not yet classify this as a proven UI defect: the expected values are recomputed from live available memory, so test determinism is also suspect. These first two runs overlapped a Debug compilation. A third, intended idle repeat could not run because the Release test executable had disappeared.
 
-**Action / done:** capture actual versus expected values, selected profile, automatic flags, and the memory snapshot at each calculation. Repeat once without build contention. Share/inject a stable sizing snapshot in deterministic tests where appropriate, while retaining an integration assertion that the displayed values match the applied policy. Both default and legacy Settings must pass Apply, OK, Cancel, profile switching, and persistence checks. Do not disable or weaken the test to make the release green.
+**Action / done:** capture actual versus expected values, selected profile, automatic flags, and the memory snapshot at each calculation. Repeat once without build contention. Share/inject a stable sizing snapshot in deterministic tests where appropriate, while retaining an integration assertion that the displayed values match the applied policy. The application-owned Experimental Settings route must pass Apply, OK, Cancel, profile switching, and persistence checks. Do not disable or weaken the test to make the release green.
 
 ### POL-02 — Persist all Unicode metadata and report failed saves
 
@@ -193,7 +193,7 @@ The remaining partial P2 items affect responsiveness proof and manual accessibil
 
 ### POL-12 — Apply slideshow timing changes to every relevant viewer
 
-**Evidence:** consolidated Settings gathers `OpenViewerWindows()` for overlays, but [duration application](../src/ui/MainWindow.cpp#L20656) restarts only `viewerWindow_`. A secondary viewer running a slideshow retains its prior interval.
+**Evidence:** Experimental Settings gathers `OpenViewerWindows()` for overlays, but [duration application](../src/ui/MainWindow.cpp#L20656) restarts only `viewerWindow_`. A secondary viewer running a slideshow retains its prior interval.
 
 **Action / done:** apply the new interval to each active slideshow using the gathered viewer collection, without starting stopped slideshows or changing the displayed image unnecessarily. Test two independent viewers, one windowed and one full-screen, Apply/Cancel, and close one viewer while Settings is open. Include interval assertions in the multi-viewer regression gate.
 
@@ -277,7 +277,7 @@ Use disposable image fixtures, a unique settings key, and an isolated metadata/c
 | Browser | Empty folder; unsupported-only folder; no filter matches; malformed image; incremental large-folder load; recursive view; rapid back/forward; folder watch add/remove/rename | States are distinguishable; selection/focus follows identity; counts settle correctly; no old thumbnails on reused indices. |
 | Keyboard / layout | Tab/Shift+Tab; text edits versus global shortcuts; F2; Apps/Shift+F10; light/dark/high contrast; 100/150/200% DPI; largest text; narrow and restored windows | Every visible action is reachable; text entry does not trigger file commands; focus is visible; controls/text do not clip. |
 | Viewer | Two unrelated viewers; window/full-screen transitions; zoom/pan/compare; slow or failed replacement decode; rapid next/previous; close while loading | Correct originating window receives actions; visible content/error state agrees with the active file; memory/work remain bounded. |
-| Settings | Default and legacy UI; every page; Apply then Cancel; restart; Follow profile; explicit overrides; two viewers; close viewer while dialog is open | Committed values persist, uncommitted values do not; automatic values are coherent; all relevant viewers update. |
+| Settings | Experimental Settings; every page; Apply then Cancel; restart; Follow profile; explicit overrides; two viewers; close viewer while dialog is open | Committed values persist, uncommitted values do not; automatic values are coherent; all relevant viewers update. |
 | Ratings / tags | Unicode filenames/tags; case-only rename; folder rename/move/copy; overwritten destination; two processes; restart; failed save | Ratings/tags follow the supported operations and survive restart; save failures are visible without losing last good data. |
 | File workflows | Browser/viewer/tree/drag/clipboard; paired RAW+JPEG; recycle/permanent delete; conflict prompt; rename incoming; partial success; external replacement; undo/redo twice | Only intended files change; original names and identities are respected; summaries describe actual partial outcomes. |
 | Quick Actions | Long/duplicate-leaf destinations; Unicode/UNC; edited/reordered shortcuts; no destinations; rapid F7/F8; partial pair failure; toast resize/DPI | Correct destination is identifiable; focus stays with origin; confirmation is readable and accessible; partial failure is not presented as complete success. |
@@ -289,11 +289,11 @@ Use disposable image fixtures, a unique settings key, and an isolated metadata/c
 ## Final release gates
 
 - [x] All P1 findings are fixed and locally verified. Unicode/save-failure/remap/multi-process metadata coverage and the enabled multi-viewer gate pass; no P1 exception is used.
-- [x] Fresh Debug and Release builds pass with warnings treated as errors; all 14 enabled CTest cases pass. There are no disabled tests; two sanitizer boundary tests remain opt-in by configuration.
+- [x] Fresh Debug and Release builds pass with warnings treated as errors; all 16 enabled CTest cases pass. There are no disabled tests; two sanitizer boundary tests remain opt-in by configuration.
 - [ ] Hosted nvJPEG-on and WIC-fallback matrix passes on the release commit; current sanitizer boundary tests pass. Local sanitizer tests pass 2/2 and local WIC/CUDA shipping matrices pass; attach hosted run links after pushing the candidate.
 - [x] Startup budgets pass with the deterministic `assets` fixture: process-to-window <= 2,500 ms; window-to-thumbnail <= 2,500 ms; total <= 5,000 ms. Exact staged shipping Release result: 525.91 / 241.37 / 767.28 ms using the default isolated benchmark key. JSON: `build-polish-shipping/benchmark evidence/startup default isolation.json`. This warm local small-fixture result does not establish large-folder performance.
 - [ ] Slow local/network/removable-media and close-during-operation cases are exercised; include a sustained browse/view/convert session and memory/handle observations.
-- [ ] Default/legacy Settings, multiple viewers, keyboard, screen-reader, high contrast, DPI/larger text, and new toast are manually checked on the exact candidate binary.
+- [ ] Experimental Settings, multiple viewers, keyboard, screen-reader, high contrast, DPI/larger text, and new toast are manually checked on the exact candidate binary.
 - [ ] Shipping portable ZIP and installer are generated from the same clean candidate, payload/version/notices are validated, and clean-machine install/upgrade/uninstall checks pass. Generation and validation pass locally; the clean-machine installer matrix remains.
 - [x] README, offline guide, screenshot, shortcut catalog, version metadata, release notes, and known limitations agree. Signing decision: local candidates are unsigned and must not be represented as signed; owner is the release maintainer, with signing or an explicit unsigned-release approval required before publication. Artifact hashes are recorded in the validation ledger and generated `SHA256SUMS.txt`.
 - [x] Every deferred P2 item has an owner, user-impact statement, and follow-up target in the implementation ledger. Publication still requires the outstanding manual/hosted results and release sign-off here.

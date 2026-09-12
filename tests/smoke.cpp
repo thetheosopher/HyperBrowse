@@ -4026,6 +4026,143 @@ namespace
          }
         }
 
+        void RunDialogGeometryScenario()
+        {
+         struct DialogFamily
+         {
+             const char* name;
+             int width;
+             int height;
+             int margin;
+             int headerHeight;
+             int controlHeight;
+         };
+
+         constexpr std::array<DialogFamily, 10> dialogFamilies{
+             DialogFamily{"About", 720, 540, 28, 44, 38},
+             DialogFamily{"Shortcut Reference", 760, 520, 18, 28, 30},
+             DialogFamily{"Slideshow", 560, 368, 18, 44, 30},
+             DialogFamily{"Image Information", 640, 370, 18, 28, 30},
+             DialogFamily{"Text Input", 420, 190, 18, 28, 30},
+             DialogFamily{"Batch Rename", 720, 480, 18, 28, 30},
+             DialogFamily{"Performance", 720, 540, 18, 28, 30},
+             DialogFamily{"File Associations", 760, 600, 18, 44, 30},
+             DialogFamily{"Diagnostics", 1040, 760, 18, 34, 30},
+             DialogFamily{"Experimental Settings", 1120, 760, 28, 44, 38}};
+         constexpr std::array<UINT, 5> dpis{96, 120, 144, 168, 192};
+         constexpr std::array<hyperbrowse::util::AppTextSize, 3> textSizes{
+             hyperbrowse::util::AppTextSize::Small,
+             hyperbrowse::util::AppTextSize::Medium,
+             hyperbrowse::util::AppTextSize::Large};
+
+         const auto isValidRect = [](const RECT& rect)
+         {
+             return rect.right > rect.left && rect.bottom > rect.top;
+         };
+         const auto contains = [](const RECT& outer, const RECT& inner)
+         {
+             return inner.left >= outer.left && inner.top >= outer.top
+                 && inner.right <= outer.right && inner.bottom <= outer.bottom;
+         };
+         const auto overlaps = [](const RECT& first, const RECT& second)
+         {
+             return first.left < second.right && second.left < first.right
+                 && first.top < second.bottom && second.top < first.bottom;
+         };
+
+         for (const DialogFamily& family : dialogFamilies)
+         {
+             int previousDpiWidth = 0;
+             for (const UINT dpi : dpis)
+             {
+                 const int width = hyperbrowse::ui::ScaleDialogAppTextDimension(
+                     family.width,
+                     hyperbrowse::util::AppTextSize::Medium,
+                     dpi);
+                 Expect(width >= previousDpiWidth,
+                        std::string(family.name) + " frame width was not monotonic across DPI values");
+                 previousDpiWidth = width;
+             }
+
+             int previousTextWidth = 0;
+             for (const auto textSize : textSizes)
+             {
+                 const int width = hyperbrowse::ui::ScaleDialogAppTextDimension(family.width, textSize, 96);
+                 Expect(width >= previousTextWidth,
+                        std::string(family.name) + " frame width was not monotonic across app text sizes");
+                 previousTextWidth = width;
+             }
+
+             for (const UINT dpi : dpis)
+             {
+                 for (const auto textSize : textSizes)
+                 {
+                     const auto scale = [family, textSize, dpi](int value)
+                     {
+                         return hyperbrowse::ui::ScaleDialogAppTextDimension(value, textSize, dpi);
+                     };
+                     const RECT client{
+                         0,
+                         0,
+                         scale(family.width),
+                         scale(family.height)};
+                     const int margin = scale(family.margin);
+                     const int gap = scale(10);
+                     const int controlHeight = scale(family.controlHeight);
+                     const RECT header{margin, margin, client.right - margin, margin + scale(family.headerHeight)};
+                     const RECT footer{
+                         margin,
+                         client.bottom - margin - controlHeight,
+                         client.right - margin,
+                         client.bottom - margin};
+                     const RECT body{
+                         margin,
+                         header.bottom + gap,
+                         client.right - margin,
+                         footer.top - gap};
+                     const RECT primaryButton{
+                         footer.right - scale(96),
+                         footer.top,
+                         footer.right,
+                         footer.bottom};
+                     const RECT secondaryButton{
+                         primaryButton.left - gap - scale(96),
+                         footer.top,
+                         primaryButton.left - gap,
+                         footer.bottom};
+                     const RECT nativeEdit{
+                         body.left,
+                         body.top,
+                         std::min(body.right, body.left + scale(300)),
+                         std::min(body.bottom, body.top + controlHeight)};
+
+                     Expect(isValidRect(client) && isValidRect(header) && isValidRect(body) && isValidRect(footer),
+                            std::string(family.name) + " produced an invalid dialog region");
+                     Expect(!overlaps(header, body) && !overlaps(body, footer) && !overlaps(header, footer),
+                            std::string(family.name) + " dialog regions overlap");
+                     Expect(contains(client, header) && contains(client, body) && contains(client, footer),
+                            std::string(family.name) + " dialog region escaped its client bounds");
+                     Expect(isValidRect(primaryButton) && isValidRect(secondaryButton) && isValidRect(nativeEdit)
+                                && contains(footer, primaryButton) && contains(footer, secondaryButton)
+                                && contains(body, nativeEdit),
+                            std::string(family.name) + " native control bounds were invalid");
+
+                     const RECT workArea{-1600, 40, 0, 900};
+                     const RECT suggestedFrame{
+                         workArea.right - client.right / 2,
+                         workArea.bottom - client.bottom / 2,
+                         workArea.right + client.right / 2,
+                         workArea.bottom + client.bottom / 2};
+                     const RECT clampedFrame = hyperbrowse::ui::ClampDialogFrameToWorkArea(suggestedFrame, workArea);
+                     Expect(clampedFrame.left >= workArea.left && clampedFrame.top >= workArea.top
+                                && clampedFrame.right <= workArea.right && clampedFrame.bottom <= workArea.bottom
+                                && isValidRect(clampedFrame),
+                            std::string(family.name) + " frame was not clamped to the work area");
+                 }
+             }
+         }
+        }
+
         void RunSettingsLayoutGeometryScenario()
         {
          using hyperbrowse::ui::dialog_detail::ConsolidatedSettingsControl;
@@ -4847,7 +4984,7 @@ namespace
                 return;
             }
             SetWindowTextW(cancelledDuration, L"5555");
-            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
+            SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(kCancelButtonId, BN_CLICKED), 0);
             const ULONGLONG closeDeadline = GetTickCount64() + 10000;
             while (GetTickCount64() < closeDeadline && FindWindowW(kDialogClassName, nullptr))
             {
@@ -5335,6 +5472,7 @@ int main(int argc, char* argv[])
         const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool accessibilityOnly = argc > 1 && std::string_view(argv[1]) == "--accessibility";
+        const bool dialogGeometryOnly = argc > 1 && std::string_view(argv[1]) == "--dialog-geometry";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
         const bool multiViewerSettingsOnly = argc > 1 && std::string_view(argv[1]) == "--multi-viewer-settings";
         const bool userMetadataOnly = argc > 1 && std::string_view(argv[1]) == "--user-metadata";
@@ -5371,6 +5509,13 @@ int main(int argc, char* argv[])
         else if (accessibilityOnly)
         {
             RunMainWindowAccessibilityScenario(instance);
+        }
+        else if (dialogGeometryOnly)
+        {
+            RunDialogDpiHelperScenario();
+            RunDialogShellGeometryScenario();
+            RunDialogGeometryScenario();
+            RunSettingsLayoutGeometryScenario();
         }
         else if (settingsOnly)
         {

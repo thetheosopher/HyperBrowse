@@ -47,17 +47,17 @@ Status: Implemented and smoke-validated.
 
 ### Slice 3: Dialog mnemonics without replacing custom surfaces
 
-Status: Implemented for Experimental and consolidated Settings; both paths are covered by the active `HyperBrowseSettingsSmoke`. The separate multi-viewer Settings smoke remains disabled by repository policy.
+Status: Implemented for Experimental Settings, which is the only application-owned Settings path, and covered by the active `HyperBrowseSettingsSmoke`. The separate multi-viewer Settings smoke remains disabled by repository policy.
 
 - Add unique field and action mnemonics per dialog/page.
 - Remove `SS_NOPREFIX` only where a static label is intended to transfer focus, and add explicit routing where Win32 static-label behavior is insufficient.
-- Add mnemonic/page navigation to consolidated settings while preserving its native field controls and owner-drawn tab presentation.
+- Keep page navigation and native field control behavior in Experimental Settings while preserving its custom-rendered tab presentation.
 - Give the experimental settings custom tabs, options, and buttons the same semantic mnemonic and focus model rather than converting them to native controls.
 
 Implementation notes:
 
 - Experimental Settings route `WM_SYSKEYDOWN` through semantic targets for page tabs, custom options, native fields, and footer actions; Direct2D text underlines the assigned mnemonic characters.
-- Consolidated Settings route the same page-scoped assignments before `IsDialogMessageW`, including page switching, visible/enabled field focus, and Apply/OK/Cancel activation.
+- Experimental Settings routes page-scoped keyboard assignments through its custom focus model, including page switching, visible/enabled field focus, and Apply/OK/Cancel activation.
 - Mnemonic assignments reserve page and footer keys and avoid collisions within each page. No custom surface was replaced with a native child control.
 
 ### Slice 4: Experimental settings custom focus model

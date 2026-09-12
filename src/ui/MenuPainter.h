@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ui/MenuMessageHandling.h"
+#include "ui/MenuMetrics.h"
 #include "util/UiTextSize.h"
 
 namespace hyperbrowse::ui
@@ -35,13 +36,13 @@ namespace hyperbrowse::ui
 
         void MeasureOwnerDrawMenuItem(
             MEASUREITEMSTRUCT* measureItem,
-            hyperbrowse::util::AppTextSize appTextSize,
+            const MenuMetrics& metrics,
             HFONT menuFont) const;
 
         void DrawOwnerDrawMenuItem(
             const DRAWITEMSTRUCT& drawItem,
             const MenuPainterPalette& palette,
-            hyperbrowse::util::AppTextSize appTextSize,
+            const MenuMetrics& metrics,
             HFONT menuFont,
             bool darkTheme) const;
     };

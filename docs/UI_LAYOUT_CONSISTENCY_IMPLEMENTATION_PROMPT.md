@@ -23,6 +23,195 @@ Read and follow `docs/UI_LAYOUT_CONSISTENCY_PLAN.md` as the source of truth for 
 - Stop only for a genuine blocker, a destructive or security-sensitive decision, an unavailable prerequisite, or a validation failure that cannot be resolved locally.
 - When a validation failure is local and understandable, repair the same slice and rerun the same validation before widening scope.
 
+## Repository-Specific Completion Runbook
+
+This section is the execution checklist for the current repository. It replaces
+the assumption that the Settings pilot means the application-wide migration is
+complete.
+
+### Current baseline
+
+Treat the following as already implemented, but verify them before changing
+nearby code:
+
+- `PromptForExperimentalSettings` is the only application Settings route.
+- `SettingsLayout.*` owns measured Settings page geometry, body scrolling, and
+  the pinned action footer.
+- `DialogShell.*` owns shared work-area metrics, centering, and frame clamping.
+- Settings native combo and edit controls receive the shared application text
+  size and monitor-DPI font, including owner-drawn combo row sizing.
+- Selected sibling dialogs clamp their `WM_DPICHANGED` suggested frame, but
+  their content layout and reflow are still dialog-specific.
+- `MenuPainter.*`, `CommandBarPainter.*`, and
+  `MainWindow::RebuildAppTextFonts` already provide menu and command-bar
+  infrastructure, but their complete Small/Medium/Large and non-96-DPI
+  behavior still needs evidence.
+
+Do not remove unrelated dirty-tree changes. Do not claim completion until the
+remaining dialog procedures and menus have passed the gates below.
+
+### Source ownership map
+
+Use these files as the first implementation anchors:
+
+- Shared metrics and frame policy: `src/ui/DialogShell.h/.cpp` and
+  `src/ui/DialogDpi.h`.
+- Settings page geometry: `src/ui/SettingsLayout.h/.cpp`.
+- Dialog state records: `src/ui/MainWindowDialogState.h`.
+- Dialog creation, procedures, modal loops, menus, and command-bar updates:
+  `src/ui/MainWindow.cpp`.
+- Text-entry, rename, and batch-rename surfaces:
+  `src/ui/MainWindowDialogs.cpp` and its state types.
+- Menu measurement and painting: `src/ui/MenuPainter.h/.cpp`.
+- Main command strip: `src/ui/CommandBarPainter.h/.cpp` and the related
+  `CommandBarController` files.
+- Existing interaction coverage: `tests/smoke.cpp`,
+  `tests/smoke_policy.cpp`, and the selectors in `tests/CMakeLists.txt`.
+
+### Autonomous implementation queue
+
+Execute these slices in order. After each slice, run its focused gate before
+starting the next slice.
+
+#### A. Establish the baseline and test harness
+
+1. Record the current `git status --short` without reverting any changes.
+2. Build `HyperBrowse` and `HyperBrowseTests` in Debug.
+3. Run the focused Settings, app-text-size, and accessibility selectors.
+4. Record unrelated baseline failures separately; do not silently attribute a
+   viewer or file-operation failure to a dialog change.
+5. Add deterministic layout-test entry points for shared metrics and menu
+   measurement if no existing pure-test seam can exercise them.
+
+Gate: the focused Settings selectors pass, and every known unrelated failure
+has a named test and reproducible command.
+
+#### B. Complete menu and command-bar consistency
+
+1. Make one shared menu metrics snapshot the source of truth for popup item
+   height, separator height, check column, text padding, shortcut gap, arrow
+   width, and measured font height.
+2. Ensure `MenuPainter::MeasureOwnerDrawMenuItem` and both paint paths consume
+   that snapshot rather than independently scaling constants.
+3. Ensure `MainWindow::RebuildAppTextFonts` refreshes the menu font, command-bar
+   font, owner-draw measurements, and visible menu state after Small/Medium/
+   Large changes and `WM_DPICHANGED`.
+4. Verify menu mnemonic underlines, shortcut columns, check marks, disabled
+   text, submenu arrows, and separators at 96/144/192 DPI and all text sizes.
+5. Add deterministic assertions for monotonic item heights and widths, and a
+   smoke assertion that the live menu font changes with application text size.
+
+Gate: menu geometry tests pass; the app-text-size and accessibility selectors
+pass; no menu item clips text or overlaps its shortcut column.
+
+#### C. Extract reusable native-control and shell helpers
+
+1. Centralize application-font creation, control font assignment, themed
+   control colors, button dimensions, and common footer ordering behind the
+   existing `DialogShell`/UI helpers.
+2. Keep `DialogDpi.h` limited to conversion and Win32 rect helpers. Do not add
+   another dialog-specific DPI utility.
+3. Give each shell a measured logical layout result and convert to physical
+   pixels only at `SetWindowPos`, accessibility, or render-target boundaries.
+4. Make the shell own activation, modal owner restoration, work-area clamping,
+   footer placement, DPI reflow, text-size reflow, and scrollbar updates.
+5. Keep page/dialog procedures responsible for content data and control
+   synchronization, not frame sizing or repeated scaling of old rectangles.
+
+Gate: helper-level tests cover Small/Medium/Large and 96/120/144/168/192 DPI;
+focused dialog smoke tests show valid child rectangles and stable focus.
+
+#### D. Migrate dialog families
+
+Migrate one family at a time. For every dialog, replace fixed frame sizing with
+measured logical metrics, use the shared font/theme path, handle
+`WM_DPICHANGED`, remeasure on application text-size changes, clamp to the
+monitor work area, and add one focused interaction/geometry assertion.
+
+1. **About and Shortcut Reference**
+   - Owners: `AboutDialogProc`, `ShortcutReferenceDialogProc`, and their prompt
+     functions in `MainWindow.cpp`.
+   - Verify title/body/footer font proportions, long shortcut rows, keyboard
+     focus, modal owner restoration, and narrow work areas.
+
+2. **Slideshow Settings and Performance Settings**
+   - Owners: `SlideshowSettingsDialogProc` and
+     `PerformanceSettingsDialogProc`.
+   - Replace independent width/height constants with measured content and the
+     shared footer. Verify spin/edit buddies, validation focus, Apply/Cancel,
+     and automatic-cache controls.
+
+3. **File Associations and text-entry surfaces**
+   - Owners: `FileAssociationsDialogProc`, `MainWindowDialogs.cpp`, rename,
+     batch-rename, file-conflict, and cross-drive prompts.
+   - Preserve native editing, validation, selection, and cancellation while
+     unifying fonts, margins, buttons, and theme colors.
+
+4. **Image Information and diagnostics**
+   - Owners: `ImageInformationDialogProc`, persistent-cache dialog content,
+     diagnostics snapshot/export/reset surfaces, and remaining app-owned
+     prompts.
+   - Keep metadata expansion and long diagnostic text inside measured scrolling
+     regions. Leave `MessageBoxW`, Windows file pickers, and shell-owned
+     property dialogs explicitly documented as OS-owned exceptions.
+
+5. **Remaining application-owned dialogs**
+   - Search `MainWindow.cpp`, `MainWindowDialogs.cpp`, and `src/ui/` for every
+     `DialogProc`, `PromptFor`, `Show*Dialog`, and `CreateWindowExW` dialog
+     class. Each result must be migrated or documented as intentionally
+     OS-owned.
+
+Gate after each family: focused Debug build, focused selector, full geometry
+and accessibility assertions for that family, and a clean `git diff --check`.
+
+#### E. Remove duplicate and obsolete paths
+
+1. Completed: delete the unreachable consolidated Settings dialog,
+  `PromptForConsolidatedSettings`, and legacy-only helpers after confirming
+  no Experimental Settings path references them.
+2. Completed: remove obsolete fixed-coordinate layout constants and dialog-specific DPI
+   scaling that the shared shell now replaces.
+3. Completed: search for raw `WM_DPICHANGED` frame application, fixed frame dimensions,
+   and repeated `MulDiv`/text-size scaling in migrated dialog procedures.
+4. Completed: update `docs/UI_LAYOUT_CONSISTENCY_PLAN.md`, `docs/THEMED_DIALOG_PLAN.md`,
+   `docs/architecture.md`, and user-facing documentation to match the final
+   ownership and intentional OS-owned boundaries.
+
+Gate: no duplicate Settings production path remains; all remaining raw frame
+handling is justified by an ownership note or removed.
+
+#### F. Final validation and decision gate
+
+Run all of the following with the exact newly built executables:
+
+```powershell
+cmake --build --preset debug --target HyperBrowse
+cmake --build --preset debug --target HyperBrowseTests
+ctest --preset debug-tests --output-on-failure
+cmake --build --preset release --target HyperBrowse
+ctest --preset release-tests --output-on-failure
+git diff --check
+```
+
+Before reporting completion, verify executable freshness, then manually check
+100%, 125%/150%, and 200% DPI where available; Small, Medium, and Large text;
+light and dark themes; a short work area; menu open/keyboard navigation; and
+every migrated dialog family. Record any unavailable physical-DPI check rather
+than implying it was performed.
+
+The framework decision must be a measured conclusion. Record implementation
+effort, accessibility results, startup/memory impact, visual consistency,
+DPI/text-size behavior, Direct2D integration, packaging impact, and estimated
+full-shell migration cost before considering Qt or WinUI.
+
+### Completion rule
+
+The task is incomplete if only Settings is polished, if menus still use an
+unverified scaling path, if any application-owned dialog retains an unexplained
+fixed frame/layout path, or if the full Debug/Release validation result is
+unknown. Stop only for a genuine blocker defined in this prompt; do not stop at
+the first successful build.
+
 ## Required Workflow
 
 1. Read `docs/UI_LAYOUT_CONSISTENCY_PLAN.md`.
