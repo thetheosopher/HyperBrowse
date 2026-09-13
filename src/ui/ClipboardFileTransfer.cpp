@@ -149,6 +149,10 @@ namespace hyperbrowse::ui
         if (!success)
         {
             GlobalFree(buffer);
+            if (effectBuffer)
+            {
+                GlobalFree(effectBuffer);
+            }
         }
         CloseClipboard();
 
