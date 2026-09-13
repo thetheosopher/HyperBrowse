@@ -87,6 +87,28 @@ namespace hyperbrowse::tests
                    "The RAW allowlist unexpectedly includes ORF before it was requested");
         }
 
+             void RunWebpFormatAllowlistScenario()
+             {
+                 Expect(hyperbrowse::decode::IsWicFileType(L"webp"),
+                     "WIC allowlist omitted WebP");
+                 Expect(hyperbrowse::decode::IsWicFileType(L".WEBP"),
+                     "WIC allowlist did not normalize the WebP extension");
+                 Expect(hyperbrowse::browser::IsSupportedImageExtension(L".WEBP"),
+                     "Browser extension policy omitted WebP");
+
+                 hyperbrowse::browser::BrowserItem item;
+                 item.fileName = L"sample.webp";
+                 item.filePath = L"C:\\Images\\sample.webp";
+                 item.fileType = L"WEBP";
+
+                 Expect(hyperbrowse::decode::CanDecodeThumbnail(item),
+                     "WebP thumbnail routing did not use the WIC decoder");
+                 Expect(hyperbrowse::decode::CanDecodeFullImage(item),
+                     "WebP full-image routing did not use the WIC decoder");
+                 Expect(!hyperbrowse::decode::IsRawFileType(L"webp"),
+                     "WebP was incorrectly classified as a RAW format");
+             }
+
         void RunRawHelperProtocolScenario()
         {
             TempFolder root(L"HyperBrowseRawHelperProtocol");
@@ -175,6 +197,7 @@ namespace hyperbrowse::tests
     void RunDecodePolicyScenarios()
     {
         RunRawFormatAllowlistScenario();
+        RunWebpFormatAllowlistScenario();
         RunRawHelperProtocolScenario();
         RunThumbnailFailureClassificationScenario();
     }

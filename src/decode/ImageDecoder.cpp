@@ -40,11 +40,12 @@ namespace
     std::atomic_bool g_libRawOutOfProcessEnabled{true};
     constexpr DWORD kRawHelperThumbnailTimeoutMs = 8000;
     constexpr DWORD kRawHelperFullImageTimeoutMs = 30000;
-    constexpr std::array<hyperbrowse::decode::SupportedFileType, 14> kSupportedFileTypes = {{
+    constexpr std::array<hyperbrowse::decode::SupportedFileType, 15> kSupportedFileTypes = {{
         {L"jpg", L"JPEG image", false},
         {L"jpeg", L"JPEG image", false},
         {L"png", L"PNG image", false},
         {L"gif", L"GIF image", false},
+        {L"webp", L"WebP image", false},
         {L"tif", L"TIFF image", false},
         {L"tiff", L"TIFF image", false},
         {L"arw", L"Sony RAW image", true},
