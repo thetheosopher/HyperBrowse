@@ -91,6 +91,8 @@ namespace
     constexpr wchar_t kRegistryValueWindowHeight[] = L"WindowHeight";
     constexpr wchar_t kRegistryValueSlideshowInterval[] = L"SlideshowIntervalMs";
     constexpr wchar_t kRegistryValueUseSlideshowTransition[] = L"UseSlideshowTransition";
+    constexpr wchar_t kRegistryValueSingleInstanceEnabled[] = L"SingleInstanceEnabled";
+    constexpr wchar_t kRegistryValueKeepInNotificationAreaEnabled[] = L"KeepInNotificationAreaEnabled";
     constexpr wchar_t kRegistryValueThumbnailCacheCapacityOverrideBytes[] = L"ThumbnailCacheCapacityOverrideBytes";
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
     constexpr wchar_t kRegistryValuePrefetchDepthOverride[] = L"PrefetchDepthOverride";
@@ -701,6 +703,220 @@ namespace
         DWORD exitCode = 1;
         require(GetExitCodeProcess(processInfo.hProcess, &exitCode) != FALSE && exitCode == 0,
                 "HyperBrowse exited unsuccessfully during idle-client testing");
+        cleanup();
+    }
+
+    void RunResidentSingleInstanceScenario()
+    {
+        constexpr wchar_t kSingleInstancePipeName[] = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch";
+        constexpr wchar_t kMainWindowClassName[] = L"HyperBrowseMainWindow";
+        constexpr wchar_t kTrayMessageName[] = L"TheTheosopher.HyperBrowse.TrayIcon";
+
+        using hyperbrowse::ui::command_ids::ID_FILE_EXIT;
+
+        ScopedRegistryDwordBackup singleInstanceBackup(kRegistryPath, kRegistryValueSingleInstanceEnabled);
+        ScopedRegistryDwordBackup keepInNotificationAreaBackup(kRegistryPath, kRegistryValueKeepInNotificationAreaEnabled);
+        hyperbrowse::app::Application::SetSingleInstanceEnabled(true);
+        hyperbrowse::app::Application::SetKeepInNotificationAreaEnabled(true);
+
+        wchar_t modulePath[MAX_PATH]{};
+        const DWORD modulePathLength = GetModuleFileNameW(nullptr, modulePath, static_cast<DWORD>(std::size(modulePath)));
+        Expect(modulePathLength > 0 && modulePathLength < std::size(modulePath),
+               "Failed to locate the smoke-test executable for resident-mode testing");
+
+        const fs::path testDirectory = fs::path(modulePath).parent_path();
+        const fs::path applicationPath = testDirectory.parent_path().parent_path()
+            / testDirectory.filename()
+            / L"HyperBrowse.exe";
+        Expect(fs::exists(applicationPath), "Failed to locate the HyperBrowse executable for resident-mode testing");
+
+        PROCESS_INFORMATION processInfo{};
+        HANDLE pipe = INVALID_HANDLE_VALUE;
+        const auto cleanupProcess = [](PROCESS_INFORMATION* process)
+        {
+            if (!process)
+            {
+                return;
+            }
+            if (process->hProcess)
+            {
+                if (WaitForSingleObject(process->hProcess, 0) == WAIT_TIMEOUT)
+                {
+                    TerminateProcess(process->hProcess, 1);
+                    WaitForSingleObject(process->hProcess, 5000);
+                }
+                CloseHandle(process->hProcess);
+                process->hProcess = nullptr;
+            }
+            if (process->hThread)
+            {
+                CloseHandle(process->hThread);
+                process->hThread = nullptr;
+            }
+        };
+        const auto cleanup = [&]()
+        {
+            if (pipe != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(pipe);
+                pipe = INVALID_HANDLE_VALUE;
+            }
+            cleanupProcess(&processInfo);
+        };
+        const auto require = [&](bool condition, const char* message)
+        {
+            if (!condition)
+            {
+                cleanup();
+                throw std::runtime_error(message);
+            }
+        };
+
+        std::wstring primaryCommandLine = L"\"" + applicationPath.wstring() + L"\" --test-single-instance";
+        std::vector<wchar_t> mutablePrimaryCommandLine(primaryCommandLine.begin(), primaryCommandLine.end());
+        mutablePrimaryCommandLine.push_back(L'\0');
+        STARTUPINFOW startupInfo{};
+        startupInfo.cb = sizeof(startupInfo);
+        Expect(CreateProcessW(applicationPath.c_str(),
+                              mutablePrimaryCommandLine.data(),
+                              nullptr,
+                              nullptr,
+                              FALSE,
+                              0,
+                              nullptr,
+                              applicationPath.parent_path().c_str(),
+                              &startupInfo,
+                              &processInfo) != FALSE,
+               "Failed to launch HyperBrowse for resident-mode testing");
+
+        HWND mainWindow = nullptr;
+        const ULONGLONG windowDeadline = GetTickCount64() + 10000;
+        while (GetTickCount64() < windowDeadline)
+        {
+            if (WaitForSingleObject(processInfo.hProcess, 0) != WAIT_TIMEOUT)
+            {
+                break;
+            }
+            HWND candidate = FindWindowW(kMainWindowClassName, nullptr);
+            DWORD candidateProcessId = 0;
+            if (candidate)
+            {
+                GetWindowThreadProcessId(candidate, &candidateProcessId);
+            }
+            if (candidate && candidateProcessId == processInfo.dwProcessId)
+            {
+                mainWindow = candidate;
+                break;
+            }
+            Sleep(25);
+        }
+        require(mainWindow != nullptr, "HyperBrowse did not create its main window for resident-mode testing");
+
+        const auto waitForVisibility = [&](bool visible)
+        {
+            const ULONGLONG deadline = GetTickCount64() + 5000;
+            while (GetTickCount64() < deadline)
+            {
+                if (IsWindow(mainWindow) != FALSE && (IsWindowVisible(mainWindow) != FALSE) == visible)
+                {
+                    return true;
+                }
+                Sleep(25);
+            }
+            return IsWindow(mainWindow) != FALSE && (IsWindowVisible(mainWindow) != FALSE) == visible;
+        };
+        const auto sendLaunchPath = [&](const std::wstring& path)
+        {
+            HANDLE launchPipe = INVALID_HANDLE_VALUE;
+            DWORD pipeError = ERROR_SUCCESS;
+            const ULONGLONG deadline = GetTickCount64() + 10000;
+            while (GetTickCount64() < deadline)
+            {
+                launchPipe = CreateFileW(kSingleInstancePipeName,
+                                         FILE_WRITE_DATA,
+                                         0,
+                                         nullptr,
+                                         OPEN_EXISTING,
+                                         0,
+                                         nullptr);
+                if (launchPipe != INVALID_HANDLE_VALUE)
+                {
+                    break;
+                }
+                pipeError = GetLastError();
+                if (pipeError != ERROR_PIPE_BUSY && pipeError != ERROR_FILE_NOT_FOUND)
+                {
+                    break;
+                }
+                WaitNamedPipeW(kSingleInstancePipeName, 100);
+            }
+            Expect(launchPipe != INVALID_HANDLE_VALUE,
+                   "Failed to connect to the resident HyperBrowse instance (Win32 error "
+                       + std::to_string(pipeError) + ")");
+            const DWORD bytesToWrite = static_cast<DWORD>((path.size() + 1) * sizeof(wchar_t));
+            DWORD bytesWritten = 0;
+            const BOOL written = WriteFile(launchPipe,
+                                           path.c_str(),
+                                           bytesToWrite,
+                                           &bytesWritten,
+                                           nullptr);
+            CloseHandle(launchPipe);
+            Expect(written != FALSE && bytesWritten == bytesToWrite,
+                   "Failed to forward a launch path to the resident HyperBrowse instance");
+        };
+        const auto launchClient = [&](const std::wstring& arguments)
+        {
+            PROCESS_INFORMATION client{};
+            std::wstring commandLine = L"\"" + applicationPath.wstring() + L"\" " + arguments;
+            std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+            mutableCommandLine.push_back(L'\0');
+            STARTUPINFOW clientStartupInfo{};
+            clientStartupInfo.cb = sizeof(clientStartupInfo);
+            Expect(CreateProcessW(applicationPath.c_str(),
+                                  mutableCommandLine.data(),
+                                  nullptr,
+                                  nullptr,
+                                  FALSE,
+                                  0,
+                                  nullptr,
+                                  applicationPath.parent_path().c_str(),
+                                  &clientStartupInfo,
+                                  &client) != FALSE,
+                   "Failed to launch a resident-mode single-instance client");
+            Expect(WaitForSingleObject(client.hProcess, 5000) == WAIT_OBJECT_0,
+                   "A resident-mode single-instance client did not exit after forwarding its launch");
+            DWORD exitCode = 1;
+            Expect(GetExitCodeProcess(client.hProcess, &exitCode) != FALSE && exitCode == 0,
+                   "A resident-mode single-instance client exited unsuccessfully");
+            cleanupProcess(&client);
+        };
+
+        require(PostMessageW(mainWindow, WM_CLOSE, 0, 0) != FALSE,
+                "Failed to request resident-mode window close");
+        require(waitForVisibility(false), "Resident-mode close did not hide the main window");
+        require(WaitForSingleObject(processInfo.hProcess, 0) == WAIT_TIMEOUT,
+                "Resident-mode close terminated HyperBrowse");
+
+        const UINT trayMessage = RegisterWindowMessageW(kTrayMessageName);
+        require(trayMessage != 0 && PostMessageW(mainWindow, trayMessage, 0, WM_LBUTTONUP) != FALSE,
+                "Failed to post the tray activation message");
+        require(waitForVisibility(true), "Tray activation did not restore the resident window");
+
+        launchClient(L"--test-single-instance");
+        require(WaitForSingleObject(processInfo.hProcess, 0) == WAIT_TIMEOUT,
+                "Activation-only launch terminated the resident HyperBrowse instance");
+
+        launchClient(L"--test-single-instance \"" + applicationPath.wstring() + L"\"");
+        require(WaitForSingleObject(processInfo.hProcess, 0) == WAIT_TIMEOUT,
+                "File launch terminated the resident HyperBrowse instance");
+
+        require(PostMessageW(mainWindow, WM_COMMAND, MAKEWPARAM(ID_FILE_EXIT, 0), 0) != FALSE,
+                "Failed to request File > Exit from the resident HyperBrowse instance");
+        require(WaitForSingleObject(processInfo.hProcess, 5000) == WAIT_OBJECT_0,
+                "File > Exit did not terminate the resident HyperBrowse instance");
+        DWORD exitCode = 1;
+        require(GetExitCodeProcess(processInfo.hProcess, &exitCode) != FALSE && exitCode == 0,
+                "Resident HyperBrowse exited unsuccessfully after File > Exit");
         cleanup();
     }
 
@@ -5899,6 +6115,7 @@ int main(int argc, char* argv[])
             hyperbrowse::tests::RunPolicyScenarios();
             hyperbrowse::tests::RunRuntimeScenarios();
             RunSingleInstanceIdleClientScenario();
+            RunResidentSingleInstanceScenario();
             RunEnumerationScenario(hwnd, &state);
             RunFolderTreeEnumerationScenario(hwnd, &state);
             RunFolderWatchStartStopScenario(hwnd);

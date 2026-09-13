@@ -1,6 +1,11 @@
-# HyperBrowse 2.2 release polish plan
+# HyperBrowse 2.2 release polish plan (Historical)
 
 Audit date: **2026-09-08**. Candidate: **2.2.0**, based on commit **9ea1245** plus the existing working-tree changes to `CMakeLists.txt`, `README.md`, and `src/ui/MainWindow.{cpp,h}`.
+
+This is the completed 2.2 release ledger. HyperBrowse 2.3.0 is the current
+release; use the source, tests, README, and current architecture/user-guide
+documents for present behavior. The validation notes below remain useful as
+2.2 provenance and are not current 2.3 release gates.
 
 **Implementation status (2026-09-08): all P1 findings are fixed and locally verified; hold publication until the remaining manual and hosted release gates below are signed off.** Debug, Release, WIC-only, sanitizer, CUDA-bundled packaging, startup, and hardware nvJPEG checks now pass. The remaining hold is for screen-reader/high-contrast/DPI walkthroughs, slow-media soak, installer scope/upgrade checks, hosted CI, signing, and final human release sign-off.
 

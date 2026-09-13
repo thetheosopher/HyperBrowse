@@ -31,6 +31,12 @@ The core library is organized by responsibility:
 - `src/render/`: Direct2D/DirectWrite factories and shared rendering helpers.
 - `src/util/`: logging, diagnostics, path/string helpers, settings, sizing, and common utilities.
 
+The WIC path covers the standard browser/viewer formats JPEG, PNG, GIF, TIFF,
+and WebP when the Windows codec is available. LibRaw handles the supported RAW
+families, and nvJPEG is an optional accelerated JPEG path with WIC fallback.
+Animated playback and multipage navigation are outside the current decode
+contract; multi-frame WIC files are presented through the available frame.
+
 ## Threading boundary
 
 The UI thread owns HWNDs, input, layout, command routing, model presentation, and invalidation/paint coordination. It must remain responsive.
@@ -58,7 +64,8 @@ Workers return results through the existing window-message or callback contracts
 3. `BrowserModel` receives incremental items and tracks enumeration state.
 4. `BrowserPane` presents early items, schedules visible/near-visible thumbnails, and requests metadata as needed.
 5. Coalesced UI updates keep large-folder enumeration from sorting, painting, or scheduling once per worker batch.
-6. `FolderWatchService` applies external changes incrementally when safe and requests a full reload for large or ambiguous event bursts.
+6. `FolderTreeController` probes child-directory presence asynchronously so tree expansion indicators do not block folder navigation.
+7. `FolderWatchService` applies external changes incrementally when safe and requests a full reload for large or ambiguous event bursts.
 
 ### Viewer navigation
 

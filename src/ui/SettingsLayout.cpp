@@ -165,10 +165,14 @@ namespace hyperbrowse::ui::dialog_detail
                 editLeft + editWidth - spinWidth, editTop, editLeft + editWidth, editTop + scale(34)};
             y += rowHeight + rowGap;
         };
-        const auto addCheck = [&](ConsolidatedSettingsControl control, std::wstring_view text, int& y)
+        const auto addCheck = [&](ConsolidatedSettingsControl control,
+                                  std::wstring_view text,
+                                  int& y,
+                                  int indent = 0)
         {
-            SetControlRect(result, control, left, y, right, y + rowHeight);
-            AddLabel(result, left + scale(34), y, right, y + rowHeight, text, false, control);
+            const int controlLeft = left + indent;
+            SetControlRect(result, control, controlLeft, y, right, y + rowHeight);
+            AddLabel(result, controlLeft + scale(34), y, right, y + rowHeight, text, false, control);
             y += rowHeight + rowGap;
         };
         const auto addRadioPair = [&](std::wstring_view label,
@@ -250,6 +254,10 @@ namespace hyperbrowse::ui::dialog_detail
             addCheck(ConsolidatedSettingsControl::ShowSubfolders, L"Show subfolders in the browser", y);
             addCheck(ConsolidatedSettingsControl::CloseOnEscape, L"Close the main window when ESC is pressed", y);
             addCheck(ConsolidatedSettingsControl::SingleInstance, L"Use a single application instance", y);
+            addCheck(ConsolidatedSettingsControl::KeepInNotificationArea,
+                     L"Keep HyperBrowse loaded in the notification area",
+                     y,
+                     scale(24));
             addLabelValue(L"New Quick Actions shortcut order", ConsolidatedSettingsControl::QuickSendShortcutOrder, y);
             break;
         default:

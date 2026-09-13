@@ -66,6 +66,7 @@ Note: The original modular decomposition (`ViewerNavigationController`, `ZoomPan
 ### Services
 - `FolderEnumerationService` — async file enumeration for browser model
 - `FolderTreeEnumerationService` — async child directory enumeration for folder tree lazy loading
+- asynchronous child-directory presence probing for expansion indicators, with cached results and invalidation after folder changes
 - `FolderWatchService` — file system change monitoring via `ReadDirectoryChangesW`
 - `MetadataService` (`ImageMetadataService`) — async metadata extraction with bounded LRU cache
 - `ThumbnailScheduler` — priority-based thumbnail decode with separate General/Raw worker pools, cross-queue work stealing, runtime-adaptive worker count via `std::thread::hardware_concurrency()`
@@ -124,6 +125,7 @@ Handles:
 - PNG
 - GIF
 - TIFF
+- WebP when the available Windows Imaging Component codec supports it
 - optional WIC-available formats later
 
 ### nvJPEG decoder

@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.2.0-2EA043)
+![Version](https://img.shields.io/badge/Version-2.3.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -20,7 +20,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Native Win32 desktop application built with CMake and modern C++20.
 - Direct2D and DirectWrite rendering in the browser and viewer, with per-monitor DPI awareness v2.
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
-- WIC baseline decode path, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
+- WIC baseline decode path including JPEG, PNG, GIF, TIFF, and WebP, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, filename/rating/tag filtering, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
@@ -36,6 +36,17 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 - A committed Windows CI workflow that builds Debug and Release, runs CTest and startup-budget checks, validates release manifests, and publishes build artifacts.
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
+
+## What's New In 2.3.0
+
+This release extends format coverage and tightens the asynchronous browsing and Windows presentation paths.
+
+- Added WebP decoding and thumbnail support through the WIC pipeline, with clear fallback behavior when a system codec cannot decode a file.
+- Improved WIC error handling, bitmap creation, thumbnail scheduling, and stale-completion rejection so superseded work cannot repaint the wrong browser item.
+- Improved folder-tree expansion feedback with asynchronous child-directory presence probing and cache invalidation when folder contents change.
+- Improved slideshow target management, viewer display-surface recovery, keyboard/system-key routing, and dialog message handling during display and monitor changes.
+- Expanded DPI-aware layout and scaling across menus, command bars, settings, diagnostics, file associations, and other application-owned dialogs.
+- Hardened external drag/drop lifetime handling, clipboard cleanup, Unicode-path workflows, thumbnail-cache validation, and their focused smoke coverage.
 
 ## What's New In 2.2.0
 
@@ -58,7 +69,7 @@ This release expands HyperBrowse's image-review and desktop file-management work
 | --- | --- |
 | Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename/rating/tag filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
 | Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
-| Formats | JPEG, PNG, GIF, TIFF via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
+| Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, folder watch refresh, and optional GPU-assisted JPEG decode |
 | Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
@@ -246,13 +257,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.2.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.3.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.2.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.3.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -295,21 +306,19 @@ When CUDA redistributable bundling is enabled, CMake downloads the official NVID
 
 ## Project Documentation
 
-The `specs/` directory tracks both design intent and implementation follow-up. Useful entry points:
+The current documentation has one product contract and one future roadmap.
+Useful entry points:
 
+- [specs/PRODUCT_SPEC.md](specs/PRODUCT_SPEC.md) for shipped product scope, supported formats, workflow boundaries, and product invariants.
+- [specs/FUTURE-ROADMAP.md](specs/FUTURE-ROADMAP.md) for deferred features, experiments, performance work, and explicit non-goals.
 - [docs/user-guide.html](docs/user-guide.html) for the practical, user-facing application guide.
 - [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, validation expectations, and pull request checklist.
 - [docs/architecture.md](docs/architecture.md) for current component ownership, threading boundaries, data flows, and rendering responsibilities.
 - [docs/testing.md](docs/testing.md) for build, smoke-test, benchmark, diagnostics, and manual validation guidance.
-- [docs/RELEASE_POLISH_PLAN_2026-09-08.md](docs/RELEASE_POLISH_PLAN_2026-09-08.md) for the 2.2 implementation ledger, validation evidence, and remaining release gates.
 - [.github/copilot-instructions.md](.github/copilot-instructions.md) for repository-wide coding guidance used by GitHub Copilot.
 - [docs/decisions/README.md](docs/decisions/README.md) for durable architecture decisions and invariants.
-- [specs/01-product-spec.md](specs/01-product-spec.md) for product scope and supported workflows.
-- [specs/02-architecture.md](specs/02-architecture.md) for subsystem layout and pipeline design.
-- [specs/04-ui-behavior.md](specs/04-ui-behavior.md) for the implemented UI contract.
-- [specs/15-d2d-rendering-migration.md](specs/15-d2d-rendering-migration.md) for the rendering migration details.
-- [specs/16-toolbar-ux-redesign.md](specs/16-toolbar-ux-redesign.md) for current toolbar implementation status.
-- [specs/14-todo.md](specs/14-todo.md) and [specs/10-prioritized-enhancements.md](specs/10-prioritized-enhancements.md) for the current backlog.
+- [specs/README.md](specs/README.md) for the documentation authority order and active engineering plans.
+- [specs/archive/README.md](specs/archive/README.md) for retained historical plans, reviews, and release artifacts.
 
 ## Current Scope Boundaries
 
@@ -320,15 +329,22 @@ HyperBrowse is already a capable browser/viewer, but it is still deliberately sc
 - Multipage TIFF navigation and animated GIF thumbnails.
 - Plugin ecosystems, duplicate finders, face detection, and library/database back ends.
 
-If you want the current backlog in detail, start with [specs/14-todo.md](specs/14-todo.md).
+For the current backlog in detail, start with [specs/FUTURE-ROADMAP.md](specs/FUTURE-ROADMAP.md).
 
 ## Version
 
-Current release: **2.2.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.2.0-portable-win64.zip` and `HyperBrowse-2.2.0-installer.exe`).
+Current release: **2.3.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.3.0-portable-win64.zip` and `HyperBrowse-2.3.0-installer.exe`).
 
-Release **2.0.0** expands HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It adds richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
+Release **2.0.0** expanded HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It added richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.3.0
+
+- Added WebP support through WIC and strengthened WIC failure reporting and bitmap creation.
+- Added stale thumbnail completion protection, asynchronous folder-tree child-presence probing, and related cache and Unicode-path hardening.
+- Improved viewer slideshow recovery, display-surface handling, keyboard routing, and DPI-aware application-owned dialog and menu layout.
+- Expanded smoke and policy coverage for the new format, asynchronous boundaries, cache validation, and presentation behavior.
 
 ### 2.2.0
 

@@ -171,6 +171,8 @@ namespace
     constexpr UINT kPersistentThumbnailCacheMaintenanceMessage = WM_APP + 75;
     constexpr UINT kAppTextSizeChangedMessage = WM_APP + 78;
     constexpr UINT kCommandBarMenuTrackingIntervalMs = 50;
+    constexpr UINT kTrayOpenCommand = 1;
+    constexpr UINT kTrayExitCommand = 2;
     enum class PersistentThumbnailCacheMaintenanceOperation : unsigned int
     {
         Statistics = 0,
@@ -3864,6 +3866,7 @@ namespace
         case ConsolidatedSettingsControl::ShowSubfolders: return L'F';
         case ConsolidatedSettingsControl::CloseOnEscape: return L'L';
         case ConsolidatedSettingsControl::SingleInstance: return L'I';
+        case ConsolidatedSettingsControl::KeepInNotificationArea: return L'K';
         case ConsolidatedSettingsControl::QuickSendShortcutOrder: return L'Q';
         default: return 0;
         }
@@ -3948,9 +3951,15 @@ namespace
                                       int bottom,
                                       const wchar_t* text,
                                       bool muted = false,
-                                      wchar_t mnemonic = 0)
+                                      wchar_t mnemonic = 0,
+                                      ConsolidatedSettingsControl mnemonicControl = ConsolidatedSettingsControl::Count)
     {
-        state.labels.push_back(ExperimentalSettingsLabel{{left, top, right, bottom}, text ? text : L"", muted, mnemonic});
+        state.labels.push_back(ExperimentalSettingsLabel{
+            {left, top, right, bottom},
+            text ? text : L"",
+            muted,
+            mnemonic,
+            mnemonicControl});
     }
 
     void ExperimentalSettingsSetControlRect(ExperimentalSettingsDialogState& state,
@@ -4028,7 +4037,8 @@ namespace
                                          bounds.bottom,
                                          label.text.c_str(),
                                          label.muted,
-                                         ExperimentalSettingsControlMnemonic(label.mnemonicControl));
+                                         ExperimentalSettingsControlMnemonic(label.mnemonicControl),
+                                         label.mnemonicControl);
         }
         state.tabRects = layout.tabRects;
         state.controlRects = layout.controlRects;
@@ -4189,6 +4199,7 @@ namespace
         case ConsolidatedSettingsControl::ShowSubfolders: return settings.showSubfoldersInBrowser;
         case ConsolidatedSettingsControl::CloseOnEscape: return settings.closeMainWindowOnEscape;
         case ConsolidatedSettingsControl::SingleInstance: return settings.singleInstanceEnabled;
+        case ConsolidatedSettingsControl::KeepInNotificationArea: return settings.keepInNotificationAreaEnabled;
         default: return false;
         }
     }
@@ -4276,6 +4287,7 @@ namespace
             case ConsolidatedSettingsControl::ShowSubfolders: value = &settings.showSubfoldersInBrowser; break;
             case ConsolidatedSettingsControl::CloseOnEscape: value = &settings.closeMainWindowOnEscape; break;
             case ConsolidatedSettingsControl::SingleInstance: value = &settings.singleInstanceEnabled; break;
+            case ConsolidatedSettingsControl::KeepInNotificationArea: value = &settings.keepInNotificationAreaEnabled; break;
             case ConsolidatedSettingsControl::ThumbnailCacheAutomatic:
                 settings.thumbnailCacheCapacityOverrideBytes = settings.thumbnailCacheCapacityOverrideBytes == 0
                     ? hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, settings.resourceProfile)
@@ -4344,6 +4356,8 @@ namespace
             return state.settings->nvJpegAvailable;
         case ConsolidatedSettingsControl::LibRawOutOfProcess:
             return state.settings->libRawAvailable;
+        case ConsolidatedSettingsControl::KeepInNotificationArea:
+            return state.settings->singleInstanceEnabled;
         default:
             return true;
         }
@@ -4426,6 +4440,7 @@ namespace
                 ConsolidatedSettingsControl::ShowSubfolders,
                 ConsolidatedSettingsControl::CloseOnEscape,
                 ConsolidatedSettingsControl::SingleInstance,
+                ConsolidatedSettingsControl::KeepInNotificationArea,
                 ConsolidatedSettingsControl::QuickSendShortcutOrder};
         default:
             return {};
@@ -5106,8 +5121,13 @@ namespace
         for (std::size_t index = 0; index < state.labels.size(); ++index)
         {
             const ExperimentalSettingsLabel& label = state.labels[index];
-            DrawExperimentalSettingsText(state.renderTarget.Get(), label.muted ? state.smallFormat.Get() : state.bodyFormat.Get(), label.text, label.bounds,
-                                         label.muted ? state.mutedTextBrush.Get() : state.textBrush.Get(), label.mnemonic);
+            const bool enabled = ExperimentalSettingsCustomControlEnabled(state, label.mnemonicControl);
+            DrawExperimentalSettingsText(state.renderTarget.Get(),
+                                         enabled && !label.muted ? state.bodyFormat.Get() : state.smallFormat.Get(),
+                                         label.text,
+                                         label.bounds,
+                                         enabled && !label.muted ? state.textBrush.Get() : state.mutedTextBrush.Get(),
+                                         label.mnemonic);
         }
 
         for (std::size_t index = 0; index < state.controlRects.size(); ++index)
@@ -5118,19 +5138,24 @@ namespace
             {
                 continue;
             }
+            const bool enabled = ExperimentalSettingsCustomControlEnabled(state, control);
             const bool checked = ExperimentalSettingsChecked(*state.settings, control);
-            const bool hovered = state.hoveredControl == static_cast<int>(index);
+            const bool hovered = enabled && state.hoveredControl == static_cast<int>(index);
             if (ExperimentalSettingsControlIsChoice(control))
             {
                 state.renderTarget->FillRoundedRectangle(
                     hyperbrowse::render::ToD2DRoundedRect(bounds, scaleF(5.0f), scaleF(5.0f)),
-                    hovered ? state.accentFillBrush.Get() : state.fieldBrush.Get());
+                    enabled && hovered ? state.accentFillBrush.Get() : state.fieldBrush.Get());
                 state.renderTarget->DrawRoundedRectangle(
                     hyperbrowse::render::ToD2DRoundedRect(bounds, scaleF(5.0f), scaleF(5.0f)),
-                    state.borderBrush.Get(), scaleF(1.0f));
+                    enabled ? state.borderBrush.Get() : state.mutedTextBrush.Get(), scaleF(1.0f));
                 RECT valueBounds = bounds;
                 valueBounds.left += scale(14);
-                DrawExperimentalSettingsText(state.renderTarget.Get(), state.bodyFormat.Get(), ExperimentalSettingsChoiceValue(*state.settings, control), valueBounds, state.textBrush.Get());
+                DrawExperimentalSettingsText(state.renderTarget.Get(),
+                                             state.bodyFormat.Get(),
+                                             ExperimentalSettingsChoiceValue(*state.settings, control),
+                                             valueBounds,
+                                             enabled ? state.textBrush.Get() : state.mutedTextBrush.Get());
             }
             else
             {
@@ -5142,25 +5167,25 @@ namespace
                     state.renderTarget->DrawEllipse(
                         D2D1::Ellipse(D2D1::Point2F((indicator.left + indicator.right) / 2.0f, (indicator.top + indicator.bottom) / 2.0f),
                                       scaleF(8.0f), scaleF(8.0f)),
-                        state.borderBrush.Get(), scaleF(1.5f));
+                        enabled ? state.borderBrush.Get() : state.mutedTextBrush.Get(), scaleF(1.5f));
                     if (checked)
                     {
                         state.renderTarget->FillEllipse(
                             D2D1::Ellipse(D2D1::Point2F((indicator.left + indicator.right) / 2.0f, (indicator.top + indicator.bottom) / 2.0f),
                                           scaleF(4.5f), scaleF(4.5f)),
-                            state.accentBrush.Get());
+                            enabled ? state.accentBrush.Get() : state.mutedTextBrush.Get());
                     }
                 }
                 else
                 {
                     state.renderTarget->DrawRoundedRectangle(
                         hyperbrowse::render::ToD2DRoundedRect(indicator, scaleF(3.0f), scaleF(3.0f)),
-                        state.borderBrush.Get(), scaleF(1.5f));
+                        enabled ? state.borderBrush.Get() : state.mutedTextBrush.Get(), scaleF(1.5f));
                     if (checked)
                     {
                         state.renderTarget->FillRoundedRectangle(
                             hyperbrowse::render::ToD2DRoundedRect(indicator, scaleF(3.0f), scaleF(3.0f)),
-                            state.accentBrush.Get());
+                            enabled ? state.accentBrush.Get() : state.mutedTextBrush.Get());
 
                         state.renderTarget->DrawLine(
                             D2D1::Point2F(static_cast<float>(indicator.left + scale(5)), static_cast<float>(indicator.top + scale(10))),
@@ -9268,7 +9293,7 @@ namespace hyperbrowse::ui
         fileCommandHandlers.onClearRecentDestinations = std::bind_front(&MainWindow::ClearRecentDestinations, this);
         fileCommandHandlers.onExit = [this]
         {
-            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+            RequestApplicationExit();
         };
         fileCommandHandlers.onEscape = [this]
         {
@@ -9921,7 +9946,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::HandleExternalLaunchPath(const std::wstring& path)
     {
-        if (path.empty() || !hwnd_)
+        if (!hwnd_)
         {
             return;
         }
@@ -9931,7 +9956,16 @@ namespace hyperbrowse::ui
         {
             ShowWindow(hwnd_, SW_RESTORE);
         }
+        else if (!IsWindowVisible(hwnd_))
+        {
+            ShowWindow(hwnd_, SW_SHOW);
+        }
         SetForegroundWindow(hwnd_);
+
+        if (path.empty())
+        {
+            return;
+        }
 
         std::error_code error;
         const fs::path resolvedPath(path);
@@ -17802,6 +17836,114 @@ namespace hyperbrowse::ui
         taskbarProgressActive_ = false;
     }
 
+    void MainWindow::RequestApplicationExit()
+    {
+        exitRequested_ = true;
+        if (hwnd_)
+        {
+            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+        }
+    }
+
+    void MainWindow::RestoreFromTray()
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        if (IsIconic(hwnd_))
+        {
+            ShowWindow(hwnd_, SW_RESTORE);
+        }
+        else if (!IsWindowVisible(hwnd_))
+        {
+            ShowWindow(hwnd_, SW_SHOW);
+        }
+        SetForegroundWindow(hwnd_);
+        UpdateWindow(hwnd_);
+    }
+
+    void MainWindow::ShowTrayContextMenu()
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        AppendMenuW(menu, MF_STRING, kTrayOpenCommand, L"&Open");
+        AppendMenuW(menu, MF_STRING, kTrayExitCommand, L"E&xit");
+
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        SetForegroundWindow(hwnd_);
+        const UINT command = TrackPopupMenuEx(
+            menu,
+            TPM_RETURNCMD | TPM_NONOTIFY,
+            cursor.x,
+            cursor.y,
+            hwnd_,
+            nullptr);
+        PostMessageW(hwnd_, WM_NULL, 0, 0);
+        DestroyMenu(menu);
+
+        switch (command)
+        {
+        case kTrayOpenCommand:
+            RestoreFromTray();
+            break;
+        case kTrayExitCommand:
+            RequestApplicationExit();
+            break;
+        default:
+            break;
+        }
+    }
+
+    LRESULT MainWindow::HandleTrayIconMessage(LPARAM lParam)
+    {
+        switch (static_cast<UINT>(lParam))
+        {
+        case WM_LBUTTONUP:
+        case WM_LBUTTONDBLCLK:
+        case NIN_SELECT:
+        case NIN_KEYSELECT:
+        case NIN_BALLOONUSERCLICK:
+            RestoreFromTray();
+            return 0;
+        case WM_RBUTTONUP:
+        case WM_CONTEXTMENU:
+            ShowTrayContextMenu();
+            return 0;
+        default:
+            return 0;
+        }
+    }
+
+    void MainWindow::HideToTray()
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        EnsureTrayIcon();
+        SaveWindowState();
+        ShowWindow(hwnd_, SW_HIDE);
+    }
+
+    bool MainWindow::ShouldKeepInNotificationArea() const
+    {
+        return app::Application::IsSingleInstanceEnabled()
+            && app::Application::IsKeepInNotificationAreaEnabled();
+    }
+
     void MainWindow::EnsureTrayIcon()
     {
         if (trayIconAdded_ || !hwnd_)
@@ -20788,6 +20930,7 @@ namespace hyperbrowse::ui
         state.libRawOutOfProcessEnabled = libRawOutOfProcessEnabled_;
         state.closeMainWindowOnEscape = closeMainWindowOnEscape_;
         state.singleInstanceEnabled = app::Application::IsSingleInstanceEnabled();
+        state.keepInNotificationAreaEnabled = app::Application::IsKeepInNotificationAreaEnabled();
         state.quickSendShortcutOrder = quickSendShortcutOrder_;
         state.secondaryMonitorAvailable = FindAlternateMonitorForWindow(hwnd_) != nullptr;
         state.nvJpegAvailable = HasNvJpegCapability();
@@ -20882,6 +21025,7 @@ namespace hyperbrowse::ui
             }
 
             app::Application::SetSingleInstanceEnabled(draft.singleInstanceEnabled);
+            app::Application::SetKeepInNotificationAreaEnabled(draft.keepInNotificationAreaEnabled);
             decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_ && HasNvJpegCapability());
             ApplyTheme();
             if (thumbnailDisplayChanged)
@@ -24228,6 +24372,11 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
+        if (trayIconMessageId_ != 0 && message == trayIconMessageId_)
+        {
+            return HandleTrayIconMessage(lParam);
+        }
+
         switch (message)
         {
         case WM_PARENTNOTIFY:
@@ -24282,6 +24431,15 @@ namespace hyperbrowse::ui
                     : (batchConvertActive_ ? L"Cancelling batch conversion" : std::wstring{});
                 UpdateStatusText();
                 UpdateMenuState();
+                return 0;
+            }
+            if (!exitRequested_ && ShouldKeepInNotificationArea())
+            {
+                closePending_ = false;
+                closePendingSinceTick_ = 0;
+                closeWaitNoticeShown_ = false;
+                KillTimer(hwnd_, kFileOperationShutdownTimerId);
+                HideToTray();
                 return 0;
             }
             return DefWindowProcW(hwnd_, message, wParam, lParam);

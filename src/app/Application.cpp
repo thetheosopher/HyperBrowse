@@ -20,6 +20,7 @@ namespace
     constexpr wchar_t kSingleInstanceMutexName[] = L"Local\\TheTheosopher.HyperBrowse.SingleInstance";
     constexpr wchar_t kSingleInstancePipeName[] = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch";
     constexpr wchar_t kRegistryValueSingleInstanceEnabled[] = L"SingleInstanceEnabled";
+    constexpr wchar_t kRegistryValueKeepInNotificationAreaEnabled[] = L"KeepInNotificationAreaEnabled";
 
     struct StartupBenchmarkOptions
     {
@@ -222,6 +223,47 @@ namespace hyperbrowse::app
         RegCloseKey(key);
     }
 
+    bool Application::IsKeepInNotificationAreaEnabled()
+    {
+        HKEY key{};
+        if (hyperbrowse::util::OpenSettingsRegistryKey(KEY_READ, &key) != ERROR_SUCCESS)
+        {
+            return false;
+        }
+
+        DWORD value = 0;
+        DWORD valueSize = sizeof(value);
+        DWORD valueType = REG_DWORD;
+        const bool enabled = RegQueryValueExW(key,
+                                              kRegistryValueKeepInNotificationAreaEnabled,
+                                              nullptr,
+                                              &valueType,
+                                              reinterpret_cast<LPBYTE>(&value),
+                                              &valueSize) == ERROR_SUCCESS
+            && valueType == REG_DWORD
+            && value != 0;
+        RegCloseKey(key);
+        return enabled;
+    }
+
+    void Application::SetKeepInNotificationAreaEnabled(bool enabled)
+    {
+        HKEY key{};
+        if (hyperbrowse::util::CreateSettingsRegistryKey(KEY_WRITE, &key) != ERROR_SUCCESS)
+        {
+            return;
+        }
+
+        const DWORD value = enabled ? 1UL : 0UL;
+        RegSetValueExW(key,
+                       kRegistryValueKeepInNotificationAreaEnabled,
+                       0,
+                       REG_DWORD,
+                       reinterpret_cast<const BYTE*>(&value),
+                       sizeof(value));
+        RegCloseKey(key);
+    }
+
     Application::~Application()
     {
         StopInstanceListener();
@@ -247,37 +289,42 @@ namespace hyperbrowse::app
             return true;
         }
 
-        // Another instance is running: forward the launch path (if any) to it and exit.
+        // Another instance is running: forward the launch path, including an empty
+        // path which means activate the existing instance, and exit.
         CloseHandle(singleInstanceMutex_);
         singleInstanceMutex_ = nullptr;
 
-        if (!launchPath.empty())
+        bool forwarded = false;
+        HANDLE pipe = CreateFileW(kSingleInstancePipeName,
+                                  FILE_WRITE_DATA,
+                                  0,
+                                  nullptr,
+                                  OPEN_EXISTING,
+                                  0,
+                                  nullptr);
+        if (pipe != INVALID_HANDLE_VALUE)
         {
-            HANDLE pipe = CreateFileW(kSingleInstancePipeName,
-                                      FILE_WRITE_DATA,
-                                      0,
-                                      nullptr,
-                                      OPEN_EXISTING,
-                                      0,
-                                      nullptr);
-            if (pipe != INVALID_HANDLE_VALUE)
+            const DWORD bytesToWrite = static_cast<DWORD>((launchPath.size() + 1) * sizeof(wchar_t));
+            DWORD bytesWritten = 0;
+            forwarded = WriteFile(pipe, launchPath.c_str(), bytesToWrite, &bytesWritten, nullptr) != FALSE
+                && bytesWritten == bytesToWrite;
+            CloseHandle(pipe);
+        }
+
+        if (!forwarded)
+        {
+            // Pipe not ready; still try to foreground the existing window by class name.
+            if (HWND existing = FindWindowW(L"HyperBrowseMainWindow", nullptr))
             {
-                const DWORD bytesToWrite = static_cast<DWORD>((launchPath.size() + 1) * sizeof(wchar_t));
-                DWORD bytesWritten = 0;
-                WriteFile(pipe, launchPath.c_str(), bytesToWrite, &bytesWritten, nullptr);
-                CloseHandle(pipe);
-            }
-            else
-            {
-                // Pipe not ready; still try to foreground the existing window by class name.
-                if (HWND existing = FindWindowW(L"HyperBrowseMainWindow", nullptr))
+                if (IsIconic(existing))
                 {
-                    if (IsIconic(existing))
-                    {
-                        ShowWindow(existing, SW_RESTORE);
-                    }
-                    SetForegroundWindow(existing);
+                    ShowWindow(existing, SW_RESTORE);
                 }
+                else if (!IsWindowVisible(existing))
+                {
+                    ShowWindow(existing, SW_SHOW);
+                }
+                SetForegroundWindow(existing);
             }
         }
         return false;
@@ -411,7 +458,7 @@ namespace hyperbrowse::app
                         {
                             path.pop_back();
                         }
-                        if (!path.empty() && mainWindow_ && mainWindow_->Hwnd())
+                        if (mainWindow_ && mainWindow_->Hwnd())
                         {
                             auto* payload = new std::wstring(std::move(path));
                             if (!PostMessageW(mainWindow_->Hwnd(),

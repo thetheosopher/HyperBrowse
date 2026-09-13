@@ -374,6 +374,12 @@ namespace hyperbrowse::ui
         void NotifyLongOperationComplete(const std::wstring& title, const std::wstring& message);
         void EnsureTrayIcon();
         void RemoveTrayIcon();
+        void RequestApplicationExit();
+        void RestoreFromTray();
+        void ShowTrayContextMenu();
+        LRESULT HandleTrayIconMessage(LPARAM lParam);
+        void HideToTray();
+        bool ShouldKeepInNotificationArea() const;
         void RecordUndoableOperation(const services::FileOperationUpdate& update);
         FileOperationCompletionContext CaptureFileOperationCompletionContext();
         void ApplyBrowserFileOperationEffects(
@@ -596,6 +602,7 @@ namespace hyperbrowse::ui
         bool taskbarProgressActive_{};
         bool trayIconAdded_{};
         UINT trayIconMessageId_{};
+        bool exitRequested_{};
 
         FileOperationJournal fileOperationJournal_;
         bool applyingUndoRedo_{};

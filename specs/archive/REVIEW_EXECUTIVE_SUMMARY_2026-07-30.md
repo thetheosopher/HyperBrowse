@@ -8,7 +8,7 @@ Codebase: HyperBrowse
 
 HyperBrowse is a native Windows image browser/viewer built around a clear promise: fast thumbnail browsing, responsive large-folder navigation, and low-latency image viewing without the weight of an editor or catalog. The implementation is mature for its size. It uses Direct2D/DirectWrite, asynchronous decode and metadata pipelines, adaptive memory limits, optional GPU JPEG acceleration, a persistent thumbnail cache, practical file-management workflows, and broad smoke/integration coverage.
 
-The current branch is release 2.1.0. Since the original review, the branch has resolved the cache corruption and split-rename findings, added journal-based persistent-cache updates, moved cache maintenance off the UI thread, improved foreground thumbnail scheduling and large-folder presentation, and added a committed Windows CI workflow with nonzero startup budgets. The smoke executable now includes cache, watcher, scheduler, decoder, settings, and viewer regression scenarios, with four CTest entry points.
+The review snapshot described release 2.1.0 and is historical rather than the current release description. Since the original review, the branch has resolved the cache corruption and split-rename findings, added journal-based persistent-cache updates, moved cache maintenance off the UI thread, improved foreground thumbnail scheduling and large-folder presentation, and added a committed Windows CI workflow with nonzero startup budgets. The smoke executable now includes cache, watcher, scheduler, decoder, settings, and viewer regression scenarios, with four CTest entry points. The current release identity is maintained in the 2.3.0 README and user guide.
 
 ## Resolved Since July
 

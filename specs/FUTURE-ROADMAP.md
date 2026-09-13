@@ -1,6 +1,11 @@
-# HyperBrowse Enhancement Plan
+# HyperBrowse Future Roadmap
 
-Last reviewed: 2026-09-06
+Last reviewed: 2026-09-13
+
+This is the single forward-looking product backlog for HyperBrowse. It is
+intentionally separate from the authoritative shipped contract in
+[PRODUCT_SPEC.md](PRODUCT_SPEC.md). Nothing in this document is implemented
+merely because it is listed here.
 
 This document tracks the **forward-looking** HyperBrowse backlog. Completed
 items have been archived (see [Appendix A](#appendix-a--recently-completed-archive))
@@ -39,6 +44,8 @@ The active plan assumes the following are already shipped and stable:
 - D2D/DirectWrite rendering in the browser grid and viewer; per-monitor DPI v2.
 - Async folder enumeration, folder tree, metadata, watching, thumbnail
   scheduling, and batch convert.
+- WebP decoding and thumbnails through WIC, with stale thumbnail completion
+  rejection and asynchronous folder-tree child-presence probing.
 - Runtime-adaptive thumbnail cache (128 MB–1 GB) and metadata cache (2,048–
   65,536 entries) sized from `GlobalMemoryStatusEx`.
 - Optional `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache` persistent cache.
@@ -52,9 +59,9 @@ The active plan assumes the following are already shipped and stable:
 - Diagnostics window, structured log, smoke + integration tests, GitHub
   Actions CI, portable zip + Inno Setup 6 installer.
 
-See [01-product-spec.md](01-product-spec.md), [03-performance-strategy.md](03-performance-strategy.md),
-and [15-d2d-rendering-migration.md](15-d2d-rendering-migration.md) for design
-detail.
+See [PRODUCT_SPEC.md](PRODUCT_SPEC.md), [docs/architecture.md](../docs/architecture.md),
+and [docs/testing.md](../docs/testing.md) for current product, architecture,
+and validation contracts.
 
 ---
 
@@ -321,6 +328,10 @@ in-app drag source beyond the new row drop targets.
 
 ### `B7` Animated GIF / WebP Playback in Viewer (P2)
 
+Static WebP decode and thumbnails are shipped in 2.3. This item remains
+limited to animated playback; GIF and WebP thumbnails continue to use the
+available first-frame WIC presentation.
+
 - Animated playback only inside the viewer (thumbnails stay first-frame).
 - Reuses the existing WIC decode pipeline; new `AnimationController` drives
   frame timing through a DWM-synced timer.
@@ -359,6 +370,10 @@ The brand is "fast". The product should look the part.
 
 ### `C4` Settings Reorganization (P1)
 
+**Implementation status:** Shipped. Performance, diagnostics, and integration
+surfaces are grouped under Tools, while the consolidated Settings dialog owns
+the appearance, viewer, performance, behavior, and slideshow preferences.
+
 - Move **Enable NVIDIA JPEG Acceleration** and **Use Out-of-Process LibRaw
   Fallback** out of the View menu into the new Settings dialog (Performance
   tab).
@@ -366,6 +381,10 @@ The brand is "fast". The product should look the part.
   (carry-over from prior P2 backlog).
 
 ### `C5` Tools Menu (P1)
+
+**Implementation status:** Shipped. The current command bar exposes Tools with
+Settings, Performance, Diagnostics, and Integration submenus. Benchmark and
+log-folder commands remain backlog ideas.
 
 - New top-level Tools menu:
   - Settings…
@@ -376,6 +395,9 @@ The brand is "fast". The product should look the part.
 
 ### `C6` Inline Rename / In-Place Label Edit (P2)
 
+**Implementation status:** Folder-tree inline rename is shipped. In-place
+editing of image labels in thumbnail/details surfaces remains deferred.
+
 - True in-place label editing in the thumbnail and details surfaces; `F2`
   currently opens a dialog.
 
@@ -383,6 +405,35 @@ The brand is "fast". The product should look the part.
 
 - Lightweight breadcrumb above the browser pane with clickable segments
   for fast parent navigation; complements the folder tree.
+
+### `C8` Accessibility Completion and Release Verification (P1)
+
+**Implementation status:** Main-window custom surfaces expose semantic names,
+roles, states, focus, and state-change notifications. Dialog-specific custom
+surfaces and platform-facing verification remain.
+
+- Complete the smallest project-compatible accessibility bridge for the
+  remaining custom dialog surfaces.
+- Expose meaningful names, roles, enabled/disabled, checked/selected,
+  expanded/open, and focused state consistently across dialogs.
+- Add focused smoke coverage for dialog semantics and focus restoration.
+- Complete NVDA or JAWS, Inspect/UI Automation, high-contrast, theme, DPI, and
+  larger-text verification before treating the accessibility contract as
+  release-complete.
+- Keep the custom-rendered controls and existing Win32, Direct2D, and GDI
+  ownership split; accessibility work must not become a framework migration.
+
+The detailed implementation queue remains in
+[docs/keyboard-accessibility-plan.md](../docs/keyboard-accessibility-plan.md).
+
+### `C9` Simplified Window Chrome (P2)
+
+- Remove redundant view mode, recursive-browsing, and theme indicators from
+  the title bar when the active folder path already identifies the window.
+- Keep the current folder path and essential state discoverable through the
+  title bar, menus, and accessible window name.
+- Revalidate narrow layouts, multiple main-window instances, and screen-reader
+  names after the chrome is simplified.
 
 ---
 
@@ -392,7 +443,7 @@ Performance branding requires evidence.
 
 ### `D1` Standard Benchmark Datasets (P0)
 
-- Datasets A–E per [05-benchmarking-plan.md](05-benchmarking-plan.md)
+- Datasets A–E per [the archived benchmarking plan](archive/05-benchmarking-plan.md)
   staged under `tests/benchmark-datasets/` with a generator script for
   synthetic inputs (and pointers to user-supplied real datasets).
 
@@ -493,26 +544,26 @@ focused. The summarized status as of this revision:
 
 - **Rendering:** D2D/DirectWrite pipeline in browser grid and viewer, per-
   monitor DPI v2, smooth inertial scroll, high-quality cubic scaling
-  ([15-d2d-rendering-migration.md](15-d2d-rendering-migration.md)).
+  (the archived D2D migration plan).
 - **File management:** copy, move, rename, batch rename (tokenized
   preview), delete, permanent delete, reveal, copy path, properties,
   recent destinations, pinned favorites, RAW+JPEG paired operations
-  ([11-file-management-workflow.md](11-file-management-workflow.md)).
+  ([the archived file-management workflow](archive/11-file-management-workflow.md)).
 - **Browse workflow:** compare/cull lite, ratings and tags with filter
   syntax, date-taken sort, sort-direction toggle, configurable viewer
   mouse wheel, slideshow interval + transitions, info strip / details
   panel, rich image-information dialog
-  ([10-prioritized-enhancements.md](10-prioritized-enhancements.md)).
+  ([archived browse enhancements](archive/10-prioritized-enhancements.md)).
 - **Caching:** runtime-adaptive thumbnail and metadata cache sizing keyed
   off `GlobalMemoryStatusEx`, optional persistent thumbnail cache under
   `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache`.
 - **Architecture / hygiene:** shared `HyperBrowseCore` static library,
   smoke + integration test suite, GitHub Actions CI, portable zip + Inno
   Setup 6 installer with CUDA redistributable bundling, static MSVC
-  runtime by default ([09-hardening-pass.md](09-hardening-pass.md)).
+  runtime by default ([the archived hardening plan](archive/09-hardening-pass.md)).
 - **Toolbar:** owner-drawn double-buffered toolbar strip with grouped icon
   buttons and right-aligned actions
-  ([16-toolbar-ux-redesign.md](16-toolbar-ux-redesign.md)).
+  ([archived toolbar redesign](archive/16-toolbar-ux-redesign.md)).
 
 For a deeper change log, consult the git history; this appendix exists only
 to anchor the active plan above.

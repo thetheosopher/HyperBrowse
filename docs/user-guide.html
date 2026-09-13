@@ -202,7 +202,8 @@
                 <a href="#viewer">Viewer</a>
                 <a href="#file-workflows">File workflows</a>
                 <a href="#quick-actions">Quick Actions</a>
-                <a href="#release-2-2">2.2 notes</a>
+                <a href="#release-2-3">2.3 notes</a>
+                <a href="#release-2-2">2.2 history</a>
                 <a href="#shortcuts">Shortcuts</a>
                 <a href="#troubleshooting">Troubleshooting</a>
             </nav>
@@ -248,7 +249,7 @@
                 </div>
             </div>
             <h3>Selection and drag-and-drop</h3>
-            <p>Use Ctrl-click to add or remove individual items, Shift-click for a range, and <kbd>Ctrl</kbd> + <kbd>A</kbd> to select all visible items. Selected files can be dragged to a folder in the tree or to another shell-aware application such as File Explorer. Dropping files onto HyperBrowse can open an image in the viewer or copy files into the current folder, depending on where they are dropped.</p>
+            <p>Use Ctrl-click to add or remove individual items, Shift-click for a range, and <kbd>Ctrl</kbd> + <kbd>A</kbd> to select all visible items. Selected files can be dragged to a folder in the tree or to another shell-aware application such as File Explorer. Dropping files onto HyperBrowse can open an image in the viewer or copy files into the current folder, depending on where they are dropped. Holding <kbd>Ctrl</kbd> requests copy and holding <kbd>Shift</kbd> requests move where the destination supports both effects.</p>
             <p>Right-click a selection for copy, move, delete, rename, duplicate, properties, ratings, tags, image information, and other actions. Shift-right-click opens the Windows shell context menu.</p>
         </section>
 
@@ -326,7 +327,7 @@
 
         <section id="formats">
             <h2>Formats and metadata</h2>
-            <p>HyperBrowse uses Windows Imaging Component for common formats and LibRaw for supported RAW formats. JPEG, PNG, GIF, and TIFF files use the standard Windows decode path. RAW support includes ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2.</p>
+            <p>HyperBrowse uses Windows Imaging Component for common formats and LibRaw for supported RAW formats. JPEG, PNG, GIF, TIFF, and WebP files use the standard Windows decode path. RAW support includes ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2. WebP and other multi-frame formats are presented through the available WIC frame; animated playback is not a current viewer feature.</p>
             <p>JPEG EXIF orientation is applied automatically when images are displayed. Metadata surfaces expose EXIF, IPTC, and XMP information when it is present. GIF and TIFF browsing uses the first frame or page.</p>
             <div class="callout"><strong>RAW fallback.</strong> The optional out-of-process RAW helper improves isolation. If the helper or optional NVIDIA JPEG runtime is unavailable, HyperBrowse falls back to its other supported decode paths where possible.</div>
         </section>
@@ -347,9 +348,15 @@
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
         </section>
 
+        <section id="release-2-3">
+            <h2>What changed in 2.3</h2>
+            <p>Version 2.3 adds WebP decoding and thumbnail support through WIC, improves WIC failure handling, and rejects stale thumbnail completions before they can update the browser. Folder-tree expansion now probes child-directory presence asynchronously, while viewer slideshow target management and display-surface recovery are more reliable during navigation and monitor changes. Menus, command bars, settings, diagnostics, file associations, and other application-owned dialogs received broader DPI-aware layout and scaling improvements, alongside stronger keyboard routing, drag/drop lifetime handling, clipboard cleanup, Unicode-path handling, and cache validation.</p>
+            <div class="callout"><strong>Format boundary.</strong> WebP support covers the standard WIC decode and thumbnail path. Animated WebP playback remains deferred; GIF and TIFF browsing also shows the first frame or page. Optional NVIDIA acceleration still requires a supported GPU and runtime, with WIC as the fallback.</div>
+        </section>
+
         <section id="release-2-2">
             <h2>What changed in 2.2</h2>
-            <p>Version 2.2 strengthens ratings and tags across Unicode paths, folder and case-only renames, save failures, and multiple app instances. File-operation undo verifies result identity, batch conversion publishes complete files atomically, image information/copy/orientation work runs through a cancellable background service, and slideshow timing now updates every active viewer. Settings adds semantic accessibility, custom surfaces follow Windows high-contrast colors, and Quick Actions confirmations use a bounded two-line layout.</p>
+            <p>Version 2.2 strengthened ratings and tags across Unicode paths, folder and case-only renames, save failures, and multiple app instances. File-operation undo verifies result identity, batch conversion publishes complete files atomically, image information/copy/orientation work runs through a cancellable background service, and slideshow timing now updates every active viewer. Settings added semantic accessibility, custom surfaces followed Windows high-contrast colors, and Quick Actions confirmations used a bounded two-line layout.</p>
             <div class="callout"><strong>Known limitations.</strong> GIF and TIFF browsing shows the first frame or page. JPEG orientation adjustment edits EXIF orientation metadata. Converted output is a rendered copy and can omit source-only metadata or features. Optional NVIDIA acceleration requires a supported GPU and runtime; WIC remains the fallback. Screen-reader, mixed-DPI, high-contrast, installer, and hosted-CI sign-off is tracked in the release polish plan.</div>
         </section>
 
@@ -362,6 +369,7 @@
                     <tr><th colspan="3">Main window</th></tr>
                     <tr><td>File</td><td><kbd>F1</kbd></td><td>Open this user guide</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open a folder</td></tr>
+                    <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>Create a folder in the current folder</td></tr>
                     <tr><td>File</td><td><kbd>F2</kbd></td><td>Rename the selected item</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>Open the selected image in a new viewer window</td></tr>
                     <tr><td>File</td><td><kbd>F5</kbd></td><td>Refresh the folder tree</td></tr>
@@ -414,6 +422,8 @@
                     <tr><td>Viewer</td><td><kbd>X</kbd></td><td>Activate the compared image</td></tr>
                     <tr><td>Viewer</td><td><kbd>Space</kbd></td><td>Start or stop the slideshow</td></tr>
                     <tr><td>Viewer</td><td><kbd>F11</kbd></td><td>Toggle full-screen mode</td></tr>
+                    <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td>Toggle full-screen mode</td></tr>
+                    <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> / <kbd>W</kbd></td><td>Size the window to the monitor work-area height / width</td></tr>
                     <tr><td>Viewer</td><td><kbd>Del</kbd> / <kbd>Shift</kbd> + <kbd>Del</kbd></td><td>Recycle / permanently delete the displayed file</td></tr>
                 </tbody>
             </table>

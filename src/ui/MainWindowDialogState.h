@@ -85,6 +85,7 @@ namespace hyperbrowse::ui::dialog_detail
         PrefetchDepth,
         PrefetchDepthAutomatic,
         QuickSendShortcutOrder,
+        KeepInNotificationArea,
         Count,
     };
 
@@ -362,6 +363,7 @@ namespace hyperbrowse::ui::dialog_detail
         bool libRawOutOfProcessEnabled{true};
         bool closeMainWindowOnEscape{};
         bool singleInstanceEnabled{};
+        bool keepInNotificationAreaEnabled{};
         bool secondaryMonitorAvailable{true};
         bool nvJpegAvailable{};
         bool libRawAvailable{};
@@ -384,6 +386,7 @@ namespace hyperbrowse::ui::dialog_detail
         std::wstring text;
         bool muted{};
         wchar_t mnemonic{};
+        ConsolidatedSettingsControl mnemonicControl{ConsolidatedSettingsControl::Count};
     };
 
     enum class ExperimentalSettingsFocusTargetKind

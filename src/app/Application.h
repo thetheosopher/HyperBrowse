@@ -21,6 +21,8 @@ namespace hyperbrowse::app
 
         static bool IsSingleInstanceEnabled();
         static void SetSingleInstanceEnabled(bool enabled);
+        static bool IsKeepInNotificationAreaEnabled();
+        static void SetKeepInNotificationAreaEnabled(bool enabled);
 
     private:
         bool TryBecomePrimaryInstance(const std::wstring& launchPath);

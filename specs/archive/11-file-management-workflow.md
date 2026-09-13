@@ -6,6 +6,11 @@ This document defines the first native file-management pass for HyperBrowse.
 
 The goal is to let users complete common browse-and-cull workflows without leaving the app, while preserving HyperBrowse's startup and rendering priorities.
 
+Implementation status: the first pass shipped and has since expanded into the
+current Copy/Move/Rename/Delete, clipboard, shell drag/drop, Quick Actions,
+batch rename, paired RAW/JPEG, taskbar-progress, and undo/redo workflows.
+Source and smoke tests define the current command and completion behavior.
+
 ## 2. Scope
 
 ### First implementation pass
@@ -22,14 +27,16 @@ The goal is to let users complete common browse-and-cull workflows without leavi
 - copy selected file paths to the clipboard
 - show file properties for the primary selected file
 
-### Deferred to a later pass
+### Remaining deferred work
 
-- rename in place
-- batch rename
-- recent destinations and favorite destinations
-- RAW+JPEG paired actions
-- drag-and-drop between panes or instances
-- undo surface inside HyperBrowse
+- image-label editing in the browser thumbnail/details surfaces (folder-tree
+	inline rename is shipped)
+- drag-and-drop file operations between separate HyperBrowse instances
+- content-based duplicate finding, which is distinct from duplicate-to-same-folder
+
+The original deferred list for this first pass is retained in git history;
+items such as batch rename, recent/favorite destinations, RAW+JPEG paired
+actions, and the in-app undo/redo surface are shipped in the current build.
 
 ## 3. UX Goals
 

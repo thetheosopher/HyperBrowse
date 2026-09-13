@@ -1,13 +1,13 @@
-# HyperBrowse 2.0 Release Hardening Plan
+# HyperBrowse 2.0 Release Hardening Plan (Historical)
 
-Status: Active
+Status: Historical and superseded by the 2.3 source, tests, and release documentation.
 Review date: 2026-08-23
 Release target: 2.0.0
 Baseline: 1.2.8
 
 ## Purpose
 
-This is the release-readiness plan for the 2.0 major release. The goal is to
+This was the release-readiness plan for the 2.0 major release. The goal was to
 make the existing browser/viewer trustworthy under damaged input, slow or
 changing filesystems, shutdown, installation, and repeated use. New features
 should not outrun this work.

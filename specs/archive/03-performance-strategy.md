@@ -101,7 +101,10 @@ The application wins on user-perceived speed, not on theoretical throughput alon
 ## 7. Memory Strategy
 
 ## 7.1 v1 memory model
-Memory cache only. No persistent disk cache.
+The original v1 design used memory cache only. The current implementation also
+supports an optional persistent disk thumbnail cache owned by
+`DiskThumbnailCache`; its index, payload, and maintenance I/O stay behind the
+thumbnail scheduler's worker path and never run on the UI thread.
 
 ## 7.2 Memory pools
 Use reusable pools where profiling justifies them for:
@@ -117,7 +120,9 @@ Use bounded LRU-style caches for:
 - viewer current and profile-controlled adjacent images (no eviction while they
 	remain in the active adjacent cache)
 
-Note: Segmented-LRU and memory pool strategies from the original spec are deferred. Basic LRU eviction is sufficient for current workloads.
+Note: Segmented-LRU remains deferred. The current decode path already pools
+selected transient byte buffers where it reduces allocation pressure; broader
+pooling remains benchmark-gated.
 
 ## 7.4 Memory pressure response
 - evict far-offscreen thumbnails first
@@ -129,11 +134,15 @@ Note: Segmented-LRU and memory pool strategies from the original spec are deferr
 
 ## 8.1 Thread pools
 Use separate logical queues for:
-- enumeration (async per-request futures)
-- folder tree enumeration (async per-request futures)
+- enumeration (bounded member-owned executor)
+- folder tree enumeration and child-presence probes (bounded member-owned executor)
 - metadata (dedicated worker threads with condition variable signaling)
 - thumbnail decode (two pools: General and Raw workers)
-- viewer decode / prefetch (async per-request futures)
+- viewer decode / prefetch (bounded background executor with navigation-generation checks)
+
+The original request-per-task `std::async` wording is historical. Current
+services own their executors, cancellation state, and shutdown joins so late
+results can be rejected deterministically.
 
 ### Runtime-adaptive worker count
 - Total thumbnail worker count defaults to `std::thread::hardware_concurrency()` (falls back to 2 if unavailable)

@@ -1,10 +1,15 @@
 # HyperBrowse Enhancement Roadmap
 
 Original review: 2026-07-30
-Status refresh: 2026-09-06
+Status refresh: 2026-09-13
 Reviewer: GitHub Copilot
 Perspectives: Software Optimization Engineering + Product Management
 Codebase: HyperBrowse
+
+This roadmap remains a dated planning record. Release 2.3.0 also ships WebP
+decode/thumbnails, asynchronous folder-tree child-presence probing, stale
+thumbnail completion rejection, and broader DPI/layout hardening; those items
+are recorded in the current README and user guide rather than reopened here.
 
 ## Summary
 
@@ -27,7 +32,7 @@ Codebase: HyperBrowse
 | SI3 Search/smart-folder product decision | Feature | Decision needed | P2 | S | browser/services |
 | SI4 Format frontier | Feature | Open, deliberately later | P3 | L | decode/viewer |
 
-## 2026-09-06 Reprioritization
+## 2026-09-06 Reprioritization (Historical Queue)
 
 The July quick-win queue is no longer the active execution order. The cache,
 watcher, malformed-input, worker-containment, and startup-gate work has landed
@@ -36,7 +41,7 @@ Settings surface, native shell drag/drop, clipboard and duplicate workflows,
 undo/redo, single-instance launch forwarding, taskbar progress, viewer
 inspection controls, decoder diagnostics, and stronger large-folder scheduling.
 
-Work should now proceed in this order:
+At the time of this refresh, work was recommended in this order:
 
 1. **P0 - Measure bounded background execution.** The four service migrations
    now have bounded executors, queue-depth accessors, cancellation metrics,
@@ -56,8 +61,8 @@ Work should now proceed in this order:
    full-reload fallbacks separately from ordinary misses, and make a redacted
    diagnostics snapshot export available for issue reports.
 5. **P1 - Maintain current-state documentation.** Architecture, UI, D2D, and
-   backlog specifications now describe shipped behavior; update them with
-   future cross-cutting changes.
+   backlog specifications were being brought into alignment with shipped
+   behavior; the 2.3 documentation pass now records that state.
 6. **P2 - Add saved structured filters.** Persist named current-folder
    expressions without introducing a catalog database.
 7. **P2 - Professional compare and color management.** Validate color-profile
@@ -117,7 +122,7 @@ not requests to repeat the work.
 - **Perspective:** Both
 - **Effort:** S
 - **Impact:** Medium
-- **Area:** [docs/architecture.md](architecture.md), [docs/mainwindow-ownership-map.md](mainwindow-ownership-map.md), [specs/02-architecture.md](../specs/02-architecture.md#L8-L14), [specs/04-ui-behavior.md](../specs/04-ui-behavior.md#L133-L140), [specs/14-todo.md](../specs/14-todo.md#L224-L227), [specs/15-d2d-rendering-migration.md](../specs/15-d2d-rendering-migration.md#L26-L35)
+- **Area:** [docs/architecture.md](../../docs/architecture.md), [docs/mainwindow-ownership-map.md](../../docs/mainwindow-ownership-map.md), [archived architecture plan](02-architecture.md), [archived UI plan](04-ui-behavior.md), [current roadmap](../FUTURE-ROADMAP.md), [archived D2D plan](15-d2d-rendering-migration.md)
 - **Current status:** the review, architecture, and MainWindow ownership documents reflect the current release, hybrid rendering, CI, cache, watcher, and workflow state. The architecture and D2D migration specs still require reconciliation; the UI-behavior spec needs an audit for shipped workflow gaps.
 
 ### QW6: Contain thumbnail-worker exceptions (Complete)
@@ -271,7 +276,7 @@ not requests to repeat the work.
 
 ### Workstream 4: Diagnostics and current-state documentation
 
-> Add distinct counters for invalid persistent-cache entries and folder-watch full-reload fallbacks, plus a redacted diagnostics snapshot export. Then reconcile `specs/02-architecture.md`, `specs/04-ui-behavior.md`, and `specs/15-d2d-rendering-migration.md` with the hybrid renderer, current MainWindow ownership, structured filters, slideshow settings, F2 behavior, metadata visibility, and shell drag/drop.
+> Add distinct counters for invalid persistent-cache entries and folder-watch full-reload fallbacks, plus a redacted diagnostics snapshot export. Then reconcile the archived architecture, UI, and D2D plans with the hybrid renderer, current MainWindow ownership, structured filters, slideshow settings, F2 behavior, metadata visibility, and shell drag/drop.
 
 ### Workstream 5: Product depth
 

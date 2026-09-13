@@ -95,7 +95,7 @@ Check the affected workflow and its neighboring state transitions. Depending on 
 - settings Apply/OK/Cancel and persistence across restart;
 - multi-monitor and high-DPI behavior for geometry or rendering changes;
 - keyboard-only focus, Inspect/MSAA names and states, a screen reader, and both Windows high-contrast schemes for accessibility changes;
-- RAW, WIC, and optional nvJPEG fallback paths for decoder changes.
+- RAW, WIC (including WebP where the Windows codec is available), and optional nvJPEG fallback paths for decoder changes.
 
 ## Diagnostics
 

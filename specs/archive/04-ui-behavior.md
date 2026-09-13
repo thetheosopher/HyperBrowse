@@ -31,9 +31,12 @@ Keep menus compact and practical.
 
 ### File
 - Open Folder
+- New Folder
 - Refresh Folder Tree
 - Open
+- Open in New Viewer Window
 - View on Secondary Monitor
+- Compare Selected
 - Image Information
 - Reveal in Explorer
 - Open Containing Folder
@@ -45,50 +48,62 @@ Keep menus compact and practical.
 - Delete Permanently
 - Adjust JPEG Orientation Left
 - Adjust JPEG Orientation Right
-- Batch Convert Selection → JPEG / PNG / TIFF
-- Batch Convert Folder → JPEG / PNG / TIFF
+- Batch Convert Selection -> JPEG / PNG / TIFF
+- Batch Convert Folder -> JPEG / PNG / TIFF
 - Cancel Batch Convert
 - Exit
+
+### Edit
+- Undo / Redo supported Copy, Move, and Rename operations
+- Cut / Copy / Paste files
+- Copy Image pixels
+- Copy Path
+- Select All
+- Quick Actions Move / Copy and Resume Filing Position
+- Metadata: ratings and tags
 
 ### View
 - Thumbnail Mode
 - Details/List Mode
 - Recursive Browsing
-- Thumbnail Size presets (96, 128, 160, 192, 256, 320 px)
+- Thumbnail Size presets (96, 128, 160, 192, 256, 320, 360, 420, 480, 560, 640 px)
 - Compact thumbnail layout toggle
 - Show thumbnail details toggle
-- Sort By (submenu: Filename, Modified Date, File Size, Dimensions, Type, Random)
+- Sort By (submenu: Filename, Modified Date, File Size, Dimensions, Type, Date Taken, Rating, Tags, Random)
+- Sort direction (ascending/descending)
 - Slideshow from Selection
 - Slideshow from Folder
-- Slideshow transition style and timing are configured under Settings > Slideshow Settings.
-- Theme (Light / Dark) under Settings > Appearance
-- Enable NVIDIA JPEG Acceleration under Settings > Performance
-- Use Out-of-Process LibRaw Fallback under Settings > Performance
 
-Sort Direction (ascending/descending) is implemented and persisted to the registry as `SortAscending`.
-
-### Settings
-- Appearance, Viewer, Performance, Diagnostics, Integration, Behavior, and Slideshow Settings
-
-Note: "Lossless JPEG Rotate" from the original spec was replaced with EXIF-only orientation adjustment.
-
-Note: The Tools menu from the original spec was not implemented. Refresh is available via F5 in the File menu. Preferences are managed through the top-level Settings menu and persisted to the Windows registry.
-
-### Shipped workflow audit (2026-09-06)
-
-- Settings are shipped for Appearance, Viewer, Performance, Diagnostics, Integration, Behavior, and Slideshow behavior.
-- `F2` opens the shipped rename dialog; inline label editing remains deferred.
-- The rename dialog validates the selected item and performs the native file operation asynchronously; it does not turn the thumbnail label into an inline editor.
-- Copy-path and shell file-selection clipboard workflows are shipped, as are duplicate-file operations (`Ctrl+D`) and bounded Copy/Move/Rename undo/redo (`Ctrl+Z` / `Ctrl+Y`).
-- Shell drag-out is provided through an OLE shell file data object and drop source. In-app drops accept OLE `IDataObject` file payloads on the main window and support folder-tree, browser, viewer, and Quick Actions destinations; the legacy `WM_DROPFILES` path remains a fallback. The separate product idea of content-based duplicate finding remains deferred.
-- Optional single-instance mode forwards a second launch path to the existing window. Taskbar progress is shown for active file operations and batch conversion.
-- Viewer inspection includes the Tab HUD, the metadata pane, image information, compare mode, and slideshow controls. Metadata extraction failures remain non-blocking.
+### Tools
+- Settings
+- Performance, including persistent thumbnail-cache statistics and cleanup
+- Diagnostics, including snapshot, redacted export, and reset
+- Integration, including file associations
 
 ### Help
 - About
+- User Guide
+- Keyboard Shortcuts
 - Diagnostics Snapshot
 - Export Redacted Snapshot...
 - Reset Diagnostics
+
+Settings > Appearance, Viewer, Performance, Diagnostics, Integration, Behavior,
+and Slideshow controls configure the remaining presentation and system
+preferences. Refresh is available via F5 in the File menu. Preferences are
+persisted to the Windows registry. The application uses a custom command bar
+whose menu buttons expose the same File, Edit, View, Tools, and Help menus;
+the native menu is detached from the top-level window after creation.
+
+### Shipped workflow audit (2026-09-13)
+
+- Settings are shipped for Appearance, Viewer, Performance, Diagnostics, Integration, Behavior, and Slideshow behavior.
+- `F2` opens the shipped rename workflow. Folder nodes also support inline label editing through the native tree control; image-label editing in the browser remains deferred.
+- The rename dialog validates the selected item and performs the native file operation asynchronously; it does not turn the thumbnail label into an inline editor.
+- Copy-path and shell file-selection clipboard workflows are shipped, as are duplicate-file operations (`Ctrl+D`) and bounded Copy/Move/Rename undo/redo (`Ctrl+Z` / `Ctrl+Y`).
+- Shell drag-out is provided through an OLE shell file data object and drop source. In-app drops accept OLE `IDataObject` file payloads on the main window and support folder-tree, browser, viewer, and Quick Actions destinations; the legacy `WM_DROPFILES` path remains a fallback. Content-based duplicate finding remains deferred.
+- Optional single-instance mode forwards a second launch path to the existing window. Taskbar progress is shown for active file operations and batch conversion.
+- Viewer inspection includes the Tab HUD, the metadata pane, image information, compare mode, and slideshow controls. Metadata extraction failures remain non-blocking.
 
 ## 4. Folder Tree Behavior
 
@@ -98,7 +113,7 @@ Note: The Tools menu from the original spec was not implemented. Refresh is avai
 - Drive roots: all logical drives
 - Shell display names and icons (via `SHGetFileInfo`)
 - keyboard navigable
-- expand/collapse support with async child directory enumeration (non-blocking)
+- expand/collapse support with asynchronous child-directory enumeration and cached child-presence probing (non-blocking)
 - current selection synchronized with browser pane
 - live refresh integration where practical
 
@@ -114,7 +129,7 @@ When a folder is selected:
 
 ### Requirements
 - virtualized grid
-- variable thumbnail sizes with practical presets from 96 px to 320 px
+- variable thumbnail sizes with practical presets from 96 px to 640 px
 - visible placeholders before thumbnail decode completes
 - smooth mouse wheel and keyboard scroll
 - strong multi-select behavior
@@ -202,9 +217,9 @@ Status bar should update incrementally and never block UI.
 
 ## 8.1 Open behavior
 - separate top-level window
-- opens immediately on double-click, in fullscreen by default on the target monitor
+- opens immediately on double-click, with fullscreen available as an explicit command and a persisted target-monitor preference
 - multi-monitor support: "View on Secondary Monitor" places viewer on a non-primary monitor
-- may reuse existing viewer window or open a new one based on future settings
+- normal Open reuses the existing viewer window; Open in New Viewer Window creates an independent viewer in the same process
 
 ## 8.2 Viewer commands
 - next image
@@ -212,9 +227,11 @@ Status bar should update incrementally and never block UI.
 - zoom in
 - zoom out
 - fit to window
+- fit height / fit width
 - 100%
 - pan
 - rotate
+- compare selected images and activate the compared image
 - slideshow start/stop
 - full screen toggle
 - image information
@@ -271,35 +288,65 @@ Slideshow interval, transition style, and transition duration are exposed throug
 
 ### Implemented shortcuts
 - `Ctrl+O`: open folder
+- `Ctrl+Shift+N`: create a folder in the current folder
+- `Backspace` / `Alt+Left`: navigate to the previous folder
+- `Alt+Right`: navigate to the next folder
+- `Esc`: close the main window when enabled in Settings
+- `Ctrl+W`: minimize the main window
 - `F5`: refresh folder tree
+- `F2`: rename the selected item
+- `Ctrl+Shift+Enter`: open the selected image in a new viewer window
+- `F7` / `F8`: move / copy the selection to a Quick Actions destination
+- `F4`: resume the saved filing position in the current folder
 - `Ctrl+I`: image information
+- `Ctrl+C` / `Ctrl+X` / `Ctrl+V`: copy, cut, and paste selected files
 - `Ctrl+Shift+C`: copy selected paths
+- `Ctrl+Shift+I`: copy displayed image pixels
+- `Ctrl+A`: select all visible browser items
+- `Ctrl+D`: duplicate selected files
+- `Ctrl+Z` / `Ctrl+Y`: undo / redo a supported file operation
 - `Ctrl+E`: reveal in Explorer
 - `Alt+Enter`: file properties
 - `Delete`: delete to Recycle Bin
 - `Shift+Delete`: permanent delete
 - `Ctrl+1`: thumbnail mode
 - `Ctrl+2`: details mode
+- `Ctrl+3`: toggle the details panel
 - `Ctrl+R`: recursive browsing toggle
+- `+` / `=` / Numpad `+`: increase thumbnail size
+- `-` / `_` / Numpad `-`: decrease thumbnail size
 - `Ctrl+Shift+S`: slideshow from selection
 - `Ctrl+Shift+F`: slideshow from folder
-- `Ctrl+A`: select all visible browser items
-- `F2`: rename the selected item
+- `Ctrl+Shift+T`: open Settings
 - `Ctrl+Shift+D`: diagnostics snapshot
 - `Ctrl+Shift+X`: reset diagnostics
 
 ### Viewer-specific shortcuts
-- `Left` / `Right`: previous / next image
-- `+` / `=`: zoom in
-- `-`: zoom out
+- `Esc`: use the configured full-screen Escape action, or close the viewer when windowed
+- `Ctrl+W`: close the viewer
+- Arrow keys: navigate, or pan when zoomed
+- `Shift` + Arrow keys: navigate the comparison pair
+- `Page Up` / `Page Down`: previous / next image
+- `Ctrl+Home` / `Ctrl+End`: first / last image
+- `Ctrl+G`: go to an image by number
+- `Ctrl+Shift+F`: start a slideshow from the current folder
+- `F7` / `F8`: move / copy the displayed image to a Quick Actions destination
+- `Ctrl+Shift+I`: copy the displayed image
+- `Tab`: toggle image information overlays
+- `+` / `=` / Numpad `+`: zoom in
+- `-` / `_` / Numpad `-`: zoom out
+- `Enter`: toggle between fit and actual-size viewing
 - `0`: fit to window
 - `1`: actual size
+- `H` / `W`: fit height / fit width
+- `Ctrl+Shift+H` / `Ctrl+Shift+W`: size the window to the monitor work area
 - `L`: rotate left
 - `R`: rotate right
-- `F11`: toggle fullscreen
-- `Escape`: close the viewer
+- `C`: toggle comparison mode
+- `X`: activate the compared image
 - `Space`: toggle slideshow
-- `Tab`: toggle info overlay HUD
+- `F11` / `Ctrl+Enter`: toggle fullscreen
+- `Delete` / `Shift+Delete`: move the displayed file to the Recycle Bin / delete it permanently
 
 ## 12. Error UX
 

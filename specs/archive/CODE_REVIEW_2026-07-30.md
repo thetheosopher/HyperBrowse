@@ -19,7 +19,7 @@ HyperBrowse is a native Windows 10/11 x64 image browser and viewer optimized for
 - Bounded memory caches, a persistent thumbnail cache under `%LOCALAPPDATA%`, and a separate RAW helper process.
 - One broad smoke/integration executable with four CTest entry points.
 
-The current release is 2.1.0. The first-party `src/` tree is approximately 53,000 physical lines across 71 source/header files. The largest units are `src/ui/MainWindow.cpp` (~27,263 lines), `src/browser/BrowserPane.cpp` (~5,478), and `src/viewer/ViewerWindow.cpp` (~6,247). The code generally uses RAII, `ComPtr`, request epochs, bounded queues/caches, and ownership-safe `PostMessageW` payload transfer.
+The review snapshot was release 2.1.0; it is historical rather than the current release description. The first-party `src/` tree was approximately 53,000 physical lines across 71 source/header files at that snapshot. The largest units were `src/ui/MainWindow.cpp` (~27,263 lines), `src/browser/BrowserPane.cpp` (~5,478), and `src/viewer/ViewerWindow.cpp` (~6,247). The code generally uses RAII, `ComPtr`, request epochs, bounded queues/caches, and ownership-safe `PostMessageW` payload transfer. See the README for the current 2.3.0 release identity.
 
 ### Review scope and validation
 
@@ -135,8 +135,8 @@ The product is notably more complete than the May review indicated: structured r
 
 The post-review branch also shipped a consolidated themed Settings surface, Quick Actions persistence, native shell drag-out and drop-in, clipboard and duplicate workflows, undo/redo, single-instance launch forwarding, taskbar progress, viewer keyboard/focus improvements, and broader decoder diagnostics. The strongest remaining opportunities inside the browser/viewer scope are:
 
-1. **n-up compare with synchronized zoom/pan.** Two-up compare exists; 3/4-up culling and synchronized inspection remain planned ([specs/14-todo.md](../specs/14-todo.md#L265-L278)).
-2. **Color-managed display.** This is material for photographers and remains absent ([specs/14-todo.md](../specs/14-todo.md#L289-L296)).
+1. **n-up compare with synchronized zoom/pan.** Two-up compare exists; 3/4-up culling and synchronized inspection remain planned ([current roadmap](../FUTURE-ROADMAP.md)).
+2. **Color-managed display.** This is material for photographers and remains absent ([current roadmap](../FUTURE-ROADMAP.md)).
 3. **Saved filter views.** Structured `rating:` and `tag:` parsing already exists ([src/browser/BrowserPane.cpp](../src/browser/BrowserPane.cpp#L300-L305), [src/browser/BrowserPane.cpp](../src/browser/BrowserPane.cpp#L377-L400)); persisting named expressions is a small, scope-compatible extension.
 4. **Histogram and inspection polish.** A details-panel histogram tooltip exists, but clip warnings and a richer viewer inspection workflow remain open.
 5. **HEIC/AVIF and animated viewer playback.** These are valid format-frontier items after reliability and color management, not before them.
@@ -145,7 +145,7 @@ Cross-folder catalog search could deliver value, but it conflicts with the expli
 
 ### 3B. UX and developer-experience gaps
 
-🟡 **Structured filters are implemented but the UI specification still documents substring-only filtering.** See [specs/04-ui-behavior.md](../specs/04-ui-behavior.md#L133-L140). The toolbar cue text helps discovery, but there is no saved-filter affordance.
+🟡 **Structured filters are implemented but the historical UI specification still documents substring-only filtering.** The current product contract and user guide are authoritative; the toolbar cue text helps discovery, but there is no saved-filter affordance.
 
 🟡 **Settings remain fragmented.** Performance settings are available, while slideshow, acceleration, theme, cache, and viewer behavior are distributed across menus. The existing roadmap's Settings/Tools consolidation is still justified if it preserves quick keyboard access.
 
