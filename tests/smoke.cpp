@@ -51,6 +51,7 @@
 #include "ui/CommandIds.h"
 #include "ui/DialogDpi.h"
 #include "ui/DialogShell.h"
+#include "ui/ExternalDropTarget.h"
 #include "ui/MainWindow.h"
 #include "ui/MainWindowDialogState.h"
 #include "ui/SettingsLayout.h"
@@ -251,6 +252,185 @@ namespace
     private:
         bool shouldUninitialize_{};
     };
+
+    struct DataObjectLifetimeState
+    {
+        bool destroyed{};
+    };
+
+    class TrackingDataObject final : public IDataObject
+    {
+    public:
+        explicit TrackingDataObject(DataObjectLifetimeState* state)
+            : state_(state)
+        {
+        }
+
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override
+        {
+            if (!object)
+            {
+                return E_POINTER;
+            }
+
+            *object = nullptr;
+            if (riid == IID_IUnknown || riid == IID_IDataObject)
+            {
+                *object = static_cast<IDataObject*>(this);
+                AddRef();
+                return S_OK;
+            }
+            return E_NOINTERFACE;
+        }
+
+        ULONG STDMETHODCALLTYPE AddRef() override
+        {
+            return ++refCount_;
+        }
+
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const ULONG remaining = --refCount_;
+            if (remaining == 0)
+            {
+                state_->destroyed = true;
+                delete this;
+            }
+            return remaining;
+        }
+
+        HRESULT STDMETHODCALLTYPE GetData(FORMATETC*, STGMEDIUM*) override
+        {
+            return E_NOTIMPL;
+        }
+
+        HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC*, STGMEDIUM*) override
+        {
+            return E_NOTIMPL;
+        }
+
+        HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC*) override
+        {
+            return E_NOTIMPL;
+        }
+
+        HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC*, FORMATETC*) override
+        {
+            return E_NOTIMPL;
+        }
+
+        HRESULT STDMETHODCALLTYPE SetData(FORMATETC*, STGMEDIUM*, BOOL) override
+        {
+            return E_NOTIMPL;
+        }
+
+        HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD, IEnumFORMATETC**) override
+        {
+            return E_NOTIMPL;
+        }
+
+        HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override
+        {
+            return E_NOTIMPL;
+        }
+
+        HRESULT STDMETHODCALLTYPE DUnadvise(DWORD) override
+        {
+            return E_NOTIMPL;
+        }
+
+        HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override
+        {
+            return E_NOTIMPL;
+        }
+
+    private:
+        DataObjectLifetimeState* state_{};
+        ULONG refCount_{1};
+    };
+
+        void RunExternalDropTargetDataObjectLifetimeScenario()
+        {
+         DataObjectLifetimeState leaveState;
+         auto* leaveDataObject = new TrackingDataObject(&leaveState);
+         int dragOverCalls = 0;
+         int dragLeaveCalls = 0;
+         auto* leaveTarget = new hyperbrowse::ui::ExternalDropTarget(
+             GetDesktopWindow(),
+             [&](IDataObject* dataObject, DWORD, POINT)
+             {
+              ++dragOverCalls;
+              Expect(dataObject != nullptr && !leaveState.destroyed,
+                  "DragOver received a data object after its source reference was released");
+              return DROPEFFECT_COPY;
+             },
+             [](IDataObject*, DWORD, POINT)
+             {
+              return DROPEFFECT_NONE;
+             },
+             [&]()
+             {
+              ++dragLeaveCalls;
+             });
+
+         DWORD effect = DROPEFFECT_NONE;
+         Expect(SUCCEEDED(leaveTarget->DragEnter(leaveDataObject, 0, POINTL{0, 0}, &effect)),
+             "ExternalDropTarget rejected DragEnter in the lifetime scenario");
+         Expect(effect == DROPEFFECT_COPY && dragOverCalls == 1,
+             "ExternalDropTarget did not invoke the initial drag-over callback");
+
+         leaveDataObject->Release();
+         Expect(!leaveState.destroyed,
+             "ExternalDropTarget did not retain the data object after DragEnter returned");
+
+         Expect(SUCCEEDED(leaveTarget->DragOver(0, POINTL{0, 0}, &effect)),
+             "ExternalDropTarget rejected DragOver after the source released its reference");
+         Expect(dragOverCalls == 2,
+             "ExternalDropTarget did not invoke DragOver with its retained data object");
+
+         Expect(SUCCEEDED(leaveTarget->DragLeave()), "ExternalDropTarget rejected DragLeave");
+         Expect(dragLeaveCalls == 1 && leaveState.destroyed,
+             "ExternalDropTarget did not release the retained data object on DragLeave");
+         leaveTarget->Release();
+
+         DataObjectLifetimeState dropState;
+         auto* dropDataObject = new TrackingDataObject(&dropState);
+         int dropCalls = 0;
+         auto* dropTarget = new hyperbrowse::ui::ExternalDropTarget(
+             GetDesktopWindow(),
+             [&](IDataObject* dataObject, DWORD, POINT)
+             {
+              Expect(dataObject != nullptr && !dropState.destroyed,
+                  "Drop scenario lost its data object during DragEnter");
+              return DROPEFFECT_COPY;
+             },
+             [&](IDataObject* dataObject, DWORD, POINT)
+             {
+              ++dropCalls;
+              Expect(dataObject == dropDataObject && !dropState.destroyed,
+                  "Drop callback received an invalid data object");
+              return DROPEFFECT_COPY;
+             },
+             []()
+             {
+             });
+
+         Expect(SUCCEEDED(dropTarget->DragEnter(dropDataObject, 0, POINTL{0, 0}, &effect)),
+             "ExternalDropTarget rejected DragEnter in the drop lifetime scenario");
+         dropDataObject->Release();
+         Expect(!dropState.destroyed,
+             "ExternalDropTarget did not retain the data object before Drop");
+
+         dropDataObject->AddRef();
+         Expect(SUCCEEDED(dropTarget->Drop(dropDataObject, 0, POINTL{0, 0}, &effect)),
+             "ExternalDropTarget rejected Drop in the lifetime scenario");
+         Expect(dropCalls == 1 && !dropState.destroyed,
+             "ExternalDropTarget released the data object before Drop completed");
+         dropDataObject->Release();
+         Expect(dropState.destroyed,
+             "ExternalDropTarget did not release the retained data object on Drop");
+         dropTarget->Release();
+        }
 
     class TempFolder
     {
@@ -5644,6 +5824,7 @@ int main(int argc, char* argv[])
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
         const bool multiViewerSettingsOnly = argc > 1 && std::string_view(argv[1]) == "--multi-viewer-settings";
         const bool userMetadataOnly = argc > 1 && std::string_view(argv[1]) == "--user-metadata";
+        const bool externalDropTargetOnly = argc > 1 && std::string_view(argv[1]) == "--external-drop-target";
         const bool nvJpegHardwareOnly = argc > 1 && std::string_view(argv[1]) == "--nvjpeg-hardware";
         const std::string_view selectedScenario = argc > 1 ? std::string_view(argv[1]) : std::string_view{};
         const bool policyOnly = hyperbrowse::tests::RunFocusedPolicyScenario(selectedScenario);
@@ -5704,6 +5885,10 @@ int main(int argc, char* argv[])
         {
             hyperbrowse::tests::RunUserMetadataScenarios();
         }
+        else if (externalDropTargetOnly)
+        {
+            RunExternalDropTargetDataObjectLifetimeScenario();
+        }
         else if (nvJpegHardwareOnly)
         {
             Expect(argc > 2, "--nvjpeg-hardware requires a JPEG fixture path");
@@ -5748,6 +5933,7 @@ int main(int argc, char* argv[])
             RunMainWindowKeyboardFocusScenario(instance);
             RunMainWindowAccessibilityScenario(instance);
             RunMainWindowTextInputAcceleratorScenario(instance);
+            RunExternalDropTargetDataObjectLifetimeScenario();
         }
 
         DestroyWindow(hwnd);

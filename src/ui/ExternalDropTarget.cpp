@@ -113,7 +113,7 @@ namespace hyperbrowse::ui
 
         POINT clientPoint{point.x, point.y};
         ScreenToClient(windowHandle_, &clientPoint);
-        *effect = dragOverCallback_(lastDataObject_, keyState, clientPoint);
+        *effect = dragOverCallback_(lastDataObject_.Get(), keyState, clientPoint);
         return S_OK;
     }
 }

@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <oleidl.h>
+#include <wrl/client.h>
 
 #include <functional>
 
@@ -38,7 +39,7 @@ namespace hyperbrowse::ui
         HRESULT InvokeDragOver(DWORD keyState, POINTL point, DWORD* effect);
 
         HWND windowHandle_{};
-        IDataObject* lastDataObject_{};
+        Microsoft::WRL::ComPtr<IDataObject> lastDataObject_{};
         DropCallback dragOverCallback_;
         DropCallback dropCallback_;
         DragLeaveCallback dragLeaveCallback_;
