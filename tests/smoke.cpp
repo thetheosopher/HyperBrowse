@@ -1574,6 +1574,67 @@ namespace
          Expect(accessMetadataPersisted,
              "Persistent thumbnail cache did not append batched access metadata to its journal");
 
+        const fs::path unicodeCacheRoot = root.Root() / L"unicode-cache";
+        const fs::path unicodeFolder = root.Root() / L"\xD14C\xC2A4\xD2B8";
+        const fs::path unicodeImagePath = unicodeFolder / L"\xC0AC\xC9C4.jpg";
+        const fs::path followingImagePath = root.Root() / L"following.png";
+        fs::create_directories(unicodeFolder);
+        fs::create_directories(unicodeCacheRoot);
+        WriteTestImage(unicodeImagePath, TestImageFormat::Png, 40, 20);
+        WriteTestImage(followingImagePath, TestImageFormat::Png, 24, 12);
+
+        const auto unicodeKey = MakeCacheKey(unicodeImagePath, 31);
+        const auto followingKey = MakeCacheKey(followingImagePath, 37);
+        const auto unicodeThumbnail = decoder.Decode(unicodeKey);
+        const auto followingThumbnail = decoder.Decode(followingKey);
+        Expect(unicodeThumbnail != nullptr && followingThumbnail != nullptr,
+               "Failed to create thumbnails used for Unicode persistent-cache testing");
+
+        std::string expectedSerializedUnicodePath = Utf8FromWide(
+            hyperbrowse::util::NormalizePathForComparison(unicodeKey.filePath));
+        for (std::size_t position = 0; position < expectedSerializedUnicodePath.size(); ++position)
+        {
+            if (expectedSerializedUnicodePath[position] == '\\')
+            {
+                expectedSerializedUnicodePath.insert(position, 1, '\\');
+                ++position;
+            }
+        }
+        {
+            hyperbrowse::cache::DiskThumbnailCache unicodeCache(4ULL * 1024ULL * 1024ULL, unicodeCacheRoot.wstring());
+            unicodeCache.Store(unicodeKey, unicodeThumbnail);
+            unicodeCache.Store(followingKey, followingThumbnail);
+
+            std::ifstream journalStream(unicodeCacheRoot / L"index.journal.tsv", std::ios::binary);
+            const std::string journalBytes((std::istreambuf_iterator<char>(journalStream)),
+                                            std::istreambuf_iterator<char>());
+                 Expect(journalBytes.find(expectedSerializedUnicodePath) != std::string::npos,
+                     "Persistent thumbnail cache did not write the Unicode path to the journal");
+                 Expect(std::count(journalBytes.begin(), journalBytes.end(), '\n') == 2,
+                     "Persistent thumbnail cache did not terminate adjacent journal rows");
+            Expect(unicodeCache.Compact(),
+                   "Persistent thumbnail cache failed to compact rows containing Unicode paths");
+
+            std::ifstream indexStream(unicodeCacheRoot / L"index.tsv", std::ios::binary);
+            const std::string indexBytes((std::istreambuf_iterator<char>(indexStream)),
+                                         std::istreambuf_iterator<char>());
+                     Expect(indexBytes.find(expectedSerializedUnicodePath) != std::string::npos,
+                     "Persistent thumbnail cache did not write the Unicode path to the index");
+                 Expect(std::count(indexBytes.begin(), indexBytes.end(), '\n') == 2,
+                     "Persistent thumbnail cache did not terminate adjacent index rows");
+        }
+        {
+            hyperbrowse::cache::DiskThumbnailCache reloadedUnicodeCache(
+                4ULL * 1024ULL * 1024ULL,
+                unicodeCacheRoot.wstring());
+            Expect(reloadedUnicodeCache.TryLoad(unicodeKey) != nullptr
+                       && reloadedUnicodeCache.TryLoad(followingKey) != nullptr,
+                   "Persistent thumbnail cache did not reload adjacent Unicode and ASCII rows");
+            std::error_code journalError;
+            Expect(fs::file_size(unicodeCacheRoot / L"index.journal.tsv", journalError) == 0 && !journalError,
+                   "Persistent thumbnail cache did not truncate the journal after Unicode compaction");
+        }
+
         const fs::path journalReplayRoot = root.Root() / L"journal-replay-cache";
            fs::create_directories(journalReplayRoot);
         {

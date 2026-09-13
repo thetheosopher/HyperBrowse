@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -46,6 +47,134 @@ namespace
     constexpr std::size_t kAccessPersistenceInterval = 64;
     constexpr std::size_t kJournalCompactionThresholdBytes = 8ULL * 1024ULL * 1024ULL;
     constexpr std::wstring_view kJournalFileName = L"index.journal.tsv";
+
+    bool EncodeUtf8(std::wstring_view value, std::string* encoded)
+    {
+        if (!encoded || value.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        {
+            return false;
+        }
+
+        encoded->clear();
+        if (value.empty())
+        {
+            return true;
+        }
+
+        const int inputLength = static_cast<int>(value.size());
+        const int required = WideCharToMultiByte(CP_UTF8,
+                                                 WC_ERR_INVALID_CHARS,
+                                                 value.data(),
+                                                 inputLength,
+                                                 nullptr,
+                                                 0,
+                                                 nullptr,
+                                                 nullptr);
+        if (required <= 0)
+        {
+            return false;
+        }
+
+        encoded->resize(static_cast<std::size_t>(required));
+        if (WideCharToMultiByte(CP_UTF8,
+                                WC_ERR_INVALID_CHARS,
+                                value.data(),
+                                inputLength,
+                                encoded->data(),
+                                required,
+                                nullptr,
+                                nullptr) != required)
+        {
+            encoded->clear();
+            return false;
+        }
+        return true;
+    }
+
+    bool DecodeUtf8(std::string_view encoded, std::wstring* value)
+    {
+        if (!value || encoded.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        {
+            return false;
+        }
+
+        value->clear();
+        if (encoded.empty())
+        {
+            return true;
+        }
+
+        const int inputLength = static_cast<int>(encoded.size());
+        const int required = MultiByteToWideChar(CP_UTF8,
+                                                 MB_ERR_INVALID_CHARS,
+                                                 encoded.data(),
+                                                 inputLength,
+                                                 nullptr,
+                                                 0);
+        if (required <= 0)
+        {
+            return false;
+        }
+
+        value->resize(static_cast<std::size_t>(required));
+        if (MultiByteToWideChar(CP_UTF8,
+                                MB_ERR_INVALID_CHARS,
+                                encoded.data(),
+                                inputLength,
+                                value->data(),
+                                required) != required)
+        {
+            value->clear();
+            return false;
+        }
+        return true;
+    }
+
+    bool DecodeCacheLine(std::string_view encoded, std::wstring* value)
+    {
+        if (DecodeUtf8(encoded, value))
+        {
+            return true;
+        }
+
+        if (!value)
+        {
+            return false;
+        }
+
+        value->clear();
+        value->reserve(encoded.size());
+        for (const unsigned char character : encoded)
+        {
+            value->push_back(static_cast<wchar_t>(character));
+        }
+        return true;
+    }
+
+    bool WriteUtf8Line(std::ofstream& stream, std::wstring_view value, std::size_t* bytesWritten = nullptr)
+    {
+        std::string encoded;
+        if (!EncodeUtf8(value, &encoded))
+        {
+            return false;
+        }
+
+        if (!encoded.empty())
+        {
+            stream.write(encoded.data(), static_cast<std::streamsize>(encoded.size()));
+        }
+        stream.put('\n');
+        if (!stream)
+        {
+            return false;
+        }
+
+        if (bytesWritten)
+        {
+            *bytesWritten = encoded.size() + 1;
+        }
+        return true;
+    }
 
     struct ParsedIndexEntry
     {
@@ -959,23 +1088,26 @@ namespace hyperbrowse::cache
         }
 
         const fs::path journalPath = fs::path(cacheDirectory_) / kJournalFileName;
-        std::wofstream stream(journalPath, std::ios::app);
+        std::ofstream stream(journalPath, std::ios::binary | std::ios::app);
         if (!stream)
         {
             return false;
         }
 
-        stream << record << L'\n';
+        std::size_t bytesWritten = 0;
+        if (!WriteUtf8Line(stream, record, &bytesWritten))
+        {
+            return false;
+        }
         stream.flush();
         if (!stream)
         {
             return false;
         }
 
-        if (record.size() < std::numeric_limits<std::size_t>::max()
-            && record.size() + 1 <= (std::numeric_limits<std::size_t>::max() - journalBytes_) / sizeof(wchar_t))
+        if (bytesWritten <= std::numeric_limits<std::size_t>::max() - journalBytes_)
         {
-            journalBytes_ += (record.size() + 1) * sizeof(wchar_t);
+            journalBytes_ += bytesWritten;
             if (journalBytes_ >= kJournalCompactionThresholdBytes)
             {
                 compactionRequested_ = true;
@@ -1079,7 +1211,7 @@ namespace hyperbrowse::cache
         }
 
         const fs::path journalPath = fs::path(cacheDirectory_) / kJournalFileName;
-        std::wofstream stream(journalPath, std::ios::trunc);
+        std::ofstream stream(journalPath, std::ios::binary | std::ios::trunc);
         if (!stream)
         {
             return false;
@@ -1161,12 +1293,23 @@ namespace hyperbrowse::cache
         }
 
         const fs::path indexPath = fs::path(cacheDirectory) / kIndexFileName;
-        std::wifstream stream(indexPath);
+        std::ifstream stream(indexPath, std::ios::binary);
         if (stream)
         {
-            std::wstring line;
-            while (std::getline(stream, line))
+            std::string encodedLine;
+            while (std::getline(stream, encodedLine))
             {
+                if (!encodedLine.empty() && encodedLine.back() == '\r')
+                {
+                    encodedLine.pop_back();
+                }
+
+                std::wstring line;
+                if (!DecodeCacheLine(encodedLine, &line))
+                {
+                    continue;
+                }
+
                 ParsedIndexEntry parsedEntry;
                 if (!TryParseIndexEntry(line, &parsedEntry))
                 {
@@ -1202,15 +1345,26 @@ namespace hyperbrowse::cache
                 ? std::numeric_limits<std::size_t>::max()
                 : static_cast<std::size_t>(journalFileBytes);
         }
-        std::wifstream journalStream(journalPath);
+        std::ifstream journalStream(journalPath, std::ios::binary);
         if (journalStream)
         {
-            std::wstring line;
-            while (std::getline(journalStream, line))
+            std::string encodedLine;
+            while (std::getline(journalStream, encodedLine))
             {
                 if (journalStream.eof())
                 {
                     break;
+                }
+
+                if (!encodedLine.empty() && encodedLine.back() == '\r')
+                {
+                    encodedLine.pop_back();
+                }
+
+                std::wstring line;
+                if (!DecodeCacheLine(encodedLine, &line))
+                {
+                    continue;
                 }
                 ReplayJournalRecordLocked(line);
             }
@@ -1228,7 +1382,7 @@ namespace hyperbrowse::cache
 
         const fs::path indexPath = fs::path(cacheDirectory_) / kIndexFileName;
         const fs::path temporaryPath = fs::path(indexPath.wstring() + L".tmp." + std::to_wstring(GetCurrentProcessId()));
-        std::wofstream stream(temporaryPath, std::ios::trunc);
+        std::ofstream stream(temporaryPath, std::ios::binary | std::ios::trunc);
         if (!stream)
         {
             return false;
@@ -1236,7 +1390,14 @@ namespace hyperbrowse::cache
 
         for (const auto& [key, entry] : entries_)
         {
-            stream << BuildIndexLine(key, entry.cacheFileName, entry.fileBytes, entry.lastAccessOrdinal) << L'\n';
+            if (!WriteUtf8Line(stream,
+                               BuildIndexLine(key, entry.cacheFileName, entry.fileBytes, entry.lastAccessOrdinal)))
+            {
+                stream.close();
+                std::error_code error;
+                fs::remove(temporaryPath, error);
+                return false;
+            }
         }
 
         stream.flush();
