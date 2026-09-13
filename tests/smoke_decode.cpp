@@ -131,6 +131,28 @@ namespace hyperbrowse::tests
                      "HEIC was incorrectly classified as a RAW format");
              }
 
+             void RunJpegXlFormatAllowlistScenario()
+             {
+                 Expect(hyperbrowse::decode::IsWicFileType(L"jxl"),
+                     "WIC allowlist omitted JPEG XL");
+                 Expect(hyperbrowse::decode::IsWicFileType(L".JXL"),
+                     "WIC allowlist did not normalize the JPEG XL extension");
+                 Expect(hyperbrowse::browser::IsSupportedImageExtension(L".JXL"),
+                     "Browser extension policy omitted JPEG XL");
+
+                 hyperbrowse::browser::BrowserItem item;
+                 item.fileName = L"sample.jxl";
+                 item.filePath = L"C:\\Images\\sample.jxl";
+                 item.fileType = L"JXL";
+
+                 Expect(hyperbrowse::decode::CanDecodeThumbnail(item),
+                     "JPEG XL thumbnail routing did not use the WIC decoder");
+                 Expect(hyperbrowse::decode::CanDecodeFullImage(item),
+                     "JPEG XL full-image routing did not use the WIC decoder");
+                 Expect(!hyperbrowse::decode::IsRawFileType(L"jxl"),
+                     "JPEG XL was incorrectly classified as a RAW format");
+             }
+
         void RunRawHelperProtocolScenario()
         {
             TempFolder root(L"HyperBrowseRawHelperProtocol");
@@ -221,6 +243,7 @@ namespace hyperbrowse::tests
         RunRawFormatAllowlistScenario();
         RunWebpFormatAllowlistScenario();
         RunHeicFormatAllowlistScenario();
+        RunJpegXlFormatAllowlistScenario();
         RunRawHelperProtocolScenario();
         RunThumbnailFailureClassificationScenario();
     }
