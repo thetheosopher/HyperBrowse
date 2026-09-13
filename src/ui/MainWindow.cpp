@@ -6120,7 +6120,7 @@ namespace
             {
                 continue;
             }
-            if (keyMessage && message.wParam == VK_TAB && (GetKeyState(VK_CONTROL) & 0x8000) != 0)
+            if (keyMessage && dialogMessage && message.wParam == VK_TAB && (GetKeyState(VK_CONTROL) & 0x8000) != 0)
             {
                 const int pageCount = static_cast<int>(ConsolidatedSettingsPage::Count);
                 int pageIndex = static_cast<int>(state.page);
@@ -6132,12 +6132,12 @@ namespace
                 focusFirstControlOnPage();
                 continue;
             }
-            if (keyMessage && message.wParam == VK_ESCAPE && !ExperimentalSettingsChoiceDropped(state))
+            if (keyMessage && dialogMessage && message.wParam == VK_ESCAPE && !ExperimentalSettingsChoiceDropped(state))
             {
                 SendMessageW(dialogWindow, WM_CLOSE, 0, 0);
                 continue;
             }
-            if (keyMessage && message.wParam == VK_RETURN && !ExperimentalSettingsChoiceDropped(state))
+            if (keyMessage && dialogMessage && message.wParam == VK_RETURN && !ExperimentalSettingsChoiceDropped(state))
             {
                 SendMessageW(dialogWindow, WM_COMMAND, MAKEWPARAM(kExperimentalSettingsOkId, BN_CLICKED), 0);
                 continue;
