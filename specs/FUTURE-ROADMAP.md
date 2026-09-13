@@ -72,80 +72,14 @@ Competitors expose almost no resource controls. HyperBrowse should ship a
 small, opinionated set that is **safe by default** and **explicit when
 asked**.
 
-### `A1` Adaptive Resource Profile (P0)
-
-**Goal:** A first-class, user-visible resource profile that drives every
-cache budget, worker count, and prefetch depth from a single decision.
-
-**Implementation status:** Shipped. The persisted
-`Conservative` / `Balanced` / `Performance` / `Aggressive` profiles drive
-automatic thumbnail-cache sizing, metadata-cache sizing, worker counts, viewer
-lookahead, and folder warm-up. The Performance settings tab also persists
-explicit cache-cap overrides and an optional prefetch-depth override from 1
-through 16 items; Auto follows the active profile. Cache usage, hit rates,
-memory-pressure state, and persistent-cache status are available through the
-Performance settings surface.
-
-- Use a `ResourceProfile` enum: `Conservative`, `Balanced` (default),
-  `Performance`, and `Aggressive`.
-- Profile selection lives in a new **Help ▸ Settings… ▸ Performance** tab
-  (also a Tools menu shortcut). Persisted under `Software\HyperBrowse` as
-  `ResourceProfile` plus explicit cache-cap and prefetch-depth overrides.
-- Each profile maps to concrete multipliers fed into the existing
-  `ResolveThumbnailCacheCapacityBytes`, `ResolveMetadataCacheCapacityEntries`,
-  and worker-count helpers. Example mapping (subject to bench tuning):
-
-  | Profile | Thumb cache cap | Metadata cap | Prefetch radius | Workers |
-  | --- | --- | --- | --- | --- |
-  | Conservative | adaptive | adaptive | 1 | profile-sized |
-  | Balanced (default) | adaptive | adaptive | 3 | profile-sized |
-  | Performance | adaptive | adaptive | 8 | profile-sized |
-  | Aggressive | adaptive | adaptive | 12 | profile-sized |
-
-  *Performance is hard-capped at `availablePhysicalBytes / 3` regardless of
-  user input to keep the OS healthy.
-
-- An explicit prefetch override is persisted as `PrefetchDepthOverride`; zero
-  means Auto and values are clamped to 1 through 16.
-- Implementation surface: thread the resolved profile through
-  `ThumbnailScheduler`, `ImageMetadataService`, `ViewerWindow` prefetch,
-  browser lookahead, and the folder warm-up window (A7).
-
-### `A2` Cache Sizing UI With Live Feedback (P0)
-
-**Goal:** A compact controller users can trust, with no math.
-
-**Implementation status:** Shipped. The Performance settings tab exposes
-slider and numeric controls for thumbnail-cache, metadata-cache,
-persistent-cache, and prefetch budgets, with profile-following automatic
-sizing. These values persist under `Software\HyperBrowse` and apply to the
-browser and viewer paths through the existing service construction flow.
-Live usage, hit-rate, and persistent-cache feedback is refreshed
-asynchronously; it is also available in the non-modal **Cache Stats** tab of
-the file details panel while folders are browsed. Profile-derived recommended
-ranges and a background Trim Now action are included.
-
-- Controls in the Performance tab show:
-  - Thumbnail cache budget (MB), bounded by detected RAM, with live readouts
-    of current bytes-in-use vs cap and current hit rate.
-  - Metadata cache entry budget, with live entry count and hit rate.
-  - Persistent thumbnail cache budget (MB) and on-disk size today, with a
-    **Trim Now** button.
-- Each slider shows a recommended range derived from `QueryMemorySnapshot()`
-  plus the active `ResourceProfile`.
-- Persisted as `ThumbnailCacheCapBytesOverride`,
-  `MetadataCacheCapEntriesOverride`, `PersistentThumbnailCacheCapBytes`.
-- Values are honored at next service construction; apply-without-restart is
-  acceptable but not required for v1 of the UI.
-
 ### `A3` Persistent Thumbnail Cache Maturity (P0)
 
 The first persistence pass shipped; now harden it.
 
 - Sharded directory layout (`xx/yy/<hash>.bin`) to keep per-directory entry
   counts low on huge libraries.
-- LRU eviction by size, driven by `PersistentThumbnailCacheCapBytes` (see
-  A2), default `min(totalRam/2, 8 GB)` capped by free-disk headroom on the
+- LRU eviction by size, driven by the configured persistent thumbnail-cache
+  budget, default `min(totalRam/2, 8 GB)` capped by free-disk headroom on the
   cache volume.
 - Background compaction pass on idle: deduplicate, drop entries for missing
   files, repack shards.
@@ -529,8 +463,8 @@ Each accepted item must satisfy:
 1. **Performance hold-the-line.** No regression in startup, first-visible-
    thumbnail, scroll smoothness, or viewer-open latency on the Theme D
    reference dataset.
-2. **Adaptive defaults.** Any new resource consumer plumbs into the
-   `ResourceProfile` (A1) and respects memory pressure (A4).
+2. **Adaptive defaults.** Any new resource consumer plumbs into the shipped
+  `ResourceProfile` contract and respects memory pressure (A4).
 3. **Native dependency budget.** New dependencies require an opt-out build
    flag and a documented runtime fallback.
 4. **Tested.** Smoke or integration coverage added/updated under `tests/`.
@@ -559,6 +493,11 @@ focused. The summarized status as of this revision:
 - **Caching:** runtime-adaptive thumbnail and metadata cache sizing keyed
   off `GlobalMemoryStatusEx`, optional persistent thumbnail cache under
   `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache`.
+- **Adaptive resource controls (A1/A2):** persisted resource profiles,
+  profile-following cache and prefetch controls, explicit cache-cap overrides,
+  the non-modal Cache Stats details tab, and asynchronous persistent-cache
+  trimming. The shipped contract is documented in
+  [PRODUCT_SPEC.md](PRODUCT_SPEC.md).
 - **Architecture / hygiene:** shared `HyperBrowseCore` static library,
   smoke + integration test suite, GitHub Actions CI, portable zip + Inno
   Setup 6 installer with CUDA redistributable bundling, static MSVC

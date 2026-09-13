@@ -90,6 +90,11 @@ conversion, and low-friction culling.
 - Per-monitor DPI awareness, asynchronous folder-tree child-presence probing,
   stale-result rejection, persistent thumbnail-cache maintenance, diagnostics,
   and smoke-tested Debug/Release packaging paths
+- Adaptive resource profiles (`Conservative`, `Balanced`, `Performance`, and
+  `Aggressive`) with persisted cache and prefetch overrides in **Tools >
+  Settings > Performance**
+- A non-modal **Cache Stats** tab in the details panel for asynchronous
+  thumbnail, metadata, and persistent-cache usage statistics
 
 ### Deferred or intentionally out of scope
 - Heavy image editing
@@ -232,6 +237,25 @@ Expose EXIF, IPTC, and XMP data where available.
 - runtime-adaptive in-memory thumbnail cache sized to host RAM (default ~`min(totalRam/8, availableRam/5)`, clamped 128 MB–1 GB)
 - runtime-adaptive metadata cache (default sized from host RAM, clamped 2,048–65,536 entries)
 - optional persistent thumbnail cache under `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache`, maintained off the UI thread
+
+### Adaptive resource controls
+- **Tools > Settings > Performance** exposes the persisted
+  `Conservative`, `Balanced`, `Performance`, and `Aggressive` resource
+  profiles. `Balanced` is the default.
+- Automatic thumbnail-cache, metadata-cache, persistent-cache, and prefetch
+  settings follow the active profile. The profile also sizes worker pools and
+  controls viewer lookahead and folder warm-up behavior.
+- Users can override thumbnail-cache capacity in megabytes, metadata-cache
+  capacity in entries, persistent-cache capacity in megabytes, and prefetch
+  depth from 1 through 16 items. **Follow profile** restores the automatic
+  value for each setting.
+- The details panel's **Cache Stats** tab reports current in-memory thumbnail
+  and metadata usage, hit rates, and persistent-cache statistics through
+  asynchronous refreshes without blocking the UI.
+- **Trim persistent cache now** performs asynchronous maintenance that removes
+  orphaned persistent thumbnails, repairs stale index entries, and evicts
+  entries until the configured persistent-cache budget is satisfied. It does
+  not change the configured budget or purge the entire cache.
 
 ## 12. Distribution
 
