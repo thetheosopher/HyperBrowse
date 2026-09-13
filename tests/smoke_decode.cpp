@@ -109,6 +109,28 @@ namespace hyperbrowse::tests
                      "WebP was incorrectly classified as a RAW format");
              }
 
+             void RunHeicFormatAllowlistScenario()
+             {
+                 Expect(hyperbrowse::decode::IsWicFileType(L"heic"),
+                     "WIC allowlist omitted HEIC");
+                 Expect(hyperbrowse::decode::IsWicFileType(L".HEIC"),
+                     "WIC allowlist did not normalize the HEIC extension");
+                 Expect(hyperbrowse::browser::IsSupportedImageExtension(L".HEIC"),
+                     "Browser extension policy omitted HEIC");
+
+                 hyperbrowse::browser::BrowserItem item;
+                 item.fileName = L"sample.heic";
+                 item.filePath = L"C:\\Images\\sample.heic";
+                 item.fileType = L"HEIC";
+
+                 Expect(hyperbrowse::decode::CanDecodeThumbnail(item),
+                     "HEIC thumbnail routing did not use the WIC decoder");
+                 Expect(hyperbrowse::decode::CanDecodeFullImage(item),
+                     "HEIC full-image routing did not use the WIC decoder");
+                 Expect(!hyperbrowse::decode::IsRawFileType(L"heic"),
+                     "HEIC was incorrectly classified as a RAW format");
+             }
+
         void RunRawHelperProtocolScenario()
         {
             TempFolder root(L"HyperBrowseRawHelperProtocol");
@@ -198,6 +220,7 @@ namespace hyperbrowse::tests
     {
         RunRawFormatAllowlistScenario();
         RunWebpFormatAllowlistScenario();
+        RunHeicFormatAllowlistScenario();
         RunRawHelperProtocolScenario();
         RunThumbnailFailureClassificationScenario();
     }
