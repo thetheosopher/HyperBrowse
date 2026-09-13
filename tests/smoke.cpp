@@ -36,6 +36,7 @@
 #include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
 #include "decode/NvJpegDecoder.h"
+#include "decode/WicDecodeHelpers.h"
 #include "decode/WicThumbnailDecoder.h"
 
 #include "services/BatchConvertService.h"
@@ -1810,6 +1811,28 @@ namespace
          Expect(corruptJpegThumbnail == nullptr, "WIC unexpectedly decoded a corrupt JPEG");
          Expect(corruptJpegError.find(L"HRESULT 0x") != std::wstring::npos,
              "WIC did not provide an HRESULT for the corrupt JPEG decode failure");
+    }
+
+    void RunWicErrorReportingScenario()
+    {
+        namespace wic = hyperbrowse::decode::wic_support;
+
+        std::wstring errorMessage;
+        wic::SetError(&errorMessage, L"Invalid WIC input.", HRESULT_FROM_WIN32(ERROR_INVALID_DATA));
+        Expect(errorMessage.find(L"HRESULT 0x8007000D") != std::wstring::npos,
+               "WIC error formatting did not preserve the failing HRESULT");
+        Expect(errorMessage.find(L"HRESULT 0x00000000") == std::wstring::npos,
+               "WIC error formatting reported success for a failure status");
+
+        void* bits = nullptr;
+        HRESULT bitmapResult = S_OK;
+        HBITMAP bitmap = wic::CreateBitmapBuffer(0, 1, &bits, &bitmapResult);
+        if (bitmap)
+        {
+            DeleteObject(bitmap);
+        }
+        Expect(bitmap == nullptr, "WIC bitmap helper accepted an invalid width");
+        Expect(bitmapResult == E_INVALIDARG, "WIC bitmap helper lost its invalid-argument status");
     }
 
     void RunJpegOrientationAdjustmentScenario()
@@ -5550,6 +5573,7 @@ int main(int argc, char* argv[])
             RunDiskThumbnailCacheCorruptionScenario();
             RunRedactedDiagnosticsExportScenario();
             RunWicDecoderScenario();
+            RunWicErrorReportingScenario();
             RunJpegOrientationAdjustmentScenario();
             RunImageCommandServiceScenario(hwnd, &state);
             RunBatchConvertCancellationScenario(hwnd, &state);

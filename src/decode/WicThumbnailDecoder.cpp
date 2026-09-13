@@ -54,13 +54,16 @@ namespace hyperbrowse::decode
         UINT sourceWidth = 0;
         UINT sourceHeight = 0;
         result = frame->GetSize(&sourceWidth, &sourceHeight);
-        if (FAILED(result) || sourceWidth == 0 || sourceHeight == 0)
+        const bool invalidDimensions = sourceWidth == 0 || sourceHeight == 0;
+        if (FAILED(result) || invalidDimensions)
         {
             wic::SetError(decodeError,
-                          sourceWidth == 0 || sourceHeight == 0
+                          SUCCEEDED(result) && invalidDimensions
                               ? L"The selected image does not report valid dimensions."
                               : L"Failed to read the image dimensions.",
-                          result);
+                          SUCCEEDED(result) && invalidDimensions
+                              ? HRESULT_FROM_WIN32(ERROR_INVALID_DATA)
+                              : result);
             return {};
         }
 
@@ -84,11 +87,18 @@ namespace hyperbrowse::decode
             {
                 ComPtr<IWICBitmapScaler> preRotationScaler;
                 result = factory->CreateBitmapScaler(&preRotationScaler);
-                if (FAILED(result) || FAILED(preRotationScaler->Initialize(
+                if (FAILED(result))
+                {
+                    wic::SetError(decodeError, L"Failed to scale the decoded image.", result);
+                    return {};
+                }
+
+                result = preRotationScaler->Initialize(
                     frame.Get(),
                     scaledHeight,
                     scaledWidth,
-                    WICBitmapInterpolationModeFant)))
+                    WICBitmapInterpolationModeFant);
+                if (FAILED(result))
                 {
                     wic::SetError(decodeError, L"Failed to scale the decoded image.", result);
                     return {};
@@ -111,7 +121,14 @@ namespace hyperbrowse::decode
 
             ComPtr<IWICBitmapFlipRotator> rotator;
             result = factory->CreateBitmapFlipRotator(&rotator);
-            if (FAILED(result) || FAILED(rotator->Initialize(source.Get(), transform)))
+            if (FAILED(result))
+            {
+                wic::SetError(decodeError, L"Failed to apply image orientation.", result);
+                return {};
+            }
+
+            result = rotator->Initialize(source.Get(), transform);
+            if (FAILED(result))
             {
                 wic::SetError(decodeError, L"Failed to apply image orientation.", result);
                 return {};
@@ -124,7 +141,14 @@ namespace hyperbrowse::decode
         {
             ComPtr<IWICBitmapScaler> scaler;
             result = factory->CreateBitmapScaler(&scaler);
-            if (FAILED(result) || FAILED(scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant)))
+            if (FAILED(result))
+            {
+                wic::SetError(decodeError, L"Failed to scale the decoded image.", result);
+                return {};
+            }
+
+            result = scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant);
+            if (FAILED(result))
             {
                 wic::SetError(decodeError, L"Failed to scale the decoded image.", result);
                 return {};
@@ -135,27 +159,35 @@ namespace hyperbrowse::decode
 
         ComPtr<IWICFormatConverter> converter;
         result = factory->CreateFormatConverter(&converter);
-        if (FAILED(result) || FAILED(converter->Initialize(
+        if (FAILED(result))
+        {
+            wic::SetError(decodeError, L"Failed to convert the decoded image into the viewer pixel format.", result);
+            return {};
+        }
+
+        result = converter->Initialize(
             source.Get(),
             GUID_WICPixelFormat32bppPBGRA,
             WICBitmapDitherTypeNone,
             nullptr,
             0.0,
-            WICBitmapPaletteTypeCustom)))
+            WICBitmapPaletteTypeCustom);
+        if (FAILED(result))
         {
             wic::SetError(decodeError, L"Failed to convert the decoded image into the viewer pixel format.", result);
             return {};
         }
 
         void* bits = nullptr;
-        HBITMAP bitmap = wic::CreateBitmapBuffer(scaledWidth, scaledHeight, &bits);
+        HRESULT bitmapResult = E_FAIL;
+        HBITMAP bitmap = wic::CreateBitmapBuffer(scaledWidth, scaledHeight, &bits, &bitmapResult);
         if (!bitmap || !bits)
         {
             if (bitmap)
             {
                 DeleteObject(bitmap);
             }
-            wic::SetError(decodeError, L"Failed to allocate the destination bitmap.", E_OUTOFMEMORY);
+            wic::SetError(decodeError, L"Failed to allocate the destination bitmap.", bitmapResult);
             return {};
         }
 

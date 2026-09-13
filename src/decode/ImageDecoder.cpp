@@ -424,13 +424,16 @@ namespace
         UINT sourceWidth = 0;
         UINT sourceHeight = 0;
         result = frame->GetSize(&sourceWidth, &sourceHeight);
-        if (FAILED(result) || sourceWidth == 0 || sourceHeight == 0)
+        const bool invalidDimensions = sourceWidth == 0 || sourceHeight == 0;
+        if (FAILED(result) || invalidDimensions)
         {
             wic::SetError(errorMessage,
-                          sourceWidth == 0 || sourceHeight == 0
+                          SUCCEEDED(result) && invalidDimensions
                               ? L"The selected image does not report valid dimensions."
                               : L"Failed to read the image dimensions.",
-                          result);
+                          SUCCEEDED(result) && invalidDimensions
+                              ? HRESULT_FROM_WIN32(ERROR_INVALID_DATA)
+                              : result);
             return {};
         }
 
@@ -457,11 +460,18 @@ namespace
             {
                 ComPtr<IWICBitmapScaler> preRotationScaler;
                 result = factory->CreateBitmapScaler(&preRotationScaler);
-                if (FAILED(result) || FAILED(preRotationScaler->Initialize(
+                if (FAILED(result))
+                {
+                    wic::SetError(errorMessage, L"Failed to scale the decoded image.", result);
+                    return {};
+                }
+
+                result = preRotationScaler->Initialize(
                     frame.Get(),
                     scaledHeight,
                     scaledWidth,
-                    WICBitmapInterpolationModeFant)))
+                    WICBitmapInterpolationModeFant);
+                if (FAILED(result))
             {
                     wic::SetError(errorMessage, L"Failed to scale the decoded image.", result);
                     return {};
@@ -484,7 +494,14 @@ namespace
 
             ComPtr<IWICBitmapFlipRotator> rotator;
             result = factory->CreateBitmapFlipRotator(&rotator);
-            if (FAILED(result) || FAILED(rotator->Initialize(source.Get(), transform)))
+            if (FAILED(result))
+            {
+                wic::SetError(errorMessage, L"Failed to apply image orientation.", result);
+                return {};
+            }
+
+            result = rotator->Initialize(source.Get(), transform);
+            if (FAILED(result))
             {
                 wic::SetError(errorMessage, L"Failed to apply image orientation.", result);
                 return {};
@@ -497,7 +514,14 @@ namespace
         {
             ComPtr<IWICBitmapScaler> scaler;
             result = factory->CreateBitmapScaler(&scaler);
-            if (FAILED(result) || FAILED(scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant)))
+            if (FAILED(result))
+            {
+                wic::SetError(errorMessage, L"Failed to scale the decoded image.", result);
+                return {};
+            }
+
+            result = scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant);
+            if (FAILED(result))
             {
                 wic::SetError(errorMessage, L"Failed to scale the decoded image.", result);
                 return {};
@@ -508,20 +532,28 @@ namespace
 
         ComPtr<IWICFormatConverter> converter;
         result = factory->CreateFormatConverter(&converter);
-        if (FAILED(result) || FAILED(converter->Initialize(
+        if (FAILED(result))
+        {
+            wic::SetError(errorMessage, L"Failed to convert the decoded image into the viewer pixel format.", result);
+            return {};
+        }
+
+        result = converter->Initialize(
             source.Get(),
             GUID_WICPixelFormat32bppPBGRA,
             WICBitmapDitherTypeNone,
             nullptr,
             0.0,
-            WICBitmapPaletteTypeCustom)))
+            WICBitmapPaletteTypeCustom);
+        if (FAILED(result))
         {
             wic::SetError(errorMessage, L"Failed to convert the decoded image into the viewer pixel format.", result);
             return {};
         }
 
         void* bits = nullptr;
-        HBITMAP bitmap = wic::CreateBitmapBuffer(scaledWidth, scaledHeight, &bits);
+        HRESULT bitmapResult = E_FAIL;
+        HBITMAP bitmap = wic::CreateBitmapBuffer(scaledWidth, scaledHeight, &bits, &bitmapResult);
         if (!bitmap || !bits)
         {
             if (bitmap)
@@ -529,7 +561,7 @@ namespace
                 DeleteObject(bitmap);
             }
 
-            wic::SetError(errorMessage, L"Failed to allocate the destination bitmap.", E_OUTOFMEMORY);
+            wic::SetError(errorMessage, L"Failed to allocate the destination bitmap.", bitmapResult);
             return {};
         }
 
@@ -586,12 +618,16 @@ namespace
         std::vector<BYTE> mutableBytes(data, data + dataSize);
         ComPtr<IWICStream> stream;
         HRESULT result = factory->CreateStream(&stream);
-        if (FAILED(result) || FAILED(stream->InitializeFromMemory(mutableBytes.data(), static_cast<DWORD>(mutableBytes.size()))))
+        if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to initialize the WIC memory stream for the RAW preview.";
-            }
+            wic::SetError(errorMessage, L"Failed to create the WIC memory stream for the RAW preview.", result);
+            return {};
+        }
+
+        result = stream->InitializeFromMemory(mutableBytes.data(), static_cast<DWORD>(mutableBytes.size()));
+        if (FAILED(result))
+        {
+            wic::SetError(errorMessage, L"Failed to initialize the WIC memory stream for the RAW preview.", result);
             return {};
         }
 
@@ -760,7 +796,11 @@ namespace
         }
 
         void* bits = nullptr;
-        HBITMAP bitmap = wic::CreateBitmapBuffer(static_cast<UINT>(destinationWidth), static_cast<UINT>(destinationHeight), &bits);
+        HRESULT bitmapResult = E_FAIL;
+        HBITMAP bitmap = wic::CreateBitmapBuffer(static_cast<UINT>(destinationWidth),
+                              static_cast<UINT>(destinationHeight),
+                              &bits,
+                              &bitmapResult);
         if (!bitmap || !bits)
         {
             if (bitmap)
@@ -769,7 +809,9 @@ namespace
             }
             if (errorMessage)
             {
-                *errorMessage = L"Failed to allocate the destination bitmap for the RAW decode result.";
+                wic::SetError(errorMessage,
+                              L"Failed to allocate the destination bitmap for the RAW decode result.",
+                              bitmapResult);
             }
             return {};
         }

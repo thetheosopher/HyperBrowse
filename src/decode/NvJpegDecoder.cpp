@@ -1103,7 +1103,12 @@ namespace
         std::wstring* errorMessage)
     {
         void* bitmapBits = nullptr;
-        HBITMAP bitmap = hyperbrowse::decode::wic_support::CreateBitmapBuffer(scaledWidth, scaledHeight, &bitmapBits);
+        HRESULT bitmapResult = E_FAIL;
+        HBITMAP bitmap = hyperbrowse::decode::wic_support::CreateBitmapBuffer(
+            scaledWidth,
+            scaledHeight,
+            &bitmapBits,
+            &bitmapResult);
         if (!bitmap || !bitmapBits)
         {
             if (bitmap)
@@ -1112,7 +1117,10 @@ namespace
             }
             if (errorMessage)
             {
-                *errorMessage = L"Failed to allocate the output bitmap for the nvJPEG thumbnail.";
+                hyperbrowse::decode::wic_support::SetError(
+                    errorMessage,
+                    L"Failed to allocate the output bitmap for the nvJPEG thumbnail.",
+                    bitmapResult);
             }
             return {};
         }

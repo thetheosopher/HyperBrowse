@@ -201,8 +201,18 @@ namespace hyperbrowse::decode::wic_support
         *scaledHeight = std::max<UINT>(1, static_cast<UINT>(std::lround(static_cast<double>(sourceHeight) * scale)));
     }
 
-    inline HBITMAP CreateBitmapBuffer(UINT width, UINT height, void** bits)
+    inline HBITMAP CreateBitmapBuffer(UINT width, UINT height, void** bits, HRESULT* result = nullptr)
     {
+        if (!bits || width == 0 || height == 0)
+        {
+            if (result)
+            {
+                *result = E_INVALIDARG;
+            }
+            return nullptr;
+        }
+
+        *bits = nullptr;
         BITMAPINFO bitmapInfo{};
         bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
         bitmapInfo.bmiHeader.biWidth = static_cast<LONG>(width);
@@ -210,6 +220,21 @@ namespace hyperbrowse::decode::wic_support
         bitmapInfo.bmiHeader.biPlanes = 1;
         bitmapInfo.bmiHeader.biBitCount = 32;
         bitmapInfo.bmiHeader.biCompression = BI_RGB;
-        return CreateDIBSection(nullptr, &bitmapInfo, DIB_RGB_COLORS, bits, nullptr, 0);
+        HBITMAP bitmap = CreateDIBSection(nullptr, &bitmapInfo, DIB_RGB_COLORS, bits, nullptr, 0);
+        if (!bitmap)
+        {
+            if (result)
+            {
+                const DWORD lastError = GetLastError();
+                *result = lastError != ERROR_SUCCESS ? HRESULT_FROM_WIN32(lastError) : E_FAIL;
+            }
+            return nullptr;
+        }
+
+        if (result)
+        {
+            *result = bits && *bits ? S_OK : E_POINTER;
+        }
+        return bitmap;
     }
 }

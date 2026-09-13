@@ -69,13 +69,16 @@ namespace hyperbrowse::util
 
         ComPtr<IWICStream> stream;
         HRESULT result = factory->CreateStream(&stream);
-        if (FAILED(result)
-            || FAILED(stream->InitializeFromMemory(static_cast<BYTE*>(resourceBytes), resourceSize)))
+        if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to initialize the WIC stream for placeholder art.";
-            }
+            wic::SetError(errorMessage, L"Failed to create the WIC stream for placeholder art.", result);
+            return {};
+        }
+
+        result = stream->InitializeFromMemory(static_cast<BYTE*>(resourceBytes), resourceSize);
+        if (FAILED(result))
+        {
+            wic::SetError(errorMessage, L"Failed to initialize the WIC stream for placeholder art.", result);
             return {};
         }
 
@@ -83,10 +86,7 @@ namespace hyperbrowse::util
         result = factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder);
         if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to create the WIC decoder for placeholder art.";
-            }
+            wic::SetError(errorMessage, L"Failed to create the WIC decoder for placeholder art.", result);
             return {};
         }
 
@@ -94,22 +94,23 @@ namespace hyperbrowse::util
         result = decoder->GetFrame(0, &frame);
         if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to read the placeholder PNG frame.";
-            }
+            wic::SetError(errorMessage, L"Failed to read the placeholder PNG frame.", result);
             return {};
         }
 
         UINT sourceWidth = 0;
         UINT sourceHeight = 0;
         result = frame->GetSize(&sourceWidth, &sourceHeight);
-        if (FAILED(result) || sourceWidth == 0 || sourceHeight == 0)
+        const bool invalidDimensions = sourceWidth == 0 || sourceHeight == 0;
+        if (FAILED(result) || invalidDimensions)
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"The placeholder PNG frame has invalid dimensions.";
-            }
+            wic::SetError(errorMessage,
+                          SUCCEEDED(result) && invalidDimensions
+                              ? L"The placeholder PNG frame has invalid dimensions."
+                              : L"Failed to read the placeholder PNG dimensions.",
+                          SUCCEEDED(result) && invalidDimensions
+                              ? HRESULT_FROM_WIN32(ERROR_INVALID_DATA)
+                              : result);
             return {};
         }
 
@@ -123,13 +124,16 @@ namespace hyperbrowse::util
             {
                 ComPtr<IWICBitmapScaler> scaler;
                 result = factory->CreateBitmapScaler(&scaler);
-                if (FAILED(result)
-                    || FAILED(scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant)))
+                if (FAILED(result))
                 {
-                    if (errorMessage)
-                    {
-                        *errorMessage = L"Failed to scale the placeholder PNG.";
-                    }
+                    wic::SetError(errorMessage, L"Failed to scale the placeholder PNG.", result);
+                    return {};
+                }
+
+                result = scaler->Initialize(source.Get(), scaledWidth, scaledHeight, WICBitmapInterpolationModeFant);
+                if (FAILED(result))
+                {
+                    wic::SetError(errorMessage, L"Failed to scale the placeholder PNG.", result);
                     return {};
                 }
                 source = scaler;
@@ -138,28 +142,32 @@ namespace hyperbrowse::util
 
         ComPtr<IWICFormatConverter> converter;
         result = factory->CreateFormatConverter(&converter);
-        if (FAILED(result)
-            || FAILED(converter->Initialize(source.Get(),
-                                            GUID_WICPixelFormat32bppPBGRA,
-                                            WICBitmapDitherTypeNone,
-                                            nullptr,
-                                            0.0,
-                                            WICBitmapPaletteTypeCustom)))
+        if (FAILED(result))
         {
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to convert the placeholder PNG to BGRA.";
-            }
+            wic::SetError(errorMessage, L"Failed to convert the placeholder PNG to BGRA.", result);
+            return {};
+        }
+
+        result = converter->Initialize(source.Get(),
+                                       GUID_WICPixelFormat32bppPBGRA,
+                                       WICBitmapDitherTypeNone,
+                                       nullptr,
+                                       0.0,
+                                       WICBitmapPaletteTypeCustom);
+        if (FAILED(result))
+        {
+            wic::SetError(errorMessage, L"Failed to convert the placeholder PNG to BGRA.", result);
             return {};
         }
 
         void* bits = nullptr;
-        HBITMAP bitmap = wic::CreateBitmapBuffer(scaledWidth, scaledHeight, &bits);
+        HRESULT bitmapResult = E_FAIL;
+        HBITMAP bitmap = wic::CreateBitmapBuffer(scaledWidth, scaledHeight, &bits, &bitmapResult);
         if (!bitmap || !bits)
         {
             if (errorMessage)
             {
-                *errorMessage = L"Failed to allocate the placeholder bitmap buffer.";
+                wic::SetError(errorMessage, L"Failed to allocate the placeholder bitmap buffer.", bitmapResult);
             }
             if (bitmap)
             {
@@ -174,10 +182,7 @@ namespace hyperbrowse::util
         if (FAILED(result))
         {
             DeleteObject(bitmap);
-            if (errorMessage)
-            {
-                *errorMessage = L"Failed to copy the placeholder PNG pixels.";
-            }
+            wic::SetError(errorMessage, L"Failed to copy the placeholder PNG pixels.", result);
             return {};
         }
 
