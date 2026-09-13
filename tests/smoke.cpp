@@ -5395,6 +5395,25 @@ namespace
                    "MainWindow consumed an OEM size key before the focused edit control could receive it");
         }
 
+        constexpr std::array<WPARAM, 8> navigationKeys{
+            VK_LEFT,
+            VK_RIGHT,
+            VK_UP,
+            VK_DOWN,
+            VK_PRIOR,
+            VK_NEXT,
+            VK_HOME,
+            VK_END};
+        for (const WPARAM key : navigationKeys)
+        {
+            MSG message{};
+            message.hwnd = edit;
+            message.message = WM_KEYDOWN;
+            message.wParam = key;
+            Expect(!mainWindow.TranslateAcceleratorMessage(&message),
+                   "MainWindow consumed a navigation key before the focused edit control could receive it");
+        }
+
         DestroyWindow(mainWindow.Hwnd());
         PumpMessagesFor(100);
     }

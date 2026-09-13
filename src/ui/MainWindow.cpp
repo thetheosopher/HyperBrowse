@@ -10002,6 +10002,26 @@ namespace hyperbrowse::ui
             return true;
         }
 
+        if (message->message == WM_KEYDOWN
+            && IsTextInputControlWindow(message->hwnd)
+            && (message->wParam == VK_BACK || message->wParam == VK_DELETE
+                || message->wParam == VK_LEFT || message->wParam == VK_RIGHT
+                || message->wParam == VK_UP || message->wParam == VK_DOWN
+                || message->wParam == VK_PRIOR || message->wParam == VK_NEXT
+                || message->wParam == VK_HOME || message->wParam == VK_END
+                || message->wParam == VK_OEM_MINUS
+                || message->wParam == VK_OEM_PLUS
+                || ((message->wParam == static_cast<WPARAM>('A')
+                     || message->wParam == static_cast<WPARAM>('C')
+                     || message->wParam == static_cast<WPARAM>('V')
+                     || message->wParam == static_cast<WPARAM>('X')
+                     || message->wParam == static_cast<WPARAM>('Y')
+                     || message->wParam == static_cast<WPARAM>('Z'))
+                    && (GetKeyState(VK_CONTROL) & 0x8000) != 0)))
+        {
+            return false;
+        }
+
         if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
             && message->wParam == static_cast<WPARAM>('G')
             && (GetKeyState(VK_CONTROL) & 0x8000) != 0
@@ -10051,23 +10071,6 @@ namespace hyperbrowse::ui
             {
                 return true;
             }
-        }
-
-        // Preserve standard text-edit behavior in edit/rich-edit controls.
-        if (message->message == WM_KEYDOWN
-            && IsTextInputControlWindow(message->hwnd)
-            && (message->wParam == VK_BACK || message->wParam == VK_DELETE
-                || message->wParam == VK_OEM_MINUS
-                || message->wParam == VK_OEM_PLUS
-                || ((message->wParam == static_cast<WPARAM>('A')
-                     || message->wParam == static_cast<WPARAM>('C')
-                     || message->wParam == static_cast<WPARAM>('V')
-                     || message->wParam == static_cast<WPARAM>('X')
-                     || message->wParam == static_cast<WPARAM>('Y')
-                     || message->wParam == static_cast<WPARAM>('Z'))
-                    && (GetKeyState(VK_CONTROL) & 0x8000) != 0)))
-        {
-            return false;
         }
 
         return TranslateAcceleratorW(hwnd_, accelerators_, message) != 0;
