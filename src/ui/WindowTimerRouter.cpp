@@ -37,6 +37,10 @@ namespace hyperbrowse::ui
         {
             handler = &handlers_.onCommandBarMenuTracking;
         }
+        else if (timerId == timerIds_.detailsPanelPerformance)
+        {
+            handler = &handlers_.onDetailsPanelPerformance;
+        }
 
         if (!handler || !*handler)
         {

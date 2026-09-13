@@ -11,6 +11,8 @@ namespace hyperbrowse::ui
         constexpr std::wstring_view kPrefetchDepthOverrideValue = L"PrefetchDepthOverride";
         constexpr std::wstring_view kThumbnailCacheCapacityOverrideBytesValue = L"ThumbnailCacheCapacityOverrideBytes";
         constexpr std::wstring_view kMetadataCacheCapacityOverrideEntriesValue = L"MetadataCacheCapacityOverrideEntries";
+        constexpr std::wstring_view kPersistentThumbnailCacheCapBytesValue = L"PersistentThumbnailCacheCapBytes";
+        constexpr std::wstring_view kLegacyPersistentThumbnailCacheCapacityOverrideBytesValue = L"PersistentThumbnailCacheCapacityOverrideBytes";
         constexpr std::wstring_view kShowPressureStateInStatusBarValue = L"ShowPressureStateInStatusBar";
         constexpr std::wstring_view kCloseMainWindowOnEscapeValue = L"CloseMainWindowOnEscape";
 
@@ -63,6 +65,12 @@ namespace hyperbrowse::ui
             state.metadataCacheCapacityOverrideEntries = util::SaturatingCastToSizeT(qwordValue);
         }
 
+        if (readQword(kPersistentThumbnailCacheCapBytesValue, &qwordValue)
+            || readQword(kLegacyPersistentThumbnailCacheCapacityOverrideBytesValue, &qwordValue))
+        {
+            state.persistentThumbnailCacheCapacityOverrideBytes = util::SaturatingCastToSizeT(qwordValue);
+        }
+
         if (readDword(kShowPressureStateInStatusBarValue, &value))
         {
             state.showPressureStateInStatusBar = value != 0;
@@ -92,5 +100,9 @@ namespace hyperbrowse::ui
                    static_cast<std::uint64_t>(state.thumbnailCacheCapacityOverrideBytes));
         writeQword(kMetadataCacheCapacityOverrideEntriesValue,
                    static_cast<std::uint64_t>(state.metadataCacheCapacityOverrideEntries));
+        writeQword(kPersistentThumbnailCacheCapBytesValue,
+                   static_cast<std::uint64_t>(state.persistentThumbnailCacheCapacityOverrideBytes));
+        writeQword(kLegacyPersistentThumbnailCacheCapacityOverrideBytesValue,
+                   static_cast<std::uint64_t>(state.persistentThumbnailCacheCapacityOverrideBytes));
     }
 }

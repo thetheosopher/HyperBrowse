@@ -2089,9 +2089,11 @@ namespace hyperbrowse::services
         const auto iterator = cache_.find(key);
         if (iterator == cache_.end())
         {
+            ++cacheMissCount_;
             return nullptr;
         }
 
+        ++cacheHitCount_;
         cacheLruOrder_.splice(cacheLruOrder_.begin(), cacheLruOrder_, iterator->second.lruIterator);
         iterator->second.lruIterator = cacheLruOrder_.begin();
         return iterator->second.metadata;
@@ -2156,6 +2158,12 @@ namespace hyperbrowse::services
     std::size_t ImageMetadataService::CacheCapacityEntries() const noexcept
     {
         return cacheCapacityEntries_;
+    }
+
+    ImageMetadataService::CacheStatistics ImageMetadataService::GetCacheStatistics() const
+    {
+        std::scoped_lock lock(mutex_);
+        return CacheStatistics{cacheHitCount_, cacheMissCount_, cacheEvictionCount_};
     }
 
     std::size_t ImageMetadataService::WorkerCount() const
@@ -2256,7 +2264,10 @@ namespace hyperbrowse::services
         {
             const MetadataCacheKey keyToEvict = cacheLruOrder_.back();
             cacheLruOrder_.pop_back();
-            cache_.erase(keyToEvict);
+            if (cache_.erase(keyToEvict) != 0)
+            {
+                ++cacheEvictionCount_;
+            }
         }
     }
 

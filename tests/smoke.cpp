@@ -1894,9 +1894,20 @@ namespace
         });
 
         Expect(cache.Find(lookupKey) != nullptr, "Thumbnail cache lookup did not normalize slash and case differences");
+         const auto statisticsAfterHit = cache.GetStatistics();
+         Expect(statisticsAfterHit.hitCount == 1 && statisticsAfterHit.missCount == 0,
+             "Thumbnail cache did not record the normalized lookup hit");
 
         cache.InvalidateFilePaths({lookupKey.filePath});
         Expect(cache.Find(insertedKey) == nullptr, "Thumbnail cache invalidation did not normalize the supplied file path");
+         const auto statisticsAfterMiss = cache.GetStatistics();
+         Expect(statisticsAfterMiss.hitCount == 1 && statisticsAfterMiss.missCount == 1,
+             "Thumbnail cache did not record the post-invalidation miss");
+
+         cache.Insert(insertedKey, thumbnail);
+         cache.SetCapacityBytes(1);
+         Expect(cache.GetStatistics().evictionCount == 1,
+             "Thumbnail cache did not record capacity eviction");
     }
 
     void RunDiskThumbnailCacheCorruptionScenario()
@@ -3028,6 +3039,9 @@ namespace
                    "Metadata cache evicted the most recently used entry instead of keeping it resident");
             Expect(service.FindCachedMetadata(itemB) == nullptr,
                    "Metadata cache did not evict the least recently used entry after reaching capacity");
+                 const auto statistics = service.GetCacheStatistics();
+                 Expect(statistics.hitCount >= 4 && statistics.missCount >= 1 && statistics.evictionCount == 1,
+                     "Metadata cache statistics did not report lookup and eviction activity");
         }
 
         {
@@ -4813,6 +4827,27 @@ namespace
                      }
                      if (page == ConsolidatedSettingsPage::Performance)
                      {
+                         constexpr std::array<std::size_t, 4> numericIndices{2, 3, 4, 5};
+                         constexpr std::array<ConsolidatedSettingsControl, 4> automaticControls{
+                             ConsolidatedSettingsControl::ThumbnailCacheAutomatic,
+                             ConsolidatedSettingsControl::MetadataCacheAutomatic,
+                             ConsolidatedSettingsControl::PrefetchDepthAutomatic,
+                             ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic};
+                         for (std::size_t index = 0; index < numericIndices.size(); ++index)
+                         {
+                             const RECT& numeric = layout.numericEditRects[numericIndices[index]];
+                             const RECT& automatic = layout.controlRects[static_cast<std::size_t>(automaticControls[index])];
+                             Expect(automatic.left >= numeric.right
+                                        && automatic.right <= metrics.right
+                                        && automatic.top <= numeric.bottom
+                                        && automatic.bottom >= numeric.top,
+                                    "Settings automatic control was not placed beside its numeric spinner");
+                         }
+                         for (const auto& label : layout.labels)
+                         {
+                             Expect(label.text != L"Live cache status",
+                                    "Settings Performance page still contains the removed live cache status section");
+                         }
                          Expect(layout.requiresScroll,
                                 "Short Settings work area did not request scrolling for Performance");
                      }
@@ -5089,20 +5124,44 @@ namespace
             const HWND thumbnailCacheEdit = GetDlgItem(dialog, 5702);
             const HWND metadataCacheEdit = GetDlgItem(dialog, 5703);
             const HWND prefetchDepthEdit = GetDlgItem(dialog, 5704);
+            const HWND persistentCacheEdit = GetDlgItem(dialog, 5705);
             const HWND slideDurationSpin = GetDlgItem(dialog, 5850);
             const HWND transitionDurationSpin = GetDlgItem(dialog, 5851);
             const HWND thumbnailCacheSpin = GetDlgItem(dialog, 5852);
             const HWND metadataCacheSpin = GetDlgItem(dialog, 5853);
             const HWND prefetchDepthSpin = GetDlgItem(dialog, 5854);
+            const HWND persistentCacheSpin = GetDlgItem(dialog, 5855);
+            const HWND thumbnailCacheSlider = GetDlgItem(dialog, 5872);
+            const HWND metadataCacheSlider = GetDlgItem(dialog, 5873);
+            const HWND prefetchDepthSlider = GetDlgItem(dialog, 5874);
+            const HWND persistentCacheSlider = GetDlgItem(dialog, 5875);
             if (!slideDurationEdit || !transitionDurationEdit || !thumbnailCacheEdit || !metadataCacheEdit
-                || !prefetchDepthEdit || !slideDurationSpin || !transitionDurationSpin || !thumbnailCacheSpin || !metadataCacheSpin || !prefetchDepthSpin
+                || !prefetchDepthEdit || !persistentCacheEdit || !slideDurationSpin || !transitionDurationSpin || !thumbnailCacheSpin
+                || !metadataCacheSpin || !prefetchDepthSpin || !persistentCacheSpin || !thumbnailCacheSlider || !metadataCacheSlider
+                || !prefetchDepthSlider || !persistentCacheSlider
                 || reinterpret_cast<HWND>(SendMessageW(slideDurationSpin, UDM_GETBUDDY, 0, 0)) != slideDurationEdit
                 || reinterpret_cast<HWND>(SendMessageW(transitionDurationSpin, UDM_GETBUDDY, 0, 0)) != transitionDurationEdit
                 || reinterpret_cast<HWND>(SendMessageW(thumbnailCacheSpin, UDM_GETBUDDY, 0, 0)) != thumbnailCacheEdit
                 || reinterpret_cast<HWND>(SendMessageW(metadataCacheSpin, UDM_GETBUDDY, 0, 0)) != metadataCacheEdit
-                || reinterpret_cast<HWND>(SendMessageW(prefetchDepthSpin, UDM_GETBUDDY, 0, 0)) != prefetchDepthEdit)
+                || reinterpret_cast<HWND>(SendMessageW(prefetchDepthSpin, UDM_GETBUDDY, 0, 0)) != prefetchDepthEdit
+                || reinterpret_cast<HWND>(SendMessageW(persistentCacheSpin, UDM_GETBUDDY, 0, 0)) != persistentCacheEdit)
             {
                 failAndClose("Experimental Settings numeric fields did not create native spin buddies");
+                return;
+            }
+            if (SendMessageW(thumbnailCacheSlider, TBM_GETRANGEMIN, 0, 0) != 0
+                || SendMessageW(thumbnailCacheSlider, TBM_GETRANGEMAX, 0, 0) != 100
+                || SendMessageW(metadataCacheSlider, TBM_GETRANGEMAX, 0, 0) != 100
+                || SendMessageW(prefetchDepthSlider, TBM_GETRANGEMAX, 0, 0) != 100
+                || SendMessageW(persistentCacheSlider, TBM_GETRANGEMAX, 0, 0) != 100)
+            {
+                failAndClose("Experimental Settings performance sliders did not retain their normalized range");
+                return;
+            }
+            Sleep(2200);
+            if (FindWindowW(nullptr, L"Persistent Thumbnail Cache") != nullptr)
+            {
+                failAndClose("Performance feedback refresh unexpectedly opened the persistent cache dialog");
                 return;
             }
             int slideMinimum = 0;
@@ -5763,8 +5822,10 @@ namespace
         Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab between details tabs was not consumed");
         Expect(GetFocus() == mainWindow.Hwnd(), "Tab between details tabs lost the custom focus surface");
         Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab from the details tabs to the close button was not consumed");
-        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the details tabs did not retain the custom focus surface");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the Cache Stats tab did not retain the custom focus surface");
         Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab from the details close button was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the details close button did not retain the custom focus surface");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab from the details tabs to the close button was not consumed");
         Expect(GetFocus() == detailsText, "Tab did not reach the native details text control");
 
         std::array<BYTE, 256> shiftedKeyboardState = keyboardState.original;
@@ -5774,13 +5835,17 @@ namespace
         Expect(sendKey(detailsText, VK_TAB), "Shift+Tab from the details text control was not consumed");
         Expect(GetFocus() == mainWindow.Hwnd(), "Shift+Tab from the details text control did not reach the custom close-button surface");
         Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Shift+Tab from the details close button was not consumed");
-        Expect(GetFocus() == mainWindow.Hwnd(), "Shift+Tab from the details close button did not retain the custom focus surface");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Shift+Tab from the details close button did not reach the Cache Stats tab");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Shift+Tab from the Cache Stats tab was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Shift+Tab from the Cache Stats tab did not reach Quick Actions");
         Expect(SetKeyboardState(keyboardState.original.data()) != FALSE,
                "Failed to restore the keyboard state after reverse focus traversal");
 
         Expect(sendKey(mainWindow.Hwnd(), VK_RETURN), "Enter did not activate the Quick Actions details tab");
         Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab from the Quick Actions details tab was not consumed");
-        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the Quick Actions details tab did not reach the custom close-button surface");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from Quick Actions did not reach the Cache Stats tab");
+        Expect(sendKey(mainWindow.Hwnd(), VK_TAB), "Tab from the Cache Stats tab was not consumed");
+        Expect(GetFocus() == mainWindow.Hwnd(), "Tab from the Cache Stats tab did not reach the custom close-button surface");
         Expect(sendKey(mainWindow.Hwnd(), VK_SPACE), "Space did not activate the custom details close button");
         Expect(GetFocus() == browserPane, "Closing the details panel did not restore focus to the browser pane");
 
@@ -5790,6 +5855,8 @@ namespace
 
         void RunMainWindowAccessibilityScenario(HINSTANCE instance)
         {
+         ScopedRegistryDwordBackup detailsStripBackup(kRegistryPath, L"DetailsStripVisible");
+         SetRegistryDwordValue(kRegistryPath, L"DetailsStripVisible", 1);
          hyperbrowse::ui::MainWindow mainWindow(instance);
          Expect(mainWindow.Create(), "Failed to create MainWindow for accessibility coverage");
          mainWindow.Show(SW_SHOW);
@@ -5813,6 +5880,7 @@ namespace
 
          bool foundFileMenu = false;
          bool foundImageBrowser = false;
+         bool foundCacheStatsTab = false;
          LONG browserChildId = 0;
          for (LONG childId = 1; childId <= childCount; ++childId)
          {
@@ -5837,6 +5905,10 @@ namespace
 
              const std::wstring childName(name, SysStringLen(name));
              foundFileMenu = foundFileMenu || childName == L"File";
+             if (childName == L"Cache Stats")
+             {
+                 foundCacheStatsTab = role.lVal == ROLE_SYSTEM_PAGETAB;
+             }
              if (childName == L"Image browser")
              {
               foundImageBrowser = true;
@@ -5848,6 +5920,8 @@ namespace
          Expect(foundFileMenu, "MainWindow accessibility tree did not expose the File menu");
          Expect(foundImageBrowser && browserChildId > 0,
              "MainWindow accessibility tree did not expose the custom image browser surface");
+         Expect(foundCacheStatsTab,
+             "MainWindow accessibility tree did not expose the Cache Stats page tab");
 
          VARIANT firstChild{};
          Expect(SUCCEEDED(accessible->accNavigate(NAVDIR_FIRSTCHILD, VARIANT{VT_I4, {CHILDID_SELF}}, &firstChild))

@@ -154,6 +154,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/BrowserItemScopeCollector.cpp
     src/ui/CommandBarController.cpp
     src/ui/CommandBarPainter.cpp
+    src/ui/CacheStatsPainter.cpp
     src/ui/ClipboardFileTransfer.cpp
     src/ui/BrowserPresentationPersistence.cpp
     src/ui/DetailsPanelHistogram.cpp

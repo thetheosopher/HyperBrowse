@@ -38,6 +38,17 @@ namespace
     {
         if (requestedCapacityBytes != 0)
         {
+            if (resourceProfile == hyperbrowse::util::ResourceProfile::Performance)
+            {
+                const auto memorySnapshot = hyperbrowse::util::QueryMemorySnapshot();
+                const std::uint64_t hardMaximum = memorySnapshot.IsValid()
+                    && memorySnapshot.availablePhysicalBytes != 0
+                    ? memorySnapshot.availablePhysicalBytes / 3ULL
+                    : kPerformanceMaximumThumbnailCacheCapacityBytes;
+                return std::min(
+                    requestedCapacityBytes,
+                    hyperbrowse::util::SaturatingCastToSizeT(hardMaximum));
+            }
             return requestedCapacityBytes;
         }
 
@@ -202,9 +213,12 @@ namespace hyperbrowse::services
                                            std::size_t workerCount,
                                            util::ResourceProfile resourceProfile,
                                            std::function<void()> persistenceBeforeJobHook,
-                                           std::function<void()> decodeBeforeJobHook)
+                                           std::function<void()> decodeBeforeJobHook,
+                                           std::size_t persistentCacheCapacityBytes)
         : cache_(ResolveThumbnailCacheCapacityBytes(cacheCapacityBytes, resourceProfile))
-        , diskCache_(cache_.CapacityBytes())
+        , diskCache_(persistentCacheCapacityBytes == 0
+                         ? cache_.CapacityBytes()
+                         : persistentCacheCapacityBytes)
         , persistenceBeforeJobHook_(std::move(persistenceBeforeJobHook))
         , decodeBeforeJobHook_(std::move(decodeBeforeJobHook))
     {
@@ -544,6 +558,11 @@ namespace hyperbrowse::services
     std::size_t ThumbnailScheduler::CacheCapacityBytes() const
     {
         return cache_.CapacityBytes();
+    }
+
+    cache::ThumbnailCache::Statistics ThumbnailScheduler::GetCacheStatistics() const
+    {
+        return cache_.GetStatistics();
     }
 
     std::size_t ThumbnailScheduler::DiskCacheCapacityBytes() const noexcept

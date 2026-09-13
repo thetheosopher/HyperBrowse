@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -86,6 +87,9 @@ namespace hyperbrowse::ui::dialog_detail
         PrefetchDepthAutomatic,
         QuickSendShortcutOrder,
         KeepInNotificationArea,
+        PersistentCacheCapacity,
+        PersistentCacheCapacityAutomatic,
+        TrimPersistentCache,
         Count,
     };
 
@@ -184,6 +188,7 @@ namespace hyperbrowse::ui::dialog_detail
         std::wstring metadataCacheText;
         std::size_t thumbnailCacheCapacityOverrideBytes{};
         std::size_t metadataCacheCapacityOverrideEntries{};
+        std::size_t persistentThumbnailCacheCapacityOverrideBytes{};
         bool thumbnailCacheAutomatic{true};
         bool metadataCacheAutomatic{true};
         bool showPressureStateInStatusBar{};
@@ -346,6 +351,7 @@ namespace hyperbrowse::ui::dialog_detail
         UINT slideshowTransitionDurationMs{350};
         std::size_t thumbnailCacheCapacityOverrideBytes{};
         std::size_t metadataCacheCapacityOverrideEntries{};
+        std::size_t persistentThumbnailCacheCapacityOverrideBytes{};
         bool useSlideshowTransition{};
         bool infoOverlaysVisible{};
         bool windowedFullMetadataVisible{};
@@ -369,6 +375,7 @@ namespace hyperbrowse::ui::dialog_detail
         bool libRawAvailable{};
         std::wstring quickSendShortcutOrder;
         std::function<void(const ConsolidatedSettingsDialogState&)> apply;
+        std::function<void()> trimPersistentCache;
         bool accepted{};
         bool done{};
     };
@@ -429,11 +436,13 @@ namespace hyperbrowse::ui::dialog_detail
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> buttonTextBrush;
         HBRUSH editBackgroundBrush{};
         HFONT controlFont{};
+        HFONT numericFont{};
         std::array<HWND, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> nativeControls{};
         std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> tabRects{};
         std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controlRects{};
-        std::array<HWND, 5> numericEdits{};
-        std::array<HWND, 5> numericSpins{};
+        std::array<HWND, 6> numericEdits{};
+        std::array<HWND, 6> numericSpins{};
+        std::array<HWND, 6> numericSliders{};
         std::vector<ExperimentalSettingsLabel> labels;
         std::shared_ptr<hyperbrowse::ui::MainWindowAccessibility> accessibility;
         RECT bodyViewport{};

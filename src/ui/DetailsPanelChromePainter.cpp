@@ -20,7 +20,7 @@ namespace hyperbrowse::ui
                 (GetBValue(baseColor) * baseAmount + GetBValue(mixColor) * mixAmount) / 255);
         }
 
-        constexpr std::wstring_view kTabLabels[] = {L"File Details", L"Quick Actions"};
+        constexpr std::wstring_view kTabLabels[] = {L"File Details", L"Quick Actions", L"Cache Stats"};
     }
 
     void DetailsPanelChromePainter::PaintD2D(ID2D1RenderTarget* renderTarget,

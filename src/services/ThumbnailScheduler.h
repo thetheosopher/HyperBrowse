@@ -54,7 +54,8 @@ namespace hyperbrowse::services
                                     std::size_t workerCount = 0,
                                     util::ResourceProfile resourceProfile = util::ResourceProfile::Balanced,
                                     std::function<void()> persistenceBeforeJobHook = {},
-                                    std::function<void()> decodeBeforeJobHook = {});
+                                    std::function<void()> decodeBeforeJobHook = {},
+                                    std::size_t persistentCacheCapacityBytes = 0);
         ~ThumbnailScheduler();
 
         static std::size_t ResolveCacheCapacityBytes(std::size_t requestedCapacityBytes,
@@ -75,6 +76,7 @@ namespace hyperbrowse::services
         std::wstring KnownFailureMessage(const cache::ThumbnailCacheKey& key) const;
         std::size_t CacheBytes() const;
         std::size_t CacheCapacityBytes() const;
+        cache::ThumbnailCache::Statistics GetCacheStatistics() const;
         std::size_t DiskCacheCapacityBytes() const noexcept;
         std::size_t WorkerCount() const;
         std::size_t GeneralWorkerCount() const;

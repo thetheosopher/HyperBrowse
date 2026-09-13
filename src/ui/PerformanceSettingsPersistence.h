@@ -17,6 +17,7 @@ namespace hyperbrowse::ui
         int prefetchDepthOverride{util::kAutomaticPrefetchDepth};
         std::size_t thumbnailCacheCapacityOverrideBytes{};
         std::size_t metadataCacheCapacityOverrideEntries{};
+        std::size_t persistentThumbnailCacheCapacityOverrideBytes{};
         bool showPressureStateInStatusBar{};
         bool closeMainWindowOnEscape{};
     };

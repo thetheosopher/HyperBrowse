@@ -88,9 +88,11 @@ namespace hyperbrowse::cache
         const auto iterator = entries_.find(key);
         if (iterator == entries_.end())
         {
+            ++missCount_;
             return {};
         }
 
+        ++hitCount_;
         lruOrder_.splice(lruOrder_.begin(), lruOrder_, iterator->second.lruIterator);
         iterator->second.lruIterator = lruOrder_.begin();
         return iterator->second.thumbnail;
@@ -185,6 +187,12 @@ namespace hyperbrowse::cache
         return capacityBytes_;
     }
 
+    ThumbnailCache::Statistics ThumbnailCache::GetStatistics() const
+    {
+        std::scoped_lock lock(mutex_);
+        return Statistics{hitCount_, missCount_, evictionCount_};
+    }
+
     void ThumbnailCache::EvictIfNeeded()
     {
         EvictToBytes(capacityBytes_);
@@ -200,6 +208,7 @@ namespace hyperbrowse::cache
             {
                 currentBytes_ -= iterator->second.byteCount;
                 entries_.erase(iterator);
+                ++evictionCount_;
             }
 
             lruOrder_.pop_back();
@@ -216,6 +225,7 @@ namespace hyperbrowse::cache
             {
                 currentBytes_ -= iterator->second.byteCount;
                 entries_.erase(iterator);
+                ++evictionCount_;
             }
 
             lruOrder_.pop_back();

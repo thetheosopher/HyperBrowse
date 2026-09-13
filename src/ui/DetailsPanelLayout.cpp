@@ -25,30 +25,33 @@ namespace hyperbrowse::ui
             const int desiredButtonWidth = (std::max)(
                 input.tabMinButtonWidth,
                 input.tabLabelWidth + (input.tabButtonHorizontalPadding * 2));
-            const int maxButtonWidth = (std::max)(1, (std::max)(0, innerWidth - input.tabButtonGap) / 2);
+            const int maxButtonWidth = (std::max)(1, (std::max)(0, innerWidth - (input.tabButtonGap * 2)) / 3);
             const int reservedTabRight = closeButtonLeft - input.closeButtonGap;
             const int reservedTabWidth = (std::max)(0, reservedTabRight - innerLeft);
             const int maxButtonWidthBeforeClose = (std::max)(
                 1,
-                (std::max)(0, reservedTabWidth - input.tabButtonGap) / 2);
+                (std::max)(0, reservedTabWidth - (input.tabButtonGap * 2)) / 3);
             const int reservedButtonWidth = (std::min)(desiredButtonWidth, maxButtonWidthBeforeClose);
             const int reservedTabStripRight = innerLeft
-                + (reservedButtonWidth * 2)
-                + input.tabButtonGap;
-            const bool canReserveCloseButton = closeButtonLeft > reservedTabStripRight + input.closeButtonGap;
+                + (reservedButtonWidth * 3)
+                + (input.tabButtonGap * 2);
+            const int minimumButtonWidthForClose = (std::max)(1, input.tabMinButtonWidth / 2);
+            const bool canReserveCloseButton = reservedButtonWidth >= minimumButtonWidthForClose
+                && closeButtonLeft >= reservedTabStripRight + input.closeButtonGap;
             const int buttonWidth = canReserveCloseButton
                 ? reservedButtonWidth
                 : (std::min)(desiredButtonWidth, maxButtonWidth);
-            const int secondButtonLeft = innerLeft + buttonWidth + input.tabButtonGap;
-
-            result.tabRects[0] = RECT{innerLeft, tabTop, innerLeft + buttonWidth, tabTop + actualTabHeight};
-            result.tabRects[1] = RECT{secondButtonLeft,
-                                      tabTop,
-                                      secondButtonLeft + buttonWidth,
-                                      tabTop + actualTabHeight};
+            for (std::size_t index = 0; index < result.tabRects.size(); ++index)
+            {
+                const int buttonLeft = innerLeft + static_cast<int>(index) * (buttonWidth + input.tabButtonGap);
+                result.tabRects[index] = RECT{buttonLeft,
+                                              tabTop,
+                                              buttonLeft + buttonWidth,
+                                              tabTop + actualTabHeight};
+            }
             result.tabStripRect = RECT{result.tabRects[0].left,
                                        result.tabRects[0].top,
-                                       result.tabRects[1].right,
+                                       result.tabRects.back().right,
                                        result.tabRects[0].bottom};
         }
 
@@ -57,7 +60,7 @@ namespace hyperbrowse::ui
                                   innerRight,
                                   input.panelRect.bottom - input.margin};
 
-        if (closeButtonLeft > result.tabStripRect.right + input.closeButtonGap)
+        if (closeButtonLeft >= result.tabStripRect.right + input.closeButtonGap)
         {
             result.closeButtonRect = RECT{closeButtonLeft,
                                           closeButtonTop,

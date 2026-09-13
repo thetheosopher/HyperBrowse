@@ -129,8 +129,10 @@ namespace hyperbrowse::ui
         static constexpr UINT_PTR kFileOperationShutdownTimerId = 9104;
         static constexpr UINT_PTR kQuickSendConfirmationTimerId = 9105;
         static constexpr UINT_PTR kCommandBarMenuTrackingTimerId = 9106;
+        static constexpr UINT_PTR kDetailsPanelPerformanceTimerId = 9107;
         static constexpr UINT kFileOperationShutdownIntervalMs = 1000;
         static constexpr UINT kQuickSendConfirmationDurationMs = 2500;
+        static constexpr UINT kDetailsPanelPerformanceIntervalMs = 1000;
         static constexpr UINT kDisplaySurfaceRecoveryIntervalMs = 400;
         static constexpr int kDisplaySurfaceRecoveryRetryLimit = 8;
         static constexpr int kDefaultActionStripHeight = 44;
@@ -151,6 +153,26 @@ namespace hyperbrowse::ui
         {
             FileDetails = 0,
             QuickSend = 1,
+            CacheStats = 2,
+        };
+
+        struct DetailsPanelPerformanceStats
+        {
+            std::uint64_t thumbnailBytes{};
+            std::uint64_t thumbnailCapacityBytes{};
+            std::uint64_t thumbnailHits{};
+            std::uint64_t thumbnailMisses{};
+            std::uint64_t thumbnailEvictions{};
+            std::uint64_t metadataEntries{};
+            std::uint64_t metadataCapacityEntries{};
+            std::uint64_t metadataHits{};
+            std::uint64_t metadataMisses{};
+            std::uint64_t metadataEvictions{};
+            std::uint64_t persistentBytes{};
+            std::uint64_t persistentCapacityBytes{};
+            std::uint64_t persistentIndexedEntries{};
+            std::uint64_t persistentFileCount{};
+            bool persistentStatisticsAvailable{};
         };
 
         enum class ThemeMode
@@ -301,6 +323,8 @@ namespace hyperbrowse::ui
         bool IsQuickAccessDestinationCurrentFolder(std::wstring_view folderPath) const;
         bool CanNavigateToQuickAccessDestination(std::wstring_view folderPath) const;
         bool CanUseQuickAccessDestinationActions(std::wstring_view folderPath) const;
+        void StartDetailsPanelPerformanceUpdates();
+        void StopDetailsPanelPerformanceUpdates();
         void SelectRightPaneTab(RightPaneTab tab);
         void ToggleDetailsPanelVisibility();
         int HitTestDetailsPanelTab(int x, int y) const;
@@ -327,8 +351,8 @@ namespace hyperbrowse::ui
         void ShowPerformanceSettingsDialog();
         void ShowPersistentThumbnailCacheDialog();
         void ShowPersistentThumbnailCacheDialogContents(std::wstring content, std::wstring expandedInformation);
-        void StartPersistentThumbnailCacheStatistics();
-        void StartPersistentThumbnailCacheMaintenance(bool purge);
+        void StartPersistentThumbnailCacheStatistics(bool showDialog = true);
+        void StartPersistentThumbnailCacheMaintenance(bool purge, bool showDialog = true);
         void ShowDiagnosticsSnapshot();
         void ExportRedactedDiagnosticsSnapshot();
         void ResetDiagnosticsState();
@@ -504,6 +528,7 @@ namespace hyperbrowse::ui
                          std::vector<std::unique_ptr<MenuDrawItemData>>& storage,
                          bool ownerDrawCurrentLevel) const;
         void UpdateDetailsPanel();
+        void UpdateDetailsPanelPerformanceStats();
         void ApplyDetailsPanelText(std::wstring title, std::wstring summary, std::wstring body);
         void RefreshDetailsPanelBodyPresentation();
         void RecreateDetailsPanelThumbnailScheduler();
@@ -704,7 +729,7 @@ namespace hyperbrowse::ui
         RECT detailsPanelRect_{};
         RECT persistedWindowBounds_{};
         RECT detailsPanelTabStripRect_{};
-        std::array<RECT, 2> detailsPanelTabRects_{};
+        std::array<RECT, 3> detailsPanelTabRects_{};
         std::wstring statusPrimaryText_;
         std::wstring statusSecondaryText_;
         RECT detailsPanelContentRect_{};
@@ -716,6 +741,8 @@ namespace hyperbrowse::ui
         std::wstring detailsPanelSummaryText_;
         std::wstring detailsPanelBodyText_;
         std::wstring detailsPanelPromptText_;
+        std::wstring detailsPanelPerformanceText_;
+        DetailsPanelPerformanceStats detailsPanelPerformanceStats_{};
         std::wstring detailsPanelHistogramPath_;
         std::vector<QuickAccessDestinationRow> quickAccessDestinationRows_;
         std::uint64_t detailsPanelHistogramModifiedTimestampUtc_{};
@@ -755,6 +782,7 @@ namespace hyperbrowse::ui
         bool imageCommandCancelling_{};
         bool fileOperationActive_{};
         UINT_PTR quickSendConfirmationTimerId_{};
+        UINT_PTR detailsPanelPerformanceTimerId_{};
         HWND quickSendConfirmationToastWindow_{};
         std::wstring quickSendConfirmationText_;
         bool cacheMaintenanceActive_{};
@@ -836,6 +864,7 @@ namespace hyperbrowse::ui
         int prefetchDepthOverride_{util::kAutomaticPrefetchDepth};
         std::size_t thumbnailCacheCapacityOverrideBytes_{};
         std::size_t metadataCacheCapacityOverrideEntries_{};
+        std::size_t persistentThumbnailCacheCapacityOverrideBytes_{};
         browser::ThumbnailSizePreset thumbnailSizePreset_{static_cast<browser::ThumbnailSizePreset>(192)};
         browser::BrowserSortMode sortMode_{static_cast<browser::BrowserSortMode>(0)};
         bool sortAscending_{true};

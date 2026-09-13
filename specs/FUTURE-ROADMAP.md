@@ -77,14 +77,14 @@ asked**.
 **Goal:** A first-class, user-visible resource profile that drives every
 cache budget, worker count, and prefetch depth from a single decision.
 
-**Implementation status:** Core profile and lookahead controls are shipped.
-The persisted `Conservative` / `Balanced` / `Performance` / `Aggressive`
-profiles drive automatic thumbnail-cache sizing, metadata-cache sizing,
-worker counts, viewer prefetch, browser lookahead, and folder warm-up. The
-Performance settings tab also persists explicit cache-cap overrides and an
-optional prefetch-depth override from 1 through 16 items; Auto follows the
-active profile. Remaining work is live cache-budget feedback and any richer
-performance inspector surface beyond the current settings and status state.
+**Implementation status:** Shipped. The persisted
+`Conservative` / `Balanced` / `Performance` / `Aggressive` profiles drive
+automatic thumbnail-cache sizing, metadata-cache sizing, worker counts, viewer
+lookahead, and folder warm-up. The Performance settings tab also persists
+explicit cache-cap overrides and an optional prefetch-depth override from 1
+through 16 items; Auto follows the active profile. Cache usage, hit rates,
+memory-pressure state, and persistent-cache status are available through the
+Performance settings surface.
 
 - Use a `ResourceProfile` enum: `Conservative`, `Balanced` (default),
   `Performance`, and `Aggressive`.
@@ -115,15 +115,17 @@ performance inspector surface beyond the current settings and status state.
 
 **Goal:** A compact controller users can trust, with no math.
 
-**Implementation status:** In progress. The Performance settings tab exposes
-explicit thumbnail-cache and metadata-cache overrides, profile-following
-automatic sizing, and an Auto or explicit prefetch-depth control. These values
-persist under `Software\HyperBrowse` and apply immediately to the browser and
-viewer paths.
-Remaining for full completion: slider-based controls, live usage/hit-rate
-feedback, recommended ranges, and persistent-cache budget management.
+**Implementation status:** Shipped. The Performance settings tab exposes
+slider and numeric controls for thumbnail-cache, metadata-cache,
+persistent-cache, and prefetch budgets, with profile-following automatic
+sizing. These values persist under `Software\HyperBrowse` and apply to the
+browser and viewer paths through the existing service construction flow.
+Live usage, hit-rate, and persistent-cache feedback is refreshed
+asynchronously; it is also available in the non-modal **Cache Stats** tab of
+the file details panel while folders are browsed. Profile-derived recommended
+ranges and a background Trim Now action are included.
 
-- Sliders in the Performance tab show:
+- Controls in the Performance tab show:
   - Thumbnail cache budget (MB), bounded by detected RAM, with live readouts
     of current bytes-in-use vs cap and current hit rate.
   - Metadata cache entry budget, with live entry count and hit rate.

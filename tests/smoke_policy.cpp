@@ -92,6 +92,29 @@ namespace hyperbrowse::tests
                    "Prefetch depth did not clamp above the supported range");
         }
 
+        void RunResourceSizingRangeScenario()
+        {
+            using hyperbrowse::util::MemorySnapshot;
+            using hyperbrowse::util::ResourceProfile;
+
+            hyperbrowse::util::SetMemorySnapshotOverrideForTests(MemorySnapshot{
+                16ULL * 1024ULL * 1024ULL * 1024ULL,
+                6ULL * 1024ULL * 1024ULL * 1024ULL});
+            const auto thumbnailRange = hyperbrowse::util::RecommendedThumbnailCacheRange(ResourceProfile::Performance);
+            const auto metadataRange = hyperbrowse::util::RecommendedMetadataCacheRange(ResourceProfile::Performance);
+            const auto persistentRange = hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(ResourceProfile::Performance);
+            Expect(thumbnailRange.IsValid() && thumbnailRange.maximum <= 2ULL * 1024ULL * 1024ULL * 1024ULL,
+                   "Performance thumbnail recommendations exceeded the available-memory hard cap");
+            Expect(metadataRange.IsValid() && persistentRange.IsValid(),
+                   "Profile cache recommendation ranges were not valid");
+            Expect(hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(
+                       8ULL * 1024ULL * 1024ULL * 1024ULL,
+                       ResourceProfile::Performance)
+                       == 2ULL * 1024ULL * 1024ULL * 1024ULL,
+                   "Performance thumbnail cache override did not honor the available-memory hard cap");
+            hyperbrowse::util::ClearMemorySnapshotOverrideForTests();
+        }
+
         void RunViewerTransitionPolicyScenario()
         {
             Expect(!hyperbrowse::ui::ShouldUseViewerTransition(false, false),
@@ -761,10 +784,11 @@ namespace hyperbrowse::tests
         {
             using hyperbrowse::ui::RightPaneHitTester;
 
-            const std::array<RECT, 2> tabRects{
+            const std::array<RECT, 3> tabRects{
                 RECT{10, 10, 60, 30},
-                RECT{64, 10, 114, 30}};
-            const RECT tabStripRect{10, 10, 114, 30};
+                RECT{64, 10, 114, 30},
+                RECT{118, 10, 168, 30}};
+            const RECT tabStripRect{10, 10, 168, 30};
             Expect(RightPaneHitTester::Tab(true, tabStripRect, tabRects, 20, 20) == 0
                        && RightPaneHitTester::Tab(true, tabStripRect, tabRects, 70, 20) == 1
                        && RightPaneHitTester::Tab(true, tabStripRect, tabRects, 60, 20) == -1
@@ -806,7 +830,8 @@ namespace hyperbrowse::tests
 
             const DetailsPanelLayout::Result result = DetailsPanelLayout::Build(input);
             Expect(result.tabRects[0].left == 114 && result.tabRects[0].top == 34
-                       && result.tabRects[0].right == 216 && result.tabRects[1].left == 226 && result.tabRects[1].right == 328,
+                       && result.tabRects[0].right == 198 && result.tabRects[1].left == 208 && result.tabRects[1].right == 292
+                       && result.tabRects[2].left == 302 && result.tabRects[2].right == 386,
                    "Details-panel layout changed tab geometry");
             Expect(result.contentRect.left == 114 && result.contentRect.top == 74
                        && result.contentRect.right == 406 && result.contentRect.bottom == 386
@@ -820,8 +845,9 @@ namespace hyperbrowse::tests
             input.panelRect = RECT{100, 20, 270, 200};
             input.histogramVisible = false;
             const DetailsPanelLayout::Result narrowResult = DetailsPanelLayout::Build(input);
-            Expect(narrowResult.tabRects[0].right == 180 && narrowResult.tabRects[1].left == 190
-                       && narrowResult.tabRects[1].right == 256
+            Expect(narrowResult.tabRects[0].right == 154 && narrowResult.tabRects[1].left == 164
+                       && narrowResult.tabRects[1].right == 204
+                       && narrowResult.tabRects[2].left == 214 && narrowResult.tabRects[2].right == 254
                        && IsRectEmpty(&narrowResult.closeButtonRect),
                    "Details-panel layout did not preserve narrow-panel tab and close-button behavior");
         }
@@ -1387,6 +1413,7 @@ namespace hyperbrowse::tests
             std::map<std::wstring, std::uint64_t> qwordValues{
                 {L"ThumbnailCacheCapacityOverrideBytes", 4096},
                 {L"MetadataCacheCapacityOverrideEntries", 42},
+                {L"PersistentThumbnailCacheCapBytes", 8192},
             };
 
             const PerformanceSettingsState restored = PerformanceSettingsPersistence::Load(
@@ -1417,6 +1444,7 @@ namespace hyperbrowse::tests
                        && restored.prefetchDepthOverride == 8
                        && restored.thumbnailCacheCapacityOverrideBytes == 4096
                        && restored.metadataCacheCapacityOverrideEntries == 42
+                       && restored.persistentThumbnailCacheCapacityOverrideBytes == 8192
                        && restored.showPressureStateInStatusBar
                        && restored.closeMainWindowOnEscape,
                    "Performance settings persistence did not restore valid settings");
@@ -1424,6 +1452,7 @@ namespace hyperbrowse::tests
             dwordValues[L"ResourceProfile"] = 99;
             dwordValues[L"PrefetchDepthOverride"] = 99;
             qwordValues[L"ThumbnailCacheCapacityOverrideBytes"] = std::numeric_limits<std::uint64_t>::max();
+            qwordValues[L"PersistentThumbnailCacheCapBytes"] = std::numeric_limits<std::uint64_t>::max();
             const PerformanceSettingsState fallback = PerformanceSettingsPersistence::Load(
                 [&dwordValues](std::wstring_view valueName, DWORD* value)
                 {
@@ -1449,7 +1478,8 @@ namespace hyperbrowse::tests
                 });
             Expect(fallback.resourceProfile == ResourceProfile::Balanced
                        && fallback.prefetchDepthOverride == 0
-                       && fallback.thumbnailCacheCapacityOverrideBytes == std::numeric_limits<std::size_t>::max(),
+                       && fallback.thumbnailCacheCapacityOverrideBytes == std::numeric_limits<std::size_t>::max()
+                       && fallback.persistentThumbnailCacheCapacityOverrideBytes == std::numeric_limits<std::size_t>::max(),
                    "Performance settings persistence did not preserve defaults or saturate cache capacity");
 
             dwordValues.clear();
@@ -1472,7 +1502,9 @@ namespace hyperbrowse::tests
                        && dwordValues[L"ShowPressureStateInStatusBar"] == 1
                        && dwordValues[L"CloseMainWindowOnEscape"] == 1
                        && qwordValues[L"ThumbnailCacheCapacityOverrideBytes"] == 4096
-                       && qwordValues[L"MetadataCacheCapacityOverrideEntries"] == 42,
+                       && qwordValues[L"MetadataCacheCapacityOverrideEntries"] == 42
+                       && qwordValues[L"PersistentThumbnailCacheCapBytes"] == 8192
+                       && qwordValues[L"PersistentThumbnailCacheCapacityOverrideBytes"] == 8192,
                    "Performance settings persistence did not write the expected value contract");
         }
 
@@ -2115,6 +2147,7 @@ namespace hyperbrowse::tests
     void RunPolicyScenarios()
     {
         RunPrefetchSizingScenario();
+        RunResourceSizingRangeScenario();
         RunViewerTransitionPolicyScenario();
         RunFileOperationMediaCacheInvalidationScenario();
         RunFolderHistoryScenario();
@@ -2263,6 +2296,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--performance-settings")
         {
             RunPerformanceSettingsPersistenceScenario();
+        }
+        else if (scenario == "--resource-sizing")
+        {
+            RunResourceSizingRangeScenario();
         }
         else if (scenario == "--paired-raw-jpeg")
         {

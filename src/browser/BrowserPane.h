@@ -14,6 +14,9 @@
 #include <vector>
 
 #include "browser/BrowserModel.h"
+#include "cache/ThumbnailCache.h"
+#include "services/ImageMetadataService.h"
+#include "services/ThumbnailScheduler.h"
 #include "util/ResourceSizing.h"
 #include "util/UiTextSize.h"
 
@@ -139,11 +142,16 @@ namespace hyperbrowse::browser
         void SetPrefetchDepthOverride(int depth);
         void SetThumbnailMemoryPressureActive(bool active);
         void SetCacheCapacityOverrides(std::size_t thumbnailCacheCapacityBytes,
-                           std::size_t metadataCacheCapacityEntries);
+                           std::size_t metadataCacheCapacityEntries,
+                           std::size_t persistentThumbnailCacheCapacityBytes = 0);
         void SetPersistentThumbnailCacheEnabled(bool enabled);
         bool IsPersistentThumbnailCacheEnabled() const noexcept;
         std::size_t ThumbnailCacheCapacityBytes() const noexcept;
+        std::size_t ThumbnailCacheBytes() const;
+        hyperbrowse::cache::ThumbnailCache::Statistics ThumbnailCacheStatistics() const;
         std::size_t MetadataCacheCapacityEntries() const noexcept;
+        std::size_t MetadataCacheEntryCount() const;
+        hyperbrowse::services::ImageMetadataService::CacheStatistics MetadataCacheStatistics() const;
         void SetDarkTheme(bool enabled);
 
         void ClearSelection();
@@ -319,6 +327,7 @@ namespace hyperbrowse::browser
         bool thumbnailMemoryPressureActive_{};
         std::size_t thumbnailCacheCapacityOverrideBytes_{};
         std::size_t metadataCacheCapacityOverrideEntries_{};
+        std::size_t persistentThumbnailCacheCapacityOverrideBytes_{};
         bool persistentThumbnailCacheEnabled_{true};
         bool darkTheme_{};
         hyperbrowse::util::AppTextSize appTextSize_{hyperbrowse::util::kDefaultAppTextSize};

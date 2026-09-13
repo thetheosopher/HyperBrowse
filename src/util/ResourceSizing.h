@@ -76,6 +76,17 @@ namespace hyperbrowse::util
         }
     };
 
+    struct CacheCapacityRange
+    {
+        std::uint64_t minimum{};
+        std::uint64_t maximum{};
+
+        bool IsValid() const noexcept
+        {
+            return minimum != 0 && maximum >= minimum;
+        }
+    };
+
     namespace resource_sizing_detail
     {
         inline std::atomic_bool memorySnapshotOverrideEnabled{};
@@ -122,6 +133,103 @@ namespace hyperbrowse::util
     {
         const std::uint64_t maxValue = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
         return static_cast<std::size_t>(std::min(value, maxValue));
+    }
+
+    inline CacheCapacityRange RecommendedThumbnailCacheRange(ResourceProfile profile) noexcept
+    {
+        constexpr std::uint64_t kMegabyte = 1024ULL * 1024ULL;
+        constexpr std::uint64_t kMinimum = 64ULL * kMegabyte;
+        constexpr std::uint64_t kMaximum = 4ULL * 1024ULL * kMegabyte;
+        const MemorySnapshot snapshot = QueryMemorySnapshot();
+        if (!snapshot.IsValid() || snapshot.availablePhysicalBytes == 0 || snapshot.totalPhysicalBytes == 0)
+        {
+            return profile == ResourceProfile::Aggressive
+                ? CacheCapacityRange{512ULL * kMegabyte, kMaximum}
+                : profile == ResourceProfile::Performance
+                    ? CacheCapacityRange{256ULL * kMegabyte, kMaximum}
+                    : profile == ResourceProfile::Conservative
+                        ? CacheCapacityRange{kMinimum, 512ULL * kMegabyte}
+                        : CacheCapacityRange{128ULL * kMegabyte, 2ULL * 1024ULL * kMegabyte};
+        }
+
+        std::uint64_t availableDivisor = 5;
+        std::uint64_t totalDivisor = 8;
+        std::uint64_t minimum = 128ULL * kMegabyte;
+        switch (profile)
+        {
+        case ResourceProfile::Conservative:
+            availableDivisor = 10;
+            totalDivisor = 16;
+            minimum = kMinimum;
+            break;
+        case ResourceProfile::Performance:
+            availableDivisor = 3;
+            totalDivisor = 4;
+            minimum = 256ULL * kMegabyte;
+            break;
+        case ResourceProfile::Aggressive:
+            availableDivisor = 2;
+            totalDivisor = 2;
+            minimum = 512ULL * kMegabyte;
+            break;
+        case ResourceProfile::Balanced:
+        default:
+            break;
+        }
+
+        const std::uint64_t availableBudget = snapshot.availablePhysicalBytes / availableDivisor;
+        const std::uint64_t totalBudget = snapshot.totalPhysicalBytes / totalDivisor;
+        const std::uint64_t maximum = std::max<std::uint64_t>(1, std::min(kMaximum, std::min(availableBudget, totalBudget)));
+        return {std::min(minimum, maximum), maximum};
+    }
+
+    inline CacheCapacityRange RecommendedMetadataCacheRange(ResourceProfile profile) noexcept
+    {
+        const MemorySnapshot snapshot = QueryMemorySnapshot();
+        constexpr std::uint64_t kMinimum = 512;
+        constexpr std::uint64_t kMaximum = 65536;
+        if (!snapshot.IsValid() || snapshot.totalPhysicalBytes == 0)
+        {
+            return profile == ResourceProfile::Conservative
+                ? CacheCapacityRange{512, 8192}
+                : profile == ResourceProfile::Performance
+                    ? CacheCapacityRange{4096, kMaximum}
+                    : profile == ResourceProfile::Aggressive
+                        ? CacheCapacityRange{8192, kMaximum}
+                        : CacheCapacityRange{2048, 32768};
+        }
+
+        const std::uint64_t totalMegabytes = snapshot.totalPhysicalBytes / (1024ULL * 1024ULL);
+        const std::uint64_t profileMultiplier = profile == ResourceProfile::Conservative
+            ? 1
+            : profile == ResourceProfile::Performance ? 4 : profile == ResourceProfile::Aggressive ? 8 : 2;
+        const std::uint64_t maximum = std::clamp(totalMegabytes * profileMultiplier, kMinimum, kMaximum);
+        const std::uint64_t minimum = std::min(maximum, profile == ResourceProfile::Conservative
+            ? kMinimum
+            : profile == ResourceProfile::Performance ? 2048ULL : profile == ResourceProfile::Aggressive ? 4096ULL : 1024ULL);
+        return {minimum, maximum};
+    }
+
+    inline CacheCapacityRange RecommendedPersistentThumbnailCacheRange(ResourceProfile profile) noexcept
+    {
+        constexpr std::uint64_t kMegabyte = 1024ULL * 1024ULL;
+        constexpr std::uint64_t kMaximum = 8ULL * 1024ULL * kMegabyte;
+        const MemorySnapshot snapshot = QueryMemorySnapshot();
+        if (!snapshot.IsValid() || snapshot.totalPhysicalBytes == 0)
+        {
+            return profile == ResourceProfile::Conservative
+                ? CacheCapacityRange{256ULL * kMegabyte, 2ULL * 1024ULL * kMegabyte}
+                : profile == ResourceProfile::Aggressive
+                    ? CacheCapacityRange{2ULL * 1024ULL * kMegabyte, kMaximum}
+                    : CacheCapacityRange{512ULL * kMegabyte, 4ULL * 1024ULL * kMegabyte};
+        }
+
+        const std::uint64_t totalBudget = snapshot.totalPhysicalBytes / (profile == ResourceProfile::Conservative ? 4ULL : 2ULL);
+        const std::uint64_t maximum = std::min(kMaximum, std::max(256ULL * kMegabyte, totalBudget));
+        const std::uint64_t minimum = std::min(maximum, profile == ResourceProfile::Conservative
+            ? 256ULL * kMegabyte
+            : profile == ResourceProfile::Performance ? 1024ULL * kMegabyte : profile == ResourceProfile::Aggressive ? 2ULL * 1024ULL * kMegabyte : 512ULL * kMegabyte);
+        return {minimum, maximum};
     }
 
     inline std::size_t ResolveViewerFullImageCacheCapacityBytes(ResourceProfile profile) noexcept

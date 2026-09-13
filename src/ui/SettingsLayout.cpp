@@ -63,7 +63,7 @@ namespace hyperbrowse::ui::dialog_detail
         const int right = std::max(left + 1, width - margin);
         const int availableWidth = std::max(1, right - left);
         const int fallbackCharacterWidth = scale(8);
-        const std::array<std::wstring_view, 9> measuredLabels{
+        const std::array<std::wstring_view, 11> measuredLabels{
             L"Transition duration (milliseconds)",
             L"Treat paired RAW+JPEG files as one operation",
             L"Open viewers on a secondary monitor when available",
@@ -73,6 +73,8 @@ namespace hyperbrowse::ui::dialog_detail
             L"Use out-of-process LibRaw fallback",
             L"New Quick Actions shortcut order",
             L"Metadata cache cap (entries)",
+            L"Persistent cache cap (MB)",
+            L"Trim persistent cache now",
         };
         int measuredLabelWidth = 0;
         for (const std::wstring_view label : measuredLabels)
@@ -89,6 +91,9 @@ namespace hyperbrowse::ui::dialog_detail
         const int radioGap = scale(16);
         const int radioWidth = std::max(1, (valueRight - valueLeft - radioGap) / 2);
         const int secondRadioLeft = valueLeft + radioWidth + radioGap;
+        const int numericRowHeight = scale(58);
+        const int numericEditHeight = scale(34);
+        const int numericSliderHeight = scale(18);
         const int footerTop = std::max(contentTop, height - margin - buttonHeight);
         const int footerBottom = std::max(footerTop, height - margin);
         const RECT bodyViewport{left, contentTop, right, std::max(contentTop, footerTop - scale(18))};
@@ -144,11 +149,17 @@ namespace hyperbrowse::ui::dialog_detail
         const auto addNumeric = [&](std::wstring_view label,
                                     ConsolidatedSettingsControl control,
                                     int numericIndex,
-                                    int& y)
+                                    int& y,
+                                    ConsolidatedSettingsControl automaticControl)
         {
-            if (canUseColumns)
+            const int automaticWidth = automaticControl == ConsolidatedSettingsControl::Count
+                ? 0
+                : scale(34) + SafeMeasureText(input, L"Follow profile", fallbackCharacterWidth);
+            const bool useColumns = canUseColumns
+                && availableWidth >= measuredLabelWidth + labelGap + scale(170) + scale(14) + automaticWidth;
+            if (useColumns)
             {
-                AddLabel(result, left, y, valueLeft - labelGap, y + rowHeight, label, false, control);
+                AddLabel(result, left, y, valueLeft - labelGap, y + numericRowHeight, label, false, control);
             }
             else
             {
@@ -156,14 +167,38 @@ namespace hyperbrowse::ui::dialog_detail
                 y += rowHeight + rowGap;
             }
             const int editTop = y;
-            const int editWidth = std::min(scale(170), std::max(1, valueRight - valueLeft));
             const int spinWidth = scale(28);
-            const int editLeft = canUseColumns ? valueLeft : left;
+            const int availableControlWidth = useColumns ? valueRight - valueLeft : right - left;
+            const int editWidth = automaticControl == ConsolidatedSettingsControl::Count
+                ? std::min(scale(170), std::max(1, availableControlWidth))
+                : std::min(scale(170),
+                           std::max(spinWidth, availableControlWidth - scale(14) - automaticWidth));
+            const int editLeft = useColumns ? valueLeft : left;
             result.numericEditRects[static_cast<std::size_t>(numericIndex)] = {
-                editLeft, editTop, editLeft + editWidth, editTop + scale(34)};
+                editLeft, editTop, editLeft + editWidth, editTop + numericEditHeight};
             result.numericSpinRects[static_cast<std::size_t>(numericIndex)] = {
-                editLeft + editWidth - spinWidth, editTop, editLeft + editWidth, editTop + scale(34)};
-            y += rowHeight + rowGap;
+                editLeft + editWidth - spinWidth, editTop, editLeft + editWidth, editTop + numericEditHeight};
+            result.numericSliderRects[static_cast<std::size_t>(numericIndex)] = {
+                editLeft, editTop + numericEditHeight + scale(4), valueRight, editTop + numericEditHeight + scale(4) + numericSliderHeight};
+            if (automaticControl != ConsolidatedSettingsControl::Count)
+            {
+                const int checkboxLeft = editLeft + editWidth + scale(14);
+                SetControlRect(result,
+                               automaticControl,
+                               checkboxLeft,
+                               editTop,
+                               right,
+                               editTop + rowHeight);
+                AddLabel(result,
+                         checkboxLeft + scale(34),
+                         editTop,
+                         right,
+                         editTop + rowHeight,
+                         L"Follow profile",
+                         false,
+                         automaticControl);
+            }
+            y += numericRowHeight + rowGap;
         };
         const auto addCheck = [&](ConsolidatedSettingsControl control,
                                   std::wstring_view text,
@@ -201,14 +236,22 @@ namespace hyperbrowse::ui::dialog_detail
             AddLabel(result, left + scale(34), y, right, y + rowHeight, secondText, false, secondControl);
             y += rowHeight + rowGap;
         };
+        const auto addAction = [&](ConsolidatedSettingsControl control,
+                                   std::wstring_view text,
+                                   int& y)
+        {
+            SetControlRect(result, control, left, y, right, y + rowHeight);
+            AddLabel(result, left + scale(14), y, right, y + rowHeight, text, false, control);
+            y += rowHeight + rowGap;
+        };
 
         int y = contentTop;
         switch (input.page)
         {
         case ConsolidatedSettingsPage::Slideshow:
             addLabelValue(L"Transition style", ConsolidatedSettingsControl::TransitionStyle, y);
-            addNumeric(L"Slide duration (milliseconds)", ConsolidatedSettingsControl::SlideshowDuration, 0, y);
-            addNumeric(L"Transition duration (milliseconds)", ConsolidatedSettingsControl::TransitionDuration, 1, y);
+            addNumeric(L"Slide duration (milliseconds)", ConsolidatedSettingsControl::SlideshowDuration, 0, y, ConsolidatedSettingsControl::Count);
+            addNumeric(L"Transition duration (milliseconds)", ConsolidatedSettingsControl::TransitionDuration, 1, y, ConsolidatedSettingsControl::Count);
             AddLabel(result, left, y, right, y + rowHeight, L"Slides: 250-60000 ms   |   Transitions: 100-5000 ms", true);
             y += rowHeight;
             break;
@@ -239,12 +282,11 @@ namespace hyperbrowse::ui::dialog_detail
         case ConsolidatedSettingsPage::Performance:
             addLabelValue(L"Resource profile", ConsolidatedSettingsControl::ResourceProfile, y);
             addCheck(ConsolidatedSettingsControl::PersistentCache, L"Keep the persistent thumbnail cache enabled", y);
-            addNumeric(L"Thumbnail cache cap (MB)", ConsolidatedSettingsControl::ThumbnailCache, 2, y);
-            addCheck(ConsolidatedSettingsControl::ThumbnailCacheAutomatic, L"Follow profile", y);
-            addNumeric(L"Metadata cache cap (entries)", ConsolidatedSettingsControl::MetadataCache, 3, y);
-            addCheck(ConsolidatedSettingsControl::MetadataCacheAutomatic, L"Follow profile", y);
-            addNumeric(L"Prefetch depth (items)", ConsolidatedSettingsControl::PrefetchDepth, 4, y);
-            addCheck(ConsolidatedSettingsControl::PrefetchDepthAutomatic, L"Follow profile", y);
+            addNumeric(L"Thumbnail cache cap (MB)", ConsolidatedSettingsControl::ThumbnailCache, 2, y, ConsolidatedSettingsControl::ThumbnailCacheAutomatic);
+            addNumeric(L"Metadata cache cap (entries)", ConsolidatedSettingsControl::MetadataCache, 3, y, ConsolidatedSettingsControl::MetadataCacheAutomatic);
+            addNumeric(L"Prefetch depth (items)", ConsolidatedSettingsControl::PrefetchDepth, 4, y, ConsolidatedSettingsControl::PrefetchDepthAutomatic);
+            addNumeric(L"Persistent cache cap (MB)", ConsolidatedSettingsControl::PersistentCacheCapacity, 5, y, ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic);
+            addAction(ConsolidatedSettingsControl::TrimPersistentCache, L"Trim persistent cache now", y);
             addCheck(ConsolidatedSettingsControl::PressureStatus, L"Show memory pressure state in the status bar", y);
             addCheck(ConsolidatedSettingsControl::NvJpeg, L"Use NVIDIA JPEG acceleration when available", y);
             addCheck(ConsolidatedSettingsControl::LibRawOutOfProcess, L"Use out-of-process LibRaw fallback", y);

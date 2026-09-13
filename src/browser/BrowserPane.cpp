@@ -1180,16 +1180,19 @@ namespace hyperbrowse::browser
     }
 
     void BrowserPane::SetCacheCapacityOverrides(std::size_t thumbnailCacheCapacityBytes,
-                                                std::size_t metadataCacheCapacityEntries)
+                                                std::size_t metadataCacheCapacityEntries,
+                                                std::size_t persistentThumbnailCacheCapacityBytes)
     {
         if (thumbnailCacheCapacityOverrideBytes_ == thumbnailCacheCapacityBytes
-            && metadataCacheCapacityOverrideEntries_ == metadataCacheCapacityEntries)
+            && metadataCacheCapacityOverrideEntries_ == metadataCacheCapacityEntries
+            && persistentThumbnailCacheCapacityOverrideBytes_ == persistentThumbnailCacheCapacityBytes)
         {
             return;
         }
 
         thumbnailCacheCapacityOverrideBytes_ = thumbnailCacheCapacityBytes;
         metadataCacheCapacityOverrideEntries_ = metadataCacheCapacityEntries;
+        persistentThumbnailCacheCapacityOverrideBytes_ = persistentThumbnailCacheCapacityBytes;
         ++thumbnailSessionId_;
         ++metadataSessionId_;
         ++thumbnailRequestEpoch_;
@@ -1220,9 +1223,31 @@ namespace hyperbrowse::browser
         return thumbnailScheduler_ ? thumbnailScheduler_->CacheCapacityBytes() : 0;
     }
 
+    std::size_t BrowserPane::ThumbnailCacheBytes() const
+    {
+        return thumbnailScheduler_ ? thumbnailScheduler_->CacheBytes() : 0;
+    }
+
+    hyperbrowse::cache::ThumbnailCache::Statistics BrowserPane::ThumbnailCacheStatistics() const
+    {
+        return thumbnailScheduler_ ? thumbnailScheduler_->GetCacheStatistics()
+                                   : hyperbrowse::cache::ThumbnailCache::Statistics{};
+    }
+
     std::size_t BrowserPane::MetadataCacheCapacityEntries() const noexcept
     {
         return metadataService_ ? metadataService_->CacheCapacityEntries() : 0;
+    }
+
+    std::size_t BrowserPane::MetadataCacheEntryCount() const
+    {
+        return metadataService_ ? metadataService_->CacheEntryCount() : 0;
+    }
+
+    hyperbrowse::services::ImageMetadataService::CacheStatistics BrowserPane::MetadataCacheStatistics() const
+    {
+        return metadataService_ ? metadataService_->GetCacheStatistics()
+                                : hyperbrowse::services::ImageMetadataService::CacheStatistics{};
     }
 
     void BrowserPane::SetDarkTheme(bool enabled)
@@ -1253,7 +1278,10 @@ namespace hyperbrowse::browser
         thumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(
             thumbnailCacheCapacityOverrideBytes_,
             0,
-            resourceProfile_);
+            resourceProfile_,
+            std::function<void()>{},
+            std::function<void()>{},
+            persistentThumbnailCacheCapacityOverrideBytes_);
         metadataService_ = std::make_unique<services::ImageMetadataService>(
             0,
             metadataCacheCapacityOverrideEntries_,

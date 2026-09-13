@@ -47,6 +47,7 @@
 #include "ui/BrowserItemScopeCollector.h"
 #include "ui/DiagnosticsWindow.h"
 #include "ui/CommandIds.h"
+#include "ui/CacheStatsPainter.h"
 #include "ui/ClipboardFileTransfer.h"
 #include "ui/ExternalDropTarget.h"
 #include "ui/FileCommandController.h"
@@ -178,8 +179,10 @@ namespace
         Statistics = 0,
         Compact = 1,
         Purge = 2,
+        Trim = 3,
     };
     constexpr unsigned int kPersistentThumbnailCacheMaintenanceSuccessFlag = 4;
+    constexpr unsigned int kPersistentThumbnailCacheMaintenanceShowDialogFlag = 8;
     constexpr UINT_PTR kMemoryPressureTimerId = 9101;
     constexpr UINT kMemoryPressureIntervalMs = 1500;
     constexpr GUID kConsoleDisplayStateGuid{
@@ -3868,6 +3871,9 @@ namespace
         case ConsolidatedSettingsControl::SingleInstance: return L'I';
         case ConsolidatedSettingsControl::KeepInNotificationArea: return L'K';
         case ConsolidatedSettingsControl::QuickSendShortcutOrder: return L'Q';
+        case ConsolidatedSettingsControl::PersistentCacheCapacity: return L'P';
+        case ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic: return L'F';
+        case ConsolidatedSettingsControl::TrimPersistentCache: return L'T';
         default: return 0;
         }
     }
@@ -3904,6 +3910,11 @@ namespace
         default:
             return false;
         }
+    }
+
+    bool ExperimentalSettingsControlIsAction(ConsolidatedSettingsControl control)
+    {
+        return control == ConsolidatedSettingsControl::TrimPersistentCache;
     }
 
     std::wstring ExperimentalSettingsChoiceValue(const ConsolidatedSettingsDialogState& settings,
@@ -4064,8 +4075,10 @@ namespace
         {
             RECT logicalBounds = layout.numericEditRects[index];
             RECT logicalSpinBounds = layout.numericSpinRects[index];
+            RECT logicalSliderBounds = layout.numericSliderRects[index];
             OffsetRect(&logicalBounds, 0, -state.scrollOffset);
             OffsetRect(&logicalSpinBounds, 0, -state.scrollOffset);
+            OffsetRect(&logicalSliderBounds, 0, -state.scrollOffset);
             if (state.numericEdits[index])
             {
                 const RECT physicalBounds = toPhysical(logicalBounds);
@@ -4104,6 +4117,24 @@ namespace
                 const bool inBody = logicalSpinBounds.top >= state.bodyViewport.top
                     && logicalSpinBounds.bottom <= state.bodyViewport.bottom;
                 ShowWindow(state.numericSpins[index], visible && inBody ? SW_SHOW : SW_HIDE);
+            }
+            if (state.numericSliders[index])
+            {
+                const RECT physicalSliderBounds = toPhysical(logicalSliderBounds);
+                const int sliderLeft = static_cast<int>(physicalSliderBounds.left);
+                const int sliderTop = static_cast<int>(physicalSliderBounds.top);
+                const int sliderWidth = std::max(1, static_cast<int>(physicalSliderBounds.right - physicalSliderBounds.left));
+                const int sliderHeight = std::max(1, static_cast<int>(physicalSliderBounds.bottom - physicalSliderBounds.top));
+                SetWindowPos(state.numericSliders[index], nullptr,
+                             sliderLeft,
+                             sliderTop,
+                             sliderWidth,
+                             sliderHeight,
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+                const bool visible = state.page == ConsolidatedSettingsPage::Performance && index >= 2;
+                const bool inBody = logicalSliderBounds.top >= state.bodyViewport.top
+                    && logicalSliderBounds.bottom <= state.bodyViewport.bottom;
+                ShowWindow(state.numericSliders[index], visible && inBody ? SW_SHOW : SW_HIDE);
             }
         }
 
@@ -4192,6 +4223,7 @@ namespace
         case ConsolidatedSettingsControl::ThumbnailCacheAutomatic: return settings.thumbnailCacheCapacityOverrideBytes == 0;
         case ConsolidatedSettingsControl::MetadataCacheAutomatic: return settings.metadataCacheCapacityOverrideEntries == 0;
         case ConsolidatedSettingsControl::PrefetchDepthAutomatic: return settings.prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth;
+        case ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic: return settings.persistentThumbnailCacheCapacityOverrideBytes == 0;
         case ConsolidatedSettingsControl::PressureStatus: return settings.showPressureStateInStatusBar;
         case ConsolidatedSettingsControl::NvJpeg: return settings.nvJpegEnabled;
         case ConsolidatedSettingsControl::LibRawOutOfProcess: return settings.libRawOutOfProcessEnabled;
@@ -4209,6 +4241,14 @@ namespace
     void ExperimentalSettingsToggle(ExperimentalSettingsDialogState& state, ConsolidatedSettingsControl control)
     {
         auto& settings = *state.settings;
+        if (ExperimentalSettingsControlIsAction(control))
+        {
+            if (settings.trimPersistentCache)
+            {
+                settings.trimPersistentCache();
+            }
+            return;
+        }
         if (ExperimentalSettingsControlIsChoice(control))
         {
             if (control == ConsolidatedSettingsControl::TransitionStyle)
@@ -4303,6 +4343,12 @@ namespace
                     ? hyperbrowse::util::ResolvePrefetchDepth(settings.resourceProfile, hyperbrowse::util::kAutomaticPrefetchDepth)
                     : hyperbrowse::util::kAutomaticPrefetchDepth;
                 return;
+            case ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic:
+                settings.persistentThumbnailCacheCapacityOverrideBytes = settings.persistentThumbnailCacheCapacityOverrideBytes == 0
+                    ? hyperbrowse::util::SaturatingCastToSizeT(
+                          hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(settings.resourceProfile).maximum)
+                    : 0;
+                return;
             default: break;
             }
             if (value)
@@ -4329,6 +4375,7 @@ namespace
         case ConsolidatedSettingsControl::ThumbnailCache: return state.numericEdits[2];
         case ConsolidatedSettingsControl::MetadataCache: return state.numericEdits[3];
         case ConsolidatedSettingsControl::PrefetchDepth: return state.numericEdits[4];
+        case ConsolidatedSettingsControl::PersistentCacheCapacity: return state.numericEdits[5];
         default:
             break;
         }
@@ -4431,6 +4478,9 @@ namespace
                 ConsolidatedSettingsControl::MetadataCacheAutomatic,
                 ConsolidatedSettingsControl::PrefetchDepth,
                 ConsolidatedSettingsControl::PrefetchDepthAutomatic,
+                ConsolidatedSettingsControl::PersistentCacheCapacity,
+                ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic,
+                ConsolidatedSettingsControl::TrimPersistentCache,
                 ConsolidatedSettingsControl::PressureStatus,
                 ConsolidatedSettingsControl::NvJpeg,
                 ConsolidatedSettingsControl::LibRawOutOfProcess};
@@ -4659,18 +4709,28 @@ namespace
             const bool enabled = !ExperimentalSettingsChecked(*state.settings, control);
             EnableWindow(state.numericEdits[2], enabled ? TRUE : FALSE);
             EnableWindow(state.numericSpins[2], enabled ? TRUE : FALSE);
+            EnableWindow(state.numericSliders[2], enabled ? TRUE : FALSE);
         }
         else if (control == ConsolidatedSettingsControl::MetadataCacheAutomatic)
         {
             const bool enabled = !ExperimentalSettingsChecked(*state.settings, control);
             EnableWindow(state.numericEdits[3], enabled ? TRUE : FALSE);
             EnableWindow(state.numericSpins[3], enabled ? TRUE : FALSE);
+            EnableWindow(state.numericSliders[3], enabled ? TRUE : FALSE);
         }
         else if (control == ConsolidatedSettingsControl::PrefetchDepthAutomatic)
         {
             const bool enabled = !ExperimentalSettingsChecked(*state.settings, control);
             EnableWindow(state.numericEdits[4], enabled ? TRUE : FALSE);
             EnableWindow(state.numericSpins[4], enabled ? TRUE : FALSE);
+            EnableWindow(state.numericSliders[4], enabled ? TRUE : FALSE);
+        }
+        else if (control == ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic)
+        {
+            const bool enabled = !ExperimentalSettingsChecked(*state.settings, control);
+            EnableWindow(state.numericEdits[5], enabled ? TRUE : FALSE);
+            EnableWindow(state.numericSpins[5], enabled ? TRUE : FALSE);
+            EnableWindow(state.numericSliders[5], enabled ? TRUE : FALSE);
         }
 
         if (control == ConsolidatedSettingsControl::ThemeLight
@@ -4680,7 +4740,8 @@ namespace
         }
         if (control == ConsolidatedSettingsControl::ThumbnailCacheAutomatic
             || control == ConsolidatedSettingsControl::MetadataCacheAutomatic
-            || control == ConsolidatedSettingsControl::PrefetchDepthAutomatic)
+            || control == ConsolidatedSettingsControl::PrefetchDepthAutomatic
+            || control == ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic)
         {
             UpdateExperimentalSettingsCacheValues(state);
         }
@@ -4941,6 +5002,9 @@ namespace
         const HFONT font = state.controlFont
             ? state.controlFont
             : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        DeleteFontIfOwned(state.numericFont);
+        state.numericFont = CreateDialogUiFont(10, FW_NORMAL, size, state.dpi);
+        const HFONT numericFont = state.numericFont ? state.numericFont : font;
         for (const HWND control : state.nativeControls)
         {
             if (control)
@@ -4952,7 +5016,7 @@ namespace
         {
             if (edit)
             {
-                SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(numericFont), TRUE);
             }
         }
     }
@@ -4990,6 +5054,57 @@ namespace
         }
     }
 
+    struct PerformanceSliderRange
+    {
+        std::uint64_t minimum{};
+        std::uint64_t maximum{};
+    };
+
+    PerformanceSliderRange GetPerformanceSliderRange(hyperbrowse::util::ResourceProfile profile,
+                                                     std::size_t index)
+    {
+        switch (index)
+        {
+        case 2:
+        {
+            const auto range = hyperbrowse::util::RecommendedThumbnailCacheRange(profile);
+            return {std::max<std::uint64_t>(1, range.minimum / (1024ULL * 1024ULL)),
+                    std::max<std::uint64_t>(1, range.maximum / (1024ULL * 1024ULL))};
+        }
+        case 3:
+        {
+            const auto range = hyperbrowse::util::RecommendedMetadataCacheRange(profile);
+            return {range.minimum, range.maximum};
+        }
+        case 4:
+            return {hyperbrowse::util::kMinimumPrefetchDepth, hyperbrowse::util::kMaximumPrefetchDepth};
+        case 5:
+        {
+            const auto range = hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(profile);
+            return {std::max<std::uint64_t>(1, range.minimum / (1024ULL * 1024ULL)),
+                    std::max<std::uint64_t>(1, range.maximum / (1024ULL * 1024ULL))};
+        }
+        default:
+            return {1, 1};
+        }
+    }
+
+    int PerformanceSliderPosition(PerformanceSliderRange range, std::uint64_t value)
+    {
+        if (range.maximum <= range.minimum)
+        {
+            return 0;
+        }
+        const std::uint64_t clamped = std::clamp(value, range.minimum, range.maximum);
+        return static_cast<int>(((clamped - range.minimum) * 100ULL) / (range.maximum - range.minimum));
+    }
+
+    std::uint64_t PerformanceSliderValue(PerformanceSliderRange range, int position)
+    {
+        const std::uint64_t clampedPosition = static_cast<std::uint64_t>(std::clamp(position, 0, 100));
+        return range.minimum + ((range.maximum - range.minimum) * clampedPosition) / 100ULL;
+    }
+
     void UpdateExperimentalSettingsCacheValues(ExperimentalSettingsDialogState& state)
     {
         if (!state.settings)
@@ -5010,6 +5125,7 @@ namespace
         const bool thumbnailAutomatic = state.settings->thumbnailCacheCapacityOverrideBytes == 0;
         const bool metadataAutomatic = state.settings->metadataCacheCapacityOverrideEntries == 0;
         const bool prefetchAutomatic = state.settings->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth;
+        const bool persistentAutomatic = state.settings->persistentThumbnailCacheCapacityOverrideBytes == 0;
         if (thumbnailAutomatic && state.numericEdits[2])
         {
             const auto capacityMegabytes = hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, profile)
@@ -5037,6 +5153,109 @@ namespace
             {
                 SendMessageW(state.numericSpins[4], UDM_SETPOS32, 0, static_cast<LPARAM>(depth));
             }
+        }
+        if (persistentAutomatic && state.numericEdits[5])
+        {
+            const auto capacityMegabytes = hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(profile).maximum
+                / (1024ULL * 1024ULL);
+            SetWindowTextW(state.numericEdits[5], std::to_wstring(capacityMegabytes).c_str());
+            if (state.numericSpins[5])
+            {
+                SendMessageW(state.numericSpins[5], UDM_SETPOS32, 0, static_cast<LPARAM>(capacityMegabytes));
+            }
+        }
+
+        for (const std::size_t index : {std::size_t{2}, std::size_t{3}, std::size_t{4}, std::size_t{5}})
+        {
+            if (!state.numericSliders[index])
+            {
+                continue;
+            }
+            const PerformanceSliderRange range = GetPerformanceSliderRange(profile, index);
+            std::uint64_t value = 1;
+            std::size_t parsed = 0;
+            if (index == 2)
+            {
+                value = TryParsePositiveSizeValue(ReadWindowText(state.numericEdits[index]), &parsed)
+                    ? parsed
+                    : range.minimum;
+            }
+            else if (index == 3)
+            {
+                value = TryParsePositiveSizeValue(ReadWindowText(state.numericEdits[index]), &parsed)
+                    ? parsed
+                    : range.minimum;
+            }
+            else if (index == 4)
+            {
+                UINT depth = 0;
+                value = TryReadDialogUInt(state.numericEdits[index], 1, 16, &depth) ? depth : range.minimum;
+            }
+            else
+            {
+                value = TryParsePositiveSizeValue(ReadWindowText(state.numericEdits[index]), &parsed)
+                    ? parsed
+                    : range.minimum;
+            }
+            SendMessageW(state.numericSliders[index], TBM_SETPOS, TRUE,
+                         PerformanceSliderPosition(range, value));
+        }
+    }
+
+    void HandleExperimentalSettingsSliderChange(ExperimentalSettingsDialogState& state, HWND source)
+    {
+        if (!state.settings || !source)
+        {
+            return;
+        }
+
+        std::size_t index = state.numericSliders.size();
+        for (std::size_t candidate = 2; candidate < state.numericSliders.size(); ++candidate)
+        {
+            if (state.numericSliders[candidate] == source)
+            {
+                index = candidate;
+                break;
+            }
+        }
+        if (index >= state.numericSliders.size())
+        {
+            return;
+        }
+
+        const auto profile = state.settings->resourceProfile;
+        const PerformanceSliderRange range = GetPerformanceSliderRange(profile, index);
+        const std::uint64_t value = PerformanceSliderValue(
+            range,
+            static_cast<int>(SendMessageW(source, TBM_GETPOS, 0, 0)));
+        if (index == 2)
+        {
+            state.settings->thumbnailCacheCapacityOverrideBytes = hyperbrowse::util::SaturatingCastToSizeT(value * 1024ULL * 1024ULL);
+            SetWindowTextW(state.numericEdits[index], std::to_wstring(value).c_str());
+        }
+        else if (index == 3)
+        {
+            state.settings->metadataCacheCapacityOverrideEntries = hyperbrowse::util::SaturatingCastToSizeT(value);
+            SetWindowTextW(state.numericEdits[index], std::to_wstring(value).c_str());
+        }
+        else if (index == 4)
+        {
+            state.settings->prefetchDepthOverride = static_cast<int>(value);
+            SetWindowTextW(state.numericEdits[index], std::to_wstring(value).c_str());
+        }
+        else
+        {
+            state.settings->persistentThumbnailCacheCapacityOverrideBytes = hyperbrowse::util::SaturatingCastToSizeT(value * 1024ULL * 1024ULL);
+            SetWindowTextW(state.numericEdits[index], std::to_wstring(value).c_str());
+        }
+        if (state.numericSpins[index])
+        {
+            SendMessageW(state.numericSpins[index], UDM_SETPOS32, 0, static_cast<LPARAM>(value));
+        }
+        InvalidateRect(state.dialogWindow, nullptr, FALSE);
+        if (state.accessibility)
+        {
+            state.accessibility->NotifyStateChanged(CHILDID_SELF);
         }
     }
 
@@ -5141,6 +5360,34 @@ namespace
             const bool enabled = ExperimentalSettingsCustomControlEnabled(state, control);
             const bool checked = ExperimentalSettingsChecked(*state.settings, control);
             const bool hovered = enabled && state.hoveredControl == static_cast<int>(index);
+            if (ExperimentalSettingsControlIsAction(control))
+            {
+                state.renderTarget->FillRoundedRectangle(
+                    hyperbrowse::render::ToD2DRoundedRect(bounds, scaleF(5.0f), scaleF(5.0f)),
+                    hovered ? state.accentFillBrush.Get() : state.fieldBrush.Get());
+                state.renderTarget->DrawRoundedRectangle(
+                    hyperbrowse::render::ToD2DRoundedRect(bounds, scaleF(5.0f), scaleF(5.0f)),
+                    enabled ? state.borderBrush.Get() : state.mutedTextBrush.Get(), scaleF(1.0f));
+                RECT textBounds = bounds;
+                textBounds.left += scale(14);
+                textBounds.right -= scale(10);
+                DrawExperimentalSettingsText(state.renderTarget.Get(),
+                                             state.bodyFormat.Get(),
+                                             L"Trim persistent cache now",
+                                             textBounds,
+                                             enabled ? state.textBrush.Get() : state.mutedTextBrush.Get(),
+                                             L'T');
+                if (customTargetFocused(ExperimentalSettingsFocusTargetKind::CustomControl, static_cast<int>(index)))
+                {
+                    RECT focusBounds = bounds;
+                    InflateRect(&focusBounds, -scale(2), -scale(2));
+                    state.renderTarget->DrawRoundedRectangle(
+                        hyperbrowse::render::ToD2DRoundedRect(focusBounds, scaleF(5.0f), scaleF(5.0f)),
+                        state.accentBrush.Get(),
+                        scaleF(2.0f));
+                }
+                continue;
+            }
             if (ExperimentalSettingsControlIsChoice(control))
             {
                 state.renderTarget->FillRoundedRectangle(
@@ -5292,6 +5539,7 @@ namespace
             return false;
         }
         const bool prefetchAutomatic = state.settings->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth;
+        const bool persistentAutomatic = state.settings->persistentThumbnailCacheCapacityOverrideBytes == 0;
         UINT prefetchDepth = 0;
         if (!prefetchAutomatic
             && !TryReadDialogUInt(state.numericEdits[4],
@@ -5303,6 +5551,14 @@ namespace
             SetFocus(state.numericEdits[4]);
             return false;
         }
+        std::size_t persistentMegabytes = 0;
+        if (!persistentAutomatic && (!TryParsePositiveSizeValue(ReadWindowText(state.numericEdits[5]), &persistentMegabytes)
+                                      || persistentMegabytes > std::numeric_limits<std::uint64_t>::max() / (1024ULL * 1024ULL)))
+        {
+            MessageBoxW(hwnd, L"Enter a positive persistent cache size in megabytes, or keep Follow profile enabled.", state.settings->title.c_str(), MB_OK | MB_ICONWARNING);
+            SetFocus(state.numericEdits[5]);
+            return false;
+        }
         state.settings->slideshowIntervalMs = slideshowDuration;
         state.settings->slideshowTransitionDurationMs = transitionDuration;
         state.settings->thumbnailCacheCapacityOverrideBytes = thumbnailAutomatic ? 0 : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(thumbnailMegabytes) * 1024ULL * 1024ULL);
@@ -5310,6 +5566,9 @@ namespace
         state.settings->prefetchDepthOverride = prefetchAutomatic
             ? hyperbrowse::util::kAutomaticPrefetchDepth
             : static_cast<int>(prefetchDepth);
+        state.settings->persistentThumbnailCacheCapacityOverrideBytes = persistentAutomatic
+            ? 0
+            : hyperbrowse::util::SaturatingCastToSizeT(static_cast<std::uint64_t>(persistentMegabytes) * 1024ULL * 1024ULL);
         state.settings->quickSendShortcutOrder = std::move(normalizedQuickSendShortcutOrder);
         return true;
     }
@@ -5433,6 +5692,7 @@ namespace
             {
                 state->controlFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             }
+            state->numericFont = CreateDialogUiFont(10, FW_NORMAL, size, state->dpi);
             for (IDWriteTextFormat* format : {state->bodyFormat.Get(), state->smallFormat.Get(), state->buttonFormat.Get()})
             {
                 if (format)
@@ -5452,12 +5712,16 @@ namespace
             const auto prefetchDepth = state->settings->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth
                 ? hyperbrowse::util::ResolvePrefetchDepth(profile, hyperbrowse::util::kAutomaticPrefetchDepth)
                 : state->settings->prefetchDepthOverride;
-            const std::array<std::pair<int, std::wstring>, 5> editValues{
+            const auto persistentCacheMegabytes = state->settings->persistentThumbnailCacheCapacityOverrideBytes == 0
+                ? hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(profile).maximum / (1024ULL * 1024ULL)
+                : state->settings->persistentThumbnailCacheCapacityOverrideBytes / (1024ULL * 1024ULL);
+            const std::array<std::pair<int, std::wstring>, 6> editValues{
                 std::pair{ES_NUMBER, std::to_wstring(state->settings->slideshowIntervalMs)},
                 std::pair{ES_NUMBER, std::to_wstring(state->settings->slideshowTransitionDurationMs)},
                 std::pair{ES_NUMBER, std::to_wstring(thumbnailCacheMegabytes)},
                 std::pair{ES_NUMBER, std::to_wstring(metadataCacheEntries)},
-                std::pair{ES_NUMBER, std::to_wstring(prefetchDepth)}};
+                std::pair{ES_NUMBER, std::to_wstring(prefetchDepth)},
+                std::pair{ES_NUMBER, std::to_wstring(persistentCacheMegabytes)}};
             for (std::size_t index = 0; index < state->numericEdits.size(); ++index)
             {
                 state->numericEdits[index] = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", editValues[index].second.c_str(),
@@ -5465,7 +5729,10 @@ namespace
                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(5700 + index)), state->instance, nullptr);
                 if (state->numericEdits[index])
                 {
-                    SendMessageW(state->numericEdits[index], WM_SETFONT, reinterpret_cast<WPARAM>(state->controlFont), TRUE);
+                    const HFONT font = state->numericFont
+                        ? state->numericFont
+                        : state->controlFont;
+                    SendMessageW(state->numericEdits[index], WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 }
             }
             state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)] = CreateWindowExW(
@@ -5586,18 +5853,47 @@ namespace
                                      : index == 1 ? state->settings->slideshowTransitionDurationMs
                                      : index == 2 ? static_cast<int>(thumbnailCacheMegabytes)
                                      : index == 3 ? static_cast<int>(metadataCacheEntries)
-                                     : prefetchDepth);
+                                     : index == 4 ? prefetchDepth
+                                     : static_cast<int>(persistentCacheMegabytes));
+                }
+            }
+            for (std::size_t index = 2; index < state->numericSliders.size(); ++index)
+            {
+                state->numericSliders[index] = CreateWindowExW(
+                    0,
+                    TRACKBAR_CLASSW,
+                    nullptr,
+                    WS_CHILD | TBS_AUTOTICKS,
+                    0,
+                    0,
+                    0,
+                    0,
+                    hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(5870 + index)),
+                    state->instance,
+                    nullptr);
+                if (state->numericSliders[index])
+                {
+                    SendMessageW(state->numericSliders[index], TBM_SETRANGE, TRUE, MAKELONG(0, 100));
                 }
             }
             const bool thumbnailCacheAutomatic = state->settings->thumbnailCacheCapacityOverrideBytes == 0;
             const bool metadataCacheAutomatic = state->settings->metadataCacheCapacityOverrideEntries == 0;
             const bool prefetchDepthAutomatic = state->settings->prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth;
+            const bool persistentCacheAutomatic = state->settings->persistentThumbnailCacheCapacityOverrideBytes == 0;
             EnableWindow(state->numericEdits[2], thumbnailCacheAutomatic ? FALSE : TRUE);
             EnableWindow(state->numericSpins[2], thumbnailCacheAutomatic ? FALSE : TRUE);
             EnableWindow(state->numericEdits[3], metadataCacheAutomatic ? FALSE : TRUE);
             EnableWindow(state->numericSpins[3], metadataCacheAutomatic ? FALSE : TRUE);
             EnableWindow(state->numericEdits[4], prefetchDepthAutomatic ? FALSE : TRUE);
             EnableWindow(state->numericSpins[4], prefetchDepthAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericSliders[2], thumbnailCacheAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericSliders[3], metadataCacheAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericSliders[4], prefetchDepthAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericEdits[5], persistentCacheAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericSpins[5], persistentCacheAutomatic ? FALSE : TRUE);
+            EnableWindow(state->numericSliders[5], persistentCacheAutomatic ? FALSE : TRUE);
+            UpdateExperimentalSettingsCacheValues(*state);
             ApplyExperimentalSettingsTheme(*state);
             LayoutExperimentalSettings(*state);
             hyperbrowse::ui::InitializeExperimentalSettingsAccessibility(*state);
@@ -5610,6 +5906,13 @@ namespace
                 LayoutExperimentalSettings(*state);
             }
             return 0;
+        case WM_HSCROLL:
+            if (state)
+            {
+                HandleExperimentalSettingsSliderChange(*state, reinterpret_cast<HWND>(lParam));
+                return 0;
+            }
+            break;
         case WM_DPICHANGED:
             if (state)
             {
@@ -5622,6 +5925,9 @@ namespace
                 const HFONT font = state->controlFont
                     ? state->controlFont
                     : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                DeleteFontIfOwned(state->numericFont);
+                state->numericFont = CreateDialogUiFont(10, FW_NORMAL, state->settings->appTextSize, state->dpi);
+                const HFONT numericFont = state->numericFont ? state->numericFont : font;
                 for (const HWND control : state->nativeControls)
                 {
                     if (control)
@@ -5633,7 +5939,7 @@ namespace
                 {
                     if (edit)
                     {
-                        SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                        SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(numericFont), TRUE);
                     }
                 }
                 LayoutExperimentalSettings(*state);
@@ -6022,6 +6328,13 @@ namespace
                         DestroyWindow(edit);
                     }
                 }
+                for (HWND slider : state->numericSliders)
+                {
+                    if (slider)
+                    {
+                        DestroyWindow(slider);
+                    }
+                }
                 if (const HWND shortcutOrderEdit = state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)])
                 {
                     DestroyWindow(shortcutOrderEdit);
@@ -6033,6 +6346,8 @@ namespace
                 }
                 DeleteFontIfOwned(state->controlFont);
                 state->controlFont = nullptr;
+                DeleteFontIfOwned(state->numericFont);
+                state->numericFont = nullptr;
                 state->done = true;
             }
             return 0;
@@ -9215,6 +9530,23 @@ namespace hyperbrowse::ui
             HandleCommandBarMenuTrackingTimer();
             return static_cast<LRESULT>(0);
         };
+        timerHandlers.onDetailsPanelPerformance = [this]() -> std::optional<LRESULT>
+        {
+            if (detailsPanelPerformanceTimerId_ == 0
+                || !detailsStripVisible_
+                || activeRightPaneTab_ != RightPaneTab::CacheStats)
+            {
+                return std::nullopt;
+            }
+
+            UpdateDetailsPanelPerformanceStats();
+            StartPersistentThumbnailCacheStatistics(false);
+            if (!IsRectEmpty(&detailsPanelRect_))
+            {
+                InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+            }
+            return static_cast<LRESULT>(0);
+        };
         timerRouter_.Configure(
             WindowTimerRouter::TimerIds{
                 kFileOperationShutdownTimerId,
@@ -9222,7 +9554,8 @@ namespace hyperbrowse::ui
                 kMemoryPressureTimerId,
                 kDisplaySurfaceRecoveryTimerId,
                 kQuickSendConfirmationTimerId,
-                kCommandBarMenuTrackingTimerId},
+                kCommandBarMenuTrackingTimerId,
+                kDetailsPanelPerformanceTimerId},
             std::move(timerHandlers));
 
         FileCommandController::Handlers fileCommandHandlers;
@@ -9638,6 +9971,7 @@ namespace hyperbrowse::ui
 
     MainWindow::~MainWindow()
     {
+        StopDetailsPanelPerformanceUpdates();
         accessibility_.reset();
         cacheMaintenanceExecutor_.reset();
 
@@ -11534,8 +11868,9 @@ namespace hyperbrowse::ui
                 const int innerWidth = std::max(0, innerRight - innerLeft);
 
                 const HFONT tabFont = detailsPanelSummaryFont_ ? detailsPanelSummaryFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-                const int maxLabelWidth = std::max(MeasureTextWidth(tabFont, L"File Details"),
-                                                   MeasureTextWidth(tabFont, L"Quick Actions"));
+                const int maxLabelWidth = std::max({MeasureTextWidth(tabFont, L"File Details"),
+                                                    MeasureTextWidth(tabFont, L"Quick Actions"),
+                                                    MeasureTextWidth(tabFont, L"Cache Stats")});
                 DetailsPanelLayout::Input layoutInput;
                 layoutInput.panelRect = detailsPanelRect_;
                 layoutInput.margin = kDetailsPanelMargin;
@@ -11593,12 +11928,21 @@ namespace hyperbrowse::ui
                         ShowWindow(detailsPanelText_, SW_SHOW);
 
                     }
-                    else
+                    else if (activeRightPaneTab_ == RightPaneTab::QuickSend)
                     {
                         RebuildQuickAccessDestinationRows(detailsPanelContentRect_.left,
                                                          detailsPanelContentRect_.right,
                                                          detailsPanelContentRect_.top);
                         ShowWindow(detailsPanelText_, SW_HIDE);
+                    }
+                    else
+                    {
+                        ShowWindow(detailsPanelText_, SW_HIDE);
+                        if (quickAccessScrollBar_)
+                        {
+                            ShowWindow(quickAccessScrollBar_, SW_HIDE);
+                        }
+                        HideQuickAccessShortcutEditControls();
                     }
                 }
                 else
@@ -12402,7 +12746,9 @@ namespace hyperbrowse::ui
             case KeyboardFocusTargetKind::DetailsTab:
                 item.name = focusTarget.index == static_cast<int>(RightPaneTab::QuickSend)
                     ? L"Quick Actions"
-                    : L"File Details";
+                    : focusTarget.index == static_cast<int>(RightPaneTab::CacheStats)
+                        ? L"Cache Stats"
+                        : L"File Details";
                 item.description = L"Select details panel view";
                 item.defaultAction = L"Select tab";
                 item.bounds = clientToScreenRect(detailsPanelTabRects_[static_cast<std::size_t>(focusTarget.index)]);
@@ -12827,9 +13173,7 @@ namespace hyperbrowse::ui
             ToolbarHandleClick(target.index);
             break;
         case KeyboardFocusTargetKind::DetailsTab:
-            SelectRightPaneTab(target.index == static_cast<int>(RightPaneTab::QuickSend)
-                ? RightPaneTab::QuickSend
-                : RightPaneTab::FileDetails);
+            SelectRightPaneTab(static_cast<RightPaneTab>(target.index));
             break;
         case KeyboardFocusTargetKind::DetailsCloseButton:
             ToggleDetailsPanelVisibility();
@@ -13500,9 +13844,96 @@ namespace hyperbrowse::ui
         detailsPanelHistogramVisible_ = result.visible;
     }
 
+    void MainWindow::UpdateDetailsPanelPerformanceStats()
+    {
+        DetailsPanelPerformanceStats stats;
+        if (browserPaneController_)
+        {
+            const auto thumbnailStatistics = browserPaneController_->ThumbnailCacheStatistics();
+            const auto metadataStatistics = browserPaneController_->MetadataCacheStatistics();
+            stats.thumbnailBytes = browserPaneController_->ThumbnailCacheBytes();
+            stats.thumbnailCapacityBytes = browserPaneController_->ThumbnailCacheCapacityBytes();
+            stats.thumbnailHits = thumbnailStatistics.hitCount;
+            stats.thumbnailMisses = thumbnailStatistics.missCount;
+            stats.thumbnailEvictions = thumbnailStatistics.evictionCount;
+            stats.metadataEntries = browserPaneController_->MetadataCacheEntryCount();
+            stats.metadataCapacityEntries = browserPaneController_->MetadataCacheCapacityEntries();
+            stats.metadataHits = metadataStatistics.hitCount;
+            stats.metadataMisses = metadataStatistics.missCount;
+            stats.metadataEvictions = metadataStatistics.evictionCount;
+        }
+
+        stats.persistentCapacityBytes = persistentThumbnailCacheCapacityOverrideBytes_ != 0
+            ? persistentThumbnailCacheCapacityOverrideBytes_
+            : services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, resourceProfile_);
+        if (cacheMaintenanceState_)
+        {
+            std::scoped_lock lock(cacheMaintenanceState_->mutex);
+            stats.persistentBytes = cacheMaintenanceState_->statistics.cacheFileBytes;
+            stats.persistentIndexedEntries = cacheMaintenanceState_->statistics.indexedEntryCount;
+            stats.persistentFileCount = cacheMaintenanceState_->statistics.cacheFileCount;
+            stats.persistentStatisticsAvailable = !cacheMaintenanceState_->statistics.cacheDirectory.empty();
+        }
+
+        const auto hitRate = [](std::uint64_t hits, std::uint64_t misses)
+        {
+            const std::uint64_t total = hits + misses;
+            return total == 0 ? 0ULL : (hits * 100ULL) / total;
+        };
+        std::wstring text;
+        text.reserve(1024);
+        text.append(L"Thumbnail Cache\r\n");
+        text.append(L"Usage: ");
+        text.append(browser::FormatByteSize(stats.thumbnailBytes));
+        text.append(L" / ");
+        text.append(browser::FormatByteSize(stats.thumbnailCapacityBytes));
+        text.append(L"\r\nHit rate: ");
+        text.append(std::to_wstring(hitRate(stats.thumbnailHits, stats.thumbnailMisses)));
+        text.append(L"%   Hits: ");
+        text.append(std::to_wstring(stats.thumbnailHits));
+        text.append(L"\r\nMisses: ");
+        text.append(std::to_wstring(stats.thumbnailMisses));
+        text.append(L"   Evictions: ");
+        text.append(std::to_wstring(stats.thumbnailEvictions));
+        text.append(L"\r\n\r\nMetadata Cache\r\nEntries: ");
+        text.append(std::to_wstring(stats.metadataEntries));
+        text.append(L" / ");
+        text.append(std::to_wstring(stats.metadataCapacityEntries));
+        text.append(L"\r\nHit rate: ");
+        text.append(std::to_wstring(hitRate(stats.metadataHits, stats.metadataMisses)));
+        text.append(L"%   Hits: ");
+        text.append(std::to_wstring(stats.metadataHits));
+        text.append(L"\r\nMisses: ");
+        text.append(std::to_wstring(stats.metadataMisses));
+        text.append(L"   Evictions: ");
+        text.append(std::to_wstring(stats.metadataEvictions));
+        text.append(L"\r\n\r\nPersistent Thumbnail Cache\r\n");
+        if (stats.persistentStatisticsAvailable)
+        {
+            text.append(L"Disk: ");
+            text.append(browser::FormatByteSize(stats.persistentBytes));
+            text.append(L" / ");
+            text.append(browser::FormatByteSize(stats.persistentCapacityBytes));
+            text.append(L"\r\nIndexed: ");
+            text.append(std::to_wstring(stats.persistentIndexedEntries));
+            text.append(L"   Files: ");
+            text.append(std::to_wstring(stats.persistentFileCount));
+        }
+        else
+        {
+            text.append(L"Checking asynchronously...");
+        }
+        text.append(L"\r\n\r\nMemory pressure: ");
+        text.append(thumbnailMemoryPressureActive_ ? L"Active" : L"Normal");
+
+        detailsPanelPerformanceStats_ = stats;
+        detailsPanelPerformanceText_ = std::move(text);
+    }
+
     void MainWindow::UpdateDetailsPanel()
     {
         detailsPanelPromptText_.clear();
+        UpdateDetailsPanelPerformanceStats();
 
         if (!detailsStripVisible_)
         {
@@ -13932,8 +14363,11 @@ namespace hyperbrowse::ui
         const auto titleFormat = renderer.CreateTextFormatFromFont(detailsPanelTitleFont_);
         const auto summaryFormat = renderer.CreateTextFormatFromFont(detailsPanelSummaryFont_);
         const auto bodyFormat = renderer.CreateTextFormatFromFont(detailsPanelBodyFont_);
+        const auto cacheHeadingFormat = renderer.CreateTextFormatFromFont(
+            detailsPanelBodyFont_,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD);
         const auto tabFormat = renderer.CreateTextFormatFromFont(detailsPanelSummaryFont_, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        if (!titleFormat || !summaryFormat || !bodyFormat || !tabFormat)
+        if (!titleFormat || !summaryFormat || !bodyFormat || !cacheHeadingFormat || !tabFormat)
         {
             return false;
         }
@@ -14085,6 +14519,45 @@ namespace hyperbrowse::ui
                                               titleFormat.Get(),
                                               summaryFormat.Get());
         }
+        else if (activeRightPaneTab_ == RightPaneTab::CacheStats && !IsRectEmpty(&detailsPanelContentRect_))
+        {
+            const int contentWidth = std::max(0, static_cast<int>(detailsPanelContentRect_.right - detailsPanelContentRect_.left));
+            const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
+                                                           L"Cache Performance",
+                                                           contentWidth,
+                                                           DT_LEFT | DT_NOPREFIX | DT_SINGLELINE,
+                                                           28);
+            const RECT titleRect{detailsPanelContentRect_.left,
+                                 detailsPanelContentRect_.top,
+                                 detailsPanelContentRect_.right,
+                                 detailsPanelContentRect_.top + titleHeight};
+            const RECT bodyRect{detailsPanelContentRect_.left,
+                                titleRect.bottom + 12,
+                                detailsPanelContentRect_.right,
+                                detailsPanelContentRect_.bottom};
+            const DetailsPanelTextPainter::State textState{
+                titleRect,
+                RECT{},
+                RECT{},
+                L"Cache Performance",
+                {},
+                {}};
+            const DetailsPanelTextPainter::Palette textPalette = BuildDetailsPanelTextPainterPalette(palette);
+            DetailsPanelTextPainter::PaintD2D(renderTarget.Get(),
+                                              textState,
+                                              textPalette,
+                                              titleFormat.Get(),
+                                              summaryFormat.Get());
+            const CacheStatsPainter::Palette cachePalette{
+                palette.mutedText,
+                palette.accent,
+                palette.paneBackground};
+            CacheStatsPainter::PaintD2D(renderTarget.Get(),
+                                        CacheStatsPainter::State{bodyRect, detailsPanelPerformanceText_, 22, 28},
+                                        cachePalette,
+                                        bodyFormat.Get(),
+                                        cacheHeadingFormat.Get());
+        }
 
         const HRESULT drawResult = renderTarget->EndDraw();
         if (SUCCEEDED(drawResult))
@@ -14217,6 +14690,45 @@ namespace hyperbrowse::ui
                                               textPalette,
                                               detailsPanelTitleFont_,
                                               detailsPanelSummaryFont_);
+        }
+        else if (activeRightPaneTab_ == RightPaneTab::CacheStats && !IsRectEmpty(&detailsPanelContentRect_))
+        {
+            const int contentWidth = std::max(0, static_cast<int>(detailsPanelContentRect_.right - detailsPanelContentRect_.left));
+            const int titleHeight = MeasureTextBlockHeight(detailsPanelTitleFont_,
+                                                           L"Cache Performance",
+                                                           contentWidth,
+                                                           DT_LEFT | DT_NOPREFIX | DT_SINGLELINE,
+                                                           28);
+            const RECT titleRect{detailsPanelContentRect_.left,
+                                 detailsPanelContentRect_.top,
+                                 detailsPanelContentRect_.right,
+                                 detailsPanelContentRect_.top + titleHeight};
+            const RECT bodyRect{detailsPanelContentRect_.left,
+                                titleRect.bottom + 12,
+                                detailsPanelContentRect_.right,
+                                detailsPanelContentRect_.bottom};
+            const DetailsPanelTextPainter::State textState{
+                titleRect,
+                RECT{},
+                RECT{},
+                L"Cache Performance",
+                {},
+                {}};
+            const DetailsPanelTextPainter::Palette textPalette = BuildDetailsPanelTextPainterPalette(palette);
+            DetailsPanelTextPainter::PaintGdi(hdc,
+                                              textState,
+                                              textPalette,
+                                              detailsPanelTitleFont_,
+                                              detailsPanelSummaryFont_);
+            const CacheStatsPainter::Palette cachePalette{
+                palette.mutedText,
+                palette.accent,
+                palette.paneBackground};
+            CacheStatsPainter::PaintGdi(hdc,
+                                        CacheStatsPainter::State{bodyRect, detailsPanelPerformanceText_, 22, 28},
+                                        cachePalette,
+                                        detailsPanelBodyFont_,
+                                        detailsPanelTitleFont_);
         }
     }
 
@@ -15010,6 +15522,34 @@ namespace hyperbrowse::ui
         return -1;
     }
 
+    void MainWindow::StartDetailsPanelPerformanceUpdates()
+    {
+        if (!hwnd_ || !detailsStripVisible_ || activeRightPaneTab_ != RightPaneTab::CacheStats)
+        {
+            return;
+        }
+
+        UpdateDetailsPanelPerformanceStats();
+        StartPersistentThumbnailCacheStatistics(false);
+        if (detailsPanelPerformanceTimerId_ == 0)
+        {
+            detailsPanelPerformanceTimerId_ = SetTimer(
+                hwnd_,
+                kDetailsPanelPerformanceTimerId,
+                kDetailsPanelPerformanceIntervalMs,
+                nullptr);
+        }
+    }
+
+    void MainWindow::StopDetailsPanelPerformanceUpdates()
+    {
+        if (detailsPanelPerformanceTimerId_ != 0)
+        {
+            KillTimer(hwnd_, kDetailsPanelPerformanceTimerId);
+            detailsPanelPerformanceTimerId_ = 0;
+        }
+    }
+
     void MainWindow::SelectRightPaneTab(RightPaneTab tab)
     {
         if (activeRightPaneTab_ == tab)
@@ -15018,6 +15558,14 @@ namespace hyperbrowse::ui
         }
 
         activeRightPaneTab_ = tab;
+        if (activeRightPaneTab_ == RightPaneTab::CacheStats)
+        {
+            StartDetailsPanelPerformanceUpdates();
+        }
+        else
+        {
+            StopDetailsPanelPerformanceUpdates();
+        }
         LayoutChildren();
         if (!IsRectEmpty(&detailsPanelRect_))
         {
@@ -15051,6 +15599,14 @@ namespace hyperbrowse::ui
         detailsPanelCloseButtonPressed_ = false;
         LayoutChildren();
         UpdateDetailsPanel();
+        if (detailsStripVisible_ && activeRightPaneTab_ == RightPaneTab::CacheStats)
+        {
+            StartDetailsPanelPerformanceUpdates();
+        }
+        else
+        {
+            StopDetailsPanelPerformanceUpdates();
+        }
         UpdateMenuState();
         if (!detailsStripVisible_ && focusWasInDetails)
         {
@@ -18382,6 +18938,9 @@ namespace hyperbrowse::ui
         case ConsolidatedSettingsControl::FullScreenFullMetadata: return L"Show full metadata in full-screen mode";
         case ConsolidatedSettingsControl::PrefetchDepth: return L"Prefetch depth in items";
         case ConsolidatedSettingsControl::PrefetchDepthAutomatic: return L"Follow profile for prefetch depth";
+        case ConsolidatedSettingsControl::PersistentCacheCapacity: return L"Persistent thumbnail cache cap in megabytes";
+        case ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic: return L"Follow profile for persistent thumbnail cache";
+        case ConsolidatedSettingsControl::TrimPersistentCache: return L"Trim persistent thumbnail cache now";
         case ConsolidatedSettingsControl::QuickSendShortcutOrder: return L"Quick Actions shortcut order";
         default: return L"Setting";
         }
@@ -20588,7 +21147,10 @@ namespace hyperbrowse::ui
             auto scheduler = std::make_unique<services::ThumbnailScheduler>(
                 thumbnailCacheCapacityOverrideBytes_,
                 0,
-                resourceProfile_);
+                resourceProfile_,
+                std::function<void()>{},
+                std::function<void()>{},
+                persistentThumbnailCacheCapacityOverrideBytes_);
             if (scheduler)
             {
                 if (hwnd_)
@@ -20612,7 +21174,8 @@ namespace hyperbrowse::ui
         {
             browserPaneController_->SetCacheCapacityOverrides(
                 thumbnailCacheCapacityOverrideBytes_,
-                metadataCacheCapacityOverrideEntries_);
+                metadataCacheCapacityOverrideEntries_,
+                persistentThumbnailCacheCapacityOverrideBytes_);
         }
 
         RecreateDetailsPanelThumbnailScheduler();
@@ -20700,7 +21263,7 @@ namespace hyperbrowse::ui
         }
     }
 
-    void MainWindow::StartPersistentThumbnailCacheStatistics()
+    void MainWindow::StartPersistentThumbnailCacheStatistics(bool showDialog)
     {
         if (cacheMaintenanceActive_ || !cacheMaintenanceExecutor_ || !cacheMaintenanceState_ || !hwnd_)
         {
@@ -20710,10 +21273,10 @@ namespace hyperbrowse::ui
         cacheMaintenanceActive_ = true;
         const HWND targetWindow = hwnd_;
         const auto state = cacheMaintenanceState_;
-        const std::size_t persistentCacheCapacityBytes = services::ThumbnailScheduler::ResolveCacheCapacityBytes(
-            thumbnailCacheCapacityOverrideBytes_,
-            resourceProfile_);
-        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, state, persistentCacheCapacityBytes]()
+        const std::size_t persistentCacheCapacityBytes = persistentThumbnailCacheCapacityOverrideBytes_ != 0
+            ? persistentThumbnailCacheCapacityOverrideBytes_
+            : services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, resourceProfile_);
+        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, state, persistentCacheCapacityBytes, showDialog]()
         {
             bool succeeded = true;
             try
@@ -20732,7 +21295,8 @@ namespace hyperbrowse::ui
 
             if (!PostMessageW(targetWindow,
                               kPersistentThumbnailCacheMaintenanceMessage,
-                              static_cast<WPARAM>(succeeded ? 4u : 0u),
+                              static_cast<WPARAM>((succeeded ? kPersistentThumbnailCacheMaintenanceSuccessFlag : 0u)
+                                                  | (showDialog ? kPersistentThumbnailCacheMaintenanceShowDialogFlag : 0u)),
                               0))
             {
                 return;
@@ -20749,7 +21313,7 @@ namespace hyperbrowse::ui
         }
     }
 
-    void MainWindow::StartPersistentThumbnailCacheMaintenance(bool purge)
+    void MainWindow::StartPersistentThumbnailCacheMaintenance(bool purge, bool showDialog)
     {
         if (cacheMaintenanceActive_ || !cacheMaintenanceExecutor_ || !hwnd_)
         {
@@ -20758,10 +21322,10 @@ namespace hyperbrowse::ui
 
         cacheMaintenanceActive_ = true;
         const HWND targetWindow = hwnd_;
-        const std::size_t persistentCacheCapacityBytes = services::ThumbnailScheduler::ResolveCacheCapacityBytes(
-            thumbnailCacheCapacityOverrideBytes_,
-            resourceProfile_);
-        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, purge, persistentCacheCapacityBytes]()
+        const std::size_t persistentCacheCapacityBytes = persistentThumbnailCacheCapacityOverrideBytes_ != 0
+            ? persistentThumbnailCacheCapacityOverrideBytes_
+            : services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, resourceProfile_);
+        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, purge, showDialog, persistentCacheCapacityBytes]()
         {
             bool succeeded = true;
             try
@@ -20785,7 +21349,9 @@ namespace hyperbrowse::ui
                               kPersistentThumbnailCacheMaintenanceMessage,
                               static_cast<WPARAM>(static_cast<unsigned int>(purge
                                                                                  ? PersistentThumbnailCacheMaintenanceOperation::Purge
-                                                                                 : PersistentThumbnailCacheMaintenanceOperation::Compact)
+                                                                                 : showDialog
+                                                                                     ? PersistentThumbnailCacheMaintenanceOperation::Compact
+                                                                                     : PersistentThumbnailCacheMaintenanceOperation::Trim)
                                                  | (succeeded ? kPersistentThumbnailCacheMaintenanceSuccessFlag : 0u)),
                               0))
             {
@@ -20808,15 +21374,19 @@ namespace hyperbrowse::ui
         cacheMaintenanceActive_ = false;
         const auto operation = static_cast<PersistentThumbnailCacheMaintenanceOperation>(wParam & 3u);
         const bool succeeded = (wParam & kPersistentThumbnailCacheMaintenanceSuccessFlag) != 0;
+        const bool showDialog = (wParam & kPersistentThumbnailCacheMaintenanceShowDialogFlag) != 0;
 
         if (operation == PersistentThumbnailCacheMaintenanceOperation::Statistics)
         {
             if (!succeeded || !cacheMaintenanceState_)
             {
-                MessageBoxW(hwnd_,
-                            L"Failed to inspect the persistent thumbnail cache.",
-                            L"Persistent Thumbnail Cache",
-                            MB_OK | MB_ICONERROR);
+                if (showDialog)
+                {
+                    MessageBoxW(hwnd_,
+                                L"Failed to inspect the persistent thumbnail cache.",
+                                L"Persistent Thumbnail Cache",
+                                MB_OK | MB_ICONERROR);
+                }
                 return 0;
             }
 
@@ -20827,38 +21397,60 @@ namespace hyperbrowse::ui
             }
             if (statistics.cacheDirectory.empty())
             {
-                MessageBoxW(hwnd_,
-                            L"The persistent thumbnail cache folder could not be resolved.",
-                            L"Persistent Thumbnail Cache",
-                            MB_OK | MB_ICONERROR);
+                if (showDialog)
+                {
+                    MessageBoxW(hwnd_,
+                                L"The persistent thumbnail cache folder could not be resolved.",
+                                L"Persistent Thumbnail Cache",
+                                MB_OK | MB_ICONERROR);
+                }
                 return 0;
             }
 
-            ShowPersistentThumbnailCacheDialogContents(
-                BuildPersistentThumbnailCacheSummary(statistics, persistentThumbnailCacheEnabled_),
-                BuildPersistentThumbnailCacheDetails(statistics));
+            if (showDialog)
+            {
+                ShowPersistentThumbnailCacheDialogContents(
+                    BuildPersistentThumbnailCacheSummary(statistics, persistentThumbnailCacheEnabled_),
+                    BuildPersistentThumbnailCacheDetails(statistics));
+            }
+            else if (activeRightPaneTab_ == RightPaneTab::CacheStats && detailsStripVisible_)
+            {
+                UpdateDetailsPanelPerformanceStats();
+                if (!IsRectEmpty(&detailsPanelRect_))
+                {
+                    InvalidateRect(hwnd_, &detailsPanelRect_, FALSE);
+                }
+            }
             return 0;
         }
 
         const bool purge = operation == PersistentThumbnailCacheMaintenanceOperation::Purge;
+        const bool trim = operation == PersistentThumbnailCacheMaintenanceOperation::Trim;
 
         if (!succeeded)
         {
             MessageBoxW(hwnd_,
                         purge
                             ? L"Failed to purge the persistent thumbnail cache."
-                            : L"Failed to compact the persistent thumbnail cache.",
+                            : trim
+                                ? L"Failed to trim the persistent thumbnail cache."
+                                : L"Failed to compact the persistent thumbnail cache.",
                         L"Persistent Thumbnail Cache",
                         MB_OK | MB_ICONERROR);
             return 0;
         }
 
         NotifyLongOperationComplete(
-            purge ? L"Persistent Thumbnail Cache Purged" : L"Persistent Thumbnail Cache Compacted",
+            purge ? L"Persistent Thumbnail Cache Purged" : trim ? L"Persistent Thumbnail Cache Trimmed" : L"Persistent Thumbnail Cache Compacted",
             purge
                 ? L"All saved thumbnails were removed from the persistent cache."
-                : L"The persistent thumbnail cache index and storage were repaired.");
-        ShowPersistentThumbnailCacheDialog();
+                : trim
+                    ? L"The persistent thumbnail cache was trimmed to its configured budget."
+                    : L"The persistent thumbnail cache index and storage were repaired.");
+        if (!trim)
+        {
+            ShowPersistentThumbnailCacheDialog();
+        }
         return 0;
     }
 
@@ -20925,6 +21517,7 @@ namespace hyperbrowse::ui
         state.persistentThumbnailCacheEnabled = persistentThumbnailCacheEnabled_;
         state.thumbnailCacheCapacityOverrideBytes = thumbnailCacheCapacityOverrideBytes_;
         state.metadataCacheCapacityOverrideEntries = metadataCacheCapacityOverrideEntries_;
+        state.persistentThumbnailCacheCapacityOverrideBytes = persistentThumbnailCacheCapacityOverrideBytes_;
         state.showPressureStateInStatusBar = showPressureStateInStatusBar_;
         state.nvJpegEnabled = nvJpegEnabled_;
         state.libRawOutOfProcessEnabled = libRawOutOfProcessEnabled_;
@@ -20954,6 +21547,11 @@ namespace hyperbrowse::ui
                 state.windowedFullMetadataVisible = viewerWindow_->IsFullMetadataVisible();
             }
         }
+
+        state.trimPersistentCache = [this]()
+        {
+            StartPersistentThumbnailCacheMaintenance(false, false);
+        };
 
         state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, 96);
         if (!state.bodyFont)
@@ -21011,6 +21609,7 @@ namespace hyperbrowse::ui
             persistentThumbnailCacheEnabled_ = draft.persistentThumbnailCacheEnabled;
             thumbnailCacheCapacityOverrideBytes_ = draft.thumbnailCacheCapacityOverrideBytes;
             metadataCacheCapacityOverrideEntries_ = draft.metadataCacheCapacityOverrideEntries;
+            persistentThumbnailCacheCapacityOverrideBytes_ = draft.persistentThumbnailCacheCapacityOverrideBytes;
             showPressureStateInStatusBar_ = draft.showPressureStateInStatusBar;
             nvJpegEnabled_ = draft.nvJpegEnabled;
             libRawOutOfProcessEnabled_ = draft.libRawOutOfProcessEnabled;
@@ -21356,6 +21955,7 @@ namespace hyperbrowse::ui
                     prefetchDepthOverride_,
                     thumbnailCacheCapacityOverrideBytes_,
                     metadataCacheCapacityOverrideEntries_,
+                    persistentThumbnailCacheCapacityOverrideBytes_,
                     showPressureStateInStatusBar_,
                     closeMainWindowOnEscape_});
             persistentThumbnailCacheEnabled_ = performanceState.persistentThumbnailCacheEnabled;
@@ -21363,6 +21963,7 @@ namespace hyperbrowse::ui
             prefetchDepthOverride_ = performanceState.prefetchDepthOverride;
             thumbnailCacheCapacityOverrideBytes_ = performanceState.thumbnailCacheCapacityOverrideBytes;
             metadataCacheCapacityOverrideEntries_ = performanceState.metadataCacheCapacityOverrideEntries;
+            persistentThumbnailCacheCapacityOverrideBytes_ = performanceState.persistentThumbnailCacheCapacityOverrideBytes;
             showPressureStateInStatusBar_ = performanceState.showPressureStateInStatusBar;
             closeMainWindowOnEscape_ = performanceState.closeMainWindowOnEscape;
 
@@ -21528,6 +22129,7 @@ namespace hyperbrowse::ui
                     prefetchDepthOverride_,
                     thumbnailCacheCapacityOverrideBytes_,
                     metadataCacheCapacityOverrideEntries_,
+                    persistentThumbnailCacheCapacityOverrideBytes_,
                     showPressureStateInStatusBar_,
                     closeMainWindowOnEscape_},
                 [&](std::wstring_view valueName, DWORD value)
@@ -23338,9 +23940,7 @@ namespace hyperbrowse::ui
 
             if (hitTab == pressedTab)
             {
-                SelectRightPaneTab(hitTab == static_cast<int>(RightPaneTab::QuickSend)
-                    ? RightPaneTab::QuickSend
-                    : RightPaneTab::FileDetails);
+                SelectRightPaneTab(static_cast<RightPaneTab>(hitTab));
             }
             return;
         }

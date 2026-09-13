@@ -15,7 +15,7 @@ namespace hyperbrowse::ui
         struct State
         {
             RECT tabStripRect{};
-            std::array<RECT, 2> tabRects{};
+            std::array<RECT, 3> tabRects{};
             int activeTabIndex{-1};
             int hotTabIndex{-1};
             int pressedTabIndex{-1};

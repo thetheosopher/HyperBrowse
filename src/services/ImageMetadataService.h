@@ -74,6 +74,13 @@ namespace hyperbrowse::services
     class ImageMetadataService
     {
     public:
+        struct CacheStatistics
+        {
+            std::uint64_t hitCount{};
+            std::uint64_t missCount{};
+            std::uint64_t evictionCount{};
+        };
+
         static constexpr UINT kMessageId = WM_APP + 45;
 
         using MetadataExtractor = std::function<std::shared_ptr<const ImageMetadata>(const browser::BrowserItem&, std::wstring*)>;
@@ -97,6 +104,7 @@ namespace hyperbrowse::services
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
         std::size_t CacheEntryCount() const;
         std::size_t CacheCapacityEntries() const noexcept;
+        CacheStatistics GetCacheStatistics() const;
         std::size_t WorkerCount() const;
 
     private:
@@ -153,6 +161,9 @@ namespace hyperbrowse::services
         std::unordered_set<MetadataCacheKey, MetadataCacheKeyHasher> inflightKeys_;
         mutable std::list<MetadataCacheKey> cacheLruOrder_;
         mutable std::unordered_map<MetadataCacheKey, CacheEntry, MetadataCacheKeyHasher> cache_;
+        mutable std::uint64_t cacheHitCount_{};
+        mutable std::uint64_t cacheMissCount_{};
+        std::uint64_t cacheEvictionCount_{};
         std::unordered_map<std::wstring, std::uint64_t> pathGenerations_;
         std::uint64_t nextPathGeneration_{1};
         std::vector<std::thread> workers_;

@@ -11,7 +11,7 @@ namespace hyperbrowse::ui
     public:
         static int Tab(bool panelVisible,
                        const RECT& tabStripRect,
-                       const std::array<RECT, 2>& tabRects,
+                       const std::array<RECT, 3>& tabRects,
                        int x,
                        int y);
         static int CloseButton(bool panelVisible, const RECT& closeButtonRect, int x, int y);

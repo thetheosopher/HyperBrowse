@@ -69,6 +69,13 @@ namespace hyperbrowse::cache
     class ThumbnailCache
     {
     public:
+        struct Statistics
+        {
+            std::uint64_t hitCount{};
+            std::uint64_t missCount{};
+            std::uint64_t evictionCount{};
+        };
+
         explicit ThumbnailCache(std::size_t capacityBytes);
 
         std::shared_ptr<const CachedThumbnail> Find(const ThumbnailCacheKey& key) const;
@@ -79,6 +86,7 @@ namespace hyperbrowse::cache
         void Clear();
         std::size_t CurrentBytes() const;
         std::size_t CapacityBytes() const;
+        Statistics GetStatistics() const;
 
     private:
         struct Entry
@@ -95,6 +103,9 @@ namespace hyperbrowse::cache
         std::size_t capacityBytes_{};
         mutable std::mutex mutex_;
         std::size_t currentBytes_{};
+        mutable std::uint64_t hitCount_{};
+        mutable std::uint64_t missCount_{};
+        std::uint64_t evictionCount_{};
         mutable std::list<ThumbnailCacheKey> lruOrder_;
         mutable std::unordered_map<ThumbnailCacheKey, Entry, ThumbnailCacheKeyHasher> entries_;
     };

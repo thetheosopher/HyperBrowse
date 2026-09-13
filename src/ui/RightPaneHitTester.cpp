@@ -4,7 +4,7 @@ namespace hyperbrowse::ui
 {
     int RightPaneHitTester::Tab(bool panelVisible,
                                  const RECT& tabStripRect,
-                                 const std::array<RECT, 2>& tabRects,
+                                 const std::array<RECT, 3>& tabRects,
                                  int x,
                                  int y)
     {

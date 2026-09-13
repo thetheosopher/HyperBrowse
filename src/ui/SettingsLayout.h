@@ -59,8 +59,9 @@ namespace hyperbrowse::ui::dialog_detail
         SettingsLayoutMetrics metrics{};
         std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> tabRects{};
         std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controlRects{};
-        std::array<RECT, 5> numericEditRects{};
-        std::array<RECT, 5> numericSpinRects{};
+        std::array<RECT, 6> numericEditRects{};
+        std::array<RECT, 6> numericSpinRects{};
+        std::array<RECT, 6> numericSliderRects{};
         std::vector<SettingsLayoutLabel> labels;
         int requiredContentHeight{};
         int scrollExtent{};

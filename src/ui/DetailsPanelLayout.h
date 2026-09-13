@@ -33,7 +33,7 @@ namespace hyperbrowse::ui
         struct Result
         {
             RECT tabStripRect{};
-            std::array<RECT, 2> tabRects{};
+            std::array<RECT, 3> tabRects{};
             RECT contentRect{};
             RECT histogramRect{};
             RECT closeButtonRect{};
