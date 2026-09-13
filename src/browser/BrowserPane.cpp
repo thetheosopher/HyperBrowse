@@ -2388,6 +2388,11 @@ namespace hyperbrowse::browser
 
     bool BrowserPane::HandleNavigationKey(UINT message, WPARAM keyCode, LPARAM keyData)
     {
+        if (message == WM_SYSKEYDOWN)
+        {
+            return false;
+        }
+
         switch (keyCode)
         {
         case VK_LEFT:

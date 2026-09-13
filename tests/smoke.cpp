@@ -2823,6 +2823,10 @@ namespace
         Expect(browserPane.SelectedCount() == 1, "Single-click selection in thumbnail mode failed");
 
         SetFocus(hostWindow);
+        Expect(!browserPane.HandleNavigationKey(WM_SYSKEYDOWN, VK_LEFT, 0),
+               "Alt+Left-style system key was consumed as thumbnail navigation");
+        Expect(!browserPane.HandleNavigationKey(WM_SYSKEYDOWN, VK_RIGHT, 0),
+               "Alt+Right-style system key was consumed as thumbnail navigation");
         Expect(browserPane.HandleNavigationKey(WM_KEYDOWN, VK_RIGHT, 0),
                "Thumbnail navigation did not handle an arrow key from the main window focus path");
         Expect(GetFocus() == browserPane.Hwnd(),
