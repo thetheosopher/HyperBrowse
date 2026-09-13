@@ -53,7 +53,8 @@ namespace hyperbrowse::services
         explicit ThumbnailScheduler(std::size_t cacheCapacityBytes = 0,
                                     std::size_t workerCount = 0,
                                     util::ResourceProfile resourceProfile = util::ResourceProfile::Balanced,
-                                    std::function<void()> persistenceBeforeJobHook = {});
+                                    std::function<void()> persistenceBeforeJobHook = {},
+                                    std::function<void()> decodeBeforeJobHook = {});
         ~ThumbnailScheduler();
 
         static std::size_t ResolveCacheCapacityBytes(std::size_t requestedCapacityBytes,
@@ -168,6 +169,7 @@ namespace hyperbrowse::services
         bool diskCacheEnabled_{true};
         bool pressureModeEnabled_{};
         std::function<void()> persistenceBeforeJobHook_;
+        std::function<void()> decodeBeforeJobHook_;
 
         mutable std::mutex diskPersistenceMutex_;
         std::condition_variable diskPersistenceAvailable_;

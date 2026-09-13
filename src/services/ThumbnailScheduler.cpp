@@ -201,10 +201,12 @@ namespace hyperbrowse::services
     ThumbnailScheduler::ThumbnailScheduler(std::size_t cacheCapacityBytes,
                                            std::size_t workerCount,
                                            util::ResourceProfile resourceProfile,
-                                           std::function<void()> persistenceBeforeJobHook)
+                                           std::function<void()> persistenceBeforeJobHook,
+                                           std::function<void()> decodeBeforeJobHook)
         : cache_(ResolveThumbnailCacheCapacityBytes(cacheCapacityBytes, resourceProfile))
         , diskCache_(cache_.CapacityBytes())
         , persistenceBeforeJobHook_(std::move(persistenceBeforeJobHook))
+        , decodeBeforeJobHook_(std::move(decodeBeforeJobHook))
     {
         const std::size_t totalWorkerCount = ResolveWorkerCount(workerCount, resourceProfile);
         const std::size_t rawWorkerCount = ResolveRawWorkerCount(totalWorkerCount, resourceProfile);
@@ -866,6 +868,11 @@ namespace hyperbrowse::services
 
             try
             {
+                if (decodeBeforeJobHook_)
+                {
+                    decodeBeforeJobHook_();
+                }
+
                 if (missingKeys.size() > 1)
                 {
                     std::vector<std::wstring> decodedFailureMessages;
@@ -924,7 +931,7 @@ namespace hyperbrowse::services
                         || requestedKeys_.contains(jobs[index].workItem.cacheKey);
                     cancelled[index] = cancelled[index] || !stillRelevant;
 
-                    if (thumbnail && !cancelled[index])
+                    if (thumbnail)
                     {
                         try
                         {
@@ -1001,7 +1008,7 @@ namespace hyperbrowse::services
                     }
                 }
 
-                if (thumbnail && !cancelled[index] && allowDiskCacheStore)
+                if (thumbnail && allowDiskCacheStore)
                 {
                     EnqueueDiskStore(jobs[index].workItem.cacheKey, thumbnail);
                 }

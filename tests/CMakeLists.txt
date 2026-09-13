@@ -48,6 +48,7 @@ add_test(NAME HyperBrowseFileOperationMediaCacheSmoke COMMAND HyperBrowseTests -
 add_test(NAME HyperBrowseViewerFitSmoke COMMAND HyperBrowseTests --viewer-fit)
 add_test(NAME HyperBrowseViewerInteractionSmoke COMMAND HyperBrowseTests --viewer-interaction)
 add_test(NAME HyperBrowseThumbnailPersistenceSmoke COMMAND HyperBrowseTests --thumbnail-persistence)
+add_test(NAME HyperBrowseThumbnailStaleCompletionSmoke COMMAND HyperBrowseTests --thumbnail-stale-completion)
 add_test(NAME HyperBrowseThumbnailFailureSmoke COMMAND HyperBrowseTests --thumbnail-failure)
 add_test(NAME HyperBrowseFileRenameSmoke COMMAND HyperBrowseTests --file-rename)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)

@@ -2465,6 +2465,66 @@ namespace
                    + ")");
     }
 
+    void RunThumbnailStaleCompletionScenario(HWND hwnd, TestWindowState* state)
+    {
+        TempFolder root(L"HyperBrowseThumbnailStaleCompletion");
+        const fs::path imagePath = root.Root() / L"stale.jpg";
+        WriteTestImage(imagePath, TestImageFormat::Jpeg, 24, 48, 6);
+        const auto key = MakeCacheKey(imagePath, 61);
+
+        std::mutex decodeMutex;
+        std::condition_variable decodeStartedCondition;
+        std::condition_variable decodeReleasedCondition;
+        bool decodeStarted = false;
+        bool releaseDecode = false;
+
+        {
+            hyperbrowse::services::ThumbnailScheduler scheduler(
+                8ULL * 1024ULL * 1024ULL,
+                1,
+                hyperbrowse::util::ResourceProfile::Balanced,
+                {},
+                [&]()
+                {
+                    std::unique_lock lock(decodeMutex);
+                    decodeStarted = true;
+                    decodeStartedCondition.notify_all();
+                    decodeReleasedCondition.wait(lock, [&]()
+                    {
+                        return releaseDecode;
+                    });
+                });
+            scheduler.BindTargetWindow(hwnd);
+
+            ResetThumbnailResult(state, 60);
+            scheduler.Schedule(60, 1, {{0, key, 0, true}});
+            Expect(PumpMessagesUntil([&]()
+            {
+                std::scoped_lock lock(decodeMutex);
+                return decodeStarted;
+            }, 5000), "Thumbnail stale-completion scenario never entered the decode barrier");
+
+            scheduler.Schedule(60, 2, {});
+            {
+                std::scoped_lock lock(decodeMutex);
+                releaseDecode = true;
+            }
+            decodeReleasedCondition.notify_one();
+
+            Expect(PumpMessagesUntil([&]()
+            {
+                return scheduler.FindCachedThumbnail(key) != nullptr;
+            }, 5000), "A stale successful thumbnail was not retained in the memory cache");
+            PumpMessagesFor(100);
+            Expect(state->thumbnailResult.readyCount == 0 && state->thumbnailResult.failedCount == 0,
+                   "A stale thumbnail completion incorrectly posted a ready update");
+        }
+
+        hyperbrowse::cache::DiskThumbnailCache diskCache(8ULL * 1024ULL * 1024ULL);
+        Expect(diskCache.TryLoad(key) != nullptr,
+               "A stale successful thumbnail was not retained in the persistent cache");
+    }
+
         void RunThumbnailSchedulerFailureScenario(HWND hwnd, TestWindowState* state)
         {
          TempFolder root(L"HyperBrowsePrompt5SchedulerFailure");
@@ -5575,6 +5635,7 @@ int main(int argc, char* argv[])
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
         const bool viewerInteractionOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-interaction";
         const bool thumbnailPersistenceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-persistence";
+        const bool thumbnailStaleCompletionOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-stale-completion";
         const bool thumbnailFailureOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-failure";
         const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
@@ -5600,6 +5661,10 @@ int main(int argc, char* argv[])
         else if (thumbnailPersistenceOnly)
         {
             RunThumbnailReadyBeforePersistenceScenario(hwnd, &state);
+        }
+        else if (thumbnailStaleCompletionOnly)
+        {
+            RunThumbnailStaleCompletionScenario(hwnd, &state);
         }
         else if (thumbnailFailureOnly)
         {
@@ -5667,6 +5732,7 @@ int main(int argc, char* argv[])
             RunThumbnailSchedulerWorkerAllocationScenario();
             RunThumbnailSchedulerScenario(hwnd, &state);
             RunThumbnailReadyBeforePersistenceScenario(hwnd, &state);
+            RunThumbnailStaleCompletionScenario(hwnd, &state);
             RunThumbnailSchedulerFailureScenario(hwnd, &state);
             RunImageMetadataServiceScenario();
             RunSwarmUiMetadataExtractionScenario();
