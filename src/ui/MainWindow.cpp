@@ -20004,6 +20004,12 @@ namespace hyperbrowse::ui
 
         for (viewer::ViewerWindow* viewer : OpenViewerWindows())
         {
+            if (displaySurfaceRecoveryTimerId_ != 0
+                && !displaySurfaceRecoveryPolicy_.ShouldRecoverViewer(
+                    reinterpret_cast<std::uintptr_t>(viewer->Hwnd())))
+            {
+                continue;
+            }
             viewer->RecoverDisplaySurface();
         }
 
@@ -20029,6 +20035,16 @@ namespace hyperbrowse::ui
             return;
         }
 
+        std::vector<std::uintptr_t> viewerTargets;
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
+        {
+            if (viewer->Hwnd())
+            {
+                viewerTargets.push_back(reinterpret_cast<std::uintptr_t>(viewer->Hwnd()));
+            }
+        }
+        displaySurfaceRecoveryPolicy_.SetViewerTargets(viewerTargets);
+
         displaySurfaceRecoveryTimerId_ = SetTimer(
             hwnd_,
             kDisplaySurfaceRecoveryTimerId,
@@ -20045,6 +20061,7 @@ namespace hyperbrowse::ui
 
         displaySurfaceRecoveryTimerId_ = 0;
         displaySurfaceRecoveryPolicy_.BeginRetries();
+        displaySurfaceRecoveryPolicy_.ClearViewerTargets();
     }
 
     void MainWindow::UpdateWindowTitle() const

@@ -842,6 +842,16 @@ namespace hyperbrowse::tests
                        && policy.Exhausted(),
                    "Display-surface recovery policy did not stop at its retry limit");
 
+                 const std::array<std::uintptr_t, 2> viewerTargets{0x10, 0x20};
+                 policy.SetViewerTargets(viewerTargets);
+                 Expect(policy.ShouldRecoverViewer(0x10)
+                      && policy.ShouldRecoverViewer(0x20)
+                      && !policy.ShouldRecoverViewer(0x30),
+                     "Display-surface recovery policy did not retain only viewers present at recovery start");
+                 policy.ClearViewerTargets();
+                 Expect(!policy.ShouldRecoverViewer(0x10),
+                     "Display-surface recovery policy did not clear viewer targets");
+
             policy.BeginRetries();
             Expect(!policy.ShouldRelayout() && !policy.Exhausted() && policy.AdvanceRetry() == 1,
                    "Display-surface recovery policy did not reset after exhaustion");
