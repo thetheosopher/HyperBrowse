@@ -1133,7 +1133,9 @@ namespace
                                   static_cast<int>(scaledWidth),
                                   static_cast<int>(scaledHeight),
                                   static_cast<std::uint8_t*>(bitmapBits));
-        hyperbrowse::util::RecordTiming(L"thumbnail.decode.nvjpeg.resample", resampleStopwatch.ElapsedMilliseconds());
+        const double resampleMs = resampleStopwatch.ElapsedMilliseconds();
+        hyperbrowse::util::RecordTiming(L"thumbnail.decode.nvjpeg.resample", resampleMs);
+        hyperbrowse::util::RecordTiming(L"thumbnail.scale", resampleMs);
 
         const int orientedWidth = OrientationSwapsDimensions(orientation) ? sourceHeight : sourceWidth;
         const int orientedHeight = OrientationSwapsDimensions(orientation) ? sourceWidth : sourceHeight;

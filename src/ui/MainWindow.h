@@ -31,6 +31,7 @@
 #include "ui/FileCommandController.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandBarPainter.h"
+#include "ui/CacheStatsPainter.h"
 #include "ui/DetailsPanelChromePainter.h"
 #include "ui/DetailsPanelHistogramPainter.h"
 #include "ui/DetailsPanelTextPainter.h"
@@ -163,6 +164,12 @@ namespace hyperbrowse::ui
             std::uint64_t thumbnailHits{};
             std::uint64_t thumbnailMisses{};
             std::uint64_t thumbnailEvictions{};
+            std::uint64_t thumbnailPendingJobs{};
+            std::uint64_t thumbnailInflightDecodes{};
+            std::uint64_t thumbnailActiveWorkers{};
+            std::uint64_t thumbnailDecodeLimit{};
+            std::uint64_t scaleSampleCount{};
+            double scaleAverageMs{};
             std::uint64_t metadataEntries{};
             std::uint64_t metadataCapacityEntries{};
             std::uint64_t metadataHits{};
@@ -541,6 +548,7 @@ namespace hyperbrowse::ui
         DetailsPanelHistogramPainter::State BuildDetailsPanelHistogramPainterState() const;
         DetailsPanelHistogramPainter::Palette BuildDetailsPanelHistogramPainterPalette(const ThemePalette& palette) const;
         DetailsPanelTextPainter::Palette BuildDetailsPanelTextPainterPalette(const ThemePalette& palette) const;
+        CacheStatsPainter::VisualState BuildCacheStatsPainterVisualState() const;
         QuickAccessPainter::State BuildQuickAccessPainterState(
             const QuickAccessLayout::Metrics& metrics,
             std::vector<QuickAccessPainter::RowState>& rowStates) const;
@@ -786,6 +794,7 @@ namespace hyperbrowse::ui
         HWND quickSendConfirmationToastWindow_{};
         std::wstring quickSendConfirmationText_;
         bool cacheMaintenanceActive_{};
+        bool cacheMaintenanceDialogPending_{};
         bool closePending_{};
         ULONGLONG closePendingSinceTick_{};
         bool closeWaitNoticeShown_{};

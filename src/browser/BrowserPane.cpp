@@ -1234,6 +1234,12 @@ namespace hyperbrowse::browser
                                    : hyperbrowse::cache::ThumbnailCache::Statistics{};
     }
 
+    hyperbrowse::services::ThumbnailScheduler::RuntimeStatistics BrowserPane::ThumbnailRuntimeStatistics() const
+    {
+        return thumbnailScheduler_ ? thumbnailScheduler_->GetRuntimeStatistics()
+                                   : hyperbrowse::services::ThumbnailScheduler::RuntimeStatistics{};
+    }
+
     std::size_t BrowserPane::MetadataCacheCapacityEntries() const noexcept
     {
         return metadataService_ ? metadataService_->CacheCapacityEntries() : 0;

@@ -4,6 +4,7 @@
 #include <wrl/client.h>
 
 #include "decode/WicDecodeHelpers.h"
+#include "util/Diagnostics.h"
 
 namespace hyperbrowse::decode
 {
@@ -78,6 +79,7 @@ namespace hyperbrowse::decode
         UINT scaledWidth = 0;
         UINT scaledHeight = 0;
         wic::ComputeScaledSize(orientedWidth, orientedHeight, key.targetWidth, key.targetHeight, &scaledWidth, &scaledHeight);
+        const bool scalingRequired = scaledWidth != orientedWidth || scaledHeight != orientedHeight;
 
         ComPtr<IWICBitmapSource> source = frame;
         const bool swapsDimensions = wic::TransformSwapsDimensions(transform);
@@ -193,12 +195,18 @@ namespace hyperbrowse::decode
 
         const UINT stride = scaledWidth * 4;
         const UINT bufferSize = stride * scaledHeight;
+        hyperbrowse::util::Stopwatch scaleStopwatch;
         result = converter->CopyPixels(nullptr, stride, bufferSize, static_cast<BYTE*>(bits));
         if (FAILED(result))
         {
             DeleteObject(bitmap);
             wic::SetError(decodeError, L"Failed to copy decoded pixels into the destination bitmap.", result);
             return {};
+        }
+
+        if (scalingRequired)
+        {
+            hyperbrowse::util::RecordTiming(L"thumbnail.scale", scaleStopwatch.ElapsedMilliseconds());
         }
 
         return std::make_shared<cache::CachedThumbnail>(bitmap,

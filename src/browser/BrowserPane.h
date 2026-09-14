@@ -149,6 +149,7 @@ namespace hyperbrowse::browser
         std::size_t ThumbnailCacheCapacityBytes() const noexcept;
         std::size_t ThumbnailCacheBytes() const;
         hyperbrowse::cache::ThumbnailCache::Statistics ThumbnailCacheStatistics() const;
+        hyperbrowse::services::ThumbnailScheduler::RuntimeStatistics ThumbnailRuntimeStatistics() const;
         std::size_t MetadataCacheCapacityEntries() const noexcept;
         std::size_t MetadataCacheEntryCount() const;
         hyperbrowse::services::ImageMetadataService::CacheStatistics MetadataCacheStatistics() const;

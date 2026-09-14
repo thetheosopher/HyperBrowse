@@ -48,6 +48,14 @@ namespace hyperbrowse::services
     class ThumbnailScheduler
     {
     public:
+        struct RuntimeStatistics
+        {
+            std::size_t pendingJobCount{};
+            std::size_t inflightDecodeCount{};
+            std::size_t activeWorkerCount{};
+            std::size_t activeDecodeLimit{};
+        };
+
         static constexpr UINT kMessageId = WM_APP + 43;
 
         explicit ThumbnailScheduler(std::size_t cacheCapacityBytes = 0,
@@ -77,6 +85,7 @@ namespace hyperbrowse::services
         std::size_t CacheBytes() const;
         std::size_t CacheCapacityBytes() const;
         cache::ThumbnailCache::Statistics GetCacheStatistics() const;
+        RuntimeStatistics GetRuntimeStatistics() const;
         std::size_t DiskCacheCapacityBytes() const noexcept;
         std::size_t WorkerCount() const;
         std::size_t GeneralWorkerCount() const;

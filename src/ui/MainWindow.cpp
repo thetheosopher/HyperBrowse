@@ -221,6 +221,10 @@ namespace
     constexpr int kDetailsPanelTextTopGap = 14;
     constexpr UINT kDetailsPanelCopyPromptCommandId = 5705;
     constexpr int kDetailsPanelHistogramBins = 64;
+    constexpr int kCacheStatsVisualMinContentWidth = 520;
+    constexpr int kCacheStatsVisualWidth = 220;
+    constexpr int kCacheStatsVisualGap = 18;
+    constexpr int kCacheStatsVisualHeight = 350;
     constexpr int kQuickAccessPanelHeaderHeight = 18;
     constexpr int kQuickAccessPanelTopGap = 12;
     constexpr int kQuickAccessPanelRowHeight = 40;
@@ -13856,6 +13860,11 @@ namespace hyperbrowse::ui
             stats.thumbnailHits = thumbnailStatistics.hitCount;
             stats.thumbnailMisses = thumbnailStatistics.missCount;
             stats.thumbnailEvictions = thumbnailStatistics.evictionCount;
+            const auto thumbnailRuntime = browserPaneController_->ThumbnailRuntimeStatistics();
+            stats.thumbnailPendingJobs = thumbnailRuntime.pendingJobCount;
+            stats.thumbnailInflightDecodes = thumbnailRuntime.inflightDecodeCount;
+            stats.thumbnailActiveWorkers = thumbnailRuntime.activeWorkerCount;
+            stats.thumbnailDecodeLimit = thumbnailRuntime.activeDecodeLimit;
             stats.metadataEntries = browserPaneController_->MetadataCacheEntryCount();
             stats.metadataCapacityEntries = browserPaneController_->MetadataCacheCapacityEntries();
             stats.metadataHits = metadataStatistics.hitCount;
@@ -13873,6 +13882,17 @@ namespace hyperbrowse::ui
             stats.persistentIndexedEntries = cacheMaintenanceState_->statistics.indexedEntryCount;
             stats.persistentFileCount = cacheMaintenanceState_->statistics.cacheFileCount;
             stats.persistentStatisticsAvailable = !cacheMaintenanceState_->statistics.cacheDirectory.empty();
+        }
+
+        const auto diagnostics = util::CaptureDiagnosticsSnapshot();
+        const auto scaleTiming = std::find_if(diagnostics.timings.begin(), diagnostics.timings.end(), [](const auto& timing)
+        {
+            return timing.name == L"thumbnail.scale";
+        });
+        if (scaleTiming != diagnostics.timings.end())
+        {
+            stats.scaleSampleCount = scaleTiming->count;
+            stats.scaleAverageMs = scaleTiming->averageMs;
         }
 
         const auto hitRate = [](std::uint64_t hits, std::uint64_t misses)
@@ -13907,6 +13927,24 @@ namespace hyperbrowse::ui
         text.append(std::to_wstring(stats.metadataMisses));
         text.append(L"   Evictions: ");
         text.append(std::to_wstring(stats.metadataEvictions));
+        text.append(L"\r\n\r\nDecode Pipeline\r\nQueue: ");
+        text.append(std::to_wstring(stats.thumbnailPendingJobs));
+        text.append(L"   Active: ");
+        text.append(std::to_wstring(stats.thumbnailInflightDecodes));
+        text.append(L" (workers ");
+        text.append(std::to_wstring(stats.thumbnailActiveWorkers));
+        text.append(L" / ");
+        text.append(std::to_wstring(stats.thumbnailDecodeLimit));
+        text.append(L")\r\nScale average: ");
+        if (stats.scaleSampleCount == 0)
+        {
+            text.append(L"No samples");
+        }
+        else
+        {
+            text.append(std::to_wstring(stats.scaleAverageMs));
+            text.append(L" ms");
+        }
         text.append(L"\r\n\r\nPersistent Thumbnail Cache\r\n");
         if (stats.persistentStatisticsAvailable)
         {
@@ -14283,6 +14321,59 @@ namespace hyperbrowse::ui
             palette.paneBackground};
     }
 
+    CacheStatsPainter::VisualState MainWindow::BuildCacheStatsPainterVisualState() const
+    {
+        const auto ratio = [](std::uint64_t value, std::uint64_t capacity)
+        {
+            return capacity == 0
+                ? 0.0f
+                : static_cast<float>((std::min)(1.0, static_cast<double>(value) / static_cast<double>(capacity)));
+        };
+        const auto hitRate = [](std::uint64_t hits, std::uint64_t misses)
+        {
+            const std::uint64_t total = hits + misses;
+            return total == 0
+                ? 0.0f
+                : static_cast<float>(static_cast<double>(hits) / static_cast<double>(total));
+        };
+
+        CacheStatsPainter::VisualState visual;
+        visual.gauges = {
+            CacheStatsPainter::Gauge{
+                L"THUMBS",
+                browser::FormatByteSize(detailsPanelPerformanceStats_.thumbnailBytes),
+                ratio(detailsPanelPerformanceStats_.thumbnailBytes,
+                      detailsPanelPerformanceStats_.thumbnailCapacityBytes)},
+            CacheStatsPainter::Gauge{
+                L"DISK",
+                detailsPanelPerformanceStats_.persistentStatisticsAvailable
+                    ? browser::FormatByteSize(detailsPanelPerformanceStats_.persistentBytes)
+                    : std::wstring(L"Checking"),
+                ratio(detailsPanelPerformanceStats_.persistentBytes,
+                      detailsPanelPerformanceStats_.persistentCapacityBytes)},
+            CacheStatsPainter::Gauge{
+                L"META",
+                std::to_wstring(detailsPanelPerformanceStats_.metadataEntries),
+                ratio(detailsPanelPerformanceStats_.metadataEntries,
+                      detailsPanelPerformanceStats_.metadataCapacityEntries)},
+            CacheStatsPainter::Gauge{
+                L"WORKERS",
+                std::to_wstring(detailsPanelPerformanceStats_.thumbnailActiveWorkers)
+                    + L" / "
+                    + std::to_wstring(detailsPanelPerformanceStats_.thumbnailDecodeLimit),
+                ratio(detailsPanelPerformanceStats_.thumbnailActiveWorkers,
+                      detailsPanelPerformanceStats_.thumbnailDecodeLimit)},
+            CacheStatsPainter::Gauge{
+                L"QUEUE",
+                std::to_wstring(detailsPanelPerformanceStats_.thumbnailPendingJobs),
+                ratio(detailsPanelPerformanceStats_.thumbnailPendingJobs,
+                      (std::max)(std::uint64_t{1}, detailsPanelPerformanceStats_.thumbnailDecodeLimit * 4))}};
+        visual.hitRate = hitRate(detailsPanelPerformanceStats_.thumbnailHits,
+                                 detailsPanelPerformanceStats_.thumbnailMisses);
+        visual.pressureActive = thumbnailMemoryPressureActive_;
+        return visual;
+    }
+
     QuickAccessPainter::State MainWindow::BuildQuickAccessPainterState(
         const QuickAccessLayout::Metrics& metrics,
         std::vector<QuickAccessPainter::RowState>& rowStates) const
@@ -14535,6 +14626,17 @@ namespace hyperbrowse::ui
                                 titleRect.bottom + 12,
                                 detailsPanelContentRect_.right,
                                 detailsPanelContentRect_.bottom};
+            RECT textRect = bodyRect;
+            RECT visualRect{};
+            if (contentWidth >= kCacheStatsVisualMinContentWidth)
+            {
+                visualRect = RECT{bodyRect.right - kCacheStatsVisualWidth,
+                                  bodyRect.top,
+                                  bodyRect.right,
+                                  (std::min)(static_cast<int>(bodyRect.bottom),
+                                             static_cast<int>(bodyRect.top) + kCacheStatsVisualHeight)};
+                textRect.right = visualRect.left - kCacheStatsVisualGap;
+            }
             const DetailsPanelTextPainter::State textState{
                 titleRect,
                 RECT{},
@@ -14551,9 +14653,15 @@ namespace hyperbrowse::ui
             const CacheStatsPainter::Palette cachePalette{
                 palette.mutedText,
                 palette.accent,
-                palette.paneBackground};
+                palette.paneBackground,
+                BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 42 : 18),
+                BlendColor(palette.actionStripBorder, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 96 : 150),
+                palette.accent,
+                themeMode_ == ThemeMode::Dark ? RGB(236, 174, 76) : RGB(170, 92, 22)};
+            CacheStatsPainter::VisualState visualState = BuildCacheStatsPainterVisualState();
+            visualState.rect = visualRect;
             CacheStatsPainter::PaintD2D(renderTarget.Get(),
-                                        CacheStatsPainter::State{bodyRect, detailsPanelPerformanceText_, 22, 28},
+                                        CacheStatsPainter::State{textRect, detailsPanelPerformanceText_, 22, 28, visualState},
                                         cachePalette,
                                         bodyFormat.Get(),
                                         cacheHeadingFormat.Get());
@@ -14707,6 +14815,17 @@ namespace hyperbrowse::ui
                                 titleRect.bottom + 12,
                                 detailsPanelContentRect_.right,
                                 detailsPanelContentRect_.bottom};
+            RECT textRect = bodyRect;
+            RECT visualRect{};
+            if (contentWidth >= kCacheStatsVisualMinContentWidth)
+            {
+                visualRect = RECT{bodyRect.right - kCacheStatsVisualWidth,
+                                  bodyRect.top,
+                                  bodyRect.right,
+                                  (std::min)(static_cast<int>(bodyRect.bottom),
+                                             static_cast<int>(bodyRect.top) + kCacheStatsVisualHeight)};
+                textRect.right = visualRect.left - kCacheStatsVisualGap;
+            }
             const DetailsPanelTextPainter::State textState{
                 titleRect,
                 RECT{},
@@ -14723,9 +14842,15 @@ namespace hyperbrowse::ui
             const CacheStatsPainter::Palette cachePalette{
                 palette.mutedText,
                 palette.accent,
-                palette.paneBackground};
+                palette.paneBackground,
+                BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 42 : 18),
+                BlendColor(palette.actionStripBorder, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 96 : 150),
+                palette.accent,
+                themeMode_ == ThemeMode::Dark ? RGB(236, 174, 76) : RGB(170, 92, 22)};
+            CacheStatsPainter::VisualState visualState = BuildCacheStatsPainterVisualState();
+            visualState.rect = visualRect;
             CacheStatsPainter::PaintGdi(hdc,
-                                        CacheStatsPainter::State{bodyRect, detailsPanelPerformanceText_, 22, 28},
+                                        CacheStatsPainter::State{textRect, detailsPanelPerformanceText_, 22, 28, visualState},
                                         cachePalette,
                                         detailsPanelBodyFont_,
                                         detailsPanelTitleFont_);
@@ -21196,8 +21321,14 @@ namespace hyperbrowse::ui
 
     void MainWindow::ShowPersistentThumbnailCacheDialog()
     {
-        if (cacheMaintenanceActive_ || !cacheMaintenanceState_)
+        if (!cacheMaintenanceState_)
         {
+            return;
+        }
+
+        if (cacheMaintenanceActive_)
+        {
+            cacheMaintenanceDialogPending_ = true;
             return;
         }
 
@@ -21374,10 +21505,12 @@ namespace hyperbrowse::ui
         cacheMaintenanceActive_ = false;
         const auto operation = static_cast<PersistentThumbnailCacheMaintenanceOperation>(wParam & 3u);
         const bool succeeded = (wParam & kPersistentThumbnailCacheMaintenanceSuccessFlag) != 0;
-        const bool showDialog = (wParam & kPersistentThumbnailCacheMaintenanceShowDialogFlag) != 0;
+        const bool showDialog = (wParam & kPersistentThumbnailCacheMaintenanceShowDialogFlag) != 0
+            || cacheMaintenanceDialogPending_;
 
         if (operation == PersistentThumbnailCacheMaintenanceOperation::Statistics)
         {
+            cacheMaintenanceDialogPending_ = false;
             if (!succeeded || !cacheMaintenanceState_)
             {
                 if (showDialog)
@@ -21426,6 +21559,8 @@ namespace hyperbrowse::ui
 
         const bool purge = operation == PersistentThumbnailCacheMaintenanceOperation::Purge;
         const bool trim = operation == PersistentThumbnailCacheMaintenanceOperation::Trim;
+        const bool dialogRequested = cacheMaintenanceDialogPending_;
+        cacheMaintenanceDialogPending_ = false;
 
         if (!succeeded)
         {
@@ -21447,7 +21582,7 @@ namespace hyperbrowse::ui
                 : trim
                     ? L"The persistent thumbnail cache was trimmed to its configured budget."
                     : L"The persistent thumbnail cache index and storage were repaired.");
-        if (!trim)
+        if (!trim || dialogRequested)
         {
             ShowPersistentThumbnailCacheDialog();
         }

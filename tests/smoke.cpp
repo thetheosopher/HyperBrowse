@@ -2830,6 +2830,13 @@ namespace
         });
         Expect(visibleQueueTiming != diagnostics.timings.end() && visibleQueueTiming->count > 0,
                "Thumbnail scheduler did not record visible general-worker queue latency");
+
+        const auto scaleTiming = std::find_if(diagnostics.timings.begin(), diagnostics.timings.end(), [](const auto& timing)
+        {
+            return timing.name == L"thumbnail.scale";
+        });
+        Expect(scaleTiming != diagnostics.timings.end() && scaleTiming->count > 0,
+               "Thumbnail decode did not record unified scale timing");
     }
 
     void RunThumbnailReadyBeforePersistenceScenario(HWND hwnd, TestWindowState* state)
@@ -2910,6 +2917,14 @@ namespace
                 std::scoped_lock lock(decodeMutex);
                 return decodeStarted;
             }, 5000), "Thumbnail stale-completion scenario never entered the decode barrier");
+
+                 const auto runtimeStatistics = scheduler.GetRuntimeStatistics();
+                 Expect(runtimeStatistics.inflightDecodeCount == 1,
+                     "Thumbnail scheduler did not report the blocked decode as in flight");
+                 Expect(runtimeStatistics.activeWorkerCount == 1,
+                     "Thumbnail scheduler did not report its active worker");
+                 Expect(runtimeStatistics.activeDecodeLimit >= runtimeStatistics.activeWorkerCount,
+                     "Thumbnail scheduler reported an invalid active decode limit");
 
             scheduler.Schedule(60, 2, {});
             {

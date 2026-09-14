@@ -90,7 +90,12 @@ The first persistence pass shipped; now harden it.
 
 ### `A4` Memory-Pressure Response & Adaptive Prefetch (P1)
 
-**Implementation status:** In progress. `2026-05-16` shipped two code slices.
+**Implementation status:** Shipped. `2026-05-16` shipped the initial response
+slice, followed by shell-owned pressure sampling, recovery hysteresis, cache
+trimming, and propagation to thumbnail, metadata, viewer, and disk-write
+paths. The Cache Performance inspector now exposes live thumbnail queue and
+in-flight decode gauges plus scale timing alongside cache hit rates and the
+current pressure state.
 The first wired `ResourceProfile` into viewer prefetch radius, retained
 farther-ahead prefetched images in the viewer full-image cache, and reduced
 viewer prefetch back to one item when physical memory is tight. The second
@@ -104,10 +109,8 @@ and trims the viewer full-image cache alongside the thumbnail caches when
 pressure is active. A later slice exposed that pressure-state indicator in the
 Performance Settings dialog, throttles metadata extraction workers under the
 same shell-owned pressure state, trims the metadata cache alongside the
-thumbnail caches, and skips opportunistic disk-thumbnail writes while pressure
-is active. Remaining for full completion: add a richer dedicated performance
-HUD or inspector surface if needed, and extend the response to other
-resource-heavy subsystems as needed.
+thumbnail cache, and skips opportunistic disk-thumbnail writes while pressure
+is active.
 
 - Sample `GlobalMemoryStatusEx` on a low-frequency timer (1–2 Hz) on a
   background thread, never the UI thread.
@@ -117,7 +120,8 @@ resource-heavy subsystems as needed.
   - Trigger eviction toward `cacheCapBytes / 2` on the thumbnail cache.
 - Recovery hysteresis: only restore when load drops below 70 % for two
   consecutive samples.
-- Expose current state in the Performance HUD (C3).
+- Expose current state and live decode pressure in the Cache Performance
+  inspector (C3).
 
 ### `A5` Decode/Scale Buffer Pools (P1)
 

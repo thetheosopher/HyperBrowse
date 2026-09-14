@@ -454,6 +454,7 @@ namespace
         {
             wic::ComputeScaledSize(orientedWidth, orientedHeight, targetWidth, targetHeight, &scaledWidth, &scaledHeight);
         }
+        const bool scalingRequired = scaledWidth != orientedWidth || scaledHeight != orientedHeight;
 
         ComPtr<IWICBitmapSource> source = frame;
         const bool swapsDimensions = wic::TransformSwapsDimensions(transform);
@@ -570,12 +571,18 @@ namespace
 
         const UINT stride = scaledWidth * 4;
         const UINT bufferSize = stride * scaledHeight;
+        hyperbrowse::util::Stopwatch scaleStopwatch;
         result = converter->CopyPixels(nullptr, stride, bufferSize, static_cast<BYTE*>(bits));
         if (FAILED(result))
         {
             DeleteObject(bitmap);
             wic::SetError(errorMessage, L"Failed to copy decoded pixels into the destination bitmap.", result);
             return {};
+        }
+
+        if (scalingRequired)
+        {
+            hyperbrowse::util::RecordTiming(L"thumbnail.scale", scaleStopwatch.ElapsedMilliseconds());
         }
 
         return std::make_shared<hyperbrowse::cache::CachedThumbnail>(bitmap,

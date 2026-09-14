@@ -565,6 +565,21 @@ namespace hyperbrowse::services
         return cache_.GetStatistics();
     }
 
+    ThumbnailScheduler::RuntimeStatistics ThumbnailScheduler::GetRuntimeStatistics() const
+    {
+        std::scoped_lock lock(mutex_);
+        RuntimeStatistics statistics;
+        statistics.pendingJobCount = pendingJobs_.size();
+        for (const auto& [cacheKey, inflightDecodes] : inflightJobs_)
+        {
+            (void)cacheKey;
+            statistics.inflightDecodeCount += inflightDecodes.size();
+        }
+        statistics.activeWorkerCount = activeWorkerCount_;
+        statistics.activeDecodeLimit = activeDecodeLimit_;
+        return statistics;
+    }
+
     std::size_t ThumbnailScheduler::DiskCacheCapacityBytes() const noexcept
     {
         return diskCache_.CapacityBytes();
