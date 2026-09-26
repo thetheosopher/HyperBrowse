@@ -16458,7 +16458,7 @@ namespace hyperbrowse::ui
 
         if (hasSelection)
         {
-            AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open");
+            AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_SELECTED, L"&Open\tEnter");
             AppendMenuW(menu, MF_STRING, ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, L"Open in New Viewer &Window\tCtrl+Shift+Enter");
             AppendMenuW(menu, MF_STRING, ID_FILE_COMPARE_SELECTED, L"&Compare Selected");
             AppendMenuW(menu, MF_STRING, ID_FILE_VIEW_ON_SECONDARY_MONITOR, L"View on Secondary &Monitor");
