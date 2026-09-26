@@ -149,6 +149,7 @@ add_library(HyperBrowseCore STATIC
     src/services/JpegTransformService.cpp
     src/services/ThumbnailScheduler.cpp
     src/services/UserMetadataStore.cpp
+    src/viewer/CompareSessionPolicy.cpp
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
     src/ui/BrowserItemScopeCollector.cpp

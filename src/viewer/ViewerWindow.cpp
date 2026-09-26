@@ -186,6 +186,17 @@ namespace
         std::wstring text;
     };
 
+    struct CompareTileReadyResult
+    {
+        std::uint64_t sessionGeneration{};
+        std::uint64_t requestGeneration{};
+        std::size_t tileIndex{};
+        int itemIndex{-1};
+        std::wstring filePath;
+        std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> image;
+        std::wstring errorMessage;
+    };
+
     COLORREF BackgroundColor(bool darkTheme)
     {
         if (hyperbrowse::ui::IsHighContrastEnabled())
@@ -891,6 +902,7 @@ namespace hyperbrowse::viewer
     ViewerWindow::ViewerWindow(HINSTANCE instance)
         : instance_(instance)
         , asyncState_(std::make_shared<AsyncState>())
+        , compareAsyncState_(std::make_shared<CompareAsyncState>())
         , infoOverlaysVisible_(LoadViewerInfoOverlaysVisibleSetting())
         , infoOverlayTextSize_(LoadViewerInfoOverlayTextSizeSetting())
         , fullMetadataVisible_(LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible))
@@ -914,6 +926,7 @@ namespace hyperbrowse::viewer
         asyncState_->shutdown.store(true, std::memory_order_release);
         asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
         asyncState_->targetWindow.store(nullptr, std::memory_order_release);
+        compareAsyncState_->sessionGeneration.fetch_add(1, std::memory_order_acq_rel);
         WaitForBackgroundTasks();
 
         ReleaseD2DResources();
@@ -951,7 +964,7 @@ namespace hyperbrowse::viewer
                             HMONITOR targetMonitor)
     {
         owner_ = owner;
-        items_ = std::move(items);
+                            items_ = std::move(items);
         if (items_.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(items_.size()))
         {
             return false;
@@ -959,6 +972,11 @@ namespace hyperbrowse::viewer
 
         currentIndex_ = selectedIndex;
         darkTheme_ = darkTheme;
+        compareSessionActive_ = false;
+        compareTiles_.clear();
+        compareCandidateMetadata_.clear();
+        compareSessionGeneration_++;
+        compareAsyncState_->sessionGeneration.store(compareSessionGeneration_, std::memory_order_release);
         compareMode_ = false;
         compareDirection_ = CompareDirection::Next;
         ClearWraparoundMessage();
@@ -1069,11 +1087,19 @@ namespace hyperbrowse::viewer
 
     int ViewerWindow::CurrentIndex() const noexcept
     {
-        return currentIndex_;
+        if (compareSessionActive_ && focusedCompareTile_ < compareTiles_.size())
+        {
+            return compareTiles_[focusedCompareTile_].itemIndex;
+        }
+            return currentIndex_;
     }
 
     std::wstring ViewerWindow::CurrentFilePath() const
     {
+        if (compareSessionActive_ && focusedCompareTile_ < compareTiles_.size())
+        {
+            return compareTiles_[focusedCompareTile_].filePath;
+        }
         if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
         {
             return {};
@@ -1162,6 +1188,30 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::SetCompareMode(bool enabled, CompareDirection direction)
     {
+        if (!compareTiles_.empty())
+        {
+            if (!enabled && compareTiles_.size() >= 3)
+            {
+                EndCompareSessionPromoteFocused();
+                return;
+            }
+            compareSessionActive_ = enabled;
+            if (!enabled)
+            {
+                CaptureFocusedCompareView();
+            }
+            else
+            {
+                FocusCompareTileInternal(focusedCompareTile_);
+            }
+            UpdateWindowTitle();
+            if (hwnd_ && IsWindow(hwnd_) != FALSE)
+            {
+                RequestRepaint();
+            }
+            return;
+        }
+
         if (!enabled)
         {
             compareMode_ = false;
@@ -1196,7 +1246,863 @@ namespace hyperbrowse::viewer
 
     bool ViewerWindow::IsCompareModeEnabled() const noexcept
     {
-        return compareMode_;
+        return compareSessionActive_ || compareMode_;
+    }
+
+    bool ViewerWindow::BeginCompareSession(const std::vector<int>& tileIndexes,
+                                          const std::vector<CompareTileMetadata>& candidateMetadata)
+    {
+        if (tileIndexes.size() < 2 || tileIndexes.size() > 4)
+        {
+            return false;
+        }
+
+        std::vector<int> uniqueIndexes;
+        uniqueIndexes.reserve(tileIndexes.size());
+        for (const int itemIndex : tileIndexes)
+        {
+            if (itemIndex < 0 || itemIndex >= static_cast<int>(items_.size())
+                || std::find(uniqueIndexes.begin(), uniqueIndexes.end(), itemIndex) != uniqueIndexes.end())
+            {
+                return false;
+            }
+            uniqueIndexes.push_back(itemIndex);
+        }
+
+        compareSessionGeneration_++;
+        compareAsyncState_->sessionGeneration.store(compareSessionGeneration_, std::memory_order_release);
+        compareTiles_.clear();
+        compareTiles_.reserve(tileIndexes.size());
+        compareCandidateMetadata_ = candidateMetadata;
+        compareViewsSynchronized_ = true;
+        compareMode_ = false;
+        focusedCompareTile_ = 0;
+        for (std::size_t tileIndex = 0; tileIndex < tileIndexes.size(); ++tileIndex)
+        {
+            CompareTileState tile;
+            tile.itemIndex = tileIndexes[tileIndex];
+            tile.filePath = items_[static_cast<std::size_t>(tile.itemIndex)].filePath;
+            if (static_cast<std::size_t>(tile.itemIndex) < compareCandidateMetadata_.size())
+            {
+                tile.metadata = compareCandidateMetadata_[static_cast<std::size_t>(tile.itemIndex)];
+            }
+            tile.image = tile.itemIndex == currentIndex_ ? currentImage_ : nullptr;
+            compareTiles_.push_back(std::move(tile));
+            if (tileIndexes[tileIndex] == currentIndex_)
+            {
+                focusedCompareTile_ = tileIndex;
+            }
+        }
+
+        compareSessionActive_ = true;
+        for (std::size_t tileIndex = 0; tileIndex < compareTiles_.size(); ++tileIndex)
+        {
+            CompareTileState& tile = compareTiles_[tileIndex];
+            if (!tile.image)
+            {
+                tile.image = ViewerFullImageCache().Find(MakeViewerFullImageCacheKey(
+                    items_[static_cast<std::size_t>(tile.itemIndex)]));
+            }
+            if (!tile.image)
+            {
+                RequestCompareTileImage(tileIndex, tile.itemIndex, false);
+            }
+        }
+        FocusCompareTileInternal(focusedCompareTile_);
+        UpdateWindowTitle();
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            RequestRepaint();
+        }
+        return true;
+    }
+
+    bool ViewerWindow::HasCompareSession() const noexcept
+    {
+        return !compareTiles_.empty();
+    }
+
+    bool ViewerWindow::IsCompareSessionActive() const noexcept
+    {
+        return compareSessionActive_;
+    }
+
+    std::size_t ViewerWindow::CompareTileCount() const noexcept
+    {
+        return compareTiles_.size();
+    }
+
+    int ViewerWindow::FocusedCompareTile() const noexcept
+    {
+        return compareSessionActive_ ? static_cast<int>(focusedCompareTile_) : -1;
+    }
+
+    int ViewerWindow::CompareTileItemIndex(std::size_t tileIndex) const noexcept
+    {
+        return tileIndex < compareTiles_.size() ? compareTiles_[tileIndex].itemIndex : -1;
+    }
+
+    bool ViewerWindow::AreCompareViewsSynchronized() const noexcept
+    {
+        return compareViewsSynchronized_;
+    }
+
+    bool ViewerWindow::SetCompareViewsSynchronized(bool synchronized)
+    {
+        if (compareTiles_.empty() || compareViewsSynchronized_ == synchronized)
+        {
+            return false;
+        }
+
+        CaptureFocusedCompareView();
+        compareViewsSynchronized_ = synchronized;
+        if (synchronized)
+        {
+            ApplyCompareViewToTiles();
+            FocusCompareTileInternal(focusedCompareTile_);
+        }
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            RequestRepaint();
+        }
+        return true;
+    }
+
+    void ViewerWindow::UpdateCompareTileMetadata(std::wstring_view filePath, CompareTileMetadata metadata)
+    {
+        for (CompareTileState& tile : compareTiles_)
+        {
+            if (browser::FilePathsEqual(tile.filePath, filePath))
+            {
+                tile.metadata = metadata;
+            }
+        }
+        for (std::size_t candidateIndex = 0; candidateIndex < items_.size(); ++candidateIndex)
+        {
+            if (browser::FilePathsEqual(items_[candidateIndex].filePath, filePath)
+                && candidateIndex < compareCandidateMetadata_.size())
+            {
+                compareCandidateMetadata_[candidateIndex] = metadata;
+            }
+        }
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            RequestRepaint();
+        }
+    }
+
+    RECT ViewerWindow::CompareTileClientRect(std::size_t tileIndex) const
+    {
+        RECT clientRect{};
+        if (!hwnd_ || GetClientRect(hwnd_, &clientRect) == FALSE)
+        {
+            return {};
+        }
+        const UINT dpi = std::max<UINT>(96, GetDpiForWindow(hwnd_));
+        const LONG gap = std::clamp<LONG>(static_cast<LONG>((static_cast<double>(dpi) / 96.0) * 16.0), 12, 32);
+        const std::vector<RECT> bounds = CompareTileBounds(clientRect, compareTiles_.size(), gap);
+        return tileIndex < bounds.size() ? bounds[tileIndex] : RECT{};
+    }
+
+    void ViewerWindow::RequestCompareTileImage(std::size_t tileIndex, int itemIndex, bool preserveCurrent)
+    {
+        if (tileIndex >= compareTiles_.size() || itemIndex < 0 || itemIndex >= static_cast<int>(items_.size()))
+        {
+            return;
+        }
+
+        CompareTileState& tile = compareTiles_[tileIndex];
+        const browser::BrowserItem item = items_[static_cast<std::size_t>(itemIndex)];
+        if (preserveCurrent)
+        {
+            tile.pendingItemIndex = itemIndex;
+            tile.pendingFilePath = item.filePath;
+        }
+        else
+        {
+            tile.itemIndex = itemIndex;
+            tile.filePath = item.filePath;
+            tile.pendingItemIndex = -1;
+            tile.pendingFilePath.clear();
+            tile.image.reset();
+            tile.bitmap.Reset();
+        }
+
+        const std::uint64_t requestGeneration = ++tile.requestGeneration;
+        const std::uint64_t sessionGeneration = compareSessionGeneration_;
+        compareAsyncState_->tileRequestGenerations[tileIndex].store(requestGeneration, std::memory_order_release);
+        tile.loading = true;
+        tile.errorMessage.clear();
+
+        if (const auto cachedImage = ViewerFullImageCache().Find(MakeViewerFullImageCacheKey(item)))
+        {
+            tile.itemIndex = itemIndex;
+            tile.filePath = item.filePath;
+            tile.pendingItemIndex = -1;
+            tile.pendingFilePath.clear();
+            tile.image = cachedImage;
+            tile.bitmap.Reset();
+            tile.loading = false;
+            if (static_cast<std::size_t>(itemIndex) < compareCandidateMetadata_.size())
+            {
+                tile.metadata = compareCandidateMetadata_[static_cast<std::size_t>(itemIndex)];
+            }
+            if (tileIndex == focusedCompareTile_)
+            {
+                FocusCompareTileInternal(tileIndex);
+                if (owner_ && IsWindow(owner_) != FALSE)
+                {
+                    PostMessageW(owner_, kContextMenuCommandMessage,
+                                 kContextMenuRefreshCompareTileMetadata,
+                                 reinterpret_cast<LPARAM>(hwnd_));
+                }
+            }
+            RequestRepaint();
+            return;
+        }
+
+        const std::shared_ptr<AsyncState> asyncState = asyncState_;
+        const std::shared_ptr<CompareAsyncState> compareAsyncState = compareAsyncState_;
+        const auto cacheKey = MakeViewerFullImageCacheKey(item);
+        if (!backgroundExecutor_
+            || !backgroundExecutor_->Post([asyncState, compareAsyncState, item, cacheKey, tileIndex,
+                                           itemIndex, requestGeneration, sessionGeneration]()
+            {
+                if (asyncState->shutdown.load(std::memory_order_acquire)
+                    || compareAsyncState->sessionGeneration.load(std::memory_order_acquire) != sessionGeneration
+                    || compareAsyncState->tileRequestGenerations[tileIndex].load(std::memory_order_acquire) != requestGeneration)
+                {
+                    return;
+                }
+
+                std::wstring errorMessage;
+                std::shared_ptr<const cache::CachedThumbnail> image;
+                try
+                {
+                    image = decode::DecodeFullImage(item, &errorMessage);
+                }
+                catch (const std::exception&)
+                {
+                    errorMessage = L"Image decoding failed unexpectedly.";
+                }
+                catch (...)
+                {
+                    errorMessage = L"Image decoding failed unexpectedly.";
+                }
+
+                if (asyncState->shutdown.load(std::memory_order_acquire)
+                    || compareAsyncState->sessionGeneration.load(std::memory_order_acquire) != sessionGeneration
+                    || compareAsyncState->tileRequestGenerations[tileIndex].load(std::memory_order_acquire) != requestGeneration)
+                {
+                    return;
+                }
+
+                auto update = std::make_unique<CompareTileReadyResult>();
+                update->sessionGeneration = sessionGeneration;
+                update->requestGeneration = requestGeneration;
+                update->tileIndex = tileIndex;
+                update->itemIndex = itemIndex;
+                update->filePath = item.filePath;
+                update->image = std::move(image);
+                update->errorMessage = std::move(errorMessage);
+                const HWND targetWindow = asyncState->targetWindow.load(std::memory_order_acquire);
+                if (!targetWindow || !PostMessageW(targetWindow,
+                                                   ViewerWindow::kCompareTileReadyMessage,
+                                                   0,
+                                                   reinterpret_cast<LPARAM>(update.get())))
+                {
+                    return;
+                }
+                update.release();
+            }))
+        {
+            tile.loading = false;
+            tile.errorMessage = L"Image loading is unavailable.";
+            tile.pendingItemIndex = -1;
+            tile.pendingFilePath.clear();
+        }
+
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            RequestRepaint();
+        }
+    }
+
+    LRESULT ViewerWindow::HandleCompareTileReadyMessage(LPARAM lParam)
+    {
+        std::unique_ptr<CompareTileReadyResult> update(reinterpret_cast<CompareTileReadyResult*>(lParam));
+        if (!update || update->sessionGeneration != compareSessionGeneration_
+            || update->tileIndex >= compareTiles_.size())
+        {
+            return 0;
+        }
+
+        CompareTileState& tile = compareTiles_[update->tileIndex];
+        const bool pendingReplacement = tile.pendingItemIndex >= 0;
+        const int expectedItemIndex = pendingReplacement ? tile.pendingItemIndex : tile.itemIndex;
+        const std::wstring& expectedPath = pendingReplacement ? tile.pendingFilePath : tile.filePath;
+        if (update->requestGeneration != tile.requestGeneration
+            || update->requestGeneration != compareAsyncState_->tileRequestGenerations[update->tileIndex].load(std::memory_order_acquire)
+            || update->itemIndex != expectedItemIndex
+            || !browser::FilePathsEqual(update->filePath, expectedPath))
+        {
+            return 0;
+        }
+
+        tile.loading = false;
+        if (pendingReplacement && !update->image)
+        {
+            tile.pendingItemIndex = -1;
+            tile.pendingFilePath.clear();
+            tile.errorMessage = update->errorMessage.empty()
+                ? L"The replacement image could not be decoded."
+                : std::move(update->errorMessage);
+            RequestRepaint();
+            return 0;
+        }
+        tile.errorMessage = std::move(update->errorMessage);
+        if (pendingReplacement)
+        {
+            tile.itemIndex = update->itemIndex;
+            tile.filePath = std::move(update->filePath);
+            tile.pendingItemIndex = -1;
+            tile.pendingFilePath.clear();
+            if (static_cast<std::size_t>(tile.itemIndex) < compareCandidateMetadata_.size())
+            {
+                tile.metadata = compareCandidateMetadata_[static_cast<std::size_t>(tile.itemIndex)];
+            }
+        }
+        tile.image = std::move(update->image);
+        tile.bitmap.Reset();
+        if (tile.image && tile.itemIndex >= 0 && tile.itemIndex < static_cast<int>(items_.size()))
+        {
+            ViewerFullImageCache().Insert(
+                MakeViewerFullImageCacheKey(items_[static_cast<std::size_t>(tile.itemIndex)]), tile.image);
+            tile.errorMessage.clear();
+        }
+        if (update->tileIndex == focusedCompareTile_)
+        {
+            FocusCompareTileInternal(update->tileIndex);
+            if (owner_ && IsWindow(owner_) != FALSE)
+            {
+                PostMessageW(owner_, kContextMenuCommandMessage,
+                             kContextMenuRefreshCompareTileMetadata,
+                             reinterpret_cast<LPARAM>(hwnd_));
+            }
+        }
+        RequestRepaint();
+        return 0;
+    }
+
+    void ViewerWindow::CaptureFocusedCompareView()
+    {
+        if (focusedCompareTile_ >= compareTiles_.size())
+        {
+            return;
+        }
+
+        CompareTileState& tile = compareTiles_[focusedCompareTile_];
+        if (!tile.image)
+        {
+            return;
+        }
+
+        const RECT tileRect = CompareTileClientRect(focusedCompareTile_);
+        const double fitScale = FitScaleForImage(*tile.image, tileRect);
+        double effectiveScale = fitScale;
+        if (zoomMode_ == ZoomMode::FitHeight)
+        {
+            effectiveScale = FitHeightScaleForImage(*tile.image, tileRect);
+        }
+        else if (zoomMode_ == ZoomMode::FitWidth)
+        {
+            effectiveScale = FitWidthScaleForImage(*tile.image, tileRect);
+        }
+        else if (zoomMode_ == ZoomMode::Custom)
+        {
+            effectiveScale = customZoomScale_;
+        }
+        tile.zoomRatio = std::clamp(effectiveScale / std::max(0.0001, fitScale), 0.01, kMaximumZoomScale);
+        const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+        const int imageWidth = swapDimensions ? tile.image->SourceHeight() : tile.image->SourceWidth();
+        const int imageHeight = swapDimensions ? tile.image->SourceWidth() : tile.image->SourceHeight();
+        tile.imageCenter = ImageCenterFromPan(imageWidth, imageHeight, effectiveScale, panOffsetX_, panOffsetY_);
+        tile.rotationQuarterTurns = rotationQuarterTurns_;
+    }
+
+    void ViewerWindow::ApplyCompareViewToTiles()
+    {
+        if (focusedCompareTile_ >= compareTiles_.size())
+        {
+            return;
+        }
+        CaptureFocusedCompareView();
+        const CompareTileState& source = compareTiles_[focusedCompareTile_];
+        for (CompareTileState& tile : compareTiles_)
+        {
+            if (&tile != &source)
+            {
+                tile.zoomRatio = source.zoomRatio;
+                tile.imageCenter = source.imageCenter;
+            }
+        }
+    }
+
+    void ViewerWindow::FocusCompareTileInternal(std::size_t tileIndex)
+    {
+        if (tileIndex >= compareTiles_.size())
+        {
+            return;
+        }
+        if (compareSessionActive_ && focusedCompareTile_ < compareTiles_.size())
+        {
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_ && tileIndex != focusedCompareTile_)
+            {
+                compareTiles_[tileIndex].zoomRatio = compareTiles_[focusedCompareTile_].zoomRatio;
+                compareTiles_[tileIndex].imageCenter = compareTiles_[focusedCompareTile_].imageCenter;
+            }
+        }
+        const bool changed = focusedCompareTile_ != tileIndex;
+        focusedCompareTile_ = tileIndex;
+        CompareTileState& tile = compareTiles_[tileIndex];
+        if (compareViewsSynchronized_ && tileIndex < compareTiles_.size())
+        {
+            const CompareTileState& sharedView = compareTiles_[tileIndex];
+            for (CompareTileState& otherTile : compareTiles_)
+            {
+                otherTile.zoomRatio = sharedView.zoomRatio;
+                otherTile.imageCenter = sharedView.imageCenter;
+            }
+        }
+        if (tile.image)
+        {
+            const RECT tileRect = CompareTileClientRect(tileIndex);
+            const double fitScale = FitScaleForImage(*tile.image, tileRect);
+            customZoomScale_ = fitScale * tile.zoomRatio;
+            zoomMode_ = ZoomMode::Custom;
+            rotationQuarterTurns_ = tile.rotationQuarterTurns;
+            const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+            const int imageWidth = swapDimensions ? tile.image->SourceHeight() : tile.image->SourceWidth();
+            const int imageHeight = swapDimensions ? tile.image->SourceWidth() : tile.image->SourceHeight();
+            const POINT pan = PanFromImageCenter(imageWidth, imageHeight, customZoomScale_, tileRect, tile.imageCenter);
+            panOffsetX_ = pan.x;
+            panOffsetY_ = pan.y;
+        }
+        if (changed && hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            NotifyCurrentItemChanged();
+            UpdateWindowTitle();
+            RequestRepaint();
+        }
+    }
+
+    bool ViewerWindow::CycleCompareCandidate(int direction)
+    {
+        if (!compareSessionActive_ || focusedCompareTile_ >= compareTiles_.size())
+        {
+            return false;
+        }
+        std::vector<int> visibleIndices;
+        visibleIndices.reserve(compareTiles_.size() - 1);
+        for (std::size_t tileIndex = 0; tileIndex < compareTiles_.size(); ++tileIndex)
+        {
+            if (tileIndex != focusedCompareTile_)
+            {
+                visibleIndices.push_back(compareTiles_[tileIndex].itemIndex);
+                if (compareTiles_[tileIndex].pendingItemIndex >= 0)
+                {
+                    visibleIndices.push_back(compareTiles_[tileIndex].pendingItemIndex);
+                }
+            }
+        }
+        const CompareTileState& focusedTile = compareTiles_[focusedCompareTile_];
+        const int cycleFromIndex = focusedTile.pendingItemIndex >= 0
+            ? focusedTile.pendingItemIndex
+            : focusedTile.itemIndex;
+        const int nextIndex = NextAvailableCompareCandidate(cycleFromIndex,
+                                                              visibleIndices,
+                                                              static_cast<int>(items_.size()),
+                                                              direction);
+        if (nextIndex < 0)
+        {
+            return false;
+        }
+        CaptureFocusedCompareView();
+        RequestCompareTileImage(focusedCompareTile_, nextIndex, true);
+        return true;
+    }
+
+    bool ViewerWindow::CycleAdjacentCompareCandidate(int direction)
+    {
+        if (!compareSessionActive_ || compareTiles_.size() != 2 || direction == 0
+            || focusedCompareTile_ >= compareTiles_.size())
+        {
+            return false;
+        }
+
+        const std::size_t replacementTile = focusedCompareTile_ == 0 ? 1 : 0;
+        const int anchorIndex = compareTiles_[focusedCompareTile_].itemIndex;
+        int candidateIndex = anchorIndex + (direction > 0 ? 1 : -1);
+        if (candidateIndex < 0 || candidateIndex >= static_cast<int>(items_.size()))
+        {
+            candidateIndex = anchorIndex + (direction > 0 ? -1 : 1);
+        }
+        if (candidateIndex < 0 || candidateIndex >= static_cast<int>(items_.size())
+            || candidateIndex == compareTiles_[replacementTile].itemIndex
+            || candidateIndex == compareTiles_[replacementTile].pendingItemIndex)
+        {
+            return false;
+        }
+
+        CaptureFocusedCompareView();
+        RequestCompareTileImage(replacementTile, candidateIndex, true);
+        return true;
+    }
+
+    void ViewerWindow::EndCompareSessionPromoteFocused()
+    {
+        if (focusedCompareTile_ >= compareTiles_.size())
+        {
+            compareSessionActive_ = false;
+            compareTiles_.clear();
+            return;
+        }
+        CaptureFocusedCompareView();
+        CompareTileState focusedTile = std::move(compareTiles_[focusedCompareTile_]);
+        compareSessionGeneration_++;
+        compareAsyncState_->sessionGeneration.store(compareSessionGeneration_, std::memory_order_release);
+        for (std::size_t tileIndex = 0; tileIndex < compareAsyncState_->tileRequestGenerations.size(); ++tileIndex)
+        {
+            compareAsyncState_->tileRequestGenerations[tileIndex].fetch_add(1, std::memory_order_acq_rel);
+        }
+        compareTiles_.clear();
+        compareCandidateMetadata_.clear();
+        compareSessionActive_ = false;
+        compareMode_ = false;
+        ResetViewState();
+        rotationQuarterTurns_ = focusedTile.rotationQuarterTurns;
+        currentIndex_ = focusedTile.itemIndex;
+        d2dCurrentImageBitmap_.Reset();
+        d2dCurrentImageIndex_ = -1;
+        if (focusedTile.image)
+        {
+            SetCurrentImageSlot(currentIndex_, focusedTile.image, false);
+            currentImage_ = focusedTile.image;
+            loading_ = false;
+            errorMessage_.clear();
+            RECT clientRect{};
+            GetClientRect(hwnd_, &clientRect);
+            customZoomScale_ = FitScaleForImage(*focusedTile.image, clientRect) * focusedTile.zoomRatio;
+            zoomMode_ = ZoomMode::Custom;
+            const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+            const int imageWidth = swapDimensions ? focusedTile.image->SourceHeight() : focusedTile.image->SourceWidth();
+            const int imageHeight = swapDimensions ? focusedTile.image->SourceWidth() : focusedTile.image->SourceHeight();
+            const POINT pan = PanFromImageCenter(imageWidth,
+                                                 imageHeight,
+                                                 customZoomScale_,
+                                                 clientRect,
+                                                 focusedTile.imageCenter);
+            panOffsetX_ = pan.x;
+            panOffsetY_ = pan.y;
+        }
+        else
+        {
+            LoadCurrentImageAsync(LoadReason::Navigation);
+        }
+        NotifyCurrentItemChanged();
+        UpdateWindowTitle();
+        RequestRepaint();
+    }
+
+    void ViewerWindow::DrawCompareSession(ID2D1RenderTarget* renderTarget,
+                                          float clientWidth,
+                                          float clientHeight)
+    {
+        if (!renderTarget || compareTiles_.size() < 2 || compareTiles_.size() > 4)
+        {
+            return;
+        }
+
+        RECT clientRect{0, 0, static_cast<LONG>(std::lround(clientWidth)), static_cast<LONG>(std::lround(clientHeight))};
+        const UINT dpi = std::max<UINT>(96, GetDpiForWindow(hwnd_));
+        const LONG gap = std::clamp<LONG>(static_cast<LONG>((static_cast<double>(dpi) / 96.0) * 16.0), 12, 32);
+        const std::vector<RECT> bounds = CompareTileBounds(clientRect, compareTiles_.size(), gap);
+        if (bounds.size() != compareTiles_.size())
+        {
+            return;
+        }
+
+        const int previousRotation = rotationQuarterTurns_;
+        for (std::size_t tileIndex = 0; tileIndex < compareTiles_.size(); ++tileIndex)
+        {
+            CompareTileState& tile = compareTiles_[tileIndex];
+            const RECT& tileRect = bounds[tileIndex];
+            const D2D1_RECT_F tileFrame = D2D1::RectF(
+                static_cast<float>(tileRect.left),
+                static_cast<float>(tileRect.top),
+                static_cast<float>(tileRect.right),
+                static_cast<float>(tileRect.bottom));
+            if (tile.image && !tile.bitmap)
+            {
+                tile.bitmap = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(
+                    renderTarget, *tile.image);
+            }
+
+            if (tile.image && tile.bitmap)
+            {
+                rotationQuarterTurns_ = tile.rotationQuarterTurns;
+                const double fitScale = FitScaleForImage(*tile.image, tileRect);
+                const double scale = fitScale * tile.zoomRatio;
+                const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+                const int imageWidth = swapDimensions ? tile.image->SourceHeight() : tile.image->SourceWidth();
+                const int imageHeight = swapDimensions ? tile.image->SourceWidth() : tile.image->SourceHeight();
+                const POINT pan = PanFromImageCenter(imageWidth,
+                                                     imageHeight,
+                                                     scale,
+                                                     tileRect,
+                                                     tile.imageCenter);
+                DrawImageBitmap(renderTarget,
+                                tile.bitmap.Get(),
+                                *tile.image,
+                                tileRect,
+                                1.0f,
+                                static_cast<float>(tile.zoomRatio),
+                                static_cast<float>(pan.x),
+                                static_cast<float>(pan.y));
+            }
+            else
+            {
+                const D2D1_RECT_F placeholder = D2D1::RectF(
+                    static_cast<float>(tileRect.left + 20),
+                    static_cast<float>(tileRect.top + 20),
+                    static_cast<float>(tileRect.right - 20),
+                    static_cast<float>(tileRect.bottom - 20));
+                const D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(placeholder, 8.0f, 8.0f);
+                if (d2dPanelFillBrush_)
+                {
+                    renderTarget->FillRoundedRectangle(panel, d2dPanelFillBrush_.Get());
+                }
+                if (d2dPanelBorderBrush_)
+                {
+                    renderTarget->DrawRoundedRectangle(panel, d2dPanelBorderBrush_.Get(), 1.0f);
+                }
+                const std::wstring message = tile.errorMessage.empty()
+                    ? L"Loading comparison image..."
+                    : tile.errorMessage;
+                if (d2dInfoFormat_ && d2dMutedTextBrush_)
+                {
+                    d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                    d2dInfoFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+                    renderTarget->DrawText(message.c_str(),
+                                           static_cast<UINT32>(message.size()),
+                                           d2dInfoFormat_.Get(),
+                                           placeholder,
+                                           d2dMutedTextBrush_.Get());
+                    d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                    d2dInfoFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                }
+            }
+
+            if (d2dPanelFillBrush_)
+            {
+                const D2D1_RECT_F labelBackground = D2D1::RectF(
+                    static_cast<float>(tileRect.left + 8),
+                    static_cast<float>(tileRect.top + 8),
+                    static_cast<float>(tileRect.right - 8),
+                    static_cast<float>(tileRect.top + 42));
+                renderTarget->FillRectangle(labelBackground, d2dPanelFillBrush_.Get());
+            }
+            if (tile.itemIndex >= 0 && tile.itemIndex < static_cast<int>(items_.size())
+                && d2dBottomInfoFormat_ && d2dTextBrush_)
+            {
+                const browser::BrowserItem& item = items_[static_cast<std::size_t>(tile.itemIndex)];
+                std::wstring label = item.fileName;
+                label.append(L"   Rating: ");
+                label.append(std::to_wstring(tile.metadata.rating));
+                label.append(L"/5");
+                if (!tile.metadata.tags.empty())
+                {
+                    label.append(L"   ");
+                    label.append(tile.metadata.tags);
+                }
+                if (tile.loading)
+                {
+                    label.append(L"   Loading replacement...");
+                }
+                else if (!tile.errorMessage.empty() && tile.image)
+                {
+                    label.append(L"   Replacement failed");
+                }
+                const D2D1_RECT_F labelRect = D2D1::RectF(
+                    static_cast<float>(tileRect.left + 16),
+                    static_cast<float>(tileRect.top + 10),
+                    static_cast<float>(tileRect.right - 16),
+                    static_cast<float>(tileRect.top + 38));
+                d2dBottomInfoFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                renderTarget->DrawText(label.c_str(),
+                                       static_cast<UINT32>(label.size()),
+                                       d2dBottomInfoFormat_.Get(),
+                                       labelRect,
+                                       d2dTextBrush_.Get(),
+                                       D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            }
+
+            if (d2dPanelBorderBrush_)
+            {
+                const float strokeWidth = tileIndex == focusedCompareTile_ ? 3.0f : 1.0f;
+                renderTarget->DrawRectangle(tileFrame,
+                                            d2dPanelBorderBrush_.Get(),
+                                            strokeWidth);
+            }
+        }
+        rotationQuarterTurns_ = previousRotation;
+
+        if (d2dTextBrush_ && d2dBottomInfoFormat_)
+        {
+            const std::wstring syncLabel = compareViewsSynchronized_ ? L"Sync: On" : L"Sync: Off";
+            const D2D1_RECT_F syncRect = D2D1::RectF(12.0f, clientHeight - 34.0f, 132.0f, clientHeight - 8.0f);
+            renderTarget->DrawText(syncLabel.c_str(),
+                                   static_cast<UINT32>(syncLabel.size()),
+                                   d2dBottomInfoFormat_.Get(),
+                                   syncRect,
+                                   d2dTextBrush_.Get());
+        }
+    }
+
+    void ViewerWindow::DrawCompareSessionGdi(HDC dc, const RECT& clientRect)
+    {
+        if (!dc || compareTiles_.size() < 2 || compareTiles_.size() > 4)
+        {
+            return;
+        }
+
+        const UINT dpi = std::max<UINT>(96, GetDpiForWindow(hwnd_));
+        const LONG gap = std::clamp<LONG>(static_cast<LONG>((static_cast<double>(dpi) / 96.0) * 16.0), 12, 32);
+        const std::vector<RECT> bounds = CompareTileBounds(clientRect, compareTiles_.size(), gap);
+        if (bounds.size() != compareTiles_.size())
+        {
+            return;
+        }
+
+        HFONT font = MenuFontOrDefault(menuFont_);
+        HGDIOBJ oldFont = SelectObject(dc, font);
+        const COLORREF textColor = TextColor(darkTheme_);
+        const COLORREF borderColor = PanelBorderColor(darkTheme_);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, textColor);
+
+        for (std::size_t tileIndex = 0; tileIndex < compareTiles_.size(); ++tileIndex)
+        {
+            CompareTileState& tile = compareTiles_[tileIndex];
+            const RECT& tileRect = bounds[tileIndex];
+            const int savedDc = SaveDC(dc);
+            IntersectClipRect(dc, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
+
+            if (tile.image)
+            {
+                const int previousRotation = rotationQuarterTurns_;
+                rotationQuarterTurns_ = tile.rotationQuarterTurns;
+                const double scale = FitScaleForImage(*tile.image, tileRect) * tile.zoomRatio;
+                const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;
+                const int sourceWidth = tile.image->SourceWidth();
+                const int sourceHeight = tile.image->SourceHeight();
+                const int imageWidth = swapDimensions ? sourceHeight : sourceWidth;
+                const int imageHeight = swapDimensions ? sourceWidth : sourceHeight;
+                const POINT pan = PanFromImageCenter(imageWidth, imageHeight, scale, tileRect, tile.imageCenter);
+                const int destinationWidth = std::max(1, static_cast<int>(std::lround(imageWidth * scale)));
+                const int destinationHeight = std::max(1, static_cast<int>(std::lround(imageHeight * scale)));
+                const int x = tileRect.left + ((tileRect.right - tileRect.left - destinationWidth) / 2) + pan.x;
+                const int y = tileRect.top + ((tileRect.bottom - tileRect.top - destinationHeight) / 2) + pan.y;
+                HDC bitmapDc = CreateCompatibleDC(dc);
+                if (bitmapDc)
+                {
+                    HGDIOBJ oldBitmap = SelectObject(bitmapDc, tile.image->Bitmap());
+                    SetStretchBltMode(dc, HALFTONE);
+                    SetBrushOrgEx(dc, 0, 0, nullptr);
+                    if (rotationQuarterTurns_ == 0)
+                    {
+                        StretchBlt(dc, x, y, destinationWidth, destinationHeight,
+                                   bitmapDc, 0, 0, sourceWidth, sourceHeight, SRCCOPY);
+                    }
+                    else
+                    {
+                        POINT destination[3]{};
+                        switch (rotationQuarterTurns_)
+                        {
+                        case 1:
+                            destination[0] = POINT{x + destinationWidth, y};
+                            destination[1] = POINT{x + destinationWidth, y + destinationHeight};
+                            destination[2] = POINT{x, y};
+                            break;
+                        case 2:
+                            destination[0] = POINT{x + destinationWidth, y + destinationHeight};
+                            destination[1] = POINT{x, y + destinationHeight};
+                            destination[2] = POINT{x + destinationWidth, y};
+                            break;
+                        case 3:
+                            destination[0] = POINT{x, y + destinationHeight};
+                            destination[1] = POINT{x, y};
+                            destination[2] = POINT{x + destinationWidth, y + destinationHeight};
+                            break;
+                        default:
+                            break;
+                        }
+                        PlgBlt(dc, destination, bitmapDc, 0, 0, sourceWidth, sourceHeight, nullptr, 0, 0);
+                    }
+                    SelectObject(bitmapDc, oldBitmap);
+                    DeleteDC(bitmapDc);
+                }
+                rotationQuarterTurns_ = previousRotation;
+            }
+            else
+            {
+                std::wstring message = tile.errorMessage.empty()
+                    ? L"Loading comparison image..."
+                    : tile.errorMessage;
+                RECT placeholder = tileRect;
+                InflateRect(&placeholder, -20, -20);
+                DrawTextW(dc, message.c_str(), static_cast<int>(message.size()), &placeholder,
+                          DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
+            }
+
+            if (tile.itemIndex >= 0 && tile.itemIndex < static_cast<int>(items_.size()))
+            {
+                const browser::BrowserItem& item = items_[static_cast<std::size_t>(tile.itemIndex)];
+                std::wstring label = item.fileName + L"   Rating: "
+                    + std::to_wstring(tile.metadata.rating) + L"/5";
+                if (!tile.metadata.tags.empty())
+                {
+                    label.append(L"   " + tile.metadata.tags);
+                }
+                if (tile.loading)
+                {
+                    label.append(L"   Loading replacement...");
+                }
+                else if (!tile.errorMessage.empty() && tile.image)
+                {
+                    label.append(L"   Replacement failed");
+                }
+                RECT labelRect{tileRect.left + 12, tileRect.top + 8, tileRect.right - 12, tileRect.top + 36};
+                DrawTextW(dc, label.c_str(), static_cast<int>(label.size()), &labelRect,
+                          DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+            }
+
+            HPEN borderPen = CreatePen(PS_SOLID, tileIndex == focusedCompareTile_ ? 3 : 1, borderColor);
+            HGDIOBJ oldPen = SelectObject(dc, borderPen);
+            HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+            Rectangle(dc, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
+            SelectObject(dc, oldBrush);
+            SelectObject(dc, oldPen);
+            DeleteObject(borderPen);
+            RestoreDC(dc, savedDc);
+        }
+
+        const std::wstring syncLabel = compareViewsSynchronized_ ? L"Sync: On" : L"Sync: Off";
+        RECT syncRect{clientRect.left + 12, clientRect.bottom - 34, clientRect.left + 132, clientRect.bottom - 8};
+        DrawTextW(dc, syncLabel.c_str(), static_cast<int>(syncLabel.size()), &syncRect,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, oldFont);
     }
 
     void ViewerWindow::SetMouseWheelBehavior(MouseWheelBehavior behavior) noexcept
@@ -1442,8 +2348,118 @@ namespace hyperbrowse::viewer
             return false;
         }
 
+        std::vector<browser::BrowserItem> oldItems = std::move(items_);
+        std::vector<CompareTileState> oldTiles = std::move(compareTiles_);
+        std::vector<CompareTileMetadata> oldCandidateMetadata = std::move(compareCandidateMetadata_);
+        const std::size_t oldFocusedTile = focusedCompareTile_;
+        const bool keepCompareActive = compareSessionActive_;
         items_ = std::move(items);
         currentIndex_ = selectedIndex;
+
+        if (!oldTiles.empty())
+        {
+            compareCandidateMetadata_.resize(items_.size());
+            for (std::size_t oldIndex = 0; oldIndex < oldItems.size() && oldIndex < oldCandidateMetadata.size(); ++oldIndex)
+            {
+                const auto newCandidate = std::find_if(items_.begin(), items_.end(), [&](const browser::BrowserItem& item)
+                {
+                    return browser::FilePathsEqual(item.filePath, oldItems[oldIndex].filePath);
+                });
+                if (newCandidate != items_.end())
+                {
+                    const std::size_t newIndex = static_cast<std::size_t>(std::distance(items_.begin(), newCandidate));
+                    compareCandidateMetadata_[newIndex] = oldCandidateMetadata[oldIndex];
+                }
+            }
+
+            std::wstring oldFocusedPath;
+            if (oldFocusedTile < oldTiles.size())
+            {
+                oldFocusedPath = oldTiles[oldFocusedTile].filePath;
+            }
+            compareTiles_.clear();
+            compareTiles_.reserve(oldTiles.size());
+            std::vector<bool> tileNeedsReload;
+            for (CompareTileState& tile : oldTiles)
+            {
+                const auto newItem = std::find_if(items_.begin(), items_.end(), [&](const browser::BrowserItem& item)
+                {
+                    return browser::FilePathsEqual(item.filePath, tile.filePath);
+                });
+                if (newItem == items_.end())
+                {
+                    continue;
+                }
+
+                const int oldIndex = tile.itemIndex;
+                const bool contentChanged = oldIndex < 0 || oldIndex >= static_cast<int>(oldItems.size())
+                    || oldItems[static_cast<std::size_t>(oldIndex)].modifiedTimestampUtc != newItem->modifiedTimestampUtc
+                    || oldItems[static_cast<std::size_t>(oldIndex)].fileSizeBytes != newItem->fileSizeBytes;
+                tile.itemIndex = static_cast<int>(std::distance(items_.begin(), newItem));
+                tile.filePath = newItem->filePath;
+                tile.pendingItemIndex = -1;
+                tile.pendingFilePath.clear();
+                tile.loading = false;
+                tile.errorMessage.clear();
+                if (contentChanged)
+                {
+                    tile.image.reset();
+                    tile.bitmap.Reset();
+                }
+                if (static_cast<std::size_t>(tile.itemIndex) < compareCandidateMetadata_.size())
+                {
+                    tile.metadata = compareCandidateMetadata_[static_cast<std::size_t>(tile.itemIndex)];
+                }
+                compareTiles_.push_back(std::move(tile));
+                tileNeedsReload.push_back(contentChanged || !compareTiles_.back().image);
+            }
+
+            compareSessionGeneration_++;
+            compareAsyncState_->sessionGeneration.store(compareSessionGeneration_, std::memory_order_release);
+            for (std::size_t tileIndex = 0; tileIndex < compareAsyncState_->tileRequestGenerations.size(); ++tileIndex)
+            {
+                compareAsyncState_->tileRequestGenerations[tileIndex].fetch_add(1, std::memory_order_acq_rel);
+            }
+
+            if (compareTiles_.size() >= 2)
+            {
+                const auto focusedTile = std::find_if(compareTiles_.begin(), compareTiles_.end(), [&](const CompareTileState& tile)
+                {
+                    return browser::FilePathsEqual(tile.filePath, oldFocusedPath);
+                });
+                focusedCompareTile_ = focusedTile == compareTiles_.end()
+                    ? std::min(oldFocusedTile, compareTiles_.size() - 1)
+                    : static_cast<std::size_t>(std::distance(compareTiles_.begin(), focusedTile));
+                compareSessionActive_ = keepCompareActive;
+                for (std::size_t tileIndex = 0; tileIndex < compareTiles_.size(); ++tileIndex)
+                {
+                    if (tileNeedsReload[tileIndex])
+                    {
+                        RequestCompareTileImage(tileIndex, compareTiles_[tileIndex].itemIndex, false);
+                    }
+                }
+                if (compareSessionActive_)
+                {
+                    FocusCompareTileInternal(focusedCompareTile_);
+                    NotifyCurrentItemChanged();
+                    UpdateWindowTitle();
+                    RequestRepaint();
+                    return true;
+                }
+            }
+            else
+            {
+                if (compareTiles_.size() == 1)
+                {
+                    selectedIndex = compareTiles_.front().itemIndex;
+                }
+                compareTiles_.clear();
+                compareCandidateMetadata_.clear();
+                compareSessionActive_ = false;
+                compareMode_ = false;
+            }
+        }
+
         NotifyCurrentItemChanged();
         ClearWraparoundMessage();
         if (compareMode_)
@@ -1467,23 +2483,24 @@ namespace hyperbrowse::viewer
 
     bool ViewerWindow::GetDeleteCurrentPaths(std::wstring* sourcePath, std::wstring* preferredFocusPath) const
     {
-        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        const int activeIndex = CurrentIndex();
+        if (activeIndex < 0 || activeIndex >= static_cast<int>(items_.size()))
         {
             return false;
         }
 
         if (sourcePath)
         {
-            *sourcePath = items_[static_cast<std::size_t>(currentIndex_)].filePath;
+            *sourcePath = items_[static_cast<std::size_t>(activeIndex)].filePath;
         }
         if (preferredFocusPath)
         {
             preferredFocusPath->clear();
         }
 
-        const int preferredIndex = (currentIndex_ + 1 < static_cast<int>(items_.size()))
-            ? currentIndex_ + 1
-            : currentIndex_ - 1;
+        const int preferredIndex = (activeIndex + 1 < static_cast<int>(items_.size()))
+            ? activeIndex + 1
+            : activeIndex - 1;
         if (preferredFocusPath && preferredIndex >= 0 && preferredIndex < static_cast<int>(items_.size()))
         {
             *preferredFocusPath = items_[static_cast<std::size_t>(preferredIndex)].filePath;
@@ -1493,14 +2510,15 @@ namespace hyperbrowse::viewer
 
     std::wstring ViewerWindow::FilingResumeTargetPathForMove() const
     {
-        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        const int activeIndex = CurrentIndex();
+        if (activeIndex < 0 || activeIndex >= static_cast<int>(items_.size()))
         {
             return {};
         }
 
-        const int targetIndex = currentIndex_ > 0
-            ? currentIndex_ - 1
-            : currentIndex_ + 1;
+        const int targetIndex = activeIndex > 0
+            ? activeIndex - 1
+            : activeIndex + 1;
         if (targetIndex < 0 || targetIndex >= static_cast<int>(items_.size()))
         {
             return {};
@@ -1512,6 +2530,10 @@ namespace hyperbrowse::viewer
     bool ViewerWindow::AdvanceAfterDeleteCurrent()
     {
         util::ScopedTimer functionTimer(L"ViewerWindow::AdvanceAfterDeleteCurrent");
+        if (compareSessionActive_)
+        {
+            EndCompareSessionPromoteFocused();
+        }
         if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
         {
             return false;
@@ -1736,6 +2758,10 @@ namespace hyperbrowse::viewer
 
         d2dCurrentImageBitmap_.Reset();
         d2dCompareImageBitmap_.Reset();
+        for (CompareTileState& tile : compareTiles_)
+        {
+            tile.bitmap.Reset();
+        }
         transitionFromBitmap_.Reset();
         pendingTransitionFromBitmap_.Reset();
         d2dStatusArtBitmap_.Reset();
@@ -1812,17 +2838,30 @@ namespace hyperbrowse::viewer
         }
 
         std::wstring title = L"HyperBrowse Viewer";
-        if (currentIndex_ >= 0 && currentIndex_ < static_cast<int>(items_.size()))
+        const int displayIndex = CurrentIndex();
+        if (displayIndex >= 0 && displayIndex < static_cast<int>(items_.size()))
         {
             title.append(L" - ");
-            title.append(items_[static_cast<std::size_t>(currentIndex_)].fileName);
-            title.append(L" (");
-            title.append(std::to_wstring(currentIndex_ + 1));
-            title.append(L"/");
-            title.append(std::to_wstring(items_.size()));
-            title.append(L")");
+            title.append(items_[static_cast<std::size_t>(displayIndex)].fileName);
+            if (compareSessionActive_ && focusedCompareTile_ < compareTiles_.size())
+            {
+                title.append(L" (Tile ");
+                title.append(std::to_wstring(focusedCompareTile_ + 1));
+                title.append(L"/");
+                title.append(std::to_wstring(compareTiles_.size()));
+                title.append(L")");
+            }
+            else
+            {
+                title.append(L" (");
+                title.append(std::to_wstring(displayIndex + 1));
+                title.append(L"/");
+                title.append(std::to_wstring(items_.size()));
+                title.append(L")");
+            }
         }
-        if (compareMode_ && ActiveCompareIndex() >= 0)
+        if ((compareSessionActive_ && compareTiles_.size() >= 2)
+            || (compareMode_ && ActiveCompareIndex() >= 0))
         {
             title.append(L" [Compare]");
         }
@@ -2140,9 +3179,34 @@ namespace hyperbrowse::viewer
         }
     }
 
+    void ViewerWindow::ExitCompareForNavigation()
+    {
+        if (compareSessionActive_)
+        {
+            EndCompareSessionPromoteFocused();
+            return;
+        }
+        if (compareTiles_.empty())
+        {
+            return;
+        }
+
+        compareSessionGeneration_++;
+        compareAsyncState_->sessionGeneration.store(compareSessionGeneration_, std::memory_order_release);
+        for (std::size_t tileIndex = 0; tileIndex < compareAsyncState_->tileRequestGenerations.size(); ++tileIndex)
+        {
+            compareAsyncState_->tileRequestGenerations[tileIndex].fetch_add(1, std::memory_order_acq_rel);
+        }
+        compareTiles_.clear();
+        compareCandidateMetadata_.clear();
+        compareMode_ = false;
+        UpdateWindowTitle();
+    }
+
     void ViewerWindow::Navigate(int delta)
     {
         slideshowAdvancePending_ = false;
+        ExitCompareForNavigation();
 
         if (items_.empty())
         {
@@ -2216,6 +3280,7 @@ namespace hyperbrowse::viewer
     void ViewerWindow::NavigateToIndex(int targetIndex, bool forward, bool slideshowNavigation)
     {
         slideshowAdvancePending_ = false;
+        ExitCompareForNavigation();
 
         if (targetIndex < 0 || targetIndex >= static_cast<int>(items_.size()) || targetIndex == currentIndex_)
         {
@@ -2584,6 +3649,59 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ZoomBy(double factor, const POINT* anchorPoint)
     {
+        if (compareSessionActive_)
+        {
+            if (focusedCompareTile_ >= compareTiles_.size() || !compareTiles_[focusedCompareTile_].image
+                || factor <= 0.0 || !hwnd_)
+            {
+                return;
+            }
+            const CompareTileState& tile = compareTiles_[focusedCompareTile_];
+            const RECT tileRect = CompareTileClientRect(focusedCompareTile_);
+            const int previousRotation = rotationQuarterTurns_;
+            rotationQuarterTurns_ = tile.rotationQuarterTurns;
+            const double fitScale = FitScaleForImage(*tile.image, tileRect);
+            const double minimumScale = zoomMode_ == ZoomMode::FitHeight
+                ? FitHeightScaleForImage(*tile.image, tileRect)
+                : (zoomMode_ == ZoomMode::FitWidth ? FitWidthScaleForImage(*tile.image, tileRect) : fitScale);
+            const double currentScale = zoomMode_ == ZoomMode::Custom
+                ? customZoomScale_
+                : minimumScale;
+            const double targetScale = std::clamp(currentScale * factor,
+                                                  std::min(currentScale, minimumScale),
+                                                  kMaximumZoomScale);
+            double targetPanX = panOffsetX_;
+            double targetPanY = panOffsetY_;
+            if (anchorPoint)
+            {
+                const double centerX = static_cast<double>(tileRect.left + tileRect.right) / 2.0;
+                const double centerY = static_cast<double>(tileRect.top + tileRect.bottom) / 2.0;
+                const double imagePointX = (static_cast<double>(anchorPoint->x) - centerX - panOffsetX_) / std::max(0.01, currentScale);
+                const double imagePointY = (static_cast<double>(anchorPoint->y) - centerY - panOffsetY_) / std::max(0.01, currentScale);
+                targetPanX = static_cast<double>(anchorPoint->x) - centerX - (imagePointX * targetScale);
+                targetPanY = static_cast<double>(anchorPoint->y) - centerY - (imagePointY * targetScale);
+            }
+            rotationQuarterTurns_ = previousRotation;
+            zoomMode_ = ZoomMode::Custom;
+            customZoomScale_ = targetScale;
+            panOffsetX_ = targetPanX;
+            panOffsetY_ = targetPanY;
+            smoothZoomTarget_ = targetScale;
+            smoothZoomCurrent_ = targetScale;
+            if (smoothZoomTimerId_)
+            {
+                KillTimer(hwnd_, kSmoothZoomTimerId);
+                smoothZoomTimerId_ = 0;
+            }
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_)
+            {
+                ApplyCompareViewToTiles();
+            }
+            ClampPanOffsets();
+            RequestRepaint();
+            return;
+        }
         if (!currentImage_ || factor <= 0.0 || !hwnd_)
         {
             return;
@@ -2671,6 +3789,14 @@ namespace hyperbrowse::viewer
             KillTimer(hwnd_, kSmoothZoomTimerId);
             smoothZoomTimerId_ = 0;
         }
+        if (compareSessionActive_)
+        {
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_)
+            {
+                ApplyCompareViewToTiles();
+            }
+        }
         if (hwnd_)
         {
             RequestRepaint();
@@ -2687,6 +3813,14 @@ namespace hyperbrowse::viewer
             KillTimer(hwnd_, kSmoothZoomTimerId);
             smoothZoomTimerId_ = 0;
         }
+        if (compareSessionActive_)
+        {
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_)
+            {
+                ApplyCompareViewToTiles();
+            }
+        }
         if (hwnd_)
         {
             RequestRepaint();
@@ -2702,6 +3836,14 @@ namespace hyperbrowse::viewer
         {
             KillTimer(hwnd_, kSmoothZoomTimerId);
             smoothZoomTimerId_ = 0;
+        }
+        if (compareSessionActive_)
+        {
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_)
+            {
+                ApplyCompareViewToTiles();
+            }
         }
         if (hwnd_)
         {
@@ -2720,6 +3862,14 @@ namespace hyperbrowse::viewer
             KillTimer(hwnd_, kSmoothZoomTimerId);
             smoothZoomTimerId_ = 0;
         }
+        if (compareSessionActive_)
+        {
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_)
+            {
+                ApplyCompareViewToTiles();
+            }
+        }
         if (hwnd_)
         {
             RequestRepaint();
@@ -2728,6 +3878,22 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::RotateLeft()
     {
+        if (compareSessionActive_ && focusedCompareTile_ < compareTiles_.size())
+        {
+            CaptureFocusedCompareView();
+            CompareTileState& tile = compareTiles_[focusedCompareTile_];
+            tile.rotationQuarterTurns = (tile.rotationQuarterTurns + 3) % 4;
+            rotationQuarterTurns_ = tile.rotationQuarterTurns;
+            panOffsetX_ = 0.0;
+            panOffsetY_ = 0.0;
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_)
+            {
+                ApplyCompareViewToTiles();
+            }
+            RequestRepaint();
+            return;
+        }
         rotationQuarterTurns_ = (rotationQuarterTurns_ + 3) % 4;
         panOffsetX_ = 0.0;
         panOffsetY_ = 0.0;
@@ -2739,6 +3905,22 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::RotateRight()
     {
+        if (compareSessionActive_ && focusedCompareTile_ < compareTiles_.size())
+        {
+            CaptureFocusedCompareView();
+            CompareTileState& tile = compareTiles_[focusedCompareTile_];
+            tile.rotationQuarterTurns = (tile.rotationQuarterTurns + 1) % 4;
+            rotationQuarterTurns_ = tile.rotationQuarterTurns;
+            panOffsetX_ = 0.0;
+            panOffsetY_ = 0.0;
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_)
+            {
+                ApplyCompareViewToTiles();
+            }
+            RequestRepaint();
+            return;
+        }
         rotationQuarterTurns_ = (rotationQuarterTurns_ + 1) % 4;
         panOffsetX_ = 0.0;
         panOffsetY_ = 0.0;
@@ -2750,11 +3932,39 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ToggleCompareMode()
     {
+        if (HasCompareSession())
+        {
+            if (compareTiles_.size() >= 3)
+            {
+                EndCompareSessionPromoteFocused();
+            }
+            else
+            {
+                SetCompareMode(!compareSessionActive_, compareDirection_);
+            }
+            return;
+        }
         SetCompareMode(!compareMode_, compareDirection_);
     }
 
     void ViewerWindow::ActivateComparedImage()
     {
+        if (compareSessionActive_ && !compareTiles_.empty())
+        {
+            CaptureFocusedCompareView();
+            if (focusedCompareTile_ > 0)
+            {
+                std::rotate(compareTiles_.begin(),
+                            compareTiles_.begin() + static_cast<std::ptrdiff_t>(focusedCompareTile_),
+                            compareTiles_.end());
+                focusedCompareTile_ = 0;
+            }
+            currentIndex_ = compareTiles_.front().itemIndex;
+            FocusCompareTileInternal(0);
+            NotifyCurrentItemChanged();
+            RequestRepaint();
+            return;
+        }
         if (!compareMode_)
         {
             return;
@@ -3063,12 +4273,12 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::ShowContextMenu(POINT screenPoint)
     {
-        if (!hwnd_ || currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
+        if (!hwnd_)
         {
             return;
         }
 
-        const std::wstring currentPath = items_[static_cast<std::size_t>(currentIndex_)].filePath;
+        const std::wstring currentPath = CurrentFilePath();
         if (currentPath.empty())
         {
             return;
@@ -3096,6 +4306,33 @@ namespace hyperbrowse::viewer
                 | (infoOverlaysVisible_ ? MF_ENABLED : MF_DISABLED),
                 kContextMenuToggleFullMetadata,
                 L"Show &Full Metadata");
+        if (HasCompareSession())
+        {
+            AppendMenuW(menu,
+                        MF_STRING | (compareViewsSynchronized_ ? MF_CHECKED : MF_UNCHECKED),
+                        kContextMenuToggleCompareViewSync,
+                        L"Synchronize Compare &Zoom and Pan");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            HMENU ratingMenu = CreatePopupMenu();
+            if (ratingMenu)
+            {
+                const int rating = compareSessionActive_ && focusedCompareTile_ < compareTiles_.size()
+                    ? compareTiles_[focusedCompareTile_].metadata.rating
+                    : 0;
+                for (int value = 0; value <= 5; ++value)
+                {
+                    std::wstring label = value == 0
+                        ? L"0 - Clear Rating"
+                        : std::to_wstring(value) + L" Star" + (value == 1 ? L"" : L"s");
+                    AppendMenuW(ratingMenu,
+                                MF_STRING | (rating == value ? MF_CHECKED : MF_UNCHECKED),
+                                kContextMenuSetCompareRatingBase + static_cast<UINT>(value),
+                                label.c_str());
+                }
+                AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(ratingMenu), L"Set Image &Rating");
+            }
+            AppendMenuW(menu, MF_STRING, kContextMenuEditCompareTags, L"Edit Image &Tags...");
+        }
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kContextMenuSetWallpaper, L"Set as Desktop &Wallpaper");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -3352,12 +4589,7 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::DispatchContextMenuCommand(UINT commandId)
     {
-        if (currentIndex_ < 0 || currentIndex_ >= static_cast<int>(items_.size()))
-        {
-            return;
-        }
-
-        const std::wstring currentPath = items_[static_cast<std::size_t>(currentIndex_)].filePath;
+        const std::wstring currentPath = CurrentFilePath();
         if (currentPath.empty())
         {
             return;
@@ -3370,6 +4602,9 @@ namespace hyperbrowse::viewer
             return;
         case kContextMenuToggleFullMetadata:
             SetFullMetadataVisible(!fullMetadataVisible_);
+            return;
+        case kContextMenuToggleCompareViewSync:
+            SetCompareViewsSynchronized(!compareViewsSynchronized_);
             return;
         case kContextMenuCopyPath:
             if (!CopyTextToClipboardLocal(hwnd_, currentPath))
@@ -3402,6 +4637,8 @@ namespace hyperbrowse::viewer
         case kContextMenuImageInformation:
         case kContextMenuProperties:
         case kContextMenuSetWallpaper:
+        case kContextMenuRefreshCompareTileMetadata:
+        case kContextMenuEditCompareTags:
             if (owner_ && IsWindow(owner_))
             {
                 // Defer to the main window so metadata dialogs and the wallpaper
@@ -3412,6 +4649,14 @@ namespace hyperbrowse::viewer
             }
             return;
         default:
+            if (commandId >= kContextMenuSetCompareRatingBase
+                && commandId < kContextMenuSetCompareRatingBase + 6
+                && owner_ && IsWindow(owner_))
+            {
+                PostMessageW(owner_, kContextMenuCommandMessage,
+                             static_cast<WPARAM>(commandId),
+                             reinterpret_cast<LPARAM>(hwnd_));
+            }
             return;
         }
     }
@@ -3483,6 +4728,7 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::NavigateToBoundary(bool first)
     {
+        ExitCompareForNavigation();
         if (items_.empty())
         {
             return;
@@ -3558,6 +4804,34 @@ namespace hyperbrowse::viewer
     {
         maxPanX = 0.0;
         maxPanY = 0.0;
+        if (compareSessionActive_ && focusedCompareTile_ < compareTiles_.size())
+        {
+            const CompareTileState& tile = compareTiles_[focusedCompareTile_];
+            if (!tile.image)
+            {
+                return;
+            }
+            const RECT tileRect = CompareTileClientRect(focusedCompareTile_);
+            const bool swapDimensions = (tile.rotationQuarterTurns % 2) != 0;
+            const double imageWidth = static_cast<double>(swapDimensions
+                ? tile.image->SourceHeight()
+                : tile.image->SourceWidth());
+            const double imageHeight = static_cast<double>(swapDimensions
+                ? tile.image->SourceWidth()
+                : tile.image->SourceHeight());
+            const double clientWidth = static_cast<double>(std::max<LONG>(1, tileRect.right - tileRect.left));
+            const double clientHeight = static_cast<double>(std::max<LONG>(1, tileRect.bottom - tileRect.top));
+            const double fitScale = std::min(clientWidth / std::max(1.0, imageWidth),
+                                             clientHeight / std::max(1.0, imageHeight));
+            const double scale = zoomMode_ == ZoomMode::FitHeight
+                ? clientHeight / std::max(1.0, imageHeight)
+                : (zoomMode_ == ZoomMode::FitWidth
+                    ? clientWidth / std::max(1.0, imageWidth)
+                    : (zoomMode_ == ZoomMode::Custom ? customZoomScale_ : fitScale));
+            maxPanX = std::max(0.0, ((imageWidth * scale) - clientWidth) / 2.0);
+            maxPanY = std::max(0.0, ((imageHeight * scale) - clientHeight) / 2.0);
+            return;
+        }
         if (!currentImage_ || !hwnd_ || zoomMode_ == ZoomMode::Fit)
         {
             return;
@@ -4259,6 +5533,20 @@ namespace hyperbrowse::viewer
             ViewerFullImageCache().Insert(
                 MakeViewerFullImageCacheKey(items_[static_cast<std::size_t>(update->index)]),
                 currentImage_);
+            for (std::size_t tileIndex = 0; tileIndex < compareTiles_.size(); ++tileIndex)
+            {
+                CompareTileState& tile = compareTiles_[tileIndex];
+                if (tile.pendingItemIndex < 0 && tile.itemIndex == update->index
+                    && browser::FilePathsEqual(tile.filePath, items_[static_cast<std::size_t>(update->index)].filePath))
+                {
+                    tile.image = currentImage_;
+                    tile.bitmap.Reset();
+                    tile.loading = false;
+                    tile.errorMessage.clear();
+                    ++tile.requestGeneration;
+                    compareAsyncState_->tileRequestGenerations[tileIndex].store(tile.requestGeneration, std::memory_order_release);
+                }
+            }
             BeginTransitionFromPending();
             ScheduleAdjacentPrefetch(update->navigationGeneration);
         }
@@ -4552,6 +5840,27 @@ namespace hyperbrowse::viewer
                 }
             }
 
+            if (compareSessionActive_
+                && wParam == VK_TAB
+                && (GetKeyState(VK_CONTROL) & 0x8000) != 0
+                && (GetKeyState(VK_MENU) & 0x8000) == 0)
+            {
+                const int direction = (GetKeyState(VK_SHIFT) & 0x8000) != 0 ? -1 : 1;
+                const std::size_t tileCount = compareTiles_.size();
+                const std::size_t nextTile = direction > 0
+                    ? (focusedCompareTile_ + 1) % tileCount
+                    : (focusedCompareTile_ + tileCount - 1) % tileCount;
+                FocusCompareTileInternal(nextTile);
+                RequestRepaint();
+                return 0;
+            }
+
+            if (compareSessionActive_ && (wParam == VK_OEM_COMMA || wParam == VK_OEM_PERIOD))
+            {
+                CycleCompareCandidate(wParam == VK_OEM_PERIOD ? 1 : -1);
+                return 0;
+            }
+
             switch (wParam)
             {
             case VK_DELETE:
@@ -4573,7 +5882,18 @@ namespace hyperbrowse::viewer
             case VK_RIGHT:
                 if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
                 {
-                    SetCompareMode(true, CompareDirection::Next);
+                    if (compareSessionActive_ && compareTiles_.size() >= 3)
+                    {
+                        CycleCompareCandidate(1);
+                    }
+                    else if (compareSessionActive_ && compareTiles_.size() == 2)
+                    {
+                        CycleAdjacentCompareCandidate(1);
+                    }
+                    else
+                    {
+                        SetCompareMode(true, CompareDirection::Next);
+                    }
                 }
                 else
                 {
@@ -4590,6 +5910,10 @@ namespace hyperbrowse::viewer
                     }
                     else
                     {
+                        if (compareSessionActive_ && compareTiles_.size() >= 3)
+                        {
+                            EndCompareSessionPromoteFocused();
+                        }
                         Navigate(+1);
                     }
                 }
@@ -4597,7 +5921,18 @@ namespace hyperbrowse::viewer
             case VK_LEFT:
                 if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
                 {
-                    SetCompareMode(true, CompareDirection::Previous);
+                    if (compareSessionActive_ && compareTiles_.size() >= 3)
+                    {
+                        CycleCompareCandidate(-1);
+                    }
+                    else if (compareSessionActive_ && compareTiles_.size() == 2)
+                    {
+                        CycleAdjacentCompareCandidate(-1);
+                    }
+                    else
+                    {
+                        SetCompareMode(true, CompareDirection::Previous);
+                    }
                 }
                 else
                 {
@@ -4614,6 +5949,10 @@ namespace hyperbrowse::viewer
                     }
                     else
                     {
+                        if (compareSessionActive_ && compareTiles_.size() >= 3)
+                        {
+                            EndCompareSessionPromoteFocused();
+                        }
                         Navigate(-1);
                     }
                 }
@@ -4638,9 +5977,17 @@ namespace hyperbrowse::viewer
                 }
                 return 0;
             case VK_PRIOR:
+                if (compareSessionActive_ && compareTiles_.size() >= 3)
+                {
+                    EndCompareSessionPromoteFocused();
+                }
                 Navigate(-1);
                 return 0;
             case VK_NEXT:
+                if (compareSessionActive_ && compareTiles_.size() >= 3)
+                {
+                    EndCompareSessionPromoteFocused();
+                }
                 Navigate(+1);
                 return 0;
             case VK_HOME:
@@ -4851,6 +6198,24 @@ namespace hyperbrowse::viewer
         case WM_LBUTTONDOWN:
         {
             const POINT clickPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            if (compareSessionActive_)
+            {
+                RECT clientRect{};
+                GetClientRect(hwnd_, &clientRect);
+                const UINT dpi = std::max<UINT>(96, GetDpiForWindow(hwnd_));
+                const LONG gap = std::clamp<LONG>(static_cast<LONG>((static_cast<double>(dpi) / 96.0) * 16.0), 12, 32);
+                const std::vector<RECT> tileBounds = CompareTileBounds(clientRect, compareTiles_.size(), gap);
+                const int hitTile = HitTestCompareTile(tileBounds, clickPoint);
+                if (hitTile >= 0)
+                {
+                    FocusCompareTileInternal(static_cast<std::size_t>(hitTile));
+                    CompleteSmoothZoom();
+                    panning_ = true;
+                    lastPanPoint_ = clickPoint;
+                    SetCapture(hwnd_);
+                    return 0;
+                }
+            }
             const int navigationDelta = NavigationDeltaForPoint(clickPoint);
             if (navigationDelta != 0)
             {
@@ -4883,6 +6248,14 @@ namespace hyperbrowse::viewer
                     panOffsetX_ += static_cast<double>(currentPoint.x - lastPanPoint_.x);
                     panOffsetY_ += static_cast<double>(currentPoint.y - lastPanPoint_.y);
                     ClampPanOffsets();
+                    if (compareSessionActive_)
+                    {
+                        CaptureFocusedCompareView();
+                        if (compareViewsSynchronized_)
+                        {
+                            ApplyCompareViewToTiles();
+                        }
+                    }
                     lastPanPoint_ = currentPoint;
                     RequestRepaint();
                     return 0;
@@ -4900,6 +6273,14 @@ namespace hyperbrowse::viewer
                 panOffsetX_ += static_cast<double>(currentPoint.x - lastPanPoint_.x);
                 panOffsetY_ += static_cast<double>(currentPoint.y - lastPanPoint_.y);
                 ClampPanOffsets();
+                if (compareSessionActive_)
+                {
+                    CaptureFocusedCompareView();
+                    if (compareViewsSynchronized_)
+                    {
+                        ApplyCompareViewToTiles();
+                    }
+                }
                 lastPanPoint_ = currentPoint;
                 RequestRepaint();
                 return 0;
@@ -5003,6 +6384,8 @@ namespace hyperbrowse::viewer
             break;
         case kDecodedImageMessage:
             return HandleDecodedImageMessage(lParam);
+        case kCompareTileReadyMessage:
+            return HandleCompareTileReadyMessage(lParam);
         case kPrefetchImageMessage:
             return HandlePrefetchImageMessage(lParam);
         case kMetadataReadyMessage:
@@ -5085,7 +6468,11 @@ namespace hyperbrowse::viewer
 
                 d2dRenderTarget_->Clear(render::ToD2DColor(BackgroundColor(darkTheme_)));
 
-                if (!currentImage_)
+                if (compareSessionActive_)
+                {
+                    DrawCompareSession(d2dRenderTarget_.Get(), clientWidth, clientHeight);
+                }
+                else if (!currentImage_)
                 {
                     const bool showIcon = loading_ || errorMessage_.empty();
                     constexpr float kPanelPaddingLeft = 28.0f;
@@ -6431,7 +7818,11 @@ namespace hyperbrowse::viewer
             FillRect(frameDc, &clientRect, backgroundBrush_);
             SetBkMode(frameDc, TRANSPARENT);
 
-            if (currentImage_)
+            if (compareSessionActive_)
+            {
+                DrawCompareSessionGdi(frameDc, clientRect);
+            }
+            else if (currentImage_)
             {
                 const double scale = EffectiveScaleForClient(clientRect);
                 const bool swapDimensions = (rotationQuarterTurns_ % 2) != 0;

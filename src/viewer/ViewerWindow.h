@@ -5,15 +5,19 @@
 #include <dwrite.h>
 #include <wrl/client.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "browser/BrowserModel.h"
 #include "cache/ThumbnailCache.h"
+#include "viewer/CompareSessionPolicy.h"
 #include "util/BackgroundExecutor.h"
 #include "util/ResourceSizing.h"
 #include "util/UiTextSize.h"
@@ -83,6 +87,12 @@ namespace hyperbrowse::viewer
         Copy = 1,
     };
 
+    struct CompareTileMetadata
+    {
+        int rating{};
+        std::wstring tags;
+    };
+
     class ViewerWindow
     {
     public:
@@ -105,6 +115,11 @@ namespace hyperbrowse::viewer
         static constexpr UINT kContextMenuCopyImage = 8;
         static constexpr UINT kContextMenuToggleInfoOverlays = 9;
         static constexpr UINT kContextMenuToggleFullMetadata = 10;
+        static constexpr UINT kContextMenuToggleCompareViewSync = 11;
+        static constexpr UINT kContextMenuRefreshCompareTileMetadata = 12;
+        static constexpr UINT kContextMenuSetCompareRatingBase = 20;
+        static constexpr UINT kContextMenuEditCompareTags = 26;
+        static constexpr UINT kCompareTileReadyMessage = WM_APP + 78;
         static constexpr WPARAM kDeleteRequestPermanent = 0x1;
 
         explicit ViewerWindow(HINSTANCE instance);
@@ -132,6 +147,16 @@ namespace hyperbrowse::viewer
         UINT SlideshowIntervalMs() const noexcept;
         void SetCompareMode(bool enabled, CompareDirection direction = CompareDirection::Next);
         bool IsCompareModeEnabled() const noexcept;
+        bool BeginCompareSession(const std::vector<int>& tileIndexes,
+                     const std::vector<CompareTileMetadata>& candidateMetadata = {});
+        bool HasCompareSession() const noexcept;
+        bool IsCompareSessionActive() const noexcept;
+        std::size_t CompareTileCount() const noexcept;
+        int FocusedCompareTile() const noexcept;
+        int CompareTileItemIndex(std::size_t tileIndex) const noexcept;
+        bool AreCompareViewsSynchronized() const noexcept;
+        bool SetCompareViewsSynchronized(bool synchronized);
+        void UpdateCompareTileMetadata(std::wstring_view filePath, CompareTileMetadata metadata);
         static bool DefaultInfoOverlaysVisible();
         static InfoOverlayTextSize DefaultOverlayTextSize();
         static bool DefaultFullMetadataVisible();
@@ -211,6 +236,29 @@ namespace hyperbrowse::viewer
             bool prefetched{};
         };
 
+        struct CompareTileState
+        {
+            int itemIndex{-1};
+            int pendingItemIndex{-1};
+            std::uint64_t requestGeneration{};
+            std::wstring filePath;
+            std::wstring pendingFilePath;
+            std::shared_ptr<const cache::CachedThumbnail> image;
+            Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+            CompareTileMetadata metadata;
+            NormalizedImageCenter imageCenter;
+            double zoomRatio{1.0};
+            int rotationQuarterTurns{};
+            bool loading{};
+            std::wstring errorMessage;
+        };
+
+        struct CompareAsyncState
+        {
+            std::atomic_uint64_t sessionGeneration{};
+            std::array<std::atomic_uint64_t, 4> tileRequestGenerations{};
+        };
+
         struct MenuDrawItemData
         {
             std::wstring text;
@@ -250,6 +298,17 @@ namespace hyperbrowse::viewer
         void RotateRight();
         void ToggleCompareMode();
         void ActivateComparedImage();
+        bool CycleCompareCandidate(int direction);
+        bool CycleAdjacentCompareCandidate(int direction);
+        void ExitCompareForNavigation();
+        void FocusCompareTileInternal(std::size_t tileIndex);
+        void CaptureFocusedCompareView();
+        void ApplyCompareViewToTiles();
+        void RequestCompareTileImage(std::size_t tileIndex, int itemIndex, bool preserveCurrent);
+        RECT CompareTileClientRect(std::size_t tileIndex) const;
+        void EndCompareSessionPromoteFocused();
+        void DrawCompareSession(ID2D1RenderTarget* renderTarget, float clientWidth, float clientHeight);
+        void DrawCompareSessionGdi(HDC dc, const RECT& clientRect);
         void ToggleInfoOverlays();
         HMONITOR ResolveTargetMonitor(HMONITOR preferredMonitor) const noexcept;
         void SetWindowFitMode(WindowFitMode mode);
@@ -328,6 +387,7 @@ namespace hyperbrowse::viewer
         void RebuildD2DBrushes();
         void RebuildD2DTextFormats();
         LRESULT HandleDecodedImageMessage(LPARAM lParam);
+        LRESULT HandleCompareTileReadyMessage(LPARAM lParam);
         LRESULT HandlePrefetchImageMessage(LPARAM lParam);
         LRESULT HandleMetadataReadyMessage(LPARAM lParam);
         LRESULT HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -337,6 +397,13 @@ namespace hyperbrowse::viewer
         HWND owner_{};
         HWND hwnd_{};
         std::vector<browser::BrowserItem> items_;
+        std::vector<CompareTileState> compareTiles_;
+        std::vector<CompareTileMetadata> compareCandidateMetadata_;
+        std::shared_ptr<CompareAsyncState> compareAsyncState_;
+        std::size_t focusedCompareTile_{};
+        std::uint64_t compareSessionGeneration_{};
+        bool compareSessionActive_{};
+        bool compareViewsSynchronized_{true};
         int currentIndex_{-1};
         bool darkTheme_{};
         util::AppTextSize appTextSize_{util::kDefaultAppTextSize};

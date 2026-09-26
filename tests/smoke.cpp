@@ -4616,6 +4616,85 @@ namespace
             "Viewer should default to the small overlay text size when no persisted preference exists");
         Expect(!viewer.IsFullMetadataVisible(), "Viewer should default to hiding the full metadata pane when no persisted preference exists");
 
+         Expect(!viewer.BeginCompareSession({0}, {}), "Compare session accepted fewer than two tiles");
+         Expect(!viewer.BeginCompareSession({0, 0}, {}), "Compare session accepted duplicate tile identities");
+         Expect(!viewer.BeginCompareSession({0, 1, 2, 3, 4}, {}), "Compare session accepted more than four tiles");
+         Expect(viewer.BeginCompareSession({0, 1}, {}), "Viewer did not start a two-tile compare session");
+         Expect(viewer.CompareTileCount() == 2 && viewer.FocusedCompareTile() == 0
+                 && viewer.CompareTileItemIndex(0) == 0 && viewer.CompareTileItemIndex(1) == 1,
+             "Two-tile compare did not preserve selection order and primary focus");
+         Expect(viewer.SetCompareViewsSynchronized(false) && !viewer.AreCompareViewsSynchronized(),
+             "Compare sync could not be disabled");
+         Expect(viewer.SetCompareViewsSynchronized(true) && viewer.AreCompareViewsSynchronized(),
+             "Compare sync could not be re-enabled");
+
+         BYTE compareKeyboardState[256]{};
+         BYTE compareModifiedKeyboardState[256]{};
+         Expect(GetKeyboardState(compareKeyboardState) != FALSE,
+             "Failed to read keyboard state for compare tile focus coverage");
+         std::copy(std::begin(compareKeyboardState), std::end(compareKeyboardState),
+                std::begin(compareModifiedKeyboardState));
+         compareModifiedKeyboardState[VK_CONTROL] |= 0x80;
+         Expect(SetKeyboardState(compareModifiedKeyboardState) != FALSE,
+             "Failed to stage Ctrl for compare tile focus coverage");
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
+         SetKeyboardState(compareKeyboardState);
+         Expect(viewer.FocusedCompareTile() == 1,
+             "Ctrl+Tab did not focus the next compare tile");
+
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PERIOD, 0);
+         Expect(PumpMessagesUntil([&]() { return viewer.CompareTileItemIndex(1) == 2; }, 5000),
+             "Compare candidate cycling did not replace only the focused tile");
+
+         Expect(GetKeyboardState(compareKeyboardState) != FALSE,
+             "Failed to read keyboard state for adjacent compare coverage");
+         std::copy(std::begin(compareKeyboardState), std::end(compareKeyboardState),
+                std::begin(compareModifiedKeyboardState));
+         compareModifiedKeyboardState[VK_SHIFT] |= 0x80;
+         Expect(SetKeyboardState(compareModifiedKeyboardState) != FALSE,
+             "Failed to stage Shift for adjacent compare coverage");
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_LEFT, 0);
+         SetKeyboardState(compareKeyboardState);
+         Expect(PumpMessagesUntil([&]() { return viewer.CompareTileItemIndex(0) == 1; }, 5000),
+             "Shift+Left did not preserve two-up adjacent comparison behavior");
+
+         Expect(viewer.BeginCompareSession({0, 2, 3}, {}), "Viewer did not start a three-tile compare session");
+         Expect(viewer.CompareTileCount() == 3 && viewer.FocusedCompareTile() == 0,
+             "Three-tile compare did not retain the primary-selected focus");
+         Expect(GetKeyboardState(compareKeyboardState) != FALSE,
+             "Failed to read keyboard state for n-up candidate coverage");
+         std::copy(std::begin(compareKeyboardState), std::end(compareKeyboardState),
+                std::begin(compareModifiedKeyboardState));
+         compareModifiedKeyboardState[VK_SHIFT] |= 0x80;
+         Expect(SetKeyboardState(compareModifiedKeyboardState) != FALSE,
+             "Failed to stage Shift for n-up candidate coverage");
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_RIGHT, 0);
+         SetKeyboardState(compareKeyboardState);
+         Expect(PumpMessagesUntil([&]() { return viewer.CompareTileItemIndex(0) == 1; }, 5000),
+             "Shift+Right did not cycle the focused tile in n-up compare");
+
+         Expect(viewer.BeginCompareSession({0, 1, 2, 3}, {}), "Viewer did not start a four-tile compare session");
+         Expect(viewer.CompareTileCount() == 4 && viewer.FocusedCompareTile() == 0,
+             "Four-tile compare did not retain the primary-selected focus");
+         Expect(GetKeyboardState(compareKeyboardState) != FALSE,
+             "Failed to read keyboard state for reverse tile focus coverage");
+         std::copy(std::begin(compareKeyboardState), std::end(compareKeyboardState),
+                std::begin(compareModifiedKeyboardState));
+         compareModifiedKeyboardState[VK_CONTROL] |= 0x80;
+         compareModifiedKeyboardState[VK_SHIFT] |= 0x80;
+         Expect(SetKeyboardState(compareModifiedKeyboardState) != FALSE,
+             "Failed to stage Ctrl+Shift for reverse tile focus coverage");
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_TAB, 0);
+         SetKeyboardState(compareKeyboardState);
+         Expect(viewer.FocusedCompareTile() == 3,
+             "Ctrl+Shift+Tab did not focus the previous compare tile");
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, 'C', 0);
+         Expect(!viewer.HasCompareSession() && viewer.CurrentIndex() == 3,
+             "C did not promote the focused tile when exiting n-up compare");
+         Expect(viewer.ReplaceItems(items, 0), "Viewer could not reset after compare-session smoke coverage");
+         Expect(PumpMessagesUntil([&]() { return viewer.CurrentIndex() == 0 && viewer.CurrentZoomPercent() > 0; }, 5000),
+             "Viewer did not reload after compare-session smoke coverage");
+
         viewer.StartSlideshow(1000);
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_SPACE, 0);
         Expect(!viewer.IsSlideshowActive(), "Viewer Space key did not pause the slideshow");
@@ -6801,6 +6880,7 @@ int main(int argc, char* argv[])
 
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
         const bool viewerInteractionOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-interaction";
+        const bool runtimeOnly = argc > 1 && std::string_view(argv[1]) == "--runtime";
         const bool thumbnailPersistenceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-persistence";
         const bool thumbnailPathSafetyOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-path-safety";
         const bool thumbnailMaintenanceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-maintenance";
@@ -6820,6 +6900,10 @@ int main(int argc, char* argv[])
         const bool policyOnly = hyperbrowse::tests::RunFocusedPolicyScenario(selectedScenario);
         if (policyOnly)
         {
+        }
+        else if (runtimeOnly)
+        {
+            hyperbrowse::tests::RunRuntimeScenarios();
         }
         else if (viewerFitOnly)
         {

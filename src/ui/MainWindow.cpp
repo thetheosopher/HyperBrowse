@@ -15925,36 +15925,89 @@ namespace hyperbrowse::ui
             return;
         }
 
-        if (browserPaneController_->SelectedCount() != 2)
+        std::vector<browser::BrowserItem> selectedItems = CollectItemsForScope(true);
+        if (selectedItems.size() < 2 || selectedItems.size() > 4
+            || std::any_of(selectedItems.begin(), selectedItems.end(), [](const browser::BrowserItem& item)
+            {
+                return item.isDirectory;
+            }))
         {
-            MessageBoxW(hwnd_, L"Select exactly two images to compare.", L"Compare Selected", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(hwnd_, L"Select 2 to 4 images to compare. Folders are not included.",
+                        L"Compare Selected", MB_OK | MB_ICONINFORMATION);
             return;
         }
 
-        std::vector<browser::BrowserItem> items = CollectItemsForScope(true);
-        if (items.size() != 2)
+        std::vector<browser::BrowserItem> candidateItems = CollectItemsForScope(false);
+        candidateItems.erase(std::remove_if(candidateItems.begin(), candidateItems.end(), [](const browser::BrowserItem& item)
         {
+            return item.isDirectory;
+        }), candidateItems.end());
+        if (candidateItems.size() < selectedItems.size())
+        {
+            MessageBoxW(hwnd_, L"The selected images are no longer available in the current view.",
+                        L"Compare Selected", MB_OK | MB_ICONINFORMATION);
             return;
         }
 
-        int selectedIndex = 0;
+        std::vector<int> tileIndexes;
+        tileIndexes.reserve(selectedItems.size());
+        for (const browser::BrowserItem& selectedItem : selectedItems)
+        {
+            const auto candidate = std::find_if(candidateItems.begin(), candidateItems.end(), [&](const browser::BrowserItem& item)
+            {
+                return browser::FilePathsEqual(item.filePath, selectedItem.filePath);
+            });
+            if (candidate == candidateItems.end())
+            {
+                MessageBoxW(hwnd_, L"The selected images are no longer available in the current view.",
+                            L"Compare Selected", MB_OK | MB_ICONINFORMATION);
+                return;
+            }
+            const int candidateIndex = static_cast<int>(std::distance(candidateItems.begin(), candidate));
+            if (std::find(tileIndexes.begin(), tileIndexes.end(), candidateIndex) != tileIndexes.end())
+            {
+                continue;
+            }
+            tileIndexes.push_back(candidateIndex);
+        }
+        if (tileIndexes.size() < 2 || tileIndexes.size() > 4)
+        {
+            MessageBoxW(hwnd_, L"Select 2 to 4 distinct images to compare.",
+                        L"Compare Selected", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        int selectedIndex = tileIndexes.front();
         const int primaryModelIndex = browserPaneController_->PrimarySelectedModelIndex();
         const auto& modelItems = browserModel_->Items();
         if (primaryModelIndex >= 0 && primaryModelIndex < static_cast<int>(modelItems.size()))
         {
             const std::wstring& primaryPath = modelItems[static_cast<std::size_t>(primaryModelIndex)].filePath;
-            if (browser::FilePathsEqual(items[1].filePath, primaryPath))
+            const auto primaryCandidate = std::find_if(candidateItems.begin(), candidateItems.end(), [&](const browser::BrowserItem& item)
             {
-                selectedIndex = 1;
+                return browser::FilePathsEqual(item.filePath, primaryPath);
+            });
+            if (primaryCandidate != candidateItems.end())
+            {
+                selectedIndex = static_cast<int>(std::distance(candidateItems.begin(), primaryCandidate));
             }
         }
 
-        const viewer::CompareDirection compareDirection = selectedIndex == 0
-            ? viewer::CompareDirection::Next
-            : viewer::CompareDirection::Previous;
-        if (OpenItemsInViewer(std::move(items), selectedIndex, false, false, false))
+        std::vector<viewer::CompareTileMetadata> candidateMetadata(candidateItems.size());
+        if (userMetadataStore_)
         {
-            viewerWindow_->SetCompareMode(true, compareDirection);
+            for (const int tileIndex : tileIndexes)
+            {
+                const services::UserMetadataEntry entry = userMetadataStore_->EntryForPath(
+                    candidateItems[static_cast<std::size_t>(tileIndex)].filePath);
+                candidateMetadata[static_cast<std::size_t>(tileIndex)] = {entry.rating, entry.tags};
+            }
+        }
+
+        if (OpenItemsInViewer(std::move(candidateItems), selectedIndex, false, false, false)
+            && !viewerWindow_->BeginCompareSession(tileIndexes, candidateMetadata))
+        {
+            viewerWindow_->SetCompareMode(false);
         }
     }
 
@@ -23128,7 +23181,7 @@ namespace hyperbrowse::ui
 
         std::wstring sourcePath;
         std::wstring preferredFocusPath;
-        if (!viewerWindow_->GetDeleteCurrentPaths(&sourcePath, &preferredFocusPath) || sourcePath.empty())
+        if (!viewer->GetDeleteCurrentPaths(&sourcePath, &preferredFocusPath) || sourcePath.empty())
         {
             return 0;
         }
@@ -23208,7 +23261,58 @@ namespace hyperbrowse::ui
             return 0;
         }
 
-        switch (static_cast<UINT>(wParam))
+        const UINT commandId = static_cast<UINT>(wParam);
+        if (commandId == viewer::ViewerWindow::kContextMenuRefreshCompareTileMetadata)
+        {
+            if (userMetadataStore_)
+            {
+                const services::UserMetadataEntry entry = userMetadataStore_->EntryForPath(currentPath);
+                viewer->UpdateCompareTileMetadata(currentPath, {entry.rating, entry.tags});
+            }
+            return 0;
+        }
+        if (commandId >= viewer::ViewerWindow::kContextMenuSetCompareRatingBase
+            && commandId < viewer::ViewerWindow::kContextMenuSetCompareRatingBase + 6)
+        {
+            if (userMetadataStore_)
+            {
+                const int rating = static_cast<int>(commandId - viewer::ViewerWindow::kContextMenuSetCompareRatingBase);
+                userMetadataStore_->SetRating({currentPath}, rating);
+                const services::UserMetadataEntry entry = userMetadataStore_->EntryForPath(currentPath);
+                viewer->UpdateCompareTileMetadata(currentPath, {entry.rating, entry.tags});
+                RefreshBrowserPane();
+                UpdateMenuState();
+            }
+            return 0;
+        }
+        if (commandId == viewer::ViewerWindow::kContextMenuEditCompareTags)
+        {
+            if (userMetadataStore_)
+            {
+                std::wstring editedTags = userMetadataStore_->EntryForPath(currentPath).tags;
+                if (PromptForSingleLineText(hwnd_,
+                                            instance_,
+                                            appTextSize_,
+                                            themeMode_ == ThemeMode::Dark,
+                                            L"Edit Image Tags",
+                                            L"Enter comma-separated tags for this image. Leave blank to clear tags.",
+                                            L"Apply",
+                                            editedTags,
+                                            0,
+                                            -1,
+                                            &editedTags))
+                {
+                    userMetadataStore_->SetTags({currentPath}, editedTags);
+                    const services::UserMetadataEntry entry = userMetadataStore_->EntryForPath(currentPath);
+                    viewer->UpdateCompareTileMetadata(currentPath, {entry.rating, entry.tags});
+                    RefreshBrowserPane();
+                    UpdateMenuState();
+                }
+            }
+            return 0;
+        }
+
+        switch (commandId)
         {
         case viewer::ViewerWindow::kContextMenuCopyImage:
             CopySelectedImagePixelsToClipboard(currentPath);

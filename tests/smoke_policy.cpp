@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cwchar>
 #include <functional>
@@ -18,6 +19,7 @@
 #include "services/BatchConvertService.h"
 #include "services/FileOperationService.h"
 #include "ui/BrowserItemScopeCollector.h"
+#include "viewer/CompareSessionPolicy.h"
 #include "ui/BrowserPresentationPersistence.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
@@ -126,6 +128,70 @@ namespace hyperbrowse::tests
             Expect(hyperbrowse::ui::ShouldUseViewerTransition(true, true),
                    "Slideshow navigation policy changed when manual transitions were enabled");
         }
+
+         void RunCompareSessionPolicyScenario()
+         {
+             using hyperbrowse::viewer::CompareTileBounds;
+             using hyperbrowse::viewer::HitTestCompareTile;
+             using hyperbrowse::viewer::ImageCenterFromPan;
+             using hyperbrowse::viewer::NormalizedImageCenter;
+             using hyperbrowse::viewer::NextAvailableCompareCandidate;
+             using hyperbrowse::viewer::PanFromImageCenter;
+
+             const RECT client{0, 0, 1000, 800};
+             const std::vector<RECT> pairBounds = CompareTileBounds(client, 2, 16);
+             Expect(pairBounds.size() == 2 && pairBounds[0].right < pairBounds[1].left,
+                 "Two-image compare panes were not separated by a gap");
+             Expect(HitTestCompareTile(pairBounds, POINT{10, 10}) == 0
+                  && HitTestCompareTile(pairBounds, POINT{990, 10}) == 1
+                  && HitTestCompareTile(pairBounds, POINT{500, 10}) == -1,
+                 "Two-image compare hit testing did not respect tile bounds and gap");
+
+             const std::vector<RECT> tripleBounds = CompareTileBounds(client, 3, 16);
+             const std::vector<RECT> quadBounds = CompareTileBounds(client, 4, 16);
+             Expect(tripleBounds.size() == 3 && quadBounds.size() == 4,
+                 "N-up compare layout did not create the requested tile count");
+             Expect(tripleBounds[0].right < tripleBounds[1].left
+                  && tripleBounds[0].bottom < tripleBounds[2].top
+                  && quadBounds[2].right < quadBounds[3].left,
+                 "N-up compare bounds overlapped or omitted the configured gutters");
+             Expect(CompareTileBounds(client, 1, 16).empty()
+                  && CompareTileBounds(client, 5, 16).empty(),
+                 "Compare layout accepted a tile count outside the supported range");
+
+             const std::array visibleIndices{1, 3, 5};
+             Expect(NextAvailableCompareCandidate(5, visibleIndices, 6, 1) == 0,
+                 "Forward compare candidate cycling did not wrap to the next unused candidate");
+             Expect(NextAvailableCompareCandidate(1, visibleIndices, 6, -1) == 0,
+                 "Reverse compare candidate cycling did not skip occupied candidates");
+                 const std::array allVisibleIndices{0, 1, 2};
+                 Expect(NextAvailableCompareCandidate(1, allVisibleIndices, 3, 1) == -1,
+                 "Compare candidate cycling did not report that all candidates are already visible");
+
+             const RECT smallClient{0, 0, 400, 300};
+             const POINT clampedPan = PanFromImageCenter(1000, 800, 1.0, smallClient, {0.0, 0.0});
+             Expect(clampedPan.x == 300 && clampedPan.y == 250,
+                 "Normalized compare pan was not clamped to the image edges");
+             const auto normalizedCenter = ImageCenterFromPan(1000, 800, 1.0, clampedPan.x, clampedPan.y);
+             Expect(normalizedCenter.x > 0.19 && normalizedCenter.x < 0.21
+                  && normalizedCenter.y > 0.18 && normalizedCenter.y < 0.20,
+                 "Compare pan conversion did not preserve the visible normalized image center");
+
+             const RECT landscapeTile{0, 0, 500, 300};
+             const RECT portraitTile{0, 0, 300, 500};
+             const NormalizedImageCenter sharedCenter{0.7, 0.3};
+             const POINT landscapePan = PanFromImageCenter(4000, 3000, 0.3, landscapeTile, sharedCenter);
+             const POINT portraitPan = PanFromImageCenter(3000, 4000, 0.3, portraitTile, sharedCenter);
+             const NormalizedImageCenter landscapeCenter = ImageCenterFromPan(4000, 3000, 0.3,
+                                                                             landscapePan.x, landscapePan.y);
+             const NormalizedImageCenter portraitCenter = ImageCenterFromPan(3000, 4000, 0.3,
+                                                                             portraitPan.x, portraitPan.y);
+             Expect(std::abs(landscapeCenter.x - sharedCenter.x) < 0.01
+                        && std::abs(landscapeCenter.y - sharedCenter.y) < 0.01
+                        && std::abs(portraitCenter.x - sharedCenter.x) < 0.01
+                        && std::abs(portraitCenter.y - sharedCenter.y) < 0.01,
+                    "Synchronized pan did not preserve normalized image center across unequal image dimensions");
+         }
 
         void RunFileOperationMediaCacheInvalidationScenario()
         {
@@ -2149,6 +2215,7 @@ namespace hyperbrowse::tests
         RunPrefetchSizingScenario();
         RunResourceSizingRangeScenario();
         RunViewerTransitionPolicyScenario();
+        RunCompareSessionPolicyScenario();
         RunFileOperationMediaCacheInvalidationScenario();
         RunFolderHistoryScenario();
         RunFileOperationJournalScenario();
@@ -2236,6 +2303,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--viewer-transition-policy")
         {
             RunViewerTransitionPolicyScenario();
+        }
+        else if (scenario == "--compare-session-policy")
+        {
+            RunCompareSessionPolicyScenario();
         }
         else if (scenario == "--item-number-navigation")
         {

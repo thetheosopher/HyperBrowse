@@ -20,6 +20,23 @@ measurement, architecture, and production acceptance contract. This prompt
 coordinates their execution in the required order. Do not replace, weaken, or
 claim completion of either contract.
 
+## Current Execution Hold
+
+As of 2026-09-26, the user has opted out of cloud-hosted GitHub Actions. The
+repository's only workflow, `HyperBrowse CI`, is manually disabled; run
+`36270914454` was cancelled, and no runs remain active or queued. Do not enable
+the workflow, dispatch it, or trigger a cloud run through a push or pull request
+without fresh explicit user authorization.
+
+The hosted D3/A8 collection gate is paused. `docs/perf/baseline.json` remains
+at `collecting` with `workflowSampleCount: 0` for both profiles; cancelled,
+failed, local, or otherwise incomplete runs do not count toward the hosted
+sample requirement. Before resuming, obtain approval either for hosted Actions
+or for a revised no-cloud evidence policy. Local measurements must not be
+described as hosted-runner samples or used to calibrate the existing
+`windows-2022` profiles without an explicitly reviewed change to the evidence
+contract.
+
 ## Hard Scope Boundary
 
 This task may publish and run the current evidence workflow, calibrate the

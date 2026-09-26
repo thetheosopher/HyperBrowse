@@ -61,7 +61,8 @@ The active plan assumes the following are already shipped and stable:
   `rating:>=N` / `tag:*`), date-taken sort, sort direction toggle,
   configurable viewer mouse wheel, slideshow with transition styles.
 - Diagnostics window, structured log, smoke + integration tests, GitHub
-  Actions CI, portable zip + Inno Setup 6 installer.
+  Actions CI workflow (currently disabled; no cloud runs are active), portable
+  zip + Inno Setup 6 installer.
 
 See [PRODUCT_SPEC.md](PRODUCT_SPEC.md), [docs/architecture.md](../docs/architecture.md),
 and [docs/testing.md](../docs/testing.md) for current product, architecture,
@@ -126,8 +127,10 @@ the [performance-evidence prompt](FUTURE-ROADMAP-PROMPT-02-PERFORMANCE-EVIDENCE.
 then use the [A6 GPU thumbnail-scaling prompt](FUTURE-ROADMAP-PROMPT-03-A6-GPU-THUMBNAIL-SCALING.md)
 as the A6 design and acceptance contract. The
 [hosted-evidence and paired-benchmark prompt](FUTURE-ROADMAP-PROMPT-04-HOSTED-EVIDENCE-AND-A6-PAIRED-BENCHMARK.md)
-executes the hosted calibration sequence and hardware comparison; production
-scaling remains gated on its reviewed result.
+defines the hosted calibration sequence and hardware comparison. Hosted
+collection is paused because the user has opted out of cloud-hosted GitHub
+Actions; no A6 hardware adapter has been verified in this execution. Production
+scaling remains gated on reviewed evidence and an explicit go decision.
 
 - Replace CPU-side `IWICBitmapScaler` for the largest thumbnail sizes with
   a Direct2D image effect chain (`ID2D1Effect` scale + linear gamma).
@@ -158,12 +161,16 @@ fixed prefetch multipliers.
 **Implementation status:** In progress. Startup diagnostics now capture
 `process-start → first-window-visible` and
 `first-window-visible → first-thumbnail-painted`, and `--bench-startup`
-emits a structured JSON snapshot on shutdown. GitHub Actions runs startup and
-persistent-cache scenarios through the repeatable Release runner and retains
-per-run/aggregate JSON artifacts. Remaining: collect at least ten independent
-hosted workflow samples for each decode-path profile, then calibrate and review
-the relative baselines. The current fixed budgets remain absolute guardrails,
-not calibrated relative thresholds. The local
+emits a structured JSON snapshot on shutdown. The checked-in GitHub Actions
+workflow is configured to run startup and persistent-cache scenarios through
+the repeatable Release runner, but the repository workflow was manually
+disabled on 2026-09-26 at the user's direction; run `36270914454` was cancelled.
+No hosted samples qualify, and both baseline profiles remain at 0/10. Do not
+re-enable or dispatch cloud Actions without fresh explicit authorization.
+Remaining: agree on an acceptable no-cloud evidence policy or explicitly
+authorize hosted collection before calibrating relative baselines. The current
+fixed budgets remain absolute guardrails, not calibrated relative thresholds.
+The local
 debug run against the repo `assets` folder currently produced roughly
 `900.60 ms` to first window visible and `1265.43 ms` to first thumbnail
 painted, with the second span at roughly `364.83 ms`; this is illustrative, not
@@ -209,12 +216,25 @@ separate deferred idea and is not implied by the duplicate-file command.
 
 ### `B2` n-Up Compare & Side-by-Side Zoom Sync (P0)
 
-- Extend the current two-up compare to 3-up and 4-up with a responsive
-  flex-style layout in the viewer.
-- Synchronized zoom and pan across tiles (toggleable).
-- Per-tile rating/tag controls so culling happens during compare.
-- Keyboard: `1`/`2`/`3`/`4` cycles candidate into focused tile,
-  `,` / `.` rotates the candidate set.
+**Implementation status:** The local implementation now supports two-to-four
+selected images, focused candidate replacement, synchronized or independent
+zoom/pan, and per-tile rating/tag commands through the existing metadata store.
+The full local Debug CTest suite passes; manual DPI and forced-GDI-fallback
+validation remain. See the
+[B2 long-horizon prompt](FUTURE-ROADMAP-PROMPT-05-N-UP-COMPARE-AND-ZOOM-SYNC.md)
+for the interaction contract and acceptance gates.
+
+- Two images remain side by side; three/four images use a responsive 2x2
+  viewer layout with a visible focus indicator.
+- `Ctrl+Tab` / `Ctrl+Shift+Tab` focus tiles; `,` / `.` replace the focused
+  tile from the captured browser candidate order, skipping visible images.
+- Synchronized fit-relative zoom and normalized pan are on by default and can
+  be toggled from the viewer context menu. Independent tile views are retained
+  when synchronization is off.
+- Per-tile rating/tag context-menu actions reuse the existing metadata store.
+- Preserve `1` for Actual Size and bare `Tab` for overlay visibility; in n-up
+  mode `Shift+Left/Right` also cycles the focused tile, while two-up retains
+  adjacent comparison behavior.
 
 ### `B3` Quick-Pick Destination Panel (P1)
 
@@ -416,17 +436,19 @@ that lack reliable measurement producers are classified in
 
 ### `D3` CI Perf Regression Gate (P1)
 
-**Implementation status:** Partial. CI runs five repetitions per scenario on
-each Release decode path and retains the JSON evidence. The checked-in baseline
-profiles are collecting; current CI uses the explicit provisional mode while
-continuing to enforce absolute guardrails. Relative comparisons become
-enforcing after each profile has ten independent workflow samples and reviewed
-thresholds.
+**Implementation status:** Partial and paused. The workflow definition runs
+five repetitions per scenario on each Release decode path and retains JSON
+evidence when enabled. The only repository workflow is currently disabled by
+the user's no-cloud-Actions decision; both checked-in baseline profiles remain
+collecting at 0/10 samples. Absolute guardrails remain in the workflow, but no
+hosted relative comparison is currently running. Do not re-enable cloud CI
+without fresh explicit authorization. Relative comparisons require reviewed
+samples and thresholds under an explicitly approved evidence policy.
 
-- GitHub Actions runs the standard automated dataset suite against the Release
-  build, compares compatible results against a reviewed baseline
-  (`docs/perf/baseline.json`), retains JSON results, and fails on a supported
-  threshold breach.
+- When enabled, GitHub Actions runs the standard automated dataset suite
+  against the Release build, compares compatible results against a reviewed
+  baseline (`docs/perf/baseline.json`), retains JSON results, and fails on a
+  supported threshold breach.
 
 ### `D4` Cache Inspector Window (P1)
 
@@ -570,9 +592,10 @@ focused. The summarized status as of this revision:
   active. Cache Performance exposes the pressure state, queue and in-flight
   decode telemetry, cache hit rates, and scale timing.
 - **Architecture / hygiene:** shared `HyperBrowseCore` static library,
-  smoke + integration test suite, GitHub Actions CI, portable zip + Inno
-  Setup 6 installer with CUDA redistributable bundling, static MSVC
-  runtime by default ([the archived hardening plan](archive/09-hardening-pass.md)).
+  smoke + integration test suite, a GitHub Actions CI workflow (currently
+  disabled), portable zip + Inno Setup 6 installer with CUDA redistributable
+  bundling, static MSVC runtime by default
+  ([the archived hardening plan](archive/09-hardening-pass.md)).
 - **Toolbar:** owner-drawn double-buffered toolbar strip with grouped icon
   buttons and right-aligned actions
   ([archived toolbar redesign](archive/16-toolbar-ux-redesign.md)).

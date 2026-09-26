@@ -134,6 +134,12 @@ namespace hyperbrowse::tests
                    "Viewer X compared-image shortcut is missing from the shared catalog");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_TAB, 0),
                    "Viewer Tab overlay shortcut is missing from the shared catalog");
+            Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_TAB, FCONTROL)
+                       && hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_TAB, FCONTROL | FSHIFT),
+                   "Compare tile focus shortcuts are missing from the shared catalog");
+            Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_OEM_COMMA, 0)
+                       && hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_OEM_PERIOD, 0),
+                   "Compare candidate cycling shortcuts are missing from the shared catalog");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_SPACE, 0),
                    "Viewer Space slideshow shortcut is missing from the shared catalog");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(), ShortcutContext::Viewer, 0, VK_F11, 0),

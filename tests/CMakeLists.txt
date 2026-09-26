@@ -55,6 +55,8 @@ add_test(NAME HyperBrowseFolderHistorySmoke COMMAND HyperBrowseTests --folder-hi
 add_test(NAME HyperBrowseFileOperationMediaCacheSmoke COMMAND HyperBrowseTests --file-operation-media-cache)
 add_test(NAME HyperBrowseViewerFitSmoke COMMAND HyperBrowseTests --viewer-fit)
 add_test(NAME HyperBrowseViewerInteractionSmoke COMMAND HyperBrowseTests --viewer-interaction)
+add_test(NAME HyperBrowseRuntimePolicySmoke COMMAND HyperBrowseTests --runtime)
+add_test(NAME HyperBrowseCompareSessionPolicySmoke COMMAND HyperBrowseTests --compare-session-policy)
 add_test(NAME HyperBrowseThumbnailPersistenceSmoke COMMAND HyperBrowseTests --thumbnail-persistence)
 add_test(NAME HyperBrowseThumbnailPathSafetySmoke COMMAND HyperBrowseTests --thumbnail-path-safety)
 add_test(NAME HyperBrowseThumbnailMaintenanceSmoke COMMAND HyperBrowseTests --thumbnail-maintenance)

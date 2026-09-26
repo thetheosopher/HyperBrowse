@@ -270,7 +270,10 @@
                 <div>
                     <h3>Compare and inspect</h3>
                     <ul>
-                        <li>Select two images and choose <strong>File &gt; Compare Selected</strong> for a side-by-side comparison.</li>
+                        <li>Select 2 to 4 images and choose <strong>File &gt; Compare Selected</strong>. Tiles follow the browser's visual selection order, with the primary-selected image receiving keyboard focus.</li>
+                        <li>Click a tile or use <kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> to move focus. Press <kbd>,</kbd> or <kbd>.</kbd> to replace the focused tile with the previous or next unused image from the captured browser view.</li>
+                        <li>Compare starts with synchronized zoom and pan. Right-click and toggle <strong>Synchronize Compare Zoom and Pan</strong> to keep independent tile views; turning sync back on aligns every tile to the focused image. Rating and tag commands in the same menu affect only that tile.</li>
+                        <li>With two tiles, <kbd>C</kbd> toggles comparison and <kbd>X</kbd> activates the compared image; <kbd>Shift</kbd> + Left / Right retains adjacent comparison. With three or four tiles, <kbd>C</kbd> exits to the focused image and <kbd>X</kbd> promotes the focused tile without removing the others. <kbd>Page Up</kbd> / <kbd>Page Down</kbd> exits n-up compare and navigates from the focused image.</li>
                         <li>Open the full metadata pane when EXIF, IPTC, or XMP details need more room.</li>
                         <li>When a RAW file has a paired JPEG, HyperBrowse can include the pair in file operations and apply the selected viewer preference.</li>
                         <li>Deleting the displayed image advances to the next available image when possible.</li>
@@ -403,7 +406,9 @@
                     <tr><td>Viewer</td><td><kbd>Esc</kbd></td><td>Use the configured full-screen action, or close the viewer when windowed</td></tr>
                     <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td>Close the viewer</td></tr>
                     <tr><td>Viewer</td><td>Arrow keys</td><td>Navigate, or pan when zoomed</td></tr>
-                    <tr><td>Viewer</td><td><kbd>Shift</kbd> + Arrow keys</td><td>Navigate the comparison pair</td></tr>
+                    <tr><td>Viewer</td><td><kbd>Shift</kbd> + Left / Right</td><td>Change the adjacent comparison; in three/four-tile compare, replace the focused tile</td></tr>
+                    <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd></td><td>Focus the next / previous compare tile</td></tr>
+                    <tr><td>Viewer</td><td><kbd>,</kbd> / <kbd>.</kbd></td><td>Show the previous / next unused candidate in the focused compare tile</td></tr>
                     <tr><td>Viewer</td><td><kbd>Page Up</kbd> / <kbd>Page Down</kbd></td><td>Navigate to the previous / next image</td></tr>
                     <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>Home</kbd> / <kbd>Ctrl</kbd> + <kbd>End</kbd></td><td>Go to the first / last image</td></tr>
                     <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>G</kbd></td><td>Go to an image by its number</td></tr>
@@ -418,8 +423,8 @@
                     <tr><td>Viewer</td><td><kbd>0</kbd> / <kbd>1</kbd></td><td>Fit the image to the window / show it at actual size</td></tr>
                     <tr><td>Viewer</td><td><kbd>H</kbd> / <kbd>W</kbd></td><td>Fit the image to the window height / width</td></tr>
                     <tr><td>Viewer</td><td><kbd>L</kbd> / <kbd>R</kbd></td><td>Rotate the image left / right</td></tr>
-                    <tr><td>Viewer</td><td><kbd>C</kbd></td><td>Toggle comparison mode</td></tr>
-                    <tr><td>Viewer</td><td><kbd>X</kbd></td><td>Activate the compared image</td></tr>
+                    <tr><td>Viewer</td><td><kbd>C</kbd></td><td>Toggle two-tile compare; exit three/four-tile compare to the focused image</td></tr>
+                    <tr><td>Viewer</td><td><kbd>X</kbd></td><td>Activate the compared image; promote the focused tile in three/four-tile compare</td></tr>
                     <tr><td>Viewer</td><td><kbd>Space</kbd></td><td>Start or stop the slideshow</td></tr>
                     <tr><td>Viewer</td><td><kbd>F11</kbd></td><td>Toggle full-screen mode</td></tr>
                     <tr><td>Viewer</td><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td>Toggle full-screen mode</td></tr>
