@@ -214,22 +214,40 @@ namespace hyperbrowse::util
     {
         constexpr std::uint64_t kMegabyte = 1024ULL * 1024ULL;
         constexpr std::uint64_t kMaximum = 8ULL * 1024ULL * kMegabyte;
+        constexpr std::uint64_t kFallback = 1024ULL * kMegabyte;
         const MemorySnapshot snapshot = QueryMemorySnapshot();
-        if (!snapshot.IsValid() || snapshot.totalPhysicalBytes == 0)
-        {
-            return profile == ResourceProfile::Conservative
-                ? CacheCapacityRange{256ULL * kMegabyte, 2ULL * 1024ULL * kMegabyte}
-                : profile == ResourceProfile::Aggressive
-                    ? CacheCapacityRange{2ULL * 1024ULL * kMegabyte, kMaximum}
-                    : CacheCapacityRange{512ULL * kMegabyte, 4ULL * 1024ULL * kMegabyte};
-        }
-
-        const std::uint64_t totalBudget = snapshot.totalPhysicalBytes / (profile == ResourceProfile::Conservative ? 4ULL : 2ULL);
-        const std::uint64_t maximum = std::min(kMaximum, std::max(256ULL * kMegabyte, totalBudget));
+        const std::uint64_t totalBudget = snapshot.totalPhysicalBytes == 0
+            ? kFallback
+            : snapshot.totalPhysicalBytes / (profile == ResourceProfile::Conservative ? 4ULL : 2ULL);
+        const std::uint64_t maximum = std::min(kMaximum, std::max<std::uint64_t>(1, totalBudget));
         const std::uint64_t minimum = std::min(maximum, profile == ResourceProfile::Conservative
             ? 256ULL * kMegabyte
             : profile == ResourceProfile::Performance ? 1024ULL * kMegabyte : profile == ResourceProfile::Aggressive ? 2ULL * 1024ULL * kMegabyte : 512ULL * kMegabyte);
         return {minimum, maximum};
+    }
+
+    inline std::size_t ResolvePersistentThumbnailCacheCapacityBytes(ResourceProfile profile,
+                                                                      std::uint64_t totalPhysicalBytes,
+                                                                      std::uint64_t availableDiskBytes,
+                                                                      bool diskSpaceKnown) noexcept
+    {
+        constexpr std::uint64_t kMegabyte = 1024ULL * 1024ULL;
+        constexpr std::uint64_t kMaximum = 8ULL * 1024ULL * kMegabyte;
+        constexpr std::uint64_t kFallback = 1024ULL * kMegabyte;
+
+        std::uint64_t budget = kFallback;
+        if (totalPhysicalBytes != 0)
+        {
+            budget = totalPhysicalBytes / (profile == ResourceProfile::Conservative ? 4ULL : 2ULL);
+        }
+
+        budget = std::min(budget, kMaximum);
+        if (diskSpaceKnown)
+        {
+            budget = std::min(budget, availableDiskBytes);
+        }
+
+        return SaturatingCastToSizeT(std::max<std::uint64_t>(1, budget));
     }
 
     inline std::size_t ResolveViewerFullImageCacheCapacityBytes(ResourceProfile profile) noexcept

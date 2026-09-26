@@ -179,13 +179,32 @@ namespace
             headerBytes.insert(headerBytes.end(), payload.begin(), payload.end());
             WriteBytes(cacheRoot / L"0123456789abcdef.thumb", headerBytes);
 
+            std::vector<unsigned char> validShardBytes = HeaderBytes(header);
+            validShardBytes.insert(validShardBytes.end(), payload.begin(), payload.end());
+            fs::create_directories(cacheRoot / L"aa" / L"bb");
+            WriteBytes(cacheRoot / L"aa" / L"bb" / L"0123456789abcdef.bin", validShardBytes);
+            WriteBytes(cacheRoot / L"orphan.bin", headerBytes);
+            WriteBytes(cacheRoot / L"aa" / L"bb" / L"..\\outside.bin", headerBytes);
+
             std::wofstream indexStream(cacheRoot / L"index.tsv", std::ios::trunc);
             indexStream << normalizedImagePath << L'\t'
                         << key.modifiedTimestampUtc << L'\t'
                         << key.targetWidth << L'\t'
                         << key.targetHeight << L"\t0123456789abcdef.thumb\t"
                         << headerBytes.size() << L"\t1\n";
+            indexStream << normalizedImagePath << L"\t"
+                        << (key.modifiedTimestampUtc + 1) << L"\t"
+                        << key.targetWidth << L"\t"
+                        << key.targetHeight << L"\taa/bb/0123456789abcdef.bin\t"
+                        << validShardBytes.size() << L"\t2\n";
             indexStream.close();
+
+            std::ofstream versionStream(cacheRoot / L"format.version", std::ios::binary | std::ios::trunc);
+            versionStream << (iteration % 2 == 0 ? "2\n" : "unexpected-version\n");
+            std::wofstream journalStream(cacheRoot / L"index.journal.tsv", std::ios::trunc);
+            journalStream << L"malformed journal row\n"
+                          << L"T\t" << normalizedImagePath << L"\tbad\trow\n";
+            journalStream.close();
 
             if (iteration % 3 == 0)
             {
@@ -198,6 +217,7 @@ namespace
             hyperbrowse::cache::DiskThumbnailCache cache(4ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
             cache.QueryStatistics();
             cache.TryLoad(key);
+            cache.Compact();
         }
     }
 }

@@ -74,54 +74,25 @@ asked**.
 
 ### `A3` Persistent Thumbnail Cache Maturity (P0)
 
-The first persistence pass shipped; now harden it.
+**Implementation status: Shipped on 2026-09-14.** The first persistence pass
+has been replaced by the hardened worker-owned path below. Detailed history
+and validation evidence are retained in the [A3 implementation plan](A3-PERSISTENT-CACHE-PLAN.md)
+and summarized in Appendix A.
 
 - Sharded directory layout (`xx/yy/<hash>.bin`) to keep per-directory entry
   counts low on huge libraries.
 - LRU eviction by size, driven by the configured persistent thumbnail-cache
   budget, default `min(totalRam/2, 8 GB)` capped by free-disk headroom on the
   cache volume.
-- Background compaction pass on idle: deduplicate, drop entries for missing
-  files, repack shards.
-- Move I/O off the scheduler worker threads onto a dedicated low-priority
-  cache thread so decode workers never block on disk writes.
-- Surfaces from the **Cache Inspector** dialog (see D4) for per-shard stats
-  and one-click purge.
-
-### `A4` Memory-Pressure Response & Adaptive Prefetch (P1)
-
-**Implementation status:** Shipped. `2026-05-16` shipped the initial response
-slice, followed by shell-owned pressure sampling, recovery hysteresis, cache
-trimming, and propagation to thumbnail, metadata, viewer, and disk-write
-paths. The Cache Performance inspector now exposes live thumbnail queue and
-in-flight decode gauges plus scale timing alongside cache hit rates and the
-current pressure state.
-The first wired `ResourceProfile` into viewer prefetch radius, retained
-farther-ahead prefetched images in the viewer full-image cache, and reduced
-viewer prefetch back to one item when physical memory is tight. The second
-added a background-sampled memory-pressure monitor with recovery hysteresis in
-the main shell, caps thumbnail decode concurrency to half the configured
-workers while pressure is active, and trims in-memory thumbnail caches toward
-half of their configured capacity for both the browser pane and details strip.
-A follow-up slice then unified the viewer onto that same shell-owned pressure
-path, added an optional status-bar indicator for the current pressure state,
-and trims the viewer full-image cache alongside the thumbnail caches when
-pressure is active. A later slice exposed that pressure-state indicator in the
-Performance Settings dialog, throttles metadata extraction workers under the
-same shell-owned pressure state, trims the metadata cache alongside the
-thumbnail cache, and skips opportunistic disk-thumbnail writes while pressure
-is active.
-
-- Sample `GlobalMemoryStatusEx` on a low-frequency timer (1–2 Hz) on a
-  background thread, never the UI thread.
-- When `dwMemoryLoad >= 85` or `availablePhysicalBytes < 1 GB`:
-  - Reduce effective viewer and browser prefetch depth to one item.
-  - Cap thumbnail decode concurrency to `max(1, workers/2)`.
-  - Trigger eviction toward `cacheCapBytes / 2` on the thumbnail cache.
-- Recovery hysteresis: only restore when load drops below 70 % for two
-  consecutive samples.
-- Expose current state and live decode pressure in the Cache Performance
-  inspector (C3).
+- Background compaction pass on idle: reconcile orphan files, drop entries
+  for confirmed-missing files, and enforce byte LRU using actual file sizes.
+- Move all persistent-cache I/O onto one low-priority cache worker, including
+  asynchronous lookup, store, invalidation, statistics, access-journal flush,
+  and maintenance operations.
+- Surface aggregate and per-shard stats from the **Cache Inspector** dialog
+  (see D4) with one-click compact and confirmed purge.
+- Enforce cache-hit, store-throughput, compaction, cache-worker queue-delay,
+  scroll-dispatch, and first-thumbnail regression bars in the benchmark suite.
 
 ### `A5` Decode/Scale Buffer Pools (P1)
 
@@ -497,11 +468,23 @@ focused. The summarized status as of this revision:
 - **Caching:** runtime-adaptive thumbnail and metadata cache sizing keyed
   off `GlobalMemoryStatusEx`, optional persistent thumbnail cache under
   `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache`.
+- **A3 Persistent Thumbnail Cache Maturity:** Shipped sharded storage,
+  bounded restartable legacy migration, collision-safe indexing, idle
+  compaction and source-health reconciliation, per-shard inspection, and one
+  low-priority worker for all production persistent-cache I/O. Release CI now
+  retains cache-performance and startup benchmark snapshots with regression
+  thresholds ([archived A3 implementation plan](A3-PERSISTENT-CACHE-PLAN.md)).
 - **Adaptive resource controls (A1/A2):** persisted resource profiles,
   profile-following cache and prefetch controls, explicit cache-cap overrides,
   the non-modal Cache Stats details tab, and asynchronous persistent-cache
   trimming. The shipped contract is documented in
   [PRODUCT_SPEC.md](PRODUCT_SPEC.md).
+- **A4 memory-pressure response:** shell-owned background pressure sampling
+  with recovery hysteresis, reduced prefetch depth, throttled thumbnail and
+  metadata workers, cache trimming, viewer full-image cache trimming, and
+  suppression of opportunistic disk-thumbnail writes while pressure is
+  active. Cache Performance exposes the pressure state, queue and in-flight
+  decode telemetry, cache hit rates, and scale timing.
 - **Architecture / hygiene:** shared `HyperBrowseCore` static library,
   smoke + integration test suite, GitHub Actions CI, portable zip + Inno
   Setup 6 installer with CUDA redistributable bundling, static MSVC

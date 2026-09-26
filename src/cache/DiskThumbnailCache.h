@@ -2,12 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <condition_variable>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -20,6 +19,18 @@ namespace hyperbrowse::cache
     public:
         struct Statistics
         {
+            struct ShardStatistics
+            {
+                std::wstring name;
+                std::size_t indexedEntryCount{};
+                std::size_t indexedBytes{};
+                std::size_t fileCount{};
+                std::size_t fileBytes{};
+                std::size_t orphanFileCount{};
+                std::size_t orphanFileBytes{};
+                std::size_t missingFileCount{};
+            };
+
             std::wstring cacheDirectory;
             std::size_t capacityBytes{};
             std::size_t indexedEntryCount{};
@@ -30,6 +41,9 @@ namespace hyperbrowse::cache
             std::size_t orphanFileCount{};
             std::size_t orphanFileBytes{};
             std::size_t missingFileCount{};
+            std::size_t missingSourceCount{};
+            std::size_t inaccessibleSourceCount{};
+            std::vector<ShardStatistics> shards;
         };
 
         explicit DiskThumbnailCache(std::size_t capacityBytes = 0, std::wstring cacheDirectory = {});
@@ -38,6 +52,8 @@ namespace hyperbrowse::cache
         DiskThumbnailCache(const DiskThumbnailCache&) = delete;
         DiskThumbnailCache& operator=(const DiskThumbnailCache&) = delete;
 
+        static std::uint64_t QueryDefaultCacheVolumeFreeBytes() noexcept;
+
         std::shared_ptr<const CachedThumbnail> TryLoad(const ThumbnailCacheKey& key);
         void Store(const ThumbnailCacheKey& key, std::shared_ptr<const CachedThumbnail> thumbnail);
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
@@ -45,6 +61,9 @@ namespace hyperbrowse::cache
         bool Compact();
         Statistics QueryStatistics() const;
         std::size_t CurrentBytes() const;
+        void SetCapacityBytes(std::size_t capacityBytes);
+        bool FlushPendingAccessUpdates();
+        bool NeedsCompaction() const;
         std::size_t CapacityBytes() const noexcept;
 
     private:
@@ -62,11 +81,13 @@ namespace hyperbrowse::cache
         bool AppendJournalRecordLocked(std::wstring_view record);
         void ReplayJournalRecordLocked(const std::wstring& record);
         bool CompactIndexLocked();
-        void AccessPersistenceLoop();
+        bool FlushPendingAccessUpdatesLocked();
+        bool MigrateLegacyLayoutLocked();
+        bool WriteFormatVersionLocked() const;
         void EvictIfNeededLocked();
         std::wstring EnsureCacheDirectoryLocked();
 
-        const std::size_t capacityBytes_{};
+        std::atomic_size_t capacityBytes_{};
         mutable std::mutex mutex_;
         bool loaded_{};
         std::wstring cacheDirectory_;
@@ -76,9 +97,6 @@ namespace hyperbrowse::cache
         mutable std::size_t pendingAccessUpdates_{};
         mutable std::vector<ThumbnailCacheKey> pendingAccessKeys_;
         std::unordered_map<ThumbnailCacheKey, Entry, ThumbnailCacheKeyHasher> entries_;
-        std::condition_variable accessPersistenceAvailable_;
-        std::thread accessPersistenceThread_;
-        bool shuttingDown_{};
         bool compactionRequested_{};
     };
 }

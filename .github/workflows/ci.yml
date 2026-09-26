@@ -38,13 +38,13 @@ jobs:
           -DHYPERBROWSE_WARNINGS_AS_ERRORS=ON
 
       - name: Build Debug
-        run: cmake --build build-ci --config Debug --target HyperBrowse HyperBrowseTests -- /m /v:minimal
+        run: cmake --build build-ci --config Debug --target HyperBrowse HyperBrowseTests HyperBrowsePerformanceBenchmark -- /m /v:minimal
 
       - name: Run Debug tests
         run: ctest --test-dir build-ci -C Debug --output-on-failure
 
       - name: Build Release
-        run: cmake --build build-ci --config Release --target HyperBrowse HyperBrowseTests -- /m /v:minimal
+        run: cmake --build build-ci --config Release --target HyperBrowse HyperBrowseTests HyperBrowsePerformanceBenchmark -- /m /v:minimal
 
       - name: Run Release tests
         run: ctest --test-dir build-ci -C Release --output-on-failure
@@ -60,6 +60,19 @@ jobs:
           -FirstWindowVisibleToFirstThumbnailPaintedBudgetMs 2500
           -ProcessToFirstThumbnailPaintedBudgetMs 5000
 
+      - name: Run Release persistent-cache benchmark
+        shell: pwsh
+        run: >-
+          ./tools/TestPersistentCacheBenchmark.ps1
+          -ProjectRoot $env:GITHUB_WORKSPACE
+          -BuildDir (Join-Path $env:GITHUB_WORKSPACE 'build-ci')
+          -Configuration Release
+          -CacheHitAverageBudgetMs 10
+          -MinimumStoreEntriesPerSecond 100
+          -CompactionBudgetMs 5000
+          -CacheWorkerQueueDelayMaxBudgetMs 500
+          -MinimumScrollMessagesPerSecond 250
+
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -68,6 +81,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             build-ci/startup-benchmark-release.json
+            build-ci/persistent-cache-benchmark.json
             ${{ runner.temp }}/HyperBrowse-debug.log
 
   package:

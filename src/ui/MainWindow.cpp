@@ -1911,8 +1911,30 @@ namespace
         AppendLabeledLine(&details, L"Thumbnail File Bytes: ", hyperbrowse::browser::FormatByteSize(statistics.cacheFileBytes));
         AppendLabeledLine(&details, L"Index File Size: ", hyperbrowse::browser::FormatByteSize(statistics.indexFileBytes));
         AppendLabeledLine(&details, L"Missing Indexed Files: ", std::to_wstring(statistics.missingFileCount));
+        AppendLabeledLine(&details, L"Missing Source Files: ", std::to_wstring(statistics.missingSourceCount));
+        AppendLabeledLine(&details, L"Inaccessible Source Files: ", std::to_wstring(statistics.inaccessibleSourceCount));
         AppendLabeledLine(&details, L"Orphaned Files: ", std::to_wstring(statistics.orphanFileCount));
         AppendLabeledLine(&details, L"Orphaned File Bytes: ", hyperbrowse::browser::FormatByteSize(statistics.orphanFileBytes));
+        AppendLabeledLine(&details, L"Per-Shard Details: ", std::to_wstring(statistics.shards.size()));
+        for (const auto& shard : statistics.shards)
+        {
+            std::wstring shardDetails = L"  ";
+            shardDetails.append(shard.name);
+            shardDetails.append(L": ");
+            shardDetails.append(std::to_wstring(shard.indexedEntryCount));
+            shardDetails.append(L" indexed entries, ");
+            shardDetails.append(hyperbrowse::browser::FormatByteSize(shard.indexedBytes));
+            shardDetails.append(L" indexed, ");
+            shardDetails.append(std::to_wstring(shard.fileCount));
+            shardDetails.append(L" files, ");
+            shardDetails.append(hyperbrowse::browser::FormatByteSize(shard.fileBytes));
+            shardDetails.append(L" on disk, ");
+            shardDetails.append(std::to_wstring(shard.orphanFileCount));
+            shardDetails.append(L" orphaned, ");
+            shardDetails.append(std::to_wstring(shard.missingFileCount));
+            shardDetails.append(L" missing");
+            AppendLabeledLine(&details, L"", shardDetails);
+        }
         return details;
     }
 
@@ -4349,8 +4371,7 @@ namespace
                 return;
             case ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic:
                 settings.persistentThumbnailCacheCapacityOverrideBytes = settings.persistentThumbnailCacheCapacityOverrideBytes == 0
-                    ? hyperbrowse::util::SaturatingCastToSizeT(
-                          hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(settings.resourceProfile).maximum)
+                    ? hyperbrowse::services::ThumbnailScheduler::ResolvePersistentCacheCapacityBytes(0, settings.resourceProfile)
                     : 0;
                 return;
             default: break;
@@ -5160,7 +5181,7 @@ namespace
         }
         if (persistentAutomatic && state.numericEdits[5])
         {
-            const auto capacityMegabytes = hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(profile).maximum
+            const auto capacityMegabytes = hyperbrowse::services::ThumbnailScheduler::ResolvePersistentCacheCapacityBytes(0, profile)
                 / (1024ULL * 1024ULL);
             SetWindowTextW(state.numericEdits[5], std::to_wstring(capacityMegabytes).c_str());
             if (state.numericSpins[5])
@@ -5717,7 +5738,7 @@ namespace
                 ? hyperbrowse::util::ResolvePrefetchDepth(profile, hyperbrowse::util::kAutomaticPrefetchDepth)
                 : state->settings->prefetchDepthOverride;
             const auto persistentCacheMegabytes = state->settings->persistentThumbnailCacheCapacityOverrideBytes == 0
-                ? hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(profile).maximum / (1024ULL * 1024ULL)
+                ? hyperbrowse::services::ThumbnailScheduler::ResolvePersistentCacheCapacityBytes(0, profile) / (1024ULL * 1024ULL)
                 : state->settings->persistentThumbnailCacheCapacityOverrideBytes / (1024ULL * 1024ULL);
             const std::array<std::pair<int, std::wstring>, 6> editValues{
                 std::pair{ES_NUMBER, std::to_wstring(state->settings->slideshowIntervalMs)},
@@ -9977,7 +9998,6 @@ namespace hyperbrowse::ui
     {
         StopDetailsPanelPerformanceUpdates();
         accessibility_.reset();
-        cacheMaintenanceExecutor_.reset();
 
         if (userMetadataStore_)
         {
@@ -10207,7 +10227,6 @@ namespace hyperbrowse::ui
             QueueMemoryPressureSample();
         }
         cacheMaintenanceState_ = std::make_shared<PersistentThumbnailCacheMaintenanceState>();
-        cacheMaintenanceExecutor_ = std::make_unique<util::BackgroundExecutor>(1, 1);
 
         ApplyPersistentThumbnailCacheSetting();
         ApplyTheme();
@@ -11232,6 +11251,21 @@ namespace hyperbrowse::ui
             : pendingTreeMouseSelectionPath_;
         pendingTreeMouseSelectionPath_.clear();
         folderTreeController_->Refresh(selectedFolderPath);
+        EnsureActiveFolderVisible();
+    }
+
+    void MainWindow::EnsureActiveFolderVisible()
+    {
+        if (!folderTreeController_ || !browserModel_)
+        {
+            return;
+        }
+
+        const std::wstring activeFolderPath = browserModel_->FolderPath();
+        if (!activeFolderPath.empty())
+        {
+            folderTreeController_->SelectFolder(activeFolderPath);
+        }
     }
 
     void MainWindow::InvalidateFolderTreeChildPresence(std::wstring_view folderPath)
@@ -13874,7 +13908,7 @@ namespace hyperbrowse::ui
 
         stats.persistentCapacityBytes = persistentThumbnailCacheCapacityOverrideBytes_ != 0
             ? persistentThumbnailCacheCapacityOverrideBytes_
-            : services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, resourceProfile_);
+            : services::ThumbnailScheduler::ResolvePersistentCacheCapacityBytes(0, resourceProfile_);
         if (cacheMaintenanceState_)
         {
             std::scoped_lock lock(cacheMaintenanceState_->mutex);
@@ -20823,6 +20857,8 @@ namespace hyperbrowse::ui
             LayoutChildren();
         }
 
+        EnsureActiveFolderVisible();
+
         if (browserPaneController_)
         {
             browserPaneController_->RecoverDisplaySurface();
@@ -21396,7 +21432,7 @@ namespace hyperbrowse::ui
 
     void MainWindow::StartPersistentThumbnailCacheStatistics(bool showDialog)
     {
-        if (cacheMaintenanceActive_ || !cacheMaintenanceExecutor_ || !cacheMaintenanceState_ || !hwnd_)
+        if (cacheMaintenanceActive_ || !cacheMaintenanceState_ || !browserPaneController_ || !hwnd_)
         {
             return;
         }
@@ -21404,24 +21440,15 @@ namespace hyperbrowse::ui
         cacheMaintenanceActive_ = true;
         const HWND targetWindow = hwnd_;
         const auto state = cacheMaintenanceState_;
-        const std::size_t persistentCacheCapacityBytes = persistentThumbnailCacheCapacityOverrideBytes_ != 0
-            ? persistentThumbnailCacheCapacityOverrideBytes_
-            : services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, resourceProfile_);
-        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, state, persistentCacheCapacityBytes, showDialog]()
+        const bool queued = browserPaneController_->QueuePersistentThumbnailCacheStatistics(
+            [targetWindow, state, showDialog](bool succeeded, cache::DiskThumbnailCache::Statistics statistics)
         {
-            bool succeeded = true;
-            try
+            if (succeeded)
             {
-                cache::DiskThumbnailCache persistentCache(persistentCacheCapacityBytes);
-                auto statistics = persistentCache.QueryStatistics();
                 {
                     std::scoped_lock lock(state->mutex);
                     state->statistics = std::move(statistics);
                 }
-            }
-            catch (...)
-            {
-                succeeded = false;
             }
 
             if (!PostMessageW(targetWindow,
@@ -21446,36 +21473,17 @@ namespace hyperbrowse::ui
 
     void MainWindow::StartPersistentThumbnailCacheMaintenance(bool purge, bool showDialog)
     {
-        if (cacheMaintenanceActive_ || !cacheMaintenanceExecutor_ || !hwnd_)
+        if (cacheMaintenanceActive_ || !browserPaneController_ || !hwnd_)
         {
             return;
         }
 
         cacheMaintenanceActive_ = true;
         const HWND targetWindow = hwnd_;
-        const std::size_t persistentCacheCapacityBytes = persistentThumbnailCacheCapacityOverrideBytes_ != 0
-            ? persistentThumbnailCacheCapacityOverrideBytes_
-            : services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, resourceProfile_);
-        const bool queued = cacheMaintenanceExecutor_->Post([targetWindow, purge, showDialog, persistentCacheCapacityBytes]()
+        const bool queued = browserPaneController_->QueuePersistentThumbnailCacheMaintenance(
+            purge,
+            [targetWindow, purge, showDialog](bool succeeded)
         {
-            bool succeeded = true;
-            try
-            {
-                cache::DiskThumbnailCache persistentCache(persistentCacheCapacityBytes);
-                if (purge)
-                {
-                    persistentCache.Clear();
-                }
-                else
-                {
-                    succeeded = persistentCache.Compact();
-                }
-            }
-            catch (...)
-            {
-                succeeded = false;
-            }
-
             if (!PostMessageW(targetWindow,
                               kPersistentThumbnailCacheMaintenanceMessage,
                               static_cast<WPARAM>(static_cast<unsigned int>(purge
@@ -25195,6 +25203,7 @@ namespace hyperbrowse::ui
             if (wParam != SIZE_MINIMIZED)
             {
                 OnSize();
+                EnsureActiveFolderVisible();
             }
             return 0;
         case WM_APP + 1:
@@ -25270,6 +25279,7 @@ namespace hyperbrowse::ui
             if (LOWORD(wParam) != WA_INACTIVE && !IsIconic(hwnd_))
             {
                 LayoutChildren();
+                EnsureActiveFolderVisible();
             }
             RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
             break;

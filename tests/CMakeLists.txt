@@ -9,6 +9,13 @@ add_executable(HyperBrowseTests
     ../src/app/Application.cpp
 )
 
+add_executable(HyperBrowsePerformanceBenchmark
+    cache_benchmark.cpp
+)
+
+target_compile_features(HyperBrowsePerformanceBenchmark PRIVATE cxx_std_20)
+target_link_libraries(HyperBrowsePerformanceBenchmark PRIVATE HyperBrowseCore)
+
 target_compile_features(HyperBrowseTests PRIVATE cxx_std_20)
 
 target_link_libraries(HyperBrowseTests PRIVATE HyperBrowseCore)
@@ -43,15 +50,19 @@ add_custom_command(TARGET HyperBrowseTests POST_BUILD
         "$<TARGET_FILE_DIR:HyperBrowseTests>/assets/toolbar-icons")
 
 add_test(NAME HyperBrowseSmoke COMMAND HyperBrowseTests)
+add_test(NAME HyperBrowsePerformanceBenchmark COMMAND HyperBrowsePerformanceBenchmark)
 add_test(NAME HyperBrowseFolderHistorySmoke COMMAND HyperBrowseTests --folder-history)
 add_test(NAME HyperBrowseFileOperationMediaCacheSmoke COMMAND HyperBrowseTests --file-operation-media-cache)
 add_test(NAME HyperBrowseViewerFitSmoke COMMAND HyperBrowseTests --viewer-fit)
 add_test(NAME HyperBrowseViewerInteractionSmoke COMMAND HyperBrowseTests --viewer-interaction)
 add_test(NAME HyperBrowseThumbnailPersistenceSmoke COMMAND HyperBrowseTests --thumbnail-persistence)
+add_test(NAME HyperBrowseThumbnailPathSafetySmoke COMMAND HyperBrowseTests --thumbnail-path-safety)
+add_test(NAME HyperBrowseThumbnailMaintenanceSmoke COMMAND HyperBrowseTests --thumbnail-maintenance)
 add_test(NAME HyperBrowseThumbnailStaleCompletionSmoke COMMAND HyperBrowseTests --thumbnail-stale-completion)
 add_test(NAME HyperBrowseThumbnailFailureSmoke COMMAND HyperBrowseTests --thumbnail-failure)
 add_test(NAME HyperBrowseFileRenameSmoke COMMAND HyperBrowseTests --file-rename)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)
+add_test(NAME HyperBrowseFolderTreeRestoreSmoke COMMAND HyperBrowseTests --folder-tree-restore)
 add_test(NAME HyperBrowseAccessibilitySmoke COMMAND HyperBrowseTests --accessibility)
 add_test(NAME HyperBrowseDialogGeometrySmoke COMMAND HyperBrowseTests --dialog-geometry)
 add_test(NAME HyperBrowseSettingsSmoke COMMAND HyperBrowseTests --settings)

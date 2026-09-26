@@ -263,6 +263,7 @@ namespace hyperbrowse::ui
         bool CreateMenuBar();
         bool CreateChildWindows();
         void RefreshFolderTree();
+        void EnsureActiveFolderVisible();
         void InvalidateFolderTreeChildPresence(std::wstring_view folderPath);
         HTREEITEM FindFolderTreeItemByPath(const std::wstring& folderPath) const;
         void InsertFolderTreeFolderIfParentLoaded(const std::wstring& folderPath);
@@ -728,7 +729,6 @@ namespace hyperbrowse::ui
         std::vector<std::unique_ptr<viewer::ViewerWindow>> additionalViewerWindows_;
         HWND activeViewerWindow_{};
         std::unique_ptr<util::BackgroundExecutor> memoryPressureExecutor_;
-        std::unique_ptr<util::BackgroundExecutor> cacheMaintenanceExecutor_;
         std::shared_ptr<struct PersistentThumbnailCacheMaintenanceState> cacheMaintenanceState_;
         mutable HWND shortcutReferenceWindow_{};
         std::wstring pendingTreeMouseSelectionPath_;

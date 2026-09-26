@@ -7,6 +7,7 @@
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -150,6 +151,11 @@ namespace hyperbrowse::browser
         std::size_t ThumbnailCacheBytes() const;
         hyperbrowse::cache::ThumbnailCache::Statistics ThumbnailCacheStatistics() const;
         hyperbrowse::services::ThumbnailScheduler::RuntimeStatistics ThumbnailRuntimeStatistics() const;
+        bool QueuePersistentThumbnailCacheStatistics(
+            hyperbrowse::services::ThumbnailScheduler::PersistentCacheStatisticsCallback callback);
+        bool QueuePersistentThumbnailCacheMaintenance(
+            bool purge,
+            hyperbrowse::services::ThumbnailScheduler::PersistentCacheOperationCallback callback);
         std::size_t MetadataCacheCapacityEntries() const noexcept;
         std::size_t MetadataCacheEntryCount() const;
         hyperbrowse::services::ImageMetadataService::CacheStatistics MetadataCacheStatistics() const;

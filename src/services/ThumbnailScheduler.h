@@ -56,6 +56,9 @@ namespace hyperbrowse::services
             std::size_t activeDecodeLimit{};
         };
 
+        using PersistentCacheStatisticsCallback = std::function<void(bool, cache::DiskThumbnailCache::Statistics)>;
+        using PersistentCacheOperationCallback = std::function<void(bool)>;
+
         static constexpr UINT kMessageId = WM_APP + 43;
 
         explicit ThumbnailScheduler(std::size_t cacheCapacityBytes = 0,
@@ -63,11 +66,14 @@ namespace hyperbrowse::services
                                     util::ResourceProfile resourceProfile = util::ResourceProfile::Balanced,
                                     std::function<void()> persistenceBeforeJobHook = {},
                                     std::function<void()> decodeBeforeJobHook = {},
-                                    std::size_t persistentCacheCapacityBytes = 0);
+                                    std::size_t persistentCacheCapacityBytes = 0,
+                                    std::wstring persistentCacheDirectory = {});
         ~ThumbnailScheduler();
 
         static std::size_t ResolveCacheCapacityBytes(std::size_t requestedCapacityBytes,
                                   util::ResourceProfile resourceProfile);
+        static std::size_t ResolvePersistentCacheCapacityBytes(std::size_t requestedCapacityBytes,
+                                    util::ResourceProfile resourceProfile);
 
         void BindTargetWindow(HWND targetWindow);
         void Schedule(std::uint64_t sessionId, std::uint64_t requestEpoch, std::vector<ThumbnailWorkItem> workItems);
@@ -77,6 +83,8 @@ namespace hyperbrowse::services
         void SetPressureModeEnabled(bool enabled);
         void TrimCacheToBytes(std::size_t targetBytes);
         bool IsDiskCacheEnabled() const;
+        bool QueuePersistentCacheStatistics(PersistentCacheStatisticsCallback callback);
+        bool QueuePersistentCacheMaintenance(bool purge, PersistentCacheOperationCallback callback);
 
         std::shared_ptr<const cache::CachedThumbnail> FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const;
         bool HasKnownFailure(const cache::ThumbnailCacheKey& key) const;
@@ -107,6 +115,8 @@ namespace hyperbrowse::services
             ThumbnailWorkItem workItem;
             bool isRaw{};
             bool isJpeg{};
+            bool diskLookupCompleted{};
+            std::shared_ptr<const cache::CachedThumbnail> cachedThumbnail;
         };
 
         // Order pending jobs by (priority asc, sequence asc) so begin() is always the
@@ -133,20 +143,31 @@ namespace hyperbrowse::services
         {
             enum class Kind
             {
+                Lookup,
+                RefreshCapacity,
                 Store,
                 Invalidate,
+                Compact,
+                Purge,
+                Statistics,
             };
 
             Kind kind{Kind::Store};
+            std::uint64_t enqueuedTickCount{};
+            PendingJob lookupJob;
             cache::ThumbnailCacheKey cacheKey;
             std::shared_ptr<const cache::CachedThumbnail> thumbnail;
             std::vector<std::wstring> filePaths;
+            PersistentCacheStatisticsCallback statisticsCallback;
+            PersistentCacheOperationCallback operationCallback;
         };
 
         bool HasDispatchableWorkLocked(WorkerKind kind) const;
         bool HasDispatchableWorkLocked(WorkerKind kind, bool foregroundLane) const;
         void WorkerLoop(WorkerKind kind, bool foregroundLane = false);
         void DiskPersistenceLoop();
+        bool HasVisibleWorkPending() const;
+        void EnqueueDiskLookup(PendingJob lookupJob);
         void EnqueueDiskStore(const cache::ThumbnailCacheKey& cacheKey,
                               std::shared_ptr<const cache::CachedThumbnail> thumbnail);
         bool PostReady(std::uint64_t sessionId,
@@ -168,6 +189,7 @@ namespace hyperbrowse::services
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> queuedKeys_;
         std::unordered_map<cache::ThumbnailCacheKey, std::vector<InflightDecode>, cache::ThumbnailCacheKeyHasher> inflightJobs_;
         std::unordered_set<cache::ThumbnailCacheKey, cache::ThumbnailCacheKeyHasher> requestedKeys_;
+        std::unordered_map<cache::ThumbnailCacheKey, ThumbnailWorkItem, cache::ThumbnailCacheKeyHasher> requestedWorkItems_;
         std::unordered_map<cache::ThumbnailCacheKey, decode::ThumbnailDecodeFailureKind, cache::ThumbnailCacheKeyHasher> failedKeys_;
         std::unordered_map<cache::ThumbnailCacheKey, std::wstring, cache::ThumbnailCacheKeyHasher> failureMessages_;
         std::size_t activeWorkerCount_{};
@@ -187,5 +209,6 @@ namespace hyperbrowse::services
         std::deque<DiskPersistenceJob> pendingDiskPersistence_;
         bool diskPersistenceShuttingDown_{};
         std::thread diskPersistenceWorker_;
+        util::ResourceProfile resourceProfile_{util::ResourceProfile::Balanced};
     };
 }

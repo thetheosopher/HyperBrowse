@@ -25,7 +25,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
 - Quick Actions with saved destinations, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy for the currently displayed image or selected browser files.
-- Persistent thumbnail cache statistics, compact/purge maintenance actions, and safer remembered window/folder restore on startup.
+- Persistent thumbnail cache statistics, deterministic per-shard inspection, asynchronous compact/purge maintenance, bounded migration, one low-priority worker for persistent I/O, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
 - Consolidated tabbed Settings dialog covering slideshow, viewer, appearance, performance, and behavior preferences with Apply, OK, and Cancel workflow; open it with Ctrl+Shift+T.
 - Folder tree workflow upgrades with validated folder moves, inline folder creation, Quick Actions destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
@@ -34,7 +34,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Display changes and graphics-surface loss trigger redraw and resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
 - Files dropped onto the application can open directly in the viewer or be copied into the current folder through the existing shell-aware workflows.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
-- A committed Windows CI workflow that builds Debug and Release, runs CTest and startup-budget checks, validates release manifests, and publishes build artifacts.
+- A committed Windows CI workflow that builds Debug and Release, runs CTest and startup/cache-performance budget checks, validates release manifests, and publishes build artifacts.
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
 
 ## What's New In 2.3.0
@@ -71,7 +71,7 @@ This release expands HyperBrowse's image-review and desktop file-management work
 | Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
-| Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, persistent disk thumbnail cache with stats/compact/purge, metadata cache, folder watch refresh, and optional GPU-assisted JPEG decode |
+| Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, worker-owned persistent disk thumbnail cache with stats/compact/purge and benchmark gates, metadata cache, folder watch refresh, and optional GPU-assisted JPEG decode |
 | Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
 
 ### Viewer Quick Actions
@@ -379,7 +379,7 @@ Known limits: GIF and TIFF browsing displays the first frame or page; JPEG orien
 - Added opt-in single-instance launch forwarding through a current-user named pipe, with overlapped shutdown-safe IPC, remote-client rejection, and current-user ACL enforcement.
 - Added tray notifications for background operation completion and display/resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
 - Hardened asynchronous services and worker boundaries so decode, metadata, enumeration, watching, file operations, conversion, scheduling, and UI-owned failures are contained and reported.
-- Hardened RAW-helper and persistent-thumbnail-cache boundaries with checked dimensions and byte counts, exact payload validation, strict index parsing, safe cache paths, atomic index replacement, authoritative in-memory indexing, asynchronous access journaling, and off-UI-thread cache maintenance.
+- Hardened RAW-helper and persistent-thumbnail-cache boundaries with checked dimensions and byte counts, exact payload validation, strict index parsing, safe cache paths, sharded atomic replacement, bounded legacy migration, authoritative in-memory indexing, worker-owned access journaling, and idle-only off-UI-thread maintenance.
 - Improved large-folder and large-selection performance with coalesced enumeration presentation, early result batches, bulk normalized path removal, hashed fallback checks, and asynchronous persistent-cache invalidation.
 - Added release packaging manifest checks and committed Windows CI covering Debug and Release builds, CTest, startup benchmark budgets, package generation, portable staging, and installer artifacts.
 

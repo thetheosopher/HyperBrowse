@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <filesystem>
@@ -438,7 +439,12 @@ namespace
     {
     public:
         explicit TempFolder(std::wstring name)
-            : root_(fs::temp_directory_path() / std::move(name))
+            : TempFolder(fs::temp_directory_path(), std::move(name))
+        {
+        }
+
+        TempFolder(fs::path parent, std::wstring name)
+            : root_(std::move(parent) / std::move(name))
         {
             std::error_code error;
             fs::remove_all(root_, error);
@@ -1939,6 +1945,16 @@ namespace
         const std::uint64_t invalidEntryCountBefore = diagnosticsCounterValue(L"persistent_cache.invalid_entries");
         cache.Store(key, thumbnail);
         Expect(cache.Compact(), "Persistent thumbnail cache did not compact its initial journal");
+         std::error_code formatVersionError;
+         Expect(fs::is_regular_file(cacheRoot / L"format.version", formatVersionError) && !formatVersionError,
+             "Persistent thumbnail cache did not write its format version");
+         {
+             std::ifstream formatStream(cacheRoot / L"format.version", std::ios::binary);
+             const std::string formatVersion((std::istreambuf_iterator<char>(formatStream)),
+                               std::istreambuf_iterator<char>());
+             Expect(formatVersion == "2\n",
+                 "Persistent thumbnail cache wrote an unexpected format version");
+         }
          std::wstring indexLineBeforeHit;
          {
              std::wifstream indexStream(cacheRoot / L"index.tsv");
@@ -2083,9 +2099,9 @@ namespace
         {
             cache.Store(key, thumbnail);
             fs::path cacheFile;
-            for (const fs::directory_entry& entry : fs::directory_iterator(cacheRoot))
+            for (const fs::directory_entry& entry : fs::recursive_directory_iterator(cacheRoot))
             {
-                if (entry.path().extension() == L".thumb")
+                if (entry.is_regular_file() && entry.path().extension() == L".bin")
                 {
                     cacheFile = entry.path();
                     break;
@@ -2133,9 +2149,9 @@ namespace
 
         cache.Store(key, thumbnail);
         fs::path validCacheFile;
-        for (const fs::directory_entry& entry : fs::directory_iterator(cacheRoot))
+        for (const fs::directory_entry& entry : fs::recursive_directory_iterator(cacheRoot))
         {
-            if (entry.path().extension() == L".thumb")
+            if (entry.is_regular_file() && entry.path().extension() == L".bin")
             {
                 validCacheFile = entry.path();
                 break;
@@ -2196,6 +2212,143 @@ namespace
              "Persistent thumbnail cache accepted an unsafe index file name");
         Expect(fs::exists(outsideCacheFile),
                "Persistent thumbnail cache cleanup escaped its cache directory");
+
+         const fs::path legacyCacheRoot = root.Root() / L"legacy-cache";
+         fs::create_directories(legacyCacheRoot);
+         const fs::path legacyCacheFile = legacyCacheRoot / L"0123456789abcdef.thumb";
+         std::error_code copyError;
+         fs::copy_file(validCacheFile, legacyCacheFile, fs::copy_options::overwrite_existing, copyError);
+         Expect(!copyError, "Failed to create the legacy persistent-cache fixture");
+         {
+            std::wstring legacyIndexLine = validIndexLine;
+            std::size_t filenameStart = 0;
+            for (int field = 0; field < 4; ++field)
+            {
+                filenameStart = legacyIndexLine.find(L'\t', filenameStart);
+                Expect(filenameStart != std::wstring::npos,
+                       "Failed to locate the legacy index filename field");
+                ++filenameStart;
+            }
+            const std::size_t filenameEnd = legacyIndexLine.find(L'\t', filenameStart);
+            Expect(filenameEnd != std::wstring::npos,
+                   "Failed to locate the legacy index filename terminator");
+            legacyIndexLine.replace(filenameStart,
+                                    filenameEnd - filenameStart,
+                                    L"0123456789abcdef.thumb");
+             std::wofstream indexStream(legacyCacheRoot / L"index.tsv", std::ios::trunc);
+            indexStream << legacyIndexLine << L'\n';
+         }
+         {
+             hyperbrowse::cache::DiskThumbnailCache migratedCache(4ULL * 1024ULL * 1024ULL,
+                                           legacyCacheRoot.wstring());
+             Expect(migratedCache.TryLoad(key) != nullptr,
+                 "Persistent thumbnail cache did not load a legacy flat entry during migration");
+         }
+        Expect(!fs::exists(legacyCacheFile),
+             "Persistent thumbnail cache did not remove the migrated legacy entry");
+         Expect(fs::is_regular_file(legacyCacheRoot / L"format.version"),
+             "Persistent thumbnail cache did not mark the migrated layout version");
+         std::size_t migratedEntryCount = 0;
+         for (const fs::directory_entry& entry : fs::recursive_directory_iterator(legacyCacheRoot))
+         {
+             if (entry.is_regular_file() && entry.path().extension() == L".bin")
+             {
+              ++migratedEntryCount;
+             }
+         }
+         Expect(migratedEntryCount == 1,
+             "Persistent thumbnail cache did not create one sharded entry during migration");
+         {
+             hyperbrowse::cache::DiskThumbnailCache restartedMigratedCache(4ULL * 1024ULL * 1024ULL,
+                                                 legacyCacheRoot.wstring());
+             Expect(restartedMigratedCache.TryLoad(key) != nullptr,
+                 "Persistent thumbnail cache did not reload a migrated entry after restart");
+         }
+    }
+
+    void RunPersistentCacheCollisionAndLongPathScenario()
+    {
+        TempFolder root(L"HyperBrowsePersistentCachePathSafety");
+        const fs::path sourceA = root.Root() / L"collision-a.png";
+        const fs::path sourceB = root.Root() / L"collision-b.png";
+        WriteTestImage(sourceA, TestImageFormat::Png, 32, 16);
+        WriteTestImage(sourceB, TestImageFormat::Png, 32, 16);
+
+        hyperbrowse::decode::WicThumbnailDecoder decoder;
+        const auto keyA = MakeCacheKey(sourceA, 41);
+        const auto keyB = MakeCacheKey(sourceB, 43);
+        const auto thumbnail = decoder.Decode(keyB);
+        Expect(thumbnail != nullptr, "Failed to create the thumbnail used for collision testing");
+
+        const fs::path collisionCacheRoot = root.Root() / L"collision-cache";
+        {
+            hyperbrowse::cache::DiskThumbnailCache cache(4ULL * 1024ULL * 1024ULL,
+                                                          collisionCacheRoot.wstring());
+            cache.Store(keyB, thumbnail);
+            Expect(cache.Compact(), "Failed to compact the collision fixture");
+        }
+
+        std::wstring collisionIndexLine;
+        {
+            std::wifstream indexStream(collisionCacheRoot / L"index.tsv");
+            Expect(static_cast<bool>(std::getline(indexStream, collisionIndexLine)),
+                   "Collision fixture did not produce an index row");
+        }
+        const std::size_t firstTab = collisionIndexLine.find(L'\t');
+        Expect(firstTab != std::wstring::npos, "Collision fixture index row was malformed");
+        collisionIndexLine.replace(0,
+                                   firstTab,
+                                   hyperbrowse::util::NormalizePathForComparison(keyA.filePath));
+        {
+            std::wofstream indexStream(collisionCacheRoot / L"index.tsv", std::ios::app);
+            indexStream << collisionIndexLine << L'\n';
+        }
+
+        const auto counterValue = [](std::wstring_view name)
+        {
+            const auto snapshot = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+            for (const auto& row : snapshot.counters)
+            {
+                if (row.name == name)
+                {
+                    return row.value;
+                }
+            }
+            return std::uint64_t{};
+        };
+        const std::uint64_t collisionCountBefore = counterValue(L"persistent_cache.hash_collisions");
+        {
+            hyperbrowse::cache::DiskThumbnailCache cache(4ULL * 1024ULL * 1024ULL,
+                                                          collisionCacheRoot.wstring());
+            Expect(cache.TryLoad(keyB) != nullptr,
+                   "Collision fixture discarded the authoritative cache entry");
+            cache.Store(keyB, thumbnail);
+        }
+        Expect(counterValue(L"persistent_cache.hash_collisions") > collisionCountBefore,
+               "Persistent thumbnail cache did not reject a conflicting shard filename");
+
+        std::wstring longFilePath = root.Root().wstring();
+        for (int segment = 0; segment < 12; ++segment)
+        {
+            longFilePath.append(L"\\long_segment_");
+            longFilePath.append(20, L'x');
+        }
+        longFilePath.append(L"\\photo.png");
+        auto longPathKey = MakeCacheKey(root.Root() / L"long-path-placeholder.png", 47);
+        longPathKey.filePath = longFilePath;
+
+        const fs::path longPathCacheRoot = root.Root() / L"long-path-cache";
+        {
+            hyperbrowse::cache::DiskThumbnailCache cache(4ULL * 1024ULL * 1024ULL,
+                                                          longPathCacheRoot.wstring());
+            cache.Store(longPathKey, thumbnail);
+        }
+        {
+            hyperbrowse::cache::DiskThumbnailCache restartedCache(4ULL * 1024ULL * 1024ULL,
+                                                                   longPathCacheRoot.wstring());
+            Expect(restartedCache.TryLoad(longPathKey) != nullptr,
+                   "Persistent thumbnail cache did not round-trip a long normalized key");
+        }
     }
 
         void RunRedactedDiagnosticsExportScenario()
@@ -2783,6 +2936,7 @@ namespace
 
         hyperbrowse::services::ThumbnailScheduler scheduler(8ULL * 1024ULL * 1024ULL, 1);
         scheduler.BindTargetWindow(hwnd);
+        scheduler.SetDiskCacheEnabled(false);
 
         ResetThumbnailResult(state, 7);
         const std::vector<hyperbrowse::services::ThumbnailWorkItem> requests{
@@ -2844,39 +2998,86 @@ namespace
         TempFolder root(L"HyperBrowseThumbnailReadyBeforePersistence");
         const fs::path imagePath = root.Root() / L"visible.jpg";
         WriteTestImage(imagePath, TestImageFormat::Jpeg, 24, 48, 6);
-        const auto key = MakeCacheKey(imagePath, 21);
+        const auto key = MakeCacheKey(imagePath, static_cast<std::uint64_t>(GetTickCount64()));
+
+        const auto diagnosticsCounterValue = [](std::wstring_view name)
+        {
+            const hyperbrowse::util::DiagnosticsSnapshot snapshot = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+            for (const hyperbrowse::util::DiagnosticCounterRow& row : snapshot.counters)
+            {
+                if (row.name == name)
+                {
+                    return row.value;
+                }
+            }
+            return std::uint64_t{};
+        };
+        const std::uint64_t completedStoreCountBefore = diagnosticsCounterValue(L"thumbnail.disk.store.completed");
 
         std::atomic<bool> persistenceStarted{false};
         std::atomic<bool> releasePersistence{false};
-        hyperbrowse::services::ThumbnailScheduler scheduler(
-            8ULL * 1024ULL * 1024ULL,
-            1,
-            hyperbrowse::util::ResourceProfile::Balanced,
-            [&]()
-            {
-                persistenceStarted.store(true, std::memory_order_release);
-                while (!releasePersistence.load(std::memory_order_acquire))
-                {
-                    Sleep(1);
-                }
-            });
-        scheduler.BindTargetWindow(hwnd);
-
-        ResetThumbnailResult(state, 9);
-        scheduler.Schedule(9, 1, {{0, key, 0, true}});
-        const bool readyPostedWhilePersistenceWasBlocked = PumpMessagesUntil([&]()
         {
-            return state->thumbnailResult.readyCount >= 1
-                && persistenceStarted.load(std::memory_order_acquire);
-        }, 15000);
-        releasePersistence.store(true, std::memory_order_release);
+            hyperbrowse::services::ThumbnailScheduler scheduler(
+                8ULL * 1024ULL * 1024ULL,
+                1,
+                hyperbrowse::util::ResourceProfile::Balanced,
+                [&]()
+                {
+                    persistenceStarted.store(true, std::memory_order_release);
+                    while (!releasePersistence.load(std::memory_order_acquire))
+                    {
+                        Sleep(1);
+                    }
+                });
+            scheduler.BindTargetWindow(hwnd);
 
-        Expect(readyPostedWhilePersistenceWasBlocked,
-               "Thumbnail ready update did not arrive while persistent storage was deliberately blocked (ready="
-                   + std::to_string(state->thumbnailResult.readyCount)
-                   + ", failed=" + std::to_string(state->thumbnailResult.failedCount)
-                   + ", persistenceStarted=" + (persistenceStarted.load(std::memory_order_acquire) ? "true" : "false")
-                   + ")");
+            ResetThumbnailResult(state, 9);
+            scheduler.Schedule(9, 1, {{0, key, 0, true}});
+            const bool readyPostedWhilePersistenceWasBlocked = PumpMessagesUntil([&]()
+            {
+                return state->thumbnailResult.readyCount >= 1
+                    && persistenceStarted.load(std::memory_order_acquire);
+            }, 15000);
+            releasePersistence.store(true, std::memory_order_release);
+
+            Expect(readyPostedWhilePersistenceWasBlocked,
+                   "Thumbnail ready update did not arrive while persistent storage was deliberately blocked (ready="
+                       + std::to_string(state->thumbnailResult.readyCount)
+                       + ", failed=" + std::to_string(state->thumbnailResult.failedCount)
+                       + ", persistenceStarted=" + (persistenceStarted.load(std::memory_order_acquire) ? "true" : "false")
+                       + ")");
+        }
+
+        Expect(diagnosticsCounterValue(L"thumbnail.disk.store.completed") > completedStoreCountBefore,
+               "Thumbnail scheduler shutdown did not drain the queued persistent store");
+        {
+            hyperbrowse::cache::DiskThumbnailCache verificationCache(8ULL * 1024ULL * 1024ULL);
+            Expect(verificationCache.TryLoad(key) != nullptr,
+                 "Thumbnail scheduler shutdown did not persist the requested cache key");
+        }
+
+        std::atomic<int> decodeCount{0};
+        {
+            hyperbrowse::services::ThumbnailScheduler scheduler(
+                8ULL * 1024ULL * 1024ULL,
+                1,
+                hyperbrowse::util::ResourceProfile::Balanced,
+                {},
+                [&]()
+                {
+                    decodeCount.fetch_add(1, std::memory_order_relaxed);
+                });
+            scheduler.BindTargetWindow(hwnd);
+            ResetThumbnailResult(state, 9);
+                        const std::uint64_t lookupHitsBefore = diagnosticsCounterValue(L"thumbnail.disk.lookup.hit");
+            scheduler.Schedule(9, 1, {{0, key, 0, true}});
+            Expect(PumpMessagesUntil([&]() { return state->thumbnailResult.readyCount >= 1; }, 5000),
+                   "Thumbnail scheduler did not return a persistent-cache lookup result");
+                  Expect(diagnosticsCounterValue(L"thumbnail.disk.lookup.hit") > lookupHitsBefore,
+                        "Thumbnail scheduler did not find the persisted key through its cache worker");
+            Expect(decodeCount.load(std::memory_order_relaxed) == 0,
+                        "Persistent-cache hit incorrectly reached the decode worker");
+        }
     }
 
     void RunThumbnailStaleCompletionScenario(HWND hwnd, TestWindowState* state)
@@ -2909,6 +3110,7 @@ namespace
                     });
                 });
             scheduler.BindTargetWindow(hwnd);
+            scheduler.SetDiskCacheEnabled(false);
 
             ResetThumbnailResult(state, 60);
             scheduler.Schedule(60, 1, {{0, key, 0, true}});
@@ -2918,13 +3120,13 @@ namespace
                 return decodeStarted;
             }, 5000), "Thumbnail stale-completion scenario never entered the decode barrier");
 
-                 const auto runtimeStatistics = scheduler.GetRuntimeStatistics();
-                 Expect(runtimeStatistics.inflightDecodeCount == 1,
-                     "Thumbnail scheduler did not report the blocked decode as in flight");
-                 Expect(runtimeStatistics.activeWorkerCount == 1,
-                     "Thumbnail scheduler did not report its active worker");
-                 Expect(runtimeStatistics.activeDecodeLimit >= runtimeStatistics.activeWorkerCount,
-                     "Thumbnail scheduler reported an invalid active decode limit");
+             const auto runtimeStatistics = scheduler.GetRuntimeStatistics();
+             Expect(runtimeStatistics.inflightDecodeCount == 1,
+                 "Thumbnail scheduler did not report the blocked decode as in flight");
+             Expect(runtimeStatistics.activeWorkerCount == 1,
+                 "Thumbnail scheduler did not report its active worker");
+             Expect(runtimeStatistics.activeDecodeLimit >= runtimeStatistics.activeWorkerCount,
+                 "Thumbnail scheduler reported an invalid active decode limit");
 
             scheduler.Schedule(60, 2, {});
             {
@@ -2945,6 +3147,95 @@ namespace
         hyperbrowse::cache::DiskThumbnailCache diskCache(8ULL * 1024ULL * 1024ULL);
         Expect(diskCache.TryLoad(key) != nullptr,
                "A stale successful thumbnail was not retained in the persistent cache");
+
+        {
+            const fs::path lookupImagePath = root.Root() / L"stale-lookup.png";
+            WriteTestImage(lookupImagePath, TestImageFormat::Png, 48, 24);
+            const auto lookupKey = MakeCacheKey(lookupImagePath, 62);
+
+            std::mutex persistenceMutex;
+            std::condition_variable persistenceCondition;
+            bool persistenceEntered = false;
+            bool releasePersistence = false;
+            const auto diagnosticsCounterValue = [](std::wstring_view name)
+            {
+                const hyperbrowse::util::DiagnosticsSnapshot snapshot = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+                for (const hyperbrowse::util::DiagnosticCounterRow& row : snapshot.counters)
+                {
+                    if (row.name == name)
+                    {
+                        return row.value;
+                    }
+                }
+                return std::uint64_t{};
+            };
+            const std::uint64_t staleLookupCountBefore = diagnosticsCounterValue(L"thumbnail.disk.lookup.stale");
+
+            hyperbrowse::services::ThumbnailScheduler scheduler(
+                8ULL * 1024ULL * 1024ULL,
+                1,
+                hyperbrowse::util::ResourceProfile::Balanced,
+                [&]()
+                {
+                    std::unique_lock lock(persistenceMutex);
+                    persistenceEntered = true;
+                    persistenceCondition.notify_all();
+                    persistenceCondition.wait(lock, [&]()
+                    {
+                        return releasePersistence;
+                    });
+                },
+                {},
+                8ULL * 1024ULL * 1024ULL,
+                (root.Root() / L"stale-lookup-cache").wstring());
+            scheduler.BindTargetWindow(hwnd);
+
+            Expect(scheduler.QueuePersistentCacheStatistics([](bool, hyperbrowse::cache::DiskThumbnailCache::Statistics)
+            {
+            }), "Failed to queue the stale-lookup persistence barrier");
+            {
+                std::unique_lock lock(persistenceMutex);
+                const bool barrierStarted = persistenceCondition.wait_for(lock, std::chrono::seconds(5), [&]()
+                {
+                    return persistenceEntered;
+                });
+                if (!barrierStarted)
+                {
+                    releasePersistence = true;
+                }
+                if (!barrierStarted)
+                {
+                    persistenceCondition.notify_all();
+                }
+                Expect(barrierStarted, "Stale-lookup persistence barrier did not start");
+            }
+
+            ResetThumbnailResult(state, 60);
+            scheduler.Schedule(60, 1, {{0, lookupKey, 0, true}});
+            const bool lookupQueued = PumpMessagesUntil([&]()
+            {
+                return scheduler.GetRuntimeStatistics().inflightDecodeCount == 1;
+            }, 5000);
+            scheduler.Schedule(60, 2, {});
+            {
+                std::scoped_lock lock(persistenceMutex);
+                releasePersistence = true;
+            }
+            persistenceCondition.notify_all();
+
+            Expect(lookupQueued, "Stale-lookup scenario did not reach the disk lookup worker");
+            Expect(PumpMessagesUntil([&]()
+            {
+                return diagnosticsCounterValue(L"thumbnail.disk.lookup.stale") > staleLookupCountBefore;
+            }, 5000), "Stale disk lookup was not rejected after its request epoch changed");
+
+            ResetThumbnailResult(state, 60);
+            scheduler.Schedule(60, 3, {{0, lookupKey, 0, true}});
+            Expect(PumpMessagesUntil([&]()
+            {
+                return state->thumbnailResult.readyCount >= 1;
+            }, 5000), "A current-epoch retry did not decode after a stale disk lookup");
+        }
     }
 
         void RunThumbnailSchedulerFailureScenario(HWND hwnd, TestWindowState* state)
@@ -2982,6 +3273,45 @@ namespace
          scheduler.InvalidateFilePaths({missingRawPath.wstring()});
          Expect(!scheduler.HasKnownFailure(missingRawKey),
              "Invalidating a file path should clear the scheduler's known-failure state");
+
+         const fs::path pressureImagePath = root.Root() / L"pressure.png";
+         WriteTestImage(pressureImagePath, TestImageFormat::Png, 48, 24);
+         const auto pressureKey = MakeCacheKey(pressureImagePath, 2);
+         const auto diagnosticsCounterValue = [](std::wstring_view name)
+         {
+             const hyperbrowse::util::DiagnosticsSnapshot snapshot = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+             for (const hyperbrowse::util::DiagnosticCounterRow& row : snapshot.counters)
+             {
+                 if (row.name == name)
+                 {
+                     return row.value;
+                 }
+             }
+             return std::uint64_t{};
+         };
+         const std::uint64_t suppressedStoresBefore = diagnosticsCounterValue(L"thumbnail.disk.store.suppressed_pressure");
+         const std::uint64_t completedStoresBefore = diagnosticsCounterValue(L"thumbnail.disk.store.completed");
+         scheduler.SetDiskCacheEnabled(true);
+         scheduler.SetPressureModeEnabled(true);
+         ResetThumbnailResult(state, 8);
+         scheduler.Schedule(8, 3, {{0, pressureKey, 0, true}});
+         Expect(PumpMessagesUntil([&]() { return state->thumbnailResult.readyCount >= 1; }, 5000),
+             "Pressure-mode thumbnail decode did not complete");
+         PumpMessagesFor(100);
+         Expect(diagnosticsCounterValue(L"thumbnail.disk.store.suppressed_pressure") > suppressedStoresBefore,
+             "Pressure mode did not suppress the opportunistic persistent store");
+         scheduler.TrimCacheToBytes(1);
+         Expect(scheduler.CacheBytes() <= 1,
+             "Explicit thumbnail-cache trimming was disabled while pressure mode was active");
+         scheduler.SetPressureModeEnabled(false);
+         ResetThumbnailResult(state, 8);
+         scheduler.Schedule(8, 4, {{0, pressureKey, 0, true}});
+         Expect(PumpMessagesUntil([&]() { return state->thumbnailResult.readyCount >= 1; }, 5000),
+             "Thumbnail decode did not resume after pressure mode ended");
+         Expect(PumpMessagesUntil([&]()
+         {
+             return diagnosticsCounterValue(L"thumbnail.disk.store.completed") > completedStoresBefore;
+         }, 5000), "Persistent store did not resume after pressure mode ended");
         }
 
         void RunThumbnailSchedulerWorkerAllocationScenario()
@@ -3003,15 +3333,280 @@ namespace
              "Thumbnail scheduler did not scale the RAW worker allocation above one lane");
          Expect(scaledScheduler.CacheCapacityBytes() == 8ULL * 1024ULL * 1024ULL,
              "Thumbnail scheduler did not preserve the configured memory cache capacity");
-         Expect(scaledScheduler.DiskCacheCapacityBytes() == 8ULL * 1024ULL * 1024ULL,
-             "Thumbnail scheduler did not apply the configured capacity to the persistent cache");
+         Expect(scaledScheduler.DiskCacheCapacityBytes()
+                    == hyperbrowse::services::ThumbnailScheduler::ResolvePersistentCacheCapacityBytes(
+                        0,
+                        hyperbrowse::util::ResourceProfile::Balanced),
+             "Thumbnail scheduler did not resolve the automatic persistent cache capacity independently");
 
          constexpr std::size_t sixteenGigabytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
-         hyperbrowse::services::ThumbnailScheduler largeBudgetScheduler(sixteenGigabytes, 2);
+         hyperbrowse::services::ThumbnailScheduler largeBudgetScheduler(
+             sixteenGigabytes,
+             2,
+             hyperbrowse::util::ResourceProfile::Balanced,
+             {},
+             {},
+             sixteenGigabytes);
          Expect(largeBudgetScheduler.CacheCapacityBytes() == sixteenGigabytes,
              "Thumbnail scheduler did not preserve a 16 GiB memory cache capacity");
          Expect(largeBudgetScheduler.DiskCacheCapacityBytes() == sixteenGigabytes,
              "Thumbnail scheduler did not preserve a 16 GiB persistent cache capacity");
+        }
+
+        void RunThumbnailPersistenceMaintenanceScenario()
+        {
+         TempFolder root(L"HyperBrowseThumbnailPersistenceMaintenance");
+         const fs::path imagePath = root.Root() / L"maintenance.png";
+         const fs::path cacheRoot = root.Root() / L"cache";
+         WriteTestImage(imagePath, TestImageFormat::Png, 32, 16);
+         const auto key = MakeCacheKey(imagePath, 71);
+         std::wstring decodeError;
+         auto thumbnail = hyperbrowse::decode::DecodeThumbnailCpuOnly(key, &decodeError);
+         Expect(thumbnail != nullptr, "Failed to create a thumbnail for persistent maintenance coverage");
+         {
+             hyperbrowse::cache::DiskThumbnailCache seedCache(8ULL * 1024ULL * 1024ULL, cacheRoot.wstring());
+             seedCache.Store(key, thumbnail);
+         }
+
+         const fs::path orphanPath = cacheRoot / L"orphan.bin";
+         {
+             std::ofstream orphanStream(orphanPath, std::ios::binary);
+             orphanStream << "orphan";
+         }
+
+         hyperbrowse::services::ThumbnailScheduler scheduler(
+             8ULL * 1024ULL * 1024ULL,
+             1,
+             hyperbrowse::util::ResourceProfile::Balanced,
+             {},
+             {},
+             8ULL * 1024ULL * 1024ULL,
+             cacheRoot.wstring());
+
+         const std::thread::id callerThread = std::this_thread::get_id();
+         std::mutex callbackMutex;
+         std::condition_variable callbackCondition;
+         std::size_t callbackCount = 0;
+         std::thread::id callbackThread;
+         bool callbackSucceeded = false;
+         hyperbrowse::cache::DiskThumbnailCache::Statistics callbackStatistics;
+         const auto waitForCallback = [&](std::size_t expectedCount)
+         {
+             std::unique_lock lock(callbackMutex);
+             Expect(callbackCondition.wait_for(lock, std::chrono::seconds(5), [&]()
+             {
+                 return callbackCount >= expectedCount;
+             }), "Persistent cache maintenance callback timed out");
+         };
+
+         std::size_t expectedCallbackCount = 0;
+         {
+             std::scoped_lock lock(callbackMutex);
+             expectedCallbackCount = callbackCount + 1;
+         }
+         Expect(scheduler.QueuePersistentCacheStatistics(
+                    [&](bool succeeded, hyperbrowse::cache::DiskThumbnailCache::Statistics statistics)
+                    {
+                        std::scoped_lock lock(callbackMutex);
+                        callbackSucceeded = succeeded;
+                        callbackThread = std::this_thread::get_id();
+                        callbackStatistics = std::move(statistics);
+                        ++callbackCount;
+                        callbackCondition.notify_all();
+                    }),
+                "Failed to queue persistent cache statistics");
+         waitForCallback(expectedCallbackCount);
+         Expect(callbackSucceeded, "Persistent cache statistics query failed");
+         Expect(callbackThread != callerThread, "Persistent cache statistics ran on the caller thread");
+         Expect(callbackStatistics.indexedEntryCount == 1,
+                "Persistent cache statistics did not report the seeded entry");
+         Expect(callbackStatistics.orphanFileCount >= 1,
+                "Persistent cache statistics did not report the orphan file");
+          const auto indexedShard = std::find_if(callbackStatistics.shards.begin(),
+                                  callbackStatistics.shards.end(),
+                                  [](const auto& shard)
+                                  {
+                                   return shard.indexedEntryCount == 1
+                                    && shard.indexedBytes > 0;
+                                  });
+          Expect(indexedShard != callbackStatistics.shards.end(),
+              "Persistent cache statistics did not report the seeded entry in a shard");
+
+         {
+             std::scoped_lock lock(callbackMutex);
+             expectedCallbackCount = callbackCount + 1;
+         }
+         Expect(scheduler.QueuePersistentCacheMaintenance(
+                    false,
+                    [&](bool succeeded)
+                    {
+                        std::scoped_lock lock(callbackMutex);
+                        callbackSucceeded = succeeded;
+                        callbackThread = std::this_thread::get_id();
+                        ++callbackCount;
+                        callbackCondition.notify_all();
+                    }),
+                "Failed to queue persistent cache compaction");
+         waitForCallback(expectedCallbackCount);
+         Expect(callbackSucceeded, "Persistent cache compaction failed");
+         Expect(!fs::exists(orphanPath), "Persistent cache compaction did not remove the orphan file");
+
+         {
+             std::scoped_lock lock(callbackMutex);
+             expectedCallbackCount = callbackCount + 1;
+         }
+         Expect(scheduler.QueuePersistentCacheMaintenance(
+                    true,
+                    [&](bool succeeded)
+                    {
+                        std::scoped_lock lock(callbackMutex);
+                        callbackSucceeded = succeeded;
+                        callbackThread = std::this_thread::get_id();
+                        ++callbackCount;
+                        callbackCondition.notify_all();
+                    }),
+                "Failed to queue persistent cache purge");
+         waitForCallback(expectedCallbackCount);
+         Expect(callbackSucceeded, "Persistent cache purge failed");
+
+         {
+             std::scoped_lock lock(callbackMutex);
+             expectedCallbackCount = callbackCount + 1;
+         }
+         Expect(scheduler.QueuePersistentCacheStatistics(
+                    [&](bool succeeded, hyperbrowse::cache::DiskThumbnailCache::Statistics statistics)
+                    {
+                        std::scoped_lock lock(callbackMutex);
+                        callbackSucceeded = succeeded;
+                        callbackThread = std::this_thread::get_id();
+                        callbackStatistics = std::move(statistics);
+                        ++callbackCount;
+                        callbackCondition.notify_all();
+                    }),
+                "Failed to queue post-purge persistent cache statistics");
+         waitForCallback(expectedCallbackCount);
+         Expect(callbackSucceeded, "Post-purge persistent cache statistics query failed");
+         Expect(callbackStatistics.indexedEntryCount == 0 && callbackStatistics.cacheFileCount == 0,
+                "Persistent cache purge did not remove indexed entries and cache files");
+          Expect(callbackStatistics.shards.empty(),
+              "Persistent cache purge did not clear per-shard statistics");
+
+         std::mutex barrierMutex;
+         std::condition_variable barrierCondition;
+         bool barrierEntered = false;
+         bool releaseBarrier = false;
+         hyperbrowse::services::ThumbnailScheduler coalescingScheduler(
+             8ULL * 1024ULL * 1024ULL,
+             1,
+             hyperbrowse::util::ResourceProfile::Balanced,
+             [&]()
+             {
+                 std::unique_lock lock(barrierMutex);
+                 if (!barrierEntered)
+                 {
+                     barrierEntered = true;
+                     barrierCondition.notify_all();
+                     barrierCondition.wait(lock, [&]()
+                     {
+                         return releaseBarrier;
+                     });
+                 }
+             },
+             {},
+             8ULL * 1024ULL * 1024ULL,
+             (root.Root() / L"coalescing-cache").wstring());
+
+         const auto readDiagnosticCounter = [](std::wstring_view name)
+         {
+             const auto diagnostics = hyperbrowse::util::CaptureDiagnosticsSnapshot();
+             for (const auto& counter : diagnostics.counters)
+             {
+                 if (counter.name == name)
+                 {
+                     return counter.value;
+                 }
+             }
+             return std::uint64_t{};
+         };
+         const std::uint64_t coalescedInvalidationsBefore =
+             readDiagnosticCounter(L"persistent_cache.invalidate.coalesced");
+         Expect(coalescingScheduler.QueuePersistentCacheStatistics(
+                    [](bool, hyperbrowse::cache::DiskThumbnailCache::Statistics)
+                    {
+                    }),
+                "Failed to queue the coalescing barrier job");
+         {
+             std::unique_lock lock(barrierMutex);
+             Expect(barrierCondition.wait_for(lock, std::chrono::seconds(5), [&]()
+             {
+                 return barrierEntered;
+             }), "Persistent cache coalescing barrier did not start");
+         }
+         coalescingScheduler.InvalidateFilePaths({imagePath.wstring()});
+         coalescingScheduler.InvalidateFilePaths({imagePath.wstring()});
+         {
+             std::scoped_lock lock(barrierMutex);
+             releaseBarrier = true;
+         }
+         barrierCondition.notify_all();
+
+         std::mutex completionMutex;
+         std::condition_variable completionCondition;
+         bool completed = false;
+         Expect(coalescingScheduler.QueuePersistentCacheStatistics(
+                    [&](bool succeeded, hyperbrowse::cache::DiskThumbnailCache::Statistics)
+                    {
+                        std::scoped_lock lock(completionMutex);
+                        completed = succeeded;
+                        completionCondition.notify_all();
+                    }),
+                "Failed to queue the coalescing completion job");
+         {
+             std::unique_lock lock(completionMutex);
+             Expect(completionCondition.wait_for(lock, std::chrono::seconds(5), [&]()
+             {
+                 return completed;
+             }), "Persistent cache coalescing completion timed out");
+         }
+         Expect(readDiagnosticCounter(L"persistent_cache.invalidate.coalesced")
+                    == coalescedInvalidationsBefore + 1,
+                "Adjacent persistent cache invalidations were not coalesced");
+        }
+
+        void RunPersistentThumbnailCacheCapacityScenario()
+        {
+         constexpr std::uint64_t oneGiB = 1024ULL * 1024ULL * 1024ULL;
+         constexpr std::uint64_t eightGiB = 8ULL * oneGiB;
+         constexpr std::uint64_t thirtyTwoGiB = 32ULL * oneGiB;
+
+         Expect(hyperbrowse::util::ResolvePersistentThumbnailCacheCapacityBytes(
+                    hyperbrowse::util::ResourceProfile::Balanced,
+                    thirtyTwoGiB,
+                    20ULL * oneGiB,
+                    true) == eightGiB,
+                "Persistent cache capacity did not enforce the 8 GiB automatic maximum");
+         Expect(hyperbrowse::util::ResolvePersistentThumbnailCacheCapacityBytes(
+                    hyperbrowse::util::ResourceProfile::Balanced,
+                    8ULL * oneGiB,
+                    3ULL * oneGiB,
+                    true) == 3ULL * oneGiB,
+                "Persistent cache capacity did not honor the available disk-space cap");
+         Expect(hyperbrowse::util::ResolvePersistentThumbnailCacheCapacityBytes(
+                    hyperbrowse::util::ResourceProfile::Conservative,
+                    16ULL * oneGiB,
+                    20ULL * oneGiB,
+                    true) == 4ULL * oneGiB,
+                "Conservative persistent cache capacity did not use its reduced RAM budget");
+         Expect(hyperbrowse::util::ResolvePersistentThumbnailCacheCapacityBytes(
+                    hyperbrowse::util::ResourceProfile::Balanced,
+                    8ULL * oneGiB,
+                    0,
+                    false) == 4ULL * oneGiB,
+                "Persistent cache capacity incorrectly treated an unknown disk budget as zero");
+         Expect(hyperbrowse::services::ThumbnailScheduler::ResolvePersistentCacheCapacityBytes(
+                    16ULL * oneGiB,
+                    hyperbrowse::util::ResourceProfile::Balanced) == 16ULL * oneGiB,
+                "Explicit persistent cache capacity override was not preserved");
         }
 
     void RunImageMetadataServiceScenario()
@@ -5721,6 +6316,62 @@ namespace
              DestroyWindow(restoredHandle);
              PumpMessagesFor(100);
          }
+
+         {
+             std::wstring visibleParent = TryGetKnownFolderPathForTest(FOLDERID_Documents);
+             std::error_code parentError;
+             if (visibleParent.empty() || !fs::is_directory(fs::path(visibleParent), parentError) || parentError)
+             {
+                 visibleParent = fs::current_path().wstring();
+             }
+             TempFolder root(fs::path(visibleParent),
+                             L"HyperBrowseFolderTreeRestore-" + std::to_wstring(GetCurrentProcessId()));
+             const fs::path activeFolder = root.Root() / L"active-parent" / L"active-folder";
+             std::error_code error;
+             Expect(fs::create_directories(activeFolder, error) && !error,
+                 "Failed to create the nested active folder for restore coverage");
+
+             hyperbrowse::ui::MainWindow mainWindow(instance);
+             mainWindow.SetStartupLaunchPath(activeFolder.wstring());
+             Expect(mainWindow.Create(), "Failed to create MainWindow for folder-tree restore coverage");
+
+             HWND mainWindowHandle = FindWindowW(L"HyperBrowseMainWindow", nullptr);
+             Expect(mainWindowHandle != nullptr, "Failed to find the folder-tree restore MainWindow");
+             HWND treeView = FindWindowExW(mainWindowHandle, nullptr, WC_TREEVIEWW, nullptr);
+             Expect(treeView != nullptr, "Folder-tree restore MainWindow did not create the tree control");
+
+             HTREEITEM selectedItem = nullptr;
+             Expect(PumpMessagesUntil([&]()
+             {
+                 selectedItem = TreeView_GetSelection(treeView);
+                 return selectedItem != nullptr
+                     && ReadTreeItemText(treeView, selectedItem) == L"active-folder";
+             }, 5000), "Folder tree did not select the active nested folder on startup");
+
+             HTREEITEM rootItem = selectedItem;
+             while (HTREEITEM parentItem = TreeView_GetParent(treeView, rootItem))
+             {
+                 rootItem = parentItem;
+             }
+             TreeView_Expand(treeView, rootItem, TVE_COLLAPSE);
+             RECT collapsedItemRect{};
+             Expect(TreeView_GetItemRect(treeView, selectedItem, &collapsedItemRect, TRUE) == FALSE,
+                 "Folder tree restore setup did not hide the active folder");
+
+             SendMessageW(mainWindowHandle, WM_SIZE, SIZE_RESTORED, 0);
+             SendMessageW(mainWindowHandle, WM_ACTIVATE, WA_ACTIVE, 0);
+             RECT restoredItemRect{};
+             Expect(PumpMessagesUntil([&]()
+             {
+                 selectedItem = TreeView_GetSelection(treeView);
+                 return selectedItem != nullptr
+                     && ReadTreeItemText(treeView, selectedItem) == L"active-folder"
+                     && TreeView_GetItemRect(treeView, selectedItem, &restoredItemRect, TRUE) != FALSE;
+             }, 2000), "Folder tree did not restore the active folder after window restoration");
+
+             DestroyWindow(mainWindowHandle);
+             PumpMessagesFor(100);
+         }
     }
 
     void RunMainWindowKeyboardFocusScenario(HINSTANCE instance)
@@ -6120,10 +6771,13 @@ int main(int argc, char* argv[])
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
         const bool viewerInteractionOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-interaction";
         const bool thumbnailPersistenceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-persistence";
+        const bool thumbnailPathSafetyOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-path-safety";
+        const bool thumbnailMaintenanceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-maintenance";
         const bool thumbnailStaleCompletionOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-stale-completion";
         const bool thumbnailFailureOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-failure";
         const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
+        const bool folderTreeRestoreOnly = argc > 1 && std::string_view(argv[1]) == "--folder-tree-restore";
         const bool accessibilityOnly = argc > 1 && std::string_view(argv[1]) == "--accessibility";
         const bool dialogGeometryOnly = argc > 1 && std::string_view(argv[1]) == "--dialog-geometry";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
@@ -6148,6 +6802,14 @@ int main(int argc, char* argv[])
         {
             RunThumbnailReadyBeforePersistenceScenario(hwnd, &state);
         }
+        else if (thumbnailPathSafetyOnly)
+        {
+            RunPersistentCacheCollisionAndLongPathScenario();
+        }
+        else if (thumbnailMaintenanceOnly)
+        {
+            RunThumbnailPersistenceMaintenanceScenario();
+        }
         else if (thumbnailStaleCompletionOnly)
         {
             RunThumbnailStaleCompletionScenario(hwnd, &state);
@@ -6163,6 +6825,10 @@ int main(int argc, char* argv[])
         else if (appTextSizeOnly)
         {
             RunAppTextSizeScenario(instance);
+        }
+        else if (folderTreeRestoreOnly)
+        {
+            RunMainWindowFolderTreeScenario(instance);
         }
         else if (accessibilityOnly)
         {
@@ -6211,6 +6877,7 @@ int main(int argc, char* argv[])
             hyperbrowse::tests::RunWatchPolicyScenarios();
             RunThumbnailCacheNormalizationScenario();
             RunDiskThumbnailCacheCorruptionScenario();
+            RunPersistentCacheCollisionAndLongPathScenario();
             RunRedactedDiagnosticsExportScenario();
             RunWicDecoderScenario();
             RunWicErrorReportingScenario();
@@ -6221,6 +6888,8 @@ int main(int argc, char* argv[])
             RunFileOperationShutdownScenario();
             RunFileConflictPlanningScenario();
             RunThumbnailSchedulerWorkerAllocationScenario();
+            RunPersistentThumbnailCacheCapacityScenario();
+            RunThumbnailPersistenceMaintenanceScenario();
             RunThumbnailSchedulerScenario(hwnd, &state);
             RunThumbnailReadyBeforePersistenceScenario(hwnd, &state);
             RunThumbnailStaleCompletionScenario(hwnd, &state);

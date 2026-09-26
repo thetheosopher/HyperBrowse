@@ -236,7 +236,7 @@ Expose EXIF, IPTC, and XMP data where available.
 ### Caching policy
 - runtime-adaptive in-memory thumbnail cache sized to host RAM (default ~`min(totalRam/8, availableRam/5)`, clamped 128 MB–1 GB)
 - runtime-adaptive metadata cache (default sized from host RAM, clamped 2,048–65,536 entries)
-- optional persistent thumbnail cache under `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache`, maintained off the UI thread
+- optional persistent thumbnail cache under `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache`, maintained by one low-priority worker off the UI thread with bounded legacy migration, batched access journaling, idle compaction, and per-shard inspection
 
 ### Adaptive resource controls
 - **Tools > Settings > Performance** exposes the persisted
@@ -249,13 +249,25 @@ Expose EXIF, IPTC, and XMP data where available.
   capacity in entries, persistent-cache capacity in megabytes, and prefetch
   depth from 1 through 16 items. **Follow profile** restores the automatic
   value for each setting.
+- Memory pressure is sampled by the shell on a low-frequency background path,
+  using recovery hysteresis before normal throughput is restored. When
+  `dwMemoryLoad >= 85` or available physical memory is below 1 GB, effective
+  viewer and browser prefetch depth is reduced to one item, thumbnail and
+  metadata workers are throttled, in-memory thumbnail and viewer caches are
+  trimmed toward half capacity, and opportunistic disk-thumbnail writes are
+  skipped. Pressure state is surfaced in the performance settings and status
+  surfaces.
 - The details panel's **Cache Stats** tab reports current in-memory thumbnail
-  and metadata usage, hit rates, and persistent-cache statistics through
-  asynchronous refreshes without blocking the UI.
+  and metadata usage, hit rates, persistent-cache statistics, live queue and
+  in-flight decode pressure, scale timing, and the current memory-pressure
+  state through asynchronous refreshes without blocking the UI.
 - **Trim persistent cache now** performs asynchronous maintenance that removes
   orphaned persistent thumbnails, repairs stale index entries, and evicts
   entries until the configured persistent-cache budget is satisfied. It does
   not change the configured budget or purge the entire cache.
+- Persistent-cache maintenance removes entries only when their source file is
+  confirmed missing; access-denied or temporarily unavailable source paths are
+  retained and reported separately in the cache inspector.
 
 ## 12. Distribution
 

@@ -9,12 +9,12 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <string>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
 
-#include "util/HashUtils.h"
 #include "util/PathUtils.h"
 #include "util/Diagnostics.h"
 
@@ -28,6 +28,8 @@ namespace
         * kMaximumThumbnailDimension * 4U;
     constexpr std::wstring_view kCacheRootFolder = L"HyperBrowse\\thumbnail-cache";
     constexpr std::wstring_view kIndexFileName = L"index.tsv";
+    constexpr std::wstring_view kFormatVersionFileName = L"format.version";
+    constexpr std::wstring_view kCurrentFormatVersion = L"2";
 
 #pragma pack(push, 1)
     struct DiskThumbnailHeader
@@ -45,6 +47,8 @@ namespace
     constexpr std::uint64_t kMaximumThumbnailFileBytes = sizeof(DiskThumbnailHeader)
         + kMaximumThumbnailPixelBytes;
     constexpr std::size_t kAccessPersistenceInterval = 64;
+    constexpr std::size_t kMaximumCompactionRemovals = 256;
+    constexpr std::size_t kLegacyMigrationBatchSize = 32;
     constexpr std::size_t kJournalCompactionThresholdBytes = 8ULL * 1024ULL * 1024ULL;
     constexpr std::wstring_view kJournalFileName = L"index.journal.tsv";
 
@@ -317,17 +321,48 @@ namespace
         return path;
     }
 
+    void AppendStableHashBytes(std::uint64_t* hash, const void* data, std::size_t byteCount) noexcept
+    {
+        constexpr std::uint64_t kFnvOffset = 14695981039346656037ULL;
+        constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
+        if (!hash)
+        {
+            return;
+        }
+
+        if (*hash == 0)
+        {
+            *hash = kFnvOffset;
+        }
+
+        const auto* bytes = static_cast<const unsigned char*>(data);
+        for (std::size_t index = 0; index < byteCount; ++index)
+        {
+            *hash ^= bytes[index];
+            *hash *= kFnvPrime;
+        }
+    }
+
+    void AppendStableHashValue(std::uint64_t* hash, std::uint64_t value) noexcept
+    {
+        AppendStableHashBytes(hash, &value, sizeof(value));
+        constexpr std::uint8_t kFieldSeparator = 0xff;
+        AppendStableHashBytes(hash, &kFieldSeparator, sizeof(kFieldSeparator));
+    }
+
     std::wstring BuildCacheFileName(const hyperbrowse::cache::ThumbnailCacheKey& key)
     {
-        std::size_t seed = 0;
-        hyperbrowse::util::HashCombine(&seed, hyperbrowse::util::NormalizePathForComparison(key.filePath));
-        hyperbrowse::util::HashCombine(&seed, key.modifiedTimestampUtc);
-        hyperbrowse::util::HashCombine(&seed, key.targetWidth);
-        hyperbrowse::util::HashCombine(&seed, key.targetHeight);
+        std::uint64_t hash = 0;
+        const std::wstring normalizedPath = hyperbrowse::util::NormalizePathForComparison(key.filePath);
+        AppendStableHashBytes(&hash, normalizedPath.data(), normalizedPath.size() * sizeof(wchar_t));
+        AppendStableHashValue(&hash, key.modifiedTimestampUtc);
+        AppendStableHashValue(&hash, static_cast<std::uint64_t>(key.targetWidth));
+        AppendStableHashValue(&hash, static_cast<std::uint64_t>(key.targetHeight));
 
         wchar_t buffer[17]{};
-        swprintf_s(buffer, L"%016llx", static_cast<unsigned long long>(seed));
-        return std::wstring(buffer) + L".thumb";
+        swprintf_s(buffer, L"%016llx", static_cast<unsigned long long>(hash));
+        const std::wstring hashText(buffer);
+        return hashText.substr(0, 2) + L"/" + hashText.substr(2, 2) + L"/" + hashText + L".bin";
     }
 
     bool ExtractBitmapPixels(HBITMAP bitmap,
@@ -487,25 +522,53 @@ namespace
     bool IsSafeCacheFileName(std::wstring_view fileName) noexcept
     {
         constexpr std::size_t kHashCharacterCount = 16;
-        constexpr std::wstring_view kSuffix = L".thumb";
-        if (fileName.size() != kHashCharacterCount + kSuffix.size()
-            || fileName.compare(kHashCharacterCount, kSuffix.size(), kSuffix) != 0)
+        constexpr std::wstring_view kLegacySuffix = L".thumb";
+        constexpr std::wstring_view kShardedSuffix = L".bin";
+        const bool isLegacy = fileName.size() == kHashCharacterCount + kLegacySuffix.size()
+            && fileName.compare(kHashCharacterCount, kLegacySuffix.size(), kLegacySuffix) == 0;
+        const bool isSharded = fileName.size() == 2 + 1 + 2 + 1 + kHashCharacterCount + kShardedSuffix.size()
+            && fileName[2] == L'/'
+            && fileName[5] == L'/'
+            && fileName.compare(22, kShardedSuffix.size(), kShardedSuffix) == 0;
+        if (!isLegacy && !isSharded)
         {
             return false;
         }
 
-        for (std::size_t index = 0; index < kHashCharacterCount; ++index)
+        const auto isHex = [](wchar_t character) noexcept
         {
-            const wchar_t character = fileName[index];
             const bool isDecimal = character >= L'0' && character <= L'9';
             const bool isLowerHex = character >= L'a' && character <= L'f';
             const bool isUpperHex = character >= L'A' && character <= L'F';
-            if (!isDecimal && !isLowerHex && !isUpperHex)
+            return isDecimal || isLowerHex || isUpperHex;
+        };
+
+        if (isLegacy)
+        {
+            for (std::size_t index = 0; index < kHashCharacterCount; ++index)
+            {
+                if (!isHex(fileName[index]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        for (std::size_t index = 0; index < 2; ++index)
+        {
+            if (!isHex(fileName[index]) || !isHex(fileName[index + 3]) || !isHex(fileName[index + 6]))
             {
                 return false;
             }
         }
-
+        for (std::size_t index = 0; index < kHashCharacterCount; ++index)
+        {
+            if (!isHex(fileName[index + 6]))
+            {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -557,27 +620,32 @@ namespace
 
 namespace hyperbrowse::cache
 {
+    std::uint64_t DiskThumbnailCache::QueryDefaultCacheVolumeFreeBytes() noexcept
+    {
+        const std::wstring localAppDataPath = TryGetLocalAppDataPath();
+        if (localAppDataPath.empty())
+        {
+            return 0;
+        }
+
+        ULARGE_INTEGER availableBytes{};
+        if (!GetDiskFreeSpaceExW(localAppDataPath.c_str(), &availableBytes, nullptr, nullptr))
+        {
+            return 0;
+        }
+
+        return availableBytes.QuadPart;
+    }
+
     DiskThumbnailCache::DiskThumbnailCache(std::size_t capacityBytes, std::wstring cacheDirectory)
         : capacityBytes_(capacityBytes == 0 ? kDefaultDiskThumbnailCacheCapacityBytes : capacityBytes)
         , cacheDirectory_(std::move(cacheDirectory))
     {
-        accessPersistenceThread_ = std::thread([this]()
-        {
-            AccessPersistenceLoop();
-        });
     }
 
     DiskThumbnailCache::~DiskThumbnailCache()
     {
-        {
-            std::scoped_lock lock(mutex_);
-            shuttingDown_ = true;
-        }
-        accessPersistenceAvailable_.notify_one();
-        if (accessPersistenceThread_.joinable())
-        {
-            accessPersistenceThread_.join();
-        }
+        FlushPendingAccessUpdates();
     }
 
     std::shared_ptr<const CachedThumbnail> DiskThumbnailCache::TryLoad(const ThumbnailCacheKey& key)
@@ -588,6 +656,7 @@ namespace hyperbrowse::cache
         normalizedKey.filePath = util::NormalizePathForComparison(normalizedKey.filePath);
 
         std::wstring cachePath;
+        bool flushAccessUpdates = false;
         {
             std::scoped_lock lock(mutex_);
             EnsureLoadedLocked();
@@ -601,9 +670,16 @@ namespace hyperbrowse::cache
             iterator->second.lastAccessOrdinal = nextAccessOrdinal_++;
             ++pendingAccessUpdates_;
             pendingAccessKeys_.push_back(normalizedKey);
+            flushAccessUpdates = pendingAccessUpdates_ >= kAccessPersistenceInterval;
         }
-        accessPersistenceAvailable_.notify_one();
-
+        if (flushAccessUpdates)
+        {
+            std::scoped_lock lock(mutex_);
+            if (!FlushPendingAccessUpdatesLocked())
+            {
+                util::IncrementCounter(L"persistent_cache.access_flush_failed");
+            }
+        }
         std::ifstream stream(fs::path(cachePath), std::ios::binary);
         const auto removeInvalidEntry = [&]()
         {
@@ -741,11 +817,27 @@ namespace hyperbrowse::cache
             EnsureLoadedLocked();
             cacheDirectory = EnsureCacheDirectoryLocked();
             entry.cacheFileName = BuildCacheFileName(normalizedKey);
+            for (const auto& [existingKey, existingEntry] : entries_)
+            {
+                if (existingKey != normalizedKey && existingEntry.cacheFileName == entry.cacheFileName)
+                {
+                    util::IncrementCounter(L"persistent_cache.hash_collisions");
+                    return;
+                }
+            }
             entry.fileBytes = sizeof(DiskThumbnailHeader) + pixels.size();
             entry.lastAccessOrdinal = nextAccessOrdinal_++;
         }
 
         if (cacheDirectory.empty())
+        {
+            return;
+        }
+
+        const fs::path cachePath = fs::path(cacheDirectory) / entry.cacheFileName;
+        std::error_code directoryError;
+        fs::create_directories(cachePath.parent_path(), directoryError);
+        if (directoryError)
         {
             return;
         }
@@ -758,7 +850,8 @@ namespace hyperbrowse::cache
         header.sourceHeight = static_cast<std::uint32_t>(thumbnail->SourceHeight());
         header.pixelBytes = static_cast<std::uint64_t>(pixels.size());
 
-        std::ofstream stream(fs::path(cacheDirectory) / entry.cacheFileName, std::ios::binary | std::ios::trunc);
+        const fs::path temporaryPath = fs::path(cachePath.wstring() + L".tmp." + std::to_wstring(GetCurrentProcessId()));
+        std::ofstream stream(temporaryPath, std::ios::binary | std::ios::trunc);
         if (!stream)
         {
             return;
@@ -768,6 +861,19 @@ namespace hyperbrowse::cache
         stream.write(reinterpret_cast<const char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
         if (!stream)
         {
+            stream.close();
+            std::error_code error;
+            fs::remove(temporaryPath, error);
+            return;
+        }
+
+        stream.close();
+        if (!MoveFileExW(temporaryPath.c_str(),
+                         cachePath.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            std::error_code error;
+            fs::remove(temporaryPath, error);
             return;
         }
 
@@ -791,7 +897,6 @@ namespace hyperbrowse::cache
                                entry.lastAccessOrdinal)));
             EvictIfNeededLocked();
         }
-        accessPersistenceAvailable_.notify_one();
     }
 
     void DiskThumbnailCache::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
@@ -810,7 +915,7 @@ namespace hyperbrowse::cache
             normalizedPaths.insert(util::NormalizePathForComparison(filePath));
         }
 
-        std::vector<std::wstring> cacheFilesToDelete;
+        std::vector<fs::path> cacheFilesToDelete;
         {
             std::scoped_lock lock(mutex_);
             EnsureLoadedLocked();
@@ -824,7 +929,7 @@ namespace hyperbrowse::cache
                 }
 
                 currentBytes_ -= iterator->second.fileBytes;
-                cacheFilesToDelete.push_back(iterator->second.cacheFileName);
+                cacheFilesToDelete.push_back(fs::path(cacheDirectory_) / iterator->second.cacheFileName);
                 iterator = entries_.erase(iterator);
             }
             for (const std::wstring& normalizedPath : normalizedPaths)
@@ -833,15 +938,12 @@ namespace hyperbrowse::cache
             }
         }
 
-        accessPersistenceAvailable_.notify_one();
-
         if (!cacheFilesToDelete.empty())
         {
-            const fs::path cacheDirectory = cacheDirectory_;
-            for (const std::wstring& cacheFileName : cacheFilesToDelete)
+            for (const fs::path& cacheFilePath : cacheFilesToDelete)
             {
                 std::error_code error;
-                fs::remove(cacheDirectory / cacheFileName, error);
+                fs::remove(cacheFilePath, error);
             }
         }
     }
@@ -850,7 +952,7 @@ namespace hyperbrowse::cache
     {
         std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
 
-        std::vector<std::wstring> cacheFilesToDelete;
+        std::vector<fs::path> cacheFilesToDelete;
         std::wstring cacheDirectory;
         {
             std::scoped_lock lock(mutex_);
@@ -858,14 +960,14 @@ namespace hyperbrowse::cache
             cacheDirectory = EnsureCacheDirectoryLocked();
             for (const auto& [_, entry] : entries_)
             {
-                cacheFilesToDelete.push_back(entry.cacheFileName);
+                cacheFilesToDelete.push_back(fs::path(cacheDirectory) / entry.cacheFileName);
             }
             entries_.clear();
             currentBytes_ = 0;
             AppendJournalRecordLocked(L"C");
 
             std::error_code directoryError;
-            for (const fs::directory_entry& directoryEntry : fs::directory_iterator(fs::path(cacheDirectory), directoryError))
+            for (const fs::directory_entry& directoryEntry : fs::recursive_directory_iterator(fs::path(cacheDirectory), directoryError))
             {
                 if (directoryError)
                 {
@@ -878,15 +980,14 @@ namespace hyperbrowse::cache
                     continue;
                 }
 
-                cacheFilesToDelete.push_back(directoryEntry.path().filename().wstring());
+                cacheFilesToDelete.push_back(directoryEntry.path());
             }
         }
 
-        const fs::path cacheDirectoryPath(cacheDirectory);
-        for (const std::wstring& cacheFileName : cacheFilesToDelete)
+        for (const fs::path& cacheFilePath : cacheFilesToDelete)
         {
             std::error_code error;
-            fs::remove(cacheDirectoryPath / cacheFileName, error);
+            fs::remove(cacheFilePath, error);
         }
 
         std::scoped_lock lock(mutex_);
@@ -895,20 +996,63 @@ namespace hyperbrowse::cache
 
     bool DiskThumbnailCache::Compact()
     {
+        util::Stopwatch compactionTimer;
         std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
         std::scoped_lock lock(mutex_);
 
         const std::wstring cacheDirectory = EnsureCacheDirectoryLocked();
         if (cacheDirectory.empty())
         {
+            util::RecordTiming(L"persistent_cache.compaction", compactionTimer.ElapsedMilliseconds());
             return false;
         }
 
         EnsureLoadedLocked();
 
+        if (!FlushPendingAccessUpdatesLocked())
+        {
+            util::IncrementCounter(L"persistent_cache.access_flush_failed");
+            return false;
+        }
+
+        for (auto iterator = entries_.begin(); iterator != entries_.end();)
+        {
+            std::error_code sourceError;
+            const bool sourceExists = fs::exists(fs::path(iterator->first.filePath), sourceError);
+            const bool sourceMissing = !sourceExists
+                && (!sourceError || sourceError == std::make_error_code(std::errc::no_such_file_or_directory));
+            if (!sourceMissing)
+            {
+                if (sourceError)
+                {
+                    util::IncrementCounter(L"persistent_cache.source_access_unavailable");
+                }
+                ++iterator;
+                continue;
+            }
+
+            const std::wstring journalRecord = BuildJournalRecord(
+                L'R',
+                BuildIndexLine(iterator->first,
+                               iterator->second.cacheFileName,
+                               iterator->second.fileBytes,
+                               iterator->second.lastAccessOrdinal));
+            if (!AppendJournalRecordLocked(journalRecord))
+            {
+                ++iterator;
+                continue;
+            }
+
+            currentBytes_ = iterator->second.fileBytes > currentBytes_
+                ? 0
+                : currentBytes_ - iterator->second.fileBytes;
+            iterator = entries_.erase(iterator);
+            util::IncrementCounter(L"persistent_cache.source_missing_removed");
+        }
+
         std::unordered_map<std::wstring, std::size_t> existingCacheFiles;
         std::error_code directoryError;
-        for (const fs::directory_entry& directoryEntry : fs::directory_iterator(fs::path(cacheDirectory), directoryError))
+        for (const fs::directory_entry& directoryEntry : fs::recursive_directory_iterator(fs::path(cacheDirectory), directoryError))
         {
             if (directoryError)
             {
@@ -921,8 +1065,19 @@ namespace hyperbrowse::cache
                 continue;
             }
 
-            const std::wstring fileName = directoryEntry.path().filename().wstring();
+            std::error_code relativePathError;
+            const fs::path relativePath = fs::relative(directoryEntry.path(), fs::path(cacheDirectory), relativePathError);
+            if (relativePathError)
+            {
+                continue;
+            }
+
+            const std::wstring fileName = relativePath.generic_wstring();
             if (fileName == kIndexFileName || fileName == kJournalFileName)
+            {
+                continue;
+            }
+            if (fileName == kFormatVersionFileName)
             {
                 continue;
             }
@@ -956,6 +1111,8 @@ namespace hyperbrowse::cache
         }
 
         const fs::path cacheDirectoryPath(cacheDirectory);
+        std::size_t removedOrphanCount = 0;
+        bool orphanCleanupDeferred = false;
         for (const auto& [fileName, _] : existingCacheFiles)
         {
             if (referencedCacheFiles.contains(fileName))
@@ -963,12 +1120,29 @@ namespace hyperbrowse::cache
                 continue;
             }
 
+            if (removedOrphanCount >= kMaximumCompactionRemovals)
+            {
+                orphanCleanupDeferred = true;
+                continue;
+            }
+
             std::error_code removeError;
             fs::remove(cacheDirectoryPath / fileName, removeError);
+            if (!removeError)
+            {
+                ++removedOrphanCount;
+            }
         }
 
         EvictIfNeededLocked();
-        return CompactIndexLocked();
+        const bool compacted = CompactIndexLocked();
+        if (compacted && orphanCleanupDeferred)
+        {
+            compactionRequested_ = true;
+            util::IncrementCounter(L"persistent_cache.compaction.deferred");
+        }
+        util::RecordTiming(L"persistent_cache.compaction", compactionTimer.ElapsedMilliseconds());
+        return compacted;
     }
 
     DiskThumbnailCache::Statistics DiskThumbnailCache::QueryStatistics() const
@@ -993,14 +1167,33 @@ namespace hyperbrowse::cache
 
         std::unordered_set<std::wstring> referencedCacheFiles;
         referencedCacheFiles.reserve(entries_.size());
+        std::map<std::wstring, Statistics::ShardStatistics> shardStatistics;
+        const auto shardNameFor = [](std::wstring_view fileName)
+        {
+            const std::size_t firstSeparator = fileName.find(L'/');
+            if (firstSeparator == std::wstring_view::npos)
+            {
+                return std::wstring(L"(root)");
+            }
+
+            const std::size_t secondSeparator = fileName.find(L'/', firstSeparator + 1);
+            if (secondSeparator == std::wstring_view::npos)
+            {
+                return std::wstring(fileName.substr(0, firstSeparator));
+            }
+            return std::wstring(fileName.substr(0, secondSeparator));
+        };
         for (const auto& [_, entry] : entries_)
         {
             referencedCacheFiles.insert(entry.cacheFileName);
+            auto& shard = shardStatistics[shardNameFor(entry.cacheFileName)];
+            ++shard.indexedEntryCount;
+            shard.indexedBytes += entry.fileBytes;
         }
 
         const fs::path cacheDirectoryPath(cacheDirectory);
         std::error_code directoryError;
-        for (const fs::directory_entry& directoryEntry : fs::directory_iterator(cacheDirectoryPath, directoryError))
+        for (const fs::directory_entry& directoryEntry : fs::recursive_directory_iterator(cacheDirectoryPath, directoryError))
         {
             if (directoryError)
             {
@@ -1019,7 +1212,14 @@ namespace hyperbrowse::cache
                 continue;
             }
 
-            const std::wstring fileName = directoryEntry.path().filename().wstring();
+            std::error_code relativePathError;
+            const fs::path relativePath = fs::relative(directoryEntry.path(), cacheDirectoryPath, relativePathError);
+            if (relativePathError)
+            {
+                continue;
+            }
+
+            const std::wstring fileName = relativePath.generic_wstring();
             if (fileName == kIndexFileName)
             {
                 statistics.indexFileBytes = static_cast<std::size_t>(fileSize);
@@ -1029,13 +1229,22 @@ namespace hyperbrowse::cache
             {
                 continue;
             }
+            if (fileName == kFormatVersionFileName)
+            {
+                continue;
+            }
 
             statistics.cacheFileCount += 1;
             statistics.cacheFileBytes += static_cast<std::size_t>(fileSize);
+            auto& shard = shardStatistics[shardNameFor(fileName)];
+            ++shard.fileCount;
+            shard.fileBytes += static_cast<std::size_t>(fileSize);
             if (!referencedCacheFiles.contains(fileName))
             {
                 statistics.orphanFileCount += 1;
                 statistics.orphanFileBytes += static_cast<std::size_t>(fileSize);
+                ++shard.orphanFileCount;
+                shard.orphanFileBytes += static_cast<std::size_t>(fileSize);
             }
         }
 
@@ -1045,7 +1254,31 @@ namespace hyperbrowse::cache
             if (!fs::exists(cacheDirectoryPath / entry.cacheFileName, existsError) || existsError)
             {
                 statistics.missingFileCount += 1;
+                ++shardStatistics[shardNameFor(entry.cacheFileName)].missingFileCount;
             }
+        }
+
+        for (const auto& [key, _] : entries_)
+        {
+            std::error_code sourceError;
+            const bool sourceExists = fs::exists(fs::path(key.filePath), sourceError);
+            const bool sourceMissing = !sourceExists
+                && (!sourceError || sourceError == std::make_error_code(std::errc::no_such_file_or_directory));
+            if (sourceMissing)
+            {
+                ++statistics.missingSourceCount;
+            }
+            else if (sourceError)
+            {
+                ++statistics.inaccessibleSourceCount;
+            }
+        }
+
+        statistics.shards.reserve(shardStatistics.size());
+        for (auto& [name, shard] : shardStatistics)
+        {
+            shard.name = std::move(name);
+            statistics.shards.push_back(std::move(shard));
         }
 
         return statistics;
@@ -1059,15 +1292,25 @@ namespace hyperbrowse::cache
         return currentBytes_;
     }
 
+    void DiskThumbnailCache::SetCapacityBytes(std::size_t capacityBytes)
+    {
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
+        std::scoped_lock lock(mutex_);
+        capacityBytes_.store(std::max<std::size_t>(1, capacityBytes), std::memory_order_relaxed);
+        EnsureLoadedLocked();
+        EvictIfNeededLocked();
+    }
+
     std::size_t DiskThumbnailCache::CapacityBytes() const noexcept
     {
-        return capacityBytes_;
+        return capacityBytes_.load(std::memory_order_relaxed);
     }
 
     void DiskThumbnailCache::EnsureLoadedLocked()
     {
         if (loaded_)
         {
+            MigrateLegacyLayoutLocked();
             return;
         }
 
@@ -1230,53 +1473,48 @@ namespace hyperbrowse::cache
         return true;
     }
 
-    void DiskThumbnailCache::AccessPersistenceLoop()
+    bool DiskThumbnailCache::FlushPendingAccessUpdates()
     {
-        std::unique_lock lock(mutex_);
-        while (true)
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
+        std::scoped_lock lock(mutex_);
+        EnsureLoadedLocked();
+
+        return FlushPendingAccessUpdatesLocked();
+    }
+
+    bool DiskThumbnailCache::FlushPendingAccessUpdatesLocked()
+    {
+
+        for (const ThumbnailCacheKey& key : pendingAccessKeys_)
         {
-            accessPersistenceAvailable_.wait(lock, [this]()
+            const auto iterator = entries_.find(key);
+            if (iterator == entries_.end())
             {
-                return shuttingDown_ || pendingAccessUpdates_ >= kAccessPersistenceInterval || compactionRequested_;
-            });
-
-            if (pendingAccessUpdates_ == 0 && !compactionRequested_ && shuttingDown_)
-            {
-                return;
+                continue;
             }
 
-            lock.unlock();
+            if (!AppendJournalRecordLocked(BuildJournalRecord(
+                    L'T',
+                    BuildIndexLine(key,
+                                   iterator->second.cacheFileName,
+                                   iterator->second.fileBytes,
+                           iterator->second.lastAccessOrdinal))))
             {
-                std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
-                lock.lock();
-                for (const ThumbnailCacheKey& key : pendingAccessKeys_)
-                {
-                    const auto iterator = entries_.find(key);
-                    if (iterator == entries_.end())
-                    {
-                        continue;
-                    }
-
-                    AppendJournalRecordLocked(BuildJournalRecord(
-                        L'T',
-                        BuildIndexLine(key,
-                                       iterator->second.cacheFileName,
-                                       iterator->second.fileBytes,
-                                       iterator->second.lastAccessOrdinal)));
-                }
-                pendingAccessUpdates_ = 0;
-                pendingAccessKeys_.clear();
-                if (compactionRequested_)
-                {
-                    CompactIndexLocked();
-                }
-            }
-
-            if (shuttingDown_ && pendingAccessUpdates_ == 0 && !compactionRequested_)
-            {
-                return;
+                return false;
             }
         }
+
+        pendingAccessUpdates_ = 0;
+        pendingAccessKeys_.clear();
+        return true;
+    }
+
+    bool DiskThumbnailCache::NeedsCompaction() const
+    {
+        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
+        std::scoped_lock lock(mutex_);
+        const_cast<DiskThumbnailCache*>(this)->EnsureLoadedLocked();
+        return compactionRequested_;
     }
 
     bool DiskThumbnailCache::LoadIndexLocked()
@@ -1335,6 +1573,7 @@ namespace hyperbrowse::cache
                 nextAccessOrdinal_ = std::max(nextAccessOrdinal_, iterator->second.lastAccessOrdinal + 1);
             }
         }
+        stream.close();
 
         const fs::path journalPath = fs::path(cacheDirectory) / kJournalFileName;
         std::error_code journalSizeError;
@@ -1369,7 +1608,24 @@ namespace hyperbrowse::cache
                 ReplayJournalRecordLocked(line);
             }
         }
+        journalStream.close();
 
+        MigrateLegacyLayoutLocked();
+        std::unordered_set<std::wstring> shardDirectories;
+        for (const auto& [_, entry] : entries_)
+        {
+            if (!entry.cacheFileName.ends_with(L".bin"))
+            {
+                continue;
+            }
+
+            const std::size_t separator = entry.cacheFileName.find(L'/');
+            if (separator != std::wstring::npos)
+            {
+                shardDirectories.insert(entry.cacheFileName.substr(0, separator));
+            }
+        }
+        util::RecordMaximum(L"persistent_cache.shard_count", shardDirectories.size());
         return true;
     }
 
@@ -1423,6 +1679,208 @@ namespace hyperbrowse::cache
         }
 
         return false;
+    }
+
+    bool DiskThumbnailCache::WriteFormatVersionLocked() const
+    {
+        if (cacheDirectory_.empty())
+        {
+            return false;
+        }
+
+        const fs::path versionPath = fs::path(cacheDirectory_) / kFormatVersionFileName;
+        const fs::path temporaryPath = fs::path(versionPath.wstring() + L".tmp." + std::to_wstring(GetCurrentProcessId()));
+        std::ofstream stream(temporaryPath, std::ios::binary | std::ios::trunc);
+        if (!stream || !WriteUtf8Line(stream, kCurrentFormatVersion) || (stream.flush(), !stream))
+        {
+            stream.close();
+            std::error_code error;
+            fs::remove(temporaryPath, error);
+            return false;
+        }
+
+        stream.close();
+        if (MoveFileExW(temporaryPath.c_str(),
+                        versionPath.c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            return true;
+        }
+
+        std::error_code error;
+        fs::remove(temporaryPath, error);
+        return false;
+    }
+
+    bool DiskThumbnailCache::MigrateLegacyLayoutLocked()
+    {
+        struct Migration
+        {
+            ThumbnailCacheKey key;
+            std::wstring oldFileName;
+            std::wstring newFileName;
+        };
+
+        std::vector<Migration> migrations;
+        std::unordered_set<std::wstring> migrationTargets;
+        bool hasLegacyEntries = false;
+        for (const auto& [key, entry] : entries_)
+        {
+            if (entry.cacheFileName.find(L'/') != std::wstring::npos
+                || entry.cacheFileName.find(L'\\') != std::wstring::npos
+                || !entry.cacheFileName.ends_with(L".thumb"))
+            {
+                continue;
+            }
+
+            hasLegacyEntries = true;
+            if (migrations.size() >= kLegacyMigrationBatchSize)
+            {
+                continue;
+            }
+            const fs::path sourcePath = fs::path(cacheDirectory_) / entry.cacheFileName;
+            std::error_code sourceError;
+            if (!fs::is_regular_file(sourcePath, sourceError) || sourceError)
+            {
+                continue;
+            }
+
+            const std::wstring newFileName = BuildCacheFileName(key);
+            if (!migrationTargets.insert(newFileName).second)
+            {
+                util::IncrementCounter(L"persistent_cache.hash_collisions");
+                return false;
+            }
+            for (const auto& [otherKey, otherEntry] : entries_)
+            {
+                if (otherKey == key)
+                {
+                    continue;
+                }
+                if (otherEntry.cacheFileName == newFileName)
+                {
+                    util::IncrementCounter(L"persistent_cache.hash_collisions");
+                    return false;
+                }
+            }
+
+            migrations.push_back(Migration{key, entry.cacheFileName, newFileName});
+        }
+
+        if (migrations.empty())
+        {
+            if (!hasLegacyEntries)
+            {
+                WriteFormatVersionLocked();
+            }
+            return !hasLegacyEntries;
+        }
+
+        std::vector<fs::path> createdFiles;
+        for (const Migration& migration : migrations)
+        {
+            const fs::path sourcePath = fs::path(cacheDirectory_) / migration.oldFileName;
+            const fs::path targetPath = fs::path(cacheDirectory_) / migration.newFileName;
+            std::error_code directoryError;
+            fs::create_directories(targetPath.parent_path(), directoryError);
+            if (directoryError)
+            {
+                for (const fs::path& createdFile : createdFiles)
+                {
+                    std::error_code error;
+                    fs::remove(createdFile, error);
+                }
+                return false;
+            }
+
+            const fs::path temporaryPath = fs::path(targetPath.wstring() + L".migrate." + std::to_wstring(GetCurrentProcessId()));
+            std::error_code copyError;
+            fs::copy_file(sourcePath, temporaryPath, fs::copy_options::overwrite_existing, copyError);
+            if (copyError)
+            {
+                util::IncrementCounter(L"persistent_cache.migration_copy_failed");
+            }
+            const bool moved = !copyError
+                && MoveFileExW(temporaryPath.c_str(),
+                               targetPath.c_str(),
+                               MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+            if (!moved)
+            {
+                if (!copyError)
+                {
+                    util::IncrementCounter(L"persistent_cache.migration_rename_failed");
+                }
+                std::error_code error;
+                fs::remove(temporaryPath, error);
+                for (const fs::path& createdFile : createdFiles)
+                {
+                    fs::remove(createdFile, error);
+                }
+                return false;
+            }
+            createdFiles.push_back(targetPath);
+        }
+
+        for (const Migration& migration : migrations)
+        {
+            entries_.find(migration.key)->second.cacheFileName = migration.newFileName;
+        }
+
+        if (!SaveIndexLocked())
+        {
+            util::IncrementCounter(L"persistent_cache.migration_index_write_failed");
+            for (const Migration& migration : migrations)
+            {
+                entries_.find(migration.key)->second.cacheFileName = migration.oldFileName;
+            }
+            for (const fs::path& createdFile : createdFiles)
+            {
+                std::error_code error;
+                fs::remove(createdFile, error);
+            }
+            return false;
+        }
+
+        bool allLegacyEntriesMigrated = true;
+        for (const auto& [_, entry] : entries_)
+        {
+            if (entry.cacheFileName.ends_with(L".thumb"))
+            {
+                allLegacyEntriesMigrated = false;
+                break;
+            }
+        }
+        const bool journalCompacted = CompactIndexLocked();
+        if (!journalCompacted)
+        {
+            util::IncrementCounter(L"persistent_cache.migration_compaction_failed");
+            return true;
+        }
+
+        for (const Migration& migration : migrations)
+        {
+            std::error_code error;
+            fs::remove(fs::path(cacheDirectory_) / migration.oldFileName, error);
+            if (error)
+            {
+                util::IncrementCounter(L"persistent_cache.migration_source_remove_failed");
+            }
+        }
+
+        if (!allLegacyEntriesMigrated)
+        {
+            return true;
+        }
+
+        const bool formatVersionWritten = WriteFormatVersionLocked();
+        if (!formatVersionWritten)
+        {
+            util::IncrementCounter(L"persistent_cache.migration_version_write_failed");
+            return true;
+        }
+
+        util::IncrementCounter(L"persistent_cache.migration.completed");
+        return true;
     }
 
     void DiskThumbnailCache::EvictIfNeededLocked()

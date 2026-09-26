@@ -53,7 +53,20 @@ Potentially blocking or high-volume work belongs on worker paths:
 
 Workers return results through the existing window-message or callback contracts. Every asynchronous path must account for cancellation, stale results, recipient lifetime, and shutdown ordering. A worker must not retain a raw HWND or object callback past the recipient's lifetime without an established lifetime guarantee.
 
-`DiskThumbnailCache` is especially important: its index and cache files are protected by process-wide persistence coordination, so cache operations must not be called from the UI thread. `ThumbnailScheduler` owns the asynchronous disk invalidation path.
+`DiskThumbnailCache` is especially important: its index and cache files are protected by process-wide persistence coordination, so cache operations must not be called from the UI thread. `ThumbnailScheduler` owns the single low-priority persistence worker for lookup, store, invalidation, statistics, compaction, purge, access-journal flushing, and shutdown draining; visible lookup requests are prioritized ahead of queued maintenance work.
+
+Persistent thumbnail storage uses a versioned `index.tsv` and journal alongside
+sharded entry files at `xx/yy/<stable-hash>.bin`. The index retains the full
+normalized source key, while new entry and index replacements use temporary
+ files followed by write-through renames. A legacy flat `.thumb` index remains
+ readable; valid legacy entries are copied into the sharded layout in bounded
+ batches, the new index and journal are committed with write-through renames,
+ and only then are each batch's legacy files removed. Subsequent cache-worker
+ operations continue incomplete migration batches after restart. Access
+ ordinals are batched and flushed by the same worker; threshold compaction is
+ deferred until the worker queue has been idle and no visible decode work is
+ pending. Statistics include aggregate and deterministic per-shard file,
+ orphan, and missing-entry data.
 
 ## Main data flows
 

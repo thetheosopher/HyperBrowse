@@ -9,6 +9,7 @@ The normal development configuration is the `vs2026-x64` CMake preset. It uses t
 ```powershell
 cmake --preset vs2026-x64
 cmake --build --preset debug --target HyperBrowse
+cmake --build --preset debug --target HyperBrowseTests HyperBrowsePerformanceBenchmark
 ```
 
 Use the Release preset for release-sensitive changes:
@@ -36,16 +37,24 @@ The current test target registers:
 - `HyperBrowseViewerFitSmoke`
 - `HyperBrowseViewerInteractionSmoke`
 - `HyperBrowseThumbnailPersistenceSmoke`
+- `HyperBrowseThumbnailPathSafetySmoke`
+- `HyperBrowseThumbnailMaintenanceSmoke`
+- `HyperBrowseThumbnailStaleCompletionSmoke`
 - `HyperBrowseThumbnailFailureSmoke`
 - `HyperBrowseFileRenameSmoke`
 - `HyperBrowseAppTextSizeSmoke`
 - `HyperBrowseAccessibilitySmoke`
+- `HyperBrowseDialogGeometrySmoke`
 - `HyperBrowseSettingsSmoke`
 - `HyperBrowseMultiViewerSettingsSmoke`
 - `HyperBrowseItemNumberNavigationSmoke`
 - `HyperBrowseUserMetadataSmoke`
+- `HyperBrowseExternalDropTargetSmoke`
+- `HyperBrowseMenuMetricsSmoke`
+- `HyperBrowseResponsivePanelSmoke`
+- `HyperBrowsePerformanceBenchmark`
 
-All 14 tests above are enabled. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+All 22 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
 
 On a machine with a supported NVIDIA GPU, prove that the configured runtime performs an actual decode, rather than only compiling the nvJPEG path, with:
 
@@ -55,11 +64,37 @@ On a machine with a supported NVIDIA GPU, prove that the configured runtime perf
 
 Run this command from a CUDA-bundled build tree so `cudart64_12.dll` and `nvjpeg64_12.dll` are beside the test executable. A successful exit means an nvJPEG decode completed on the available CUDA device; the normal CTest matrix continues to allow WIC fallback on hosts without suitable hardware.
 
-The tests cover model/service behavior and selected application/viewer state without requiring every workflow to be driven through a live desktop session. Add focused coverage to `tests/smoke.cpp` when a change can be exercised deterministically there.
+The tests cover model/service behavior and selected application/viewer state without requiring every workflow to be driven through a live desktop session. The full smoke also exercises persistent-cache sharding, atomic entry replacement, bounded legacy flat-layout migration, restart loading, malformed index paths, corruption cleanup, source-missing maintenance, asynchronous statistics/compact/purge callbacks, per-shard statistics, adjacent invalidation coalescing, and pressure-mode store suppression. Add focused coverage to `tests/smoke.cpp` when a change can be exercised deterministically there.
 
 ### Startup and performance checks
 
 CI runs `tools/TestStartupBenchmark.ps1` against the Release build with budgets for first-window visibility and first-thumbnail presentation. Performance changes should use the repository benchmark tools and report before/after measurements rather than relying on subjective timing.
+
+Run the startup gate with:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -NoProfile -File .\tools\TestStartupBenchmark.ps1 `
+	-ProjectRoot $PWD -BuildDir .\build -Configuration Release
+```
+
+The persistent-cache gate runs the companion benchmark and checks disk-cache hit
+latency, store throughput, compaction duration, cache-worker queue delay, and
+synthetic browser scroll dispatch throughput:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -NoProfile -File .\tools\TestPersistentCacheBenchmark.ps1 `
+	-ProjectRoot $PWD -BuildDir .\build -Configuration Release
+```
+
+The current CI budgets are 10 ms for average disk hits, 100 stored entries per
+second, 5 seconds for compaction, 500 ms for maximum cache-worker queue delay,
+and 250 scroll messages per second. The startup gate separately allows 2500 ms
+to first-window visibility, 2500 ms from visibility to first thumbnail, and
+5000 ms process-to-first-thumbnail. These are hosted-runner regression bars,
+not claims about every machine; both JSON snapshots are retained as CI
+artifacts for baseline and post-change comparison. The scroll metric dispatches
+messages to a hidden `BrowserPane`, so it measures scheduling/presentation
+overhead rather than physical input-device speed.
 
 The deterministic CI fixture is the checked-in `assets` directory. CI points
 the isolated `SelectedFolderPath` setting at that directory; no generated,
@@ -114,8 +149,9 @@ When investigating a failure:
 CI now runs a dedicated AddressSanitizer boundary-fuzz job with the dynamic
 MSVC runtime. The opt-in `HYPERBROWSE_BUILD_FUZZ_TESTS` target uses fixed seeds
 and bounded mutations, so it is deterministic and does not require a separate
-fuzzing engine. `HyperBrowsePersistentCacheFuzz` mutates persistent-cache
-headers and index rows, while `HyperBrowseRawHelperProtocolFuzz` mutates RAW
+fuzzing engine. `HyperBrowsePersistentCacheFuzz` mutates persistent-cache headers, version and
+journal records, legacy and sharded index rows, orphan files, and
+traversal-shaped paths, while `HyperBrowseRawHelperProtocolFuzz` mutates RAW
 helper payload sizes, headers, and bytes. The job disables optional LibRaw and
 nvJPEG dependencies because these tests exercise the protocol and cache
 boundaries, not codec implementations.

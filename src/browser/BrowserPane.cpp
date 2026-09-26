@@ -1240,6 +1240,20 @@ namespace hyperbrowse::browser
                                    : hyperbrowse::services::ThumbnailScheduler::RuntimeStatistics{};
     }
 
+    bool BrowserPane::QueuePersistentThumbnailCacheStatistics(
+        hyperbrowse::services::ThumbnailScheduler::PersistentCacheStatisticsCallback callback)
+    {
+        return thumbnailScheduler_ && thumbnailScheduler_->QueuePersistentCacheStatistics(std::move(callback));
+    }
+
+    bool BrowserPane::QueuePersistentThumbnailCacheMaintenance(
+        bool purge,
+        hyperbrowse::services::ThumbnailScheduler::PersistentCacheOperationCallback callback)
+    {
+        return thumbnailScheduler_
+            && thumbnailScheduler_->QueuePersistentCacheMaintenance(purge, std::move(callback));
+    }
+
     std::size_t BrowserPane::MetadataCacheCapacityEntries() const noexcept
     {
         return metadataService_ ? metadataService_->CacheCapacityEntries() : 0;
