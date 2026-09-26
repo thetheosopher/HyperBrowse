@@ -111,6 +111,9 @@ jobs:
           -DHYPERBROWSE_WARNINGS_AS_ERRORS=ON
           -DHYPERBROWSE_INNO_SETUP_COMPILER="C:/Program Files (x86)/Inno Setup 6/ISCC.exe"
 
+      - name: Build performance benchmark for package CTest
+        run: cmake --build build-ci-package --config Release --target HyperBrowsePerformanceBenchmark -- /m /v:minimal
+
       - name: Build and validate release artifacts
         run: cmake --build build-ci-package --config Release --target HyperBrowseReleaseArtifacts -- /m /v:minimal
 
@@ -150,11 +153,24 @@ jobs:
       - name: Run cache and RAW-helper boundary fuzz tests
         shell: pwsh
         run: >-
-          $asanRuntime = Get-ChildItem "$env:ProgramFiles\Microsoft Visual Studio\2022"
-          -Recurse -Filter clang_rt.asan_dynamic-x86_64.dll |
-          Select-Object -First 1;
-          if ($null -eq $asanRuntime) { throw 'MSVC AddressSanitizer runtime was not found.' };
-          $env:PATH = "$($asanRuntime.DirectoryName);$env:PATH";
+          $cachePath = Join-Path $env:GITHUB_WORKSPACE 'build-ci-asan/CMakeCache.txt';
+          $generatorInstanceLine = Select-String -Path $cachePath -Pattern '^CMAKE_GENERATOR_INSTANCE:INTERNAL=(.+)$' | Select-Object -First 1;
+          if ($null -eq $generatorInstanceLine) { throw 'The selected Visual Studio instance was not recorded in CMakeCache.txt.' };
+          $generatorInstance = $generatorInstanceLine.Matches[0].Groups[1].Value;
+          $toolsetVersionLine = Select-String -Path $cachePath -Pattern '^CMAKE_VS_PLATFORM_TOOLSET_VERSION:[^=]*=(.+)$' | Select-Object -First 1;
+          if ($null -ne $toolsetVersionLine) {
+            $toolsetVersion = $toolsetVersionLine.Matches[0].Groups[1].Value;
+          } else {
+            $defaultToolsetPath = Join-Path $generatorInstance 'VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt';
+            if (-not (Test-Path -LiteralPath $defaultToolsetPath -PathType Leaf)) { throw 'The selected Visual Studio instance has no default MSVC toolset metadata.' };
+            $toolsetVersion = (Get-Content -LiteralPath $defaultToolsetPath -Raw).Trim();
+          };
+          $toolsetRoot = Join-Path $generatorInstance "VC/Tools/MSVC/$toolsetVersion";
+          if (-not (Test-Path -LiteralPath $toolsetRoot -PathType Container)) { throw "Selected MSVC toolset $toolsetVersion was not found." };
+          $asanRuntimeDirectory = Join-Path $toolsetRoot 'bin/Hostx64/x64';
+          $asanRuntime = Join-Path $asanRuntimeDirectory 'clang_rt.asan_dynamic-x86_64.dll';
+          if (-not (Test-Path -LiteralPath $asanRuntime -PathType Leaf)) { throw "MSVC AddressSanitizer runtime was not found for toolset $toolsetVersion." };
+          $env:PATH = "$asanRuntimeDirectory;$env:PATH";
           $env:ASAN_OPTIONS = 'abort_on_error=1:halt_on_error=1:detect_leaks=0';
           ctest --test-dir build-ci-asan -C Debug -R 'HyperBrowse(PersistentCache|RawHelperProtocol)Fuzz' --output-on-failure 2>&1 |
           Tee-Object -FilePath build-ci-asan/asan-fuzz.log;

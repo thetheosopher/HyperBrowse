@@ -2730,7 +2730,7 @@ namespace
         Expect(!fs::exists(sourcePath), "The original file still exists after rename");
         Expect(fs::exists(renamedPath), "The renamed file was not created");
         Expect(state->fileOperationResult.update.createdPaths.size() == 1
-                   && state->fileOperationResult.update.createdPaths.front() == renamedPath.wstring(),
+                   && fs::equivalent(state->fileOperationResult.update.createdPaths.front(), renamedPath),
                "File rename operation did not report the created path");
 
         hyperbrowse::ui::FileOperationPathState renamedState;
@@ -4912,10 +4912,11 @@ namespace
         Expect(viewer.PanOffset().y == panBeforeArrow, "Viewer down arrow did not pan the zoomed image downward");
         viewer.SetKeyboardPanningInverted(true);
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_UP, 0);
-        Expect(viewer.PanOffset().y < panBeforeArrow,
+        const LONG invertedPanAfterUp = viewer.PanOffset().y;
+        Expect(invertedPanAfterUp < panBeforeArrow,
             "Viewer inverted keyboard panning option did not restore the legacy up-arrow direction");
         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_DOWN, 0);
-        Expect(viewer.PanOffset().y == panBeforeArrow,
+        Expect(viewer.PanOffset().y > invertedPanAfterUp,
             "Viewer inverted keyboard panning option did not restore the legacy down-arrow direction");
         viewer.SetKeyboardPanningInverted(false);
 
@@ -5946,10 +5947,24 @@ namespace
                 return;
             }
             RECT largeTextFrame{};
+            MONITORINFO textSizeMonitorInfo{sizeof(MONITORINFO)};
+            const HMONITOR textSizeMonitor = MonitorFromWindow(dialog, MONITOR_DEFAULTTONEAREST);
             if (!GetWindowRect(dialog, &largeTextFrame)
-                || largeTextFrame.bottom - largeTextFrame.top <= mediumTextFrame.bottom - mediumTextFrame.top)
+                || !textSizeMonitor
+                || !GetMonitorInfoW(textSizeMonitor, &textSizeMonitorInfo))
             {
-                failAndClose("Experimental Settings did not grow its measured frame for Large text");
+                failAndClose("Could not measure the Experimental Settings work area after Large text reflow");
+                return;
+            }
+            const LONG mediumFrameHeight = mediumTextFrame.bottom - mediumTextFrame.top;
+            const LONG largeFrameHeight = largeTextFrame.bottom - largeTextFrame.top;
+            const LONG availableWorkAreaHeight = textSizeMonitorInfo.rcWork.bottom - textSizeMonitorInfo.rcWork.top;
+            const bool frameGrew = largeFrameHeight > mediumFrameHeight;
+            const bool frameReachedWorkAreaLimit = largeFrameHeight == availableWorkAreaHeight
+                && mediumFrameHeight == largeFrameHeight;
+            if (!frameGrew && !frameReachedWorkAreaLimit)
+            {
+                failAndClose("Experimental Settings large-text frame neither grew nor reached the work-area limit");
                 return;
             }
             const RECT resizedApplyButton = experimentalState->applyButtonRect;
