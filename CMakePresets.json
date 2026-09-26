@@ -17,6 +17,7 @@
             },
             "cacheVariables": {
                 "HYPERBROWSE_BUILD_TESTS": "ON",
+                "HYPERBROWSE_BUILD_FUZZ_TESTS": "OFF",
                 "HYPERBROWSE_ENABLE_NVJPEG": "ON"
             }
         },

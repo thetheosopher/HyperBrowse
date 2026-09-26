@@ -56,6 +56,8 @@ The current test target registers:
 
 All 22 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
 
+The `vs2026-x64` development preset explicitly sets `HYPERBROWSE_BUILD_FUZZ_TESTS=OFF`. An opt-in configuration may set it to `ON`; building `HyperBrowseTests` then builds `HyperBrowseBoundaryFuzz` before the two boundary tests are run.
+
 On a machine with a supported NVIDIA GPU, prove that the configured runtime performs an actual decode, rather than only compiling the nvJPEG path, with:
 
 ```powershell
@@ -166,5 +168,7 @@ assertion when a user-visible failure mode is involved.
 ## Test isolation and safety
 
 Smoke tests use a dedicated registry subkey. Manual runs should use a different subkey when testing settings or destructive file workflows. Do not point test runs at a user's important image folder when a fixture or temporary directory is sufficient.
+
+The single-instance smoke scenarios use a per-test-process mutex and named-pipe namespace, so they do not depend on or interfere with an installed or separately running HyperBrowse instance.
 
 Keep generated test output and build trees out of source control. The repository `.gitignore` excludes the standard build, test, and log locations.

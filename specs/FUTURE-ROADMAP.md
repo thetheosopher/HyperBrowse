@@ -1,6 +1,6 @@
 # HyperBrowse Future Roadmap
 
-Last reviewed: 2026-09-13
+Last reviewed: 2026-09-26
 
 This is the single forward-looking product backlog for HyperBrowse. It is
 intentionally separate from the authoritative shipped contract in
@@ -351,6 +351,22 @@ The detailed implementation queue remains in
 ## 6. Theme D — Benchmarking & Diagnostics
 
 Performance branding requires evidence.
+
+### `D0` Trustworthy Validation Baseline (P0)
+
+**Implementation status: Shipped on 2026-09-26.** The normal Debug and Release
+CTest matrices now pass with 23/23 tests in each configuration. Single-instance
+smoke coverage uses a per-test mutex and named-pipe namespace, so an installed
+or separately running HyperBrowse process cannot contaminate the result. The
+stale-completion scenario uses fresh persistent-cache identities on each run
+and verifies both memory retention and worker-owned disk persistence without
+posting a stale UI update. Optional fuzz tests are excluded from the normal
+preset and the opt-in configuration builds and runs both boundary tests.
+
+The execution brief and root-cause history are retained in the
+[validation-baseline prompt](FUTURE-ROADMAP-PROMPT-01-VALIDATION-BASELINE.md).
+This baseline is a prerequisite for starting new roadmap feature work and
+remains the hold-the-line gate for future cache, startup, and decode changes.
 
 ### `D1` Standard Benchmark Datasets (P0)
 

@@ -35,6 +35,7 @@ namespace hyperbrowse::app
         HANDLE singleInstanceMutex_{};
         HANDLE listenerStopEvent_{};
         std::thread listenerThread_;
+        std::wstring singleInstanceNamespace_;
         bool isPrimaryInstance_{};
     };
 }

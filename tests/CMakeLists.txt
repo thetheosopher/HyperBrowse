@@ -80,6 +80,7 @@ if(HYPERBROWSE_BUILD_FUZZ_TESTS)
 
     target_compile_features(HyperBrowseBoundaryFuzz PRIVATE cxx_std_20)
     target_link_libraries(HyperBrowseBoundaryFuzz PRIVATE HyperBrowseCore)
+    add_dependencies(HyperBrowseTests HyperBrowseBoundaryFuzz)
 
     add_test(NAME HyperBrowsePersistentCacheFuzz COMMAND HyperBrowseBoundaryFuzz --persistent-cache)
     add_test(NAME HyperBrowseRawHelperProtocolFuzz COMMAND HyperBrowseBoundaryFuzz --raw-helper)

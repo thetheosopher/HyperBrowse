@@ -575,8 +575,9 @@ namespace
 
     void RunSingleInstanceIdleClientScenario()
     {
-        constexpr wchar_t kSingleInstancePipeName[] = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch";
         constexpr wchar_t kMainWindowClassName[] = L"HyperBrowseMainWindow";
+        const std::wstring testNamespace = L"Smoke-" + std::to_wstring(GetCurrentProcessId());
+        const std::wstring singleInstancePipeName = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch." + testNamespace;
 
         ScopedRegistryDwordBackup singleInstanceBackup(
             kRegistryPath,
@@ -595,7 +596,7 @@ namespace
         Expect(fs::exists(applicationPath), "Failed to locate the HyperBrowse executable for IPC testing");
 
         std::wstring commandLine = L"\"" + applicationPath.wstring()
-            + L"\" --test-single-instance";
+            + L"\" --test-single-instance-isolated=" + testNamespace;
         std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
         mutableCommandLine.push_back(L'\0');
 
@@ -675,7 +676,7 @@ namespace
         const ULONGLONG pipeDeadline = GetTickCount64() + 10000;
         while (GetTickCount64() < pipeDeadline)
         {
-            pipe = CreateFileW(kSingleInstancePipeName,
+            pipe = CreateFileW(singleInstancePipeName.c_str(),
                                FILE_WRITE_DATA,
                                0,
                                nullptr,
@@ -691,7 +692,7 @@ namespace
             {
                 break;
             }
-            WaitNamedPipeW(kSingleInstancePipeName, 100);
+            WaitNamedPipeW(singleInstancePipeName.c_str(), 100);
         }
         if (pipe == INVALID_HANDLE_VALUE)
         {
@@ -714,9 +715,11 @@ namespace
 
     void RunResidentSingleInstanceScenario()
     {
-        constexpr wchar_t kSingleInstancePipeName[] = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch";
         constexpr wchar_t kMainWindowClassName[] = L"HyperBrowseMainWindow";
         constexpr wchar_t kTrayMessageName[] = L"TheTheosopher.HyperBrowse.TrayIcon";
+        const std::wstring testNamespace = L"Smoke-" + std::to_wstring(GetCurrentProcessId());
+        const std::wstring singleInstancePipeName = L"\\\\.\\pipe\\TheTheosopher.HyperBrowse.Launch." + testNamespace;
+        const std::wstring isolatedSingleInstanceArgument = L"--test-single-instance-isolated=" + testNamespace;
 
         using hyperbrowse::ui::command_ids::ID_FILE_EXIT;
 
@@ -778,7 +781,7 @@ namespace
             }
         };
 
-        std::wstring primaryCommandLine = L"\"" + applicationPath.wstring() + L"\" --test-single-instance";
+        std::wstring primaryCommandLine = L"\"" + applicationPath.wstring() + L"\" " + isolatedSingleInstanceArgument;
         std::vector<wchar_t> mutablePrimaryCommandLine(primaryCommandLine.begin(), primaryCommandLine.end());
         mutablePrimaryCommandLine.push_back(L'\0');
         STARTUPINFOW startupInfo{};
@@ -838,7 +841,7 @@ namespace
             const ULONGLONG deadline = GetTickCount64() + 10000;
             while (GetTickCount64() < deadline)
             {
-                launchPipe = CreateFileW(kSingleInstancePipeName,
+                launchPipe = CreateFileW(singleInstancePipeName.c_str(),
                                          FILE_WRITE_DATA,
                                          0,
                                          nullptr,
@@ -854,7 +857,7 @@ namespace
                 {
                     break;
                 }
-                WaitNamedPipeW(kSingleInstancePipeName, 100);
+                WaitNamedPipeW(singleInstancePipeName.c_str(), 100);
             }
             Expect(launchPipe != INVALID_HANDLE_VALUE,
                    "Failed to connect to the resident HyperBrowse instance (Win32 error "
@@ -908,11 +911,11 @@ namespace
                 "Failed to post the tray activation message");
         require(waitForVisibility(true), "Tray activation did not restore the resident window");
 
-        launchClient(L"--test-single-instance");
+        launchClient(isolatedSingleInstanceArgument);
         require(WaitForSingleObject(processInfo.hProcess, 0) == WAIT_TIMEOUT,
                 "Activation-only launch terminated the resident HyperBrowse instance");
 
-        launchClient(L"--test-single-instance \"" + applicationPath.wstring() + L"\"");
+        launchClient(isolatedSingleInstanceArgument + L" \"" + applicationPath.wstring() + L"\"");
         require(WaitForSingleObject(processInfo.hProcess, 0) == WAIT_TIMEOUT,
                 "File launch terminated the resident HyperBrowse instance");
 
@@ -3085,7 +3088,8 @@ namespace
         TempFolder root(L"HyperBrowseThumbnailStaleCompletion");
         const fs::path imagePath = root.Root() / L"stale.jpg";
         WriteTestImage(imagePath, TestImageFormat::Jpeg, 24, 48, 6);
-        const auto key = MakeCacheKey(imagePath, 61);
+        const std::uint64_t cacheGeneration = static_cast<std::uint64_t>(GetTickCount64());
+        const auto key = MakeCacheKey(imagePath, cacheGeneration);
 
         std::mutex decodeMutex;
         std::condition_variable decodeStartedCondition;
@@ -3110,7 +3114,6 @@ namespace
                     });
                 });
             scheduler.BindTargetWindow(hwnd);
-            scheduler.SetDiskCacheEnabled(false);
 
             ResetThumbnailResult(state, 60);
             scheduler.Schedule(60, 1, {{0, key, 0, true}});
@@ -3151,7 +3154,7 @@ namespace
         {
             const fs::path lookupImagePath = root.Root() / L"stale-lookup.png";
             WriteTestImage(lookupImagePath, TestImageFormat::Png, 48, 24);
-            const auto lookupKey = MakeCacheKey(lookupImagePath, 62);
+            const auto lookupKey = MakeCacheKey(lookupImagePath, cacheGeneration + 1);
 
             std::mutex persistenceMutex;
             std::condition_variable persistenceCondition;

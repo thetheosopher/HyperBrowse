@@ -22,6 +22,17 @@ namespace
     constexpr wchar_t kRegistryValueSingleInstanceEnabled[] = L"SingleInstanceEnabled";
     constexpr wchar_t kRegistryValueKeepInNotificationAreaEnabled[] = L"KeepInNotificationAreaEnabled";
 
+    std::wstring MakeSingleInstanceName(const wchar_t* baseName, std::wstring_view namespaceSuffix)
+    {
+        std::wstring name(baseName);
+        if (!namespaceSuffix.empty())
+        {
+            name.push_back(L'.');
+            name.append(namespaceSuffix);
+        }
+        return name;
+    }
+
     struct StartupBenchmarkOptions
     {
         bool enabled{};
@@ -32,6 +43,7 @@ namespace
     {
         StartupBenchmarkOptions benchmark;
         std::wstring launchPath;
+        std::wstring singleInstanceNamespace;
         bool forceSingleInstanceForTest{};
     };
 
@@ -164,6 +176,14 @@ namespace
                 continue;
             }
 
+            constexpr std::wstring_view kIsolatedSingleInstancePrefix = L"--test-single-instance-isolated=";
+            if (argument.rfind(kIsolatedSingleInstancePrefix, 0) == 0)
+            {
+                options.forceSingleInstanceForTest = true;
+                options.singleInstanceNamespace.assign(argument.substr(kIsolatedSingleInstancePrefix.size()));
+                continue;
+            }
+
             if (options.launchPath.empty() && !argument.empty())
             {
                 options.launchPath.assign(argument);
@@ -277,7 +297,9 @@ namespace hyperbrowse::app
 
     bool Application::TryBecomePrimaryInstance(const std::wstring& launchPath)
     {
-        singleInstanceMutex_ = CreateMutexW(nullptr, TRUE, kSingleInstanceMutexName);
+        const std::wstring mutexName = MakeSingleInstanceName(kSingleInstanceMutexName, singleInstanceNamespace_);
+        const std::wstring pipeName = MakeSingleInstanceName(kSingleInstancePipeName, singleInstanceNamespace_);
+        singleInstanceMutex_ = CreateMutexW(nullptr, TRUE, mutexName.c_str());
         if (!singleInstanceMutex_)
         {
             return true; // Could not determine; proceed as primary.
@@ -295,7 +317,7 @@ namespace hyperbrowse::app
         singleInstanceMutex_ = nullptr;
 
         bool forwarded = false;
-        HANDLE pipe = CreateFileW(kSingleInstancePipeName,
+        HANDLE pipe = CreateFileW(pipeName.c_str(),
                                   FILE_WRITE_DATA,
                                   0,
                                   nullptr,
@@ -368,6 +390,7 @@ namespace hyperbrowse::app
 
     void Application::InstanceListenerLoop()
     {
+        const std::wstring pipeName = MakeSingleInstanceName(kSingleInstancePipeName, singleInstanceNamespace_);
         while (true)
         {
             CurrentUserPipeSecurity pipeSecurity;
@@ -376,7 +399,7 @@ namespace hyperbrowse::app
                 return;
             }
 
-            HANDLE pipe = CreateNamedPipeW(kSingleInstancePipeName,
+            HANDLE pipe = CreateNamedPipeW(pipeName.c_str(),
                                            PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
                                            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                                            1,
@@ -496,6 +519,7 @@ namespace hyperbrowse::app
         util::LogInfo(L"Starting HyperBrowse application shell");
 
         const StartupOptions startupOptions = ParseStartupOptions();
+        singleInstanceNamespace_ = startupOptions.singleInstanceNamespace;
         if (startupOptions.benchmark.enabled)
         {
             util::EnableStartupBenchmark(startupOptions.benchmark.outputPath);
