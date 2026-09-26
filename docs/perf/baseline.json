@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "calibrationPolicy": {
+    "status": "collecting",
+    "minimumRepetitionsPerScenario": 5,
+    "minimumIndependentWorkflowSamplesPerProfile": 10,
+    "comparisonStatistic": "median",
+    "tailStatistic": "nearest-rank p95, reported when at least five samples exist",
+    "retentionDays": 90,
+    "promotionRule": "Promote only after reviewing at least ten successful workflow artifacts for the same runner image, decode path, configuration, and dataset inventory. Set each profile calibrationStatus to calibrated, record measured thresholds and tolerances, then remove AllowProvisionalBaseline from CI."
+  },
+  "absoluteGuardrails": {
+    "startup.processToFirstWindowVisibleMs": {
+      "maximum": 2500,
+      "unit": "ms"
+    },
+    "startup.firstWindowVisibleToFirstThumbnailPaintedMs": {
+      "maximum": 2500,
+      "unit": "ms"
+    },
+    "startup.processToFirstThumbnailPaintedMs": {
+      "maximum": 5000,
+      "unit": "ms"
+    },
+    "cache.cacheHitAverageMs": {
+      "maximum": 10,
+      "unit": "ms"
+    },
+    "cache.storeEntriesPerSecond": {
+      "minimum": 100,
+      "unit": "entries/s"
+    },
+    "cache.compactionMs": {
+      "maximum": 5000,
+      "unit": "ms"
+    },
+    "cache.cacheWorkerQueueDelayMaxMs": {
+      "maximum": 500,
+      "unit": "ms"
+    },
+    "cache.scrollMessagesPerSecond": {
+      "minimum": 250,
+      "unit": "messages/s"
+    }
+  },
+  "profiles": [
+    {
+      "id": "windows-2022/nvjpeg",
+      "runnerImage": "windows-2022",
+      "decodePath": "nvjpeg",
+      "configuration": "Release",
+      "calibrationStatus": "collecting",
+      "workflowSampleCount": 0,
+      "datasets": [
+        {
+          "id": "A",
+          "inventorySha256": "a4df0b55a0cc0f8b30035f72777ba97575e565eb8576c6b1e9d07d7678d8a661"
+        },
+        {
+          "id": "cache-micro-v1",
+          "inventorySha256": "0c1da8e503c1e60e4f57f1d2a7b316ed8bdc6ad8ea331f420b0cda3b35c8f4a7"
+        }
+      ],
+      "metrics": []
+    },
+    {
+      "id": "windows-2022/wic-fallback",
+      "runnerImage": "windows-2022",
+      "decodePath": "wic-fallback",
+      "configuration": "Release",
+      "calibrationStatus": "collecting",
+      "workflowSampleCount": 0,
+      "datasets": [
+        {
+          "id": "A",
+          "inventorySha256": "a4df0b55a0cc0f8b30035f72777ba97575e565eb8576c6b1e9d07d7678d8a661"
+        },
+        {
+          "id": "cache-micro-v1",
+          "inventorySha256": "0c1da8e503c1e60e4f57f1d2a7b316ed8bdc6ad8ea331f420b0cda3b35c8f4a7"
+        }
+      ],
+      "metrics": []
+    }
+  ]
+}

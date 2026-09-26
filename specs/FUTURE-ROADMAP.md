@@ -46,6 +46,10 @@ The active plan assumes the following are already shipped and stable:
   scheduling, and batch convert.
 - WebP decoding and thumbnails through WIC, with stale thumbnail completion
   rejection and asynchronous folder-tree child-presence probing.
+- HEIC (`.heic`) and JPEG XL (`.jxl`) are recognized by the browser and routed
+  through WIC. Actual decode support depends on an installed WIC codec; codec
+  availability detection is not implemented, and allowlist tests do not prove
+  that a codec is available on a given machine.
 - Runtime-adaptive thumbnail cache (128 MB–1 GB) and metadata cache (2,048–
   65,536 entries) sized from `GlobalMemoryStatusEx`.
 - Optional `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache` persistent cache.
@@ -89,8 +93,10 @@ and summarized in Appendix A.
 - Move all persistent-cache I/O onto one low-priority cache worker, including
   asynchronous lookup, store, invalidation, statistics, access-journal flush,
   and maintenance operations.
-- Surface aggregate and per-shard stats from the **Cache Inspector** dialog
-  (see D4) with one-click compact and confirmed purge.
+- Surface live cache metrics in the **Cache Stats** details-panel tab and
+  detailed persistent-cache/per-shard information in the asynchronous
+  **Persistent Thumbnail Cache** dialog (see D4), with compact and confirmed
+  purge actions.
 - Enforce cache-hit, store-throughput, compaction, cache-worker queue-delay,
   scroll-dispatch, and first-thumbnail regression bars in the benchmark suite.
 
@@ -102,8 +108,9 @@ CUDA device before thumbnail construction, with reuse counters recorded through
 diagnostics. The RAW decode helpers now also reuse pooled BGRA conversion and
 scale scratch buffers when building thumbnails from LibRaw and raw-helper
 payloads. Remaining work: extend the same idea to any WIC-controlled scale
-intermediates if benchmark evidence still justifies the added allocator
-complexity.
+intermediates only if the completed D1-D3/A8 evidence loop demonstrates
+material allocation pressure. See the [performance-evidence prompt](FUTURE-ROADMAP-PROMPT-02-PERFORMANCE-EVIDENCE.md);
+do not start WIC pooling before its benchmark and baseline gates are reviewed.
 
 - Add a small `ScratchBufferPool` (per-size class, max N buffers) consumed
   by WIC scale, nvJPEG output, and LibRaw embedded-preview decode paths.
@@ -112,6 +119,15 @@ complexity.
   the decode/scale hot path; otherwise leave as planned-but-gated.
 
 ### `A6` GPU-Accelerated Thumbnail Scale Pipeline (P1)
+
+**Implementation status:** Deferred until the D1-D3/A8 performance-evidence
+gates are complete and reviewed. First close the shared evidence gates with
+the [performance-evidence prompt](FUTURE-ROADMAP-PROMPT-02-PERFORMANCE-EVIDENCE.md),
+then use the [A6 GPU thumbnail-scaling prompt](FUTURE-ROADMAP-PROMPT-03-A6-GPU-THUMBNAIL-SCALING.md)
+as the A6 design and acceptance contract. The
+[hosted-evidence and paired-benchmark prompt](FUTURE-ROADMAP-PROMPT-04-HOSTED-EVIDENCE-AND-A6-PAIRED-BENCHMARK.md)
+executes the hosted calibration sequence and hardware comparison; production
+scaling remains gated on its reviewed result.
 
 - Replace CPU-side `IWICBitmapScaler` for the largest thumbnail sizes with
   a Direct2D image effect chain (`ID2D1Effect` scale + linear gamma).
@@ -142,14 +158,17 @@ fixed prefetch multipliers.
 **Implementation status:** In progress. Startup diagnostics now capture
 `process-start → first-window-visible` and
 `first-window-visible → first-thumbnail-painted`, and `--bench-startup`
-emits a structured JSON snapshot on shutdown. GitHub Actions now runs a tracked
-PowerShell benchmark gate with configurable thresholds against Release builds,
-so regressions can fail CI without depending on ad hoc local scripts. Remaining:
-tune the initial budgets against runner variability and decide whether to retain
-historical benchmark artifacts. A local
+emits a structured JSON snapshot on shutdown. GitHub Actions runs startup and
+persistent-cache scenarios through the repeatable Release runner and retains
+per-run/aggregate JSON artifacts. Remaining: collect at least ten independent
+hosted workflow samples for each decode-path profile, then calibrate and review
+the relative baselines. The current fixed budgets remain absolute guardrails,
+not calibrated relative thresholds. The local
 debug run against the repo `assets` folder currently produced roughly
 `900.60 ms` to first window visible and `1265.43 ms` to first thumbnail
-painted, with the second span at roughly `364.83 ms`.
+painted, with the second span at roughly `364.83 ms`; this is illustrative, not
+a calibrated baseline. See the
+[performance-evidence prompt](FUTURE-ROADMAP-PROMPT-02-PERFORMANCE-EVIDENCE.md).
 
 - Capture `process-start → first-window-visible` and
   `first-window-visible → first-thumbnail-painted` spans through the
@@ -352,6 +371,9 @@ The detailed implementation queue remains in
 
 Performance branding requires evidence.
 
+D1-D3 and the remaining A8 work are one evidence-closure effort. Its execution
+brief is the [performance-evidence prompt](FUTURE-ROADMAP-PROMPT-02-PERFORMANCE-EVIDENCE.md).
+
 ### `D0` Trustworthy Validation Baseline (P0)
 
 **Implementation status: Shipped on 2026-09-26.** The normal Debug and Release
@@ -370,28 +392,55 @@ remains the hold-the-line gate for future cache, startup, and decode changes.
 
 ### `D1` Standard Benchmark Datasets (P0)
 
-- Datasets A–E per [the archived benchmarking plan](archive/05-benchmarking-plan.md)
-  staged under `tests/benchmark-datasets/` with a generator script for
-  synthetic inputs (and pointers to user-supplied real datasets).
+**Implementation status:** Shipped for deterministic generated fixtures and
+manifest-driven local RAW staging. Dataset D remains unavailable until a user
+supplies permitted NEF/NRW samples and a completed staging manifest. The small
+checked-in `assets` startup fixture is not the formal A-E suite.
+
+- Datasets A-E per [the archived benchmarking plan](archive/05-benchmarking-plan.md)
+  are defined in `tests/benchmark-datasets/manifest.json`; generate and verify
+  synthetic inputs with `tools/GenerateBenchmarkDatasets.ps1`.
 
 ### `D2` Benchmark Runner & JSON Report (P0)
 
-- `tools/RunBenchmarks.ps1` invoking `HyperBrowse.exe --bench-startup
-  --bench-folder <path>` and aggregating runs into
-  `build/bench/<git-sha>/report.json`.
-- Markdown summary rendered into `docs/perf/latest.md`.
+**Implementation status:** Shipped for the currently automated startup and
+persistent-cache scenarios. Archived browser/viewer interaction categories
+that lack reliable measurement producers are classified in
+[the performance scenario matrix](../docs/perf/scenario-matrix.md).
+
+- `tools/RunBenchmarks.ps1` invokes the supported benchmark scenarios against
+  formal datasets, retains each raw sample, and aggregates runs into
+  `build/bench/<git-sha>/<run-id>/report.json`.
+- Markdown summary rendered into `docs/perf/latest.md`; CI artifacts retain
+  per-run JSON, logs, and Dataset A inputs for 90 days.
 
 ### `D3` CI Perf Regression Gate (P1)
 
-- GitHub Actions job runs a small dataset bench against the release build,
-  compares against a checked-in baseline (`docs/perf/baseline.json`), and
-  fails on threshold breach.
+**Implementation status:** Partial. CI runs five repetitions per scenario on
+each Release decode path and retains the JSON evidence. The checked-in baseline
+profiles are collecting; current CI uses the explicit provisional mode while
+continuing to enforce absolute guardrails. Relative comparisons become
+enforcing after each profile has ten independent workflow samples and reviewed
+thresholds.
+
+- GitHub Actions runs the standard automated dataset suite against the Release
+  build, compares compatible results against a reviewed baseline
+  (`docs/perf/baseline.json`), retains JSON results, and fails on a supported
+  threshold breach.
 
 ### `D4` Cache Inspector Window (P1)
 
-- Diagnostics-style window showing thumbnail cache contents
-  (count/bytes/hit rate), metadata cache stats, persistent cache shard
-  stats, and a Trim/Purge control.
+**Implementation status:** Functionally shipped through existing UI surfaces.
+The Cache Stats details-panel tab is the live, non-modal view for thumbnail and
+metadata cache usage, hit rates, decode queue, scale timing, memory pressure,
+and persistent-cache totals. The asynchronous Persistent Thumbnail Cache
+dialog provides expanded aggregate and per-shard details plus compact and
+confirmed purge actions; Settings provides persistent-cache trim. Decision:
+keep these focused surfaces and do not build a separate Diagnostics-style
+Cache Inspector window unless user research identifies a concrete gap.
+
+The original single-window proposal is superseded by this split-surface
+implementation; there is no remaining D4 feature work.
 
 ### `D5` ETW / WPR Trace Hooks (P2)
 
@@ -412,8 +461,15 @@ Lower priority than A–D but where competitors are starting to differentiate.
 
 ### `E2` HEIC Support via Microsoft HEIF Extensions (P2)
 
-- Detect the Microsoft HEIF Image Extension at startup; route HEIC/HEIF
-  through WIC when available with a clear unsupported state otherwise.
+**Implementation status:** Partial. The `.heic` extension is in the browser
+and WIC decoder allowlists and is routed through WIC. Startup detection of the
+Microsoft HEIF Image Extension, explicit codec availability reporting, and a
+clear unsupported state remain open. `.heif` is not currently in the
+allowlist.
+
+- Detect the Microsoft HEIF Image Extension at startup and report whether
+  HEIC decoding is available; retain graceful failure when its WIC codec is
+  absent.
 
 ### `E3` Multipage TIFF Navigation (P2)
 
@@ -425,6 +481,18 @@ Lower priority than A–D but where competitors are starting to differentiate.
 - Extend the existing EXIF-only orientation pipeline with lossless crop
   alignment (mcu-aligned) via libjpeg-turbo's transform API. Strictly
   opt-in; no other editing follows.
+
+### `E5` JPEG XL Support via WIC (P2)
+
+**Implementation status:** Partial. The `.jxl` extension is in the browser and
+WIC decoder allowlists and is routed through WIC. Actual decoding depends on a
+compatible installed WIC codec; HyperBrowse does not currently detect codec
+availability or guarantee out-of-box JPEG XL decoding. Existing smoke coverage
+validates allowlisting and routing, not codec installation or image decoding.
+
+- Detect and report JPEG XL codec availability, and add codec-backed decode
+  verification on a supported Windows configuration before describing JPEG XL
+  as generally available.
 
 ---
 

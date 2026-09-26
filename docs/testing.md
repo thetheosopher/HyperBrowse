@@ -70,45 +70,96 @@ The tests cover model/service behavior and selected application/viewer state wit
 
 ### Startup and performance checks
 
-CI runs `tools/TestStartupBenchmark.ps1` against the Release build with budgets for first-window visibility and first-thumbnail presentation. Performance changes should use the repository benchmark tools and report before/after measurements rather than relying on subjective timing.
-
-Run the startup gate with:
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -NoProfile -File .\tools\TestStartupBenchmark.ps1 `
-	-ProjectRoot $PWD -BuildDir .\build -Configuration Release
-```
-
-The persistent-cache gate runs the companion benchmark and checks disk-cache hit
-latency, store throughput, compaction duration, cache-worker queue delay, and
-synthetic browser scroll dispatch throughput:
+The standard datasets are defined in `tests/benchmark-datasets/manifest.json`.
+Generate and verify the synthetic datasets with:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -NoProfile -File .\tools\TestPersistentCacheBenchmark.ps1 `
-	-ProjectRoot $PWD -BuildDir .\build -Configuration Release
+.\tools\GenerateBenchmarkDatasets.ps1 -ProjectRoot $PWD -DatasetId A,B,C,E
+.\tools\GenerateBenchmarkDatasets.ps1 -ProjectRoot $PWD -DatasetId A,B,C,E -VerifyOnly
 ```
 
-The current CI budgets are 10 ms for average disk hits, 100 stored entries per
-second, 5 seconds for compaction, 500 ms for maximum cache-worker queue delay,
-and 250 scroll messages per second. The startup gate separately allows 2500 ms
-to first-window visibility, 2500 ms from visibility to first thumbnail, and
-5000 ms process-to-first-thumbnail. These are hosted-runner regression bars,
-not claims about every machine; both JSON snapshots are retained as CI
-artifacts for baseline and post-change comparison. The scroll metric dispatches
-messages to a hidden `BrowserPane`, so it measures scheduling/presentation
-overhead rather than physical input-device speed.
+Generated image files are placed under `build/benchmark-datasets/` and are not
+checked in. Dataset D is intentionally local: copy
+`tests/benchmark-datasets/raw-manifest.template.json` beside legitimate NEF/NRW
+inputs, fill in the camera, dimensions, case ID, and thumbnail path, then pass
+that directory through `-RawSourceDirectory` when generating Dataset D. Verify
+it separately with `-DatasetId D -VerifyOnly -RawSourceDirectory <path>`. Without
+local RAW inputs D is reported as unavailable, not as a passing decode test.
 
-The deterministic CI fixture is the checked-in `assets` directory. CI points
-the isolated `SelectedFolderPath` setting at that directory; no generated,
-network, removable-media, or user-library content is part of the gate. The
-fixture is intentionally small and stable, while large-folder, removable-media,
-and network-path measurements remain release investigations rather than hard CI
-thresholds. Hosted Windows runners have variable CPU, storage, and desktop
-startup latency, so a benchmark result is interpreted as a regression only when
-the configured budget is exceeded. Capture repeated-run distributions before
-tightening those budgets or comparing small timing deltas. JSON snapshots and
-the debug log are uploaded for every matrix leg, including failed runs, and the
-release job separately preserves the package files under `build-ci-package/dist`.
+Run the repeatable startup and persistent-cache scenarios with five samples:
+
+```powershell
+.\tools\RunBenchmarks.ps1 -ProjectRoot $PWD -BuildDir .\build `
+    -Configuration Release -Scenario All -DatasetId A -Runs 5
+```
+
+`RunBenchmarks.ps1` calls the existing focused scripts rather than duplicating
+their timing logic. Each run retains the child snapshot, a metadata envelope,
+the per-run application-log delta, and runner output under
+`build/bench/<git-sha>/<run-id>/`; `report.json` includes all
+successful raw samples, median, nearest-rank p95 when at least five samples
+exist, min/max/mean, source/build identity, environment, and dataset inventory
+checksums. `docs/perf/latest.md` is the generated Markdown summary. Process
+state is recorded explicitly; OS file-cache state is uncontrolled, so the
+runner does not claim a cold-disk result. `-CacheState repeat-process` performs
+one unmeasured launch before measured launches, while each sample still uses a
+new process.
+
+### A6 GPU scaling evidence
+
+`RunBenchmarks.ps1` does not currently measure WIC-versus-GPU thumbnail scaling.
+Its startup and persistent-cache results are not evidence for A6. The paired
+scenario, hardware requirements, and go/no-go criteria are defined in
+[the A6 execution prompt](../specs/FUTURE-ROADMAP-PROMPT-03-A6-GPU-THUMBNAIL-SCALING.md).
+Do not enable a production GPU path until the D3/A8 baselines are reviewed and
+the paired benchmark has run through completed output on a verified hardware
+GPU; WARP results are correctness evidence only, not GPU performance evidence.
+
+The current Release CI absolute guardrails remain 2500 ms to first-window
+visibility, 2500 ms from visibility to first thumbnail, 5000 ms process to
+first thumbnail, 10 ms average disk hit, 100 stores/second, 5 seconds for
+compaction, 500 ms maximum cache-worker queue delay, and 250 synthetic scroll
+messages/second. These are safety ceilings/floors, not calibrated claims about
+all machines. The hidden-window scroll measure is scheduling/presentation
+overhead, not physical input-device smoothness.
+
+CI invokes the aggregate runner on both Release decode paths with five
+repetitions and uploads raw JSON, aggregate reports, summaries, logs, and the
+Dataset A inputs as 90-day artifacts, including on failure. Relative baseline
+comparison is fail-closed once calibrated. The checked-in
+`docs/perf/baseline.json` profiles are currently collecting hosted-runner
+evidence; during this bootstrap, CI uses `-AllowProvisionalBaseline` and
+continues enforcing the absolute limits above. Do not remove that flag until
+each profile has at least ten successful independent workflow artifacts.
+
+To collect or compare results locally:
+
+```powershell
+.\tools\RunBenchmarks.ps1 -ProjectRoot $PWD -BuildDir .\build `
+    -Configuration Release -Scenario All -DatasetId A -Runs 5
+```
+
+This produces a baseline candidate but does not compare it automatically. For
+a calibrated compatible profile, add `-CompareBaseline` and set the same
+`-RunnerImage`, `-DecodePath`, and `-ProfileId` used during calibration. The
+current hosted profiles are still collecting and local runs are not compatible
+with them. `-AllowProvisionalBaseline` is reserved for the CI calibration
+period; it does not disable the absolute safety limits.
+
+The supported runner scenarios and currently unmeasured archived-plan cases are
+listed in [the performance scenario matrix](perf/scenario-matrix.md). To
+promote a profile in `docs/perf/baseline.json`, combine the per-workflow
+candidate distributions from at least ten successful artifacts for the same
+runner image, decode path, Release configuration, and dataset inventory. Choose
+median-based tolerances above the measured noise floor, record the source
+artifact IDs and rationale, and submit the change for review. The runner never
+updates the checked-in baseline automatically. If a profile is absent,
+incompatible, or exceeds its calibrated threshold, baseline comparison fails.
+
+The checked-in `assets` folder remains a small startup fixture for unrelated
+manual checks; the performance runner uses generated Dataset A. Large-folder,
+RAW, viewer-interaction, physical-scroll, and GPU/resource measurements remain
+manual or uninstrumented as documented in the scenario matrix.
 
 Do not use the release packaging target as a routine performance or correctness check. It can stage package contents and optional CUDA redistributables.
 

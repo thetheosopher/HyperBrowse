@@ -8,7 +8,7 @@ param(
     [string]$OutputPath = '',
     [string]$RegistryPath = 'HKCU:\Software\HyperBrowse\StartupBenchmark',
     [string]$LogPath = '',
-    [int]$StartupTimeoutSeconds = 20,
+    [int]$StartupTimeoutSeconds = 5,
     [int]$ShutdownTimeoutSeconds = 15,
     [double]$ProcessToFirstWindowVisibleBudgetMs = 0,
     [double]$FirstWindowVisibleToFirstThumbnailPaintedBudgetMs = 0,
@@ -55,6 +55,22 @@ if (-not (Test-Path $ExecutablePath)) {
 }
 if (-not (Test-Path $DatasetPath)) {
     throw "Startup benchmark dataset folder was not found: $DatasetPath"
+}
+
+if ($null -eq ('HyperBrowse.Benchmark.NativeMethods' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace HyperBrowse.Benchmark
+{
+    public static class NativeMethods
+    {
+        [DllImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
+        public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    }
+}
+'@
 }
 
 function Assert-Budget {
@@ -155,16 +171,32 @@ $previousSelectedFolder = if ($hadPreviousSelectedFolder) {
 } else {
     $null
 }
+$hadPreviousKeepInNotificationArea = $settingsKey.GetValueNames() -contains 'KeepInNotificationAreaEnabled'
+$previousKeepInNotificationArea = if ($hadPreviousKeepInNotificationArea) {
+    $settingsKey.GetValue('KeepInNotificationAreaEnabled', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+} else {
+    $null
+}
+$previousKeepInNotificationAreaKind = if ($hadPreviousKeepInNotificationArea) {
+    $settingsKey.GetValueKind('KeepInNotificationAreaEnabled')
+} else {
+    $null
+}
 $settingsEnvironmentName = 'HYPERBROWSE_SETTINGS_REGISTRY_PATH'
 $previousSettingsEnvironment = [System.Environment]::GetEnvironmentVariable($settingsEnvironmentName, 'Process')
 $childRegistrySubkey = ConvertTo-ChildRegistrySubkey -ProviderPath $RegistryPath
 
 try {
     Set-ItemProperty -Path $RegistryPath -Name SelectedFolderPath -Value $DatasetPath
+    New-ItemProperty -Path $RegistryPath `
+                     -Name KeepInNotificationAreaEnabled `
+                     -Value 0 `
+                     -PropertyType DWord `
+                     -Force | Out-Null
     [System.Environment]::SetEnvironmentVariable($settingsEnvironmentName, $childRegistrySubkey, 'Process')
     Remove-Item -Path $OutputPath -ErrorAction SilentlyContinue
 
-    $beforeLogCount = if (Test-Path $LogPath) { (Get-Content -Path $LogPath).Count } else { 0 }
+    $beforeLogCount = if (Test-Path $LogPath) { @(Get-Content -Path $LogPath).Count } else { 0 }
 
     $processStartInfo = New-Object System.Diagnostics.ProcessStartInfo
     $processStartInfo.FileName = $ExecutablePath
@@ -189,10 +221,32 @@ try {
             throw "Startup benchmark could not request a normal application shutdown after $StartupTimeoutSeconds seconds."
         }
     }
-    if (-not $process.WaitForExit($ShutdownTimeoutSeconds * 1000)) {
+
+    $shutdownTimeoutMs = $ShutdownTimeoutSeconds * 1000
+    $closeGracePeriodMs = [Math]::Min(2000, $shutdownTimeoutMs)
+    if (-not $process.WaitForExit($closeGracePeriodMs)) {
+        $exitCommandPosted = [HyperBrowse.Benchmark.NativeMethods]::PostMessage(
+            $process.MainWindowHandle,
+            0x0111,
+            [IntPtr]::new(1002),
+            [IntPtr]::Zero)
+        $remainingShutdownTimeoutMs = $shutdownTimeoutMs - $closeGracePeriodMs
+        if ($remainingShutdownTimeoutMs -gt 0 -and -not $process.WaitForExit($remainingShutdownTimeoutMs)) {
+            Stop-Process -Id $process.Id -Force
+            $process.WaitForExit()
+            throw "Startup benchmark forced process termination after a $ShutdownTimeoutSeconds-second shutdown timeout."
+        }
+        if (-not $exitCommandPosted -and -not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force
+            $process.WaitForExit()
+            throw 'Startup benchmark could not post the File > Exit command for graceful shutdown.'
+        }
+    }
+
+    if (-not $process.HasExited) {
         Stop-Process -Id $process.Id -Force
         $process.WaitForExit()
-        throw "Startup benchmark forced process termination after a $ShutdownTimeoutSeconds-second shutdown timeout."
+        throw "Startup benchmark did not exit cleanly within $ShutdownTimeoutSeconds seconds."
     }
 
     if ($process.ExitCode -ne 0) {
@@ -230,8 +284,8 @@ try {
                       -SnapshotPath $OutputPath
 
     if (Test-Path $LogPath) {
-        $logTail = Get-Content -Path $LogPath | Select-Object -Skip $beforeLogCount
-        if ($logTail) {
+        $logTail = @(Get-Content -Path $LogPath | Select-Object -Skip $beforeLogCount)
+        if ($logTail.Count -gt 0) {
             Write-Host 'recent_log_lines_begin'
             $logTail | Select-Object -Last 20
             Write-Host 'recent_log_lines_end'
@@ -246,5 +300,15 @@ finally {
     }
     else {
         Remove-ItemProperty -Path $RegistryPath -Name SelectedFolderPath -ErrorAction SilentlyContinue
+    }
+    if ($hadPreviousKeepInNotificationArea) {
+        New-ItemProperty -Path $RegistryPath `
+                         -Name KeepInNotificationAreaEnabled `
+                         -Value $previousKeepInNotificationArea `
+                         -PropertyType ([string]$previousKeepInNotificationAreaKind) `
+                         -Force | Out-Null
+    }
+    else {
+        Remove-ItemProperty -Path $RegistryPath -Name KeepInNotificationAreaEnabled -ErrorAction SilentlyContinue
     }
 }

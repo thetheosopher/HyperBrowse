@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "D",
+  "files": [
+    {
+      "fileName": "sample-embedded-preview.nef",
+      "caseId": "camera-model-embedded-preview",
+      "camera": "Fill in camera make and model",
+      "width": 6000,
+      "height": 4000,
+      "thumbnailPath": "embedded-preview",
+      "edgeCase": false
+    },
+    {
+      "fileName": "sample-full-decode.nrw",
+      "caseId": "camera-model-full-decode",
+      "camera": "Fill in camera make and model",
+      "width": 4000,
+      "height": 3000,
+      "thumbnailPath": "full-decode",
+      "edgeCase": false
+    }
+  ]
+}

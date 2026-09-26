@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "generatorVersion": "1.0.0",
+  "datasets": [
+    {
+      "id": "A",
+      "name": "small-mixed",
+      "description": "Small deterministic mixed JPEG, PNG, GIF, and TIFF folder.",
+      "kind": "generated",
+      "seed": 1701,
+      "width": 320,
+      "height": 240,
+      "formatCounts": {
+        "jpeg": 80,
+        "png": 40,
+        "gif": 40,
+        "tiff": 40
+      }
+    },
+    {
+      "id": "B",
+      "name": "large-jpeg-heavy",
+      "description": "Deterministic JPEG-heavy folder for thumbnail throughput and decode-path comparisons.",
+      "kind": "generated",
+      "seed": 2801,
+      "width": 640,
+      "height": 480,
+      "formatCounts": {
+        "jpeg": 2000
+      }
+    },
+    {
+      "id": "C",
+      "name": "mixed-format-production-like",
+      "description": "Thousands of deterministic common-format files with declared proportions; synthetic, not production media.",
+      "kind": "generated",
+      "seed": 3901,
+      "width": 480,
+      "height": 320,
+      "formatCounts": {
+        "jpeg": 1400,
+        "png": 300,
+        "gif": 150,
+        "tiff": 150
+      }
+    },
+    {
+      "id": "D",
+      "name": "raw-focused-nikon",
+      "description": "Locally staged NEF/NRW samples classified by embedded-preview, full-decode, and edge-case behavior.",
+      "kind": "external-raw",
+      "rawManifestFileName": "raw-manifest.json",
+      "allowedExtensions": [
+        ".nef",
+        ".nrw"
+      ]
+    },
+    {
+      "id": "E",
+      "name": "large-resolution-stress",
+      "description": "Four deterministic 24-megapixel JPEGs in landscape and portrait orientations.",
+      "kind": "generated",
+      "seed": 5101,
+      "dimensionGroups": [
+        {
+          "format": "jpeg",
+          "width": 6000,
+          "height": 4000,
+          "count": 2
+        },
+        {
+          "format": "jpeg",
+          "width": 4000,
+          "height": 6000,
+          "count": 2
+        }
+      ]
+    }
+  ],
+  "syntheticBenchmarks": [
+    {
+      "id": "cache-micro-v1",
+      "description": "HyperBrowsePerformanceBenchmark fixed cache and hidden-browser dispatch workload; not an image-folder dataset.",
+      "cacheHitIterations": 256,
+      "storeIterations": 128,
+      "queueStatisticsIterations": 32,
+      "scrollMessageIterations": 512
+    }
+  ]
+}

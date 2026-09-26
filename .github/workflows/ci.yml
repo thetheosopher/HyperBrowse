@@ -49,24 +49,27 @@ jobs:
       - name: Run Release tests
         run: ctest --test-dir build-ci -C Release --output-on-failure
 
-      - name: Run Release startup benchmark
+      - name: Run repeated Release benchmark suite
         shell: pwsh
         run: >-
-          ./tools/TestStartupBenchmark.ps1
+          ./tools/RunBenchmarks.ps1
           -ProjectRoot $env:GITHUB_WORKSPACE
           -BuildDir (Join-Path $env:GITHUB_WORKSPACE 'build-ci')
           -Configuration Release
+          -Scenario All
+          -DatasetId A
+          -Runs 5
+          -RunnerImage windows-2022
+          -DecodePath ${{ matrix.decode-path.name }}
+          -ProfileId windows-2022/${{ matrix.decode-path.name }}
+          -OutputRoot (Join-Path $env:GITHUB_WORKSPACE 'build-ci/bench')
+          -MarkdownPath (Join-Path $env:GITHUB_WORKSPACE 'docs/perf/latest.md')
+          -BaselinePath (Join-Path $env:GITHUB_WORKSPACE 'docs/perf/baseline.json')
+          -CompareBaseline
+          -AllowProvisionalBaseline
           -ProcessToFirstWindowVisibleBudgetMs 2500
           -FirstWindowVisibleToFirstThumbnailPaintedBudgetMs 2500
           -ProcessToFirstThumbnailPaintedBudgetMs 5000
-
-      - name: Run Release persistent-cache benchmark
-        shell: pwsh
-        run: >-
-          ./tools/TestPersistentCacheBenchmark.ps1
-          -ProjectRoot $env:GITHUB_WORKSPACE
-          -BuildDir (Join-Path $env:GITHUB_WORKSPACE 'build-ci')
-          -Configuration Release
           -CacheHitAverageBudgetMs 10
           -MinimumStoreEntriesPerSecond 100
           -CompactionBudgetMs 5000
@@ -77,12 +80,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: startup-benchmark-${{ matrix.decode-path.name }}
+          name: performance-${{ matrix.decode-path.name }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: ignore
           path: |
-            build-ci/startup-benchmark-release.json
-            build-ci/persistent-cache-benchmark.json
+            build-ci/bench/**
+            build/benchmark-datasets/A/**
+            docs/perf/latest.md
             ${{ runner.temp }}/HyperBrowse-debug.log
+          retention-days: 90
 
   package:
     runs-on: windows-2022
