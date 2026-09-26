@@ -4544,7 +4544,10 @@ namespace
             "Failed to read the monitor work area for oversized-image Escape coverage");
         const LONG workWidth = oversizedMonitorInfo.rcWork.right - oversizedMonitorInfo.rcWork.left;
         const LONG workHeight = oversizedMonitorInfo.rcWork.bottom - oversizedMonitorInfo.rcWork.top;
-        WriteTestImage(oversizedPath, TestImageFormat::Png, static_cast<int>(workWidth + 1), static_cast<int>(workHeight + 1));
+        const LONG oversizedWidth = workWidth + std::max<LONG>(32, workWidth / 10);
+        const LONG oversizedHeight = workHeight + std::max<LONG>(32, workHeight / 10);
+        WriteTestImage(oversizedPath, TestImageFormat::Png,
+                       static_cast<int>(oversizedWidth), static_cast<int>(oversizedHeight));
         std::vector<hyperbrowse::browser::BrowserItem> oversizedItems;
         oversizedItems.push_back(hyperbrowse::browser::BrowserItem{
             L"oversized.png", oversizedPath.wstring(), L"PNG", L"2026-04-11 12:04", 5, 50, 256, 256});
@@ -4722,7 +4725,7 @@ namespace
             "Failed to read the viewer client area for the metadata pane test");
         const POINT metadataSamplePoint{
             metadataClientRect.left + ((metadataClientRect.right - metadataClientRect.left) * 5 / 6),
-            metadataClientRect.top + 24};
+            metadataClientRect.top + ((metadataClientRect.bottom - metadataClientRect.top) / 2)};
         COLORREF metadataPixelWithOverlays{};
         Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithOverlays),
             "Failed to sample the visible metadata pane");
@@ -5845,12 +5848,22 @@ namespace
                 return;
             }
             SendMessageW(dialog, WM_SYSKEYDOWN, L'P', 0);
-            const auto& lastPerformanceControl = experimentalState->controlRects[
-                static_cast<std::size_t>(hyperbrowse::ui::dialog_detail::ConsolidatedSettingsControl::LibRawOutOfProcess)];
-            if (experimentalState->page != hyperbrowse::ui::dialog_detail::ConsolidatedSettingsPage::Performance
-                || lastPerformanceControl.bottom + 12 > experimentalState->applyButtonRect.top)
+            if (experimentalState->page != hyperbrowse::ui::dialog_detail::ConsolidatedSettingsPage::Performance)
             {
-                failAndClose("Experimental Settings Performance page overlaps its footer actions");
+                failAndClose("Alt+P did not select the Performance page in Experimental Settings");
+                return;
+            }
+            if (experimentalState->scrollExtent > 0)
+            {
+                SendMessageW(dialog, WM_VSCROLL, MAKEWPARAM(SB_BOTTOM, 0), 0);
+            }
+            const RECT& lastPerformanceControl = experimentalState->controlRects[
+                static_cast<std::size_t>(hyperbrowse::ui::dialog_detail::ConsolidatedSettingsControl::LibRawOutOfProcess)];
+            if (lastPerformanceControl.top < experimentalState->bodyViewport.top
+                || lastPerformanceControl.bottom > experimentalState->bodyViewport.bottom
+                || experimentalState->bodyViewport.bottom + 12 > experimentalState->applyButtonRect.top)
+            {
+                failAndClose("Experimental Settings Performance controls were not scrollable above its footer actions");
                 return;
             }
             SendMessageW(dialog, WM_SYSKEYDOWN, L'V', 0);
