@@ -9759,6 +9759,7 @@ namespace hyperbrowse::ui
         };
         fileCommandHandlers.onNavigateBackFolder = std::bind_front(&MainWindow::NavigateBackToLastOpenedFolder, this);
         fileCommandHandlers.onNavigateForwardFolder = std::bind_front(&MainWindow::NavigateForwardToLastOpenedFolder, this);
+        fileCommandHandlers.onNavigateParentFolder = std::bind_front(&MainWindow::NavigateToParentFolder, this);
         fileCommandHandlers.onToggleCurrentFolderFavorite = std::bind_front(&MainWindow::ToggleCurrentFolderFavoriteDestination, this);
         fileCommandHandlers.onClearFavoriteDestinations = [this]
         {
@@ -10523,6 +10524,27 @@ namespace hyperbrowse::ui
         }
 
         if (message->message == WM_KEYDOWN
+            && message->wParam == static_cast<WPARAM>('F')
+            && (GetKeyState(VK_CONTROL) & 0x8000) != 0
+            && (GetKeyState(VK_SHIFT) & 0x8000) == 0
+            && (GetKeyState(VK_MENU) & 0x8000) == 0
+            && (message->lParam & (1LL << 30)) == 0
+            && message->hwnd
+            && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd)))
+        {
+            const HWND focus = GetFocus();
+            if (!IsTextInputControlWindow(focus) || focus == filterEdit_)
+            {
+                if (filterEdit_)
+                {
+                    SetFocus(filterEdit_);
+                    SendMessageW(filterEdit_, EM_SETSEL, 0, -1);
+                    return true;
+                }
+            }
+        }
+
+        if (message->message == WM_KEYDOWN
             && IsTextInputControlWindow(message->hwnd)
             && (message->wParam == VK_BACK || message->wParam == VK_DELETE
                 || message->wParam == VK_LEFT || message->wParam == VK_RIGHT
@@ -10538,6 +10560,13 @@ namespace hyperbrowse::ui
                      || message->wParam == static_cast<WPARAM>('Y')
                      || message->wParam == static_cast<WPARAM>('Z'))
                     && (GetKeyState(VK_CONTROL) & 0x8000) != 0)))
+        {
+            return false;
+        }
+
+        if (message->message == WM_SYSKEYDOWN
+            && message->wParam == VK_UP
+            && IsTextInputControlWindow(message->hwnd))
         {
             return false;
         }
@@ -10643,6 +10672,10 @@ namespace hyperbrowse::ui
         accelerators.reserve(MainWindowShortcuts().size());
         for (const ShortcutDefinition& shortcut : MainWindowShortcuts())
         {
+            if (shortcut.commandId == 0)
+            {
+                continue;
+            }
             accelerators.push_back(ACCEL{
                 static_cast<BYTE>(FVIRTKEY | shortcut.modifiers),
                 shortcut.virtualKey,
@@ -10761,11 +10794,12 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_BACK_FOLDER, L"Navigate &Back\tBackspace / Alt+Left");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_FORWARD_FOLDER, L"Navigate &Forward\tAlt+Right");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_PARENT_FOLDER, L"Navigate to &Parent\tAlt+Up");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_RECURSIVE, L"&Recursive Browsing");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SHOW_SUBFOLDERS, L"Show &Subfolders");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, kDetailsPanelMenuLabel.data());
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERFORMANCE_HUD, L"Performance &HUD\tCtrl+Shift+P");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"&Compact Thumbnail Layout");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
@@ -10866,7 +10900,7 @@ namespace hyperbrowse::ui
         {
             SendMessageW(filterEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
             SendMessageW(filterEdit_, EM_LIMITTEXT, 260, 0);
-            SendMessageW(filterEdit_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"Filter names, rating:>=3, tag:pick"));
+            SendMessageW(filterEdit_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"Filter names, rating:>=3, tag:pick (Ctrl+F)"));
         }
 
         tooltipControl_ = CreateWindowExW(
@@ -13441,6 +13475,24 @@ namespace hyperbrowse::ui
             DeactivateCommandBarKeyboardMode(false);
         }
 
+        if (wParam == VK_F6)
+        {
+            if ((GetKeyState(VK_CONTROL) & 0x8000) != 0
+                || (GetKeyState(VK_MENU) & 0x8000) != 0)
+            {
+                return false;
+            }
+            if ((lParam & (1LL << 30)) != 0)
+            {
+                return true;
+            }
+            if (commandBarKeyboardActive_)
+            {
+                DeactivateCommandBarKeyboardMode(false);
+            }
+            return CycleKeyboardPaneFocus((GetKeyState(VK_SHIFT) & 0x8000) != 0);
+        }
+
         const KeyboardFocusTarget currentTarget = CurrentKeyboardFocusTarget();
         if (wParam == VK_TAB)
         {
@@ -13484,6 +13536,67 @@ namespace hyperbrowse::ui
 
         (void)lParam;
         return false;
+    }
+
+    bool MainWindow::CycleKeyboardPaneFocus(bool reverse)
+    {
+        std::vector<KeyboardFocusTarget> paneTargets;
+        const auto addAvailable = [this, &paneTargets](KeyboardFocusTarget target)
+        {
+            if (IsKeyboardFocusTargetAvailable(target))
+            {
+                paneTargets.push_back(target);
+            }
+        };
+
+        addAvailable({KeyboardFocusTargetKind::FolderTree});
+        addAvailable({KeyboardFocusTargetKind::BrowserPane});
+        if (detailsStripVisible_)
+        {
+            addAvailable({KeyboardFocusTargetKind::DetailsTab, static_cast<int>(activeRightPaneTab_)});
+        }
+        if (paneTargets.empty())
+        {
+            return false;
+        }
+
+        const KeyboardFocusTarget currentTarget = CurrentKeyboardFocusTarget();
+        int currentIndex = -1;
+        for (int index = 0; index < static_cast<int>(paneTargets.size()); ++index)
+        {
+            if (paneTargets[static_cast<std::size_t>(index)] == currentTarget)
+            {
+                currentIndex = index;
+                break;
+            }
+        }
+
+        const bool focusInRightPane = currentTarget.kind == KeyboardFocusTargetKind::DetailsTab
+            || currentTarget.kind == KeyboardFocusTargetKind::DetailsCloseButton
+            || currentTarget.kind == KeyboardFocusTargetKind::DetailsText
+            || currentTarget.kind == KeyboardFocusTargetKind::QuickAccessSortButton
+            || currentTarget.kind == KeyboardFocusTargetKind::QuickAccessShortcutEdit
+            || currentTarget.kind == KeyboardFocusTargetKind::QuickAccessRow
+            || currentTarget.kind == KeyboardFocusTargetKind::QuickAccessButton
+            || currentTarget.kind == KeyboardFocusTargetKind::QuickAccessScrollBar;
+        if (currentIndex < 0 && focusInRightPane && detailsStripVisible_)
+        {
+            const KeyboardFocusTarget rightPaneTarget{
+                KeyboardFocusTargetKind::DetailsTab,
+                static_cast<int>(activeRightPaneTab_)};
+            const auto rightPane = std::find(paneTargets.begin(), paneTargets.end(), rightPaneTarget);
+            if (rightPane != paneTargets.end())
+            {
+                currentIndex = static_cast<int>(std::distance(paneTargets.begin(), rightPane));
+            }
+        }
+
+        const int direction = reverse ? -1 : 1;
+        const int targetIndex = currentIndex < 0
+            ? (reverse ? static_cast<int>(paneTargets.size()) - 1 : 0)
+            : (currentIndex + direction + static_cast<int>(paneTargets.size()))
+                % static_cast<int>(paneTargets.size());
+        return FocusKeyboardTarget(paneTargets[static_cast<std::size_t>(targetIndex)]);
     }
 
     void MainWindow::HandleCommandBarMenuTrackingTimer()
@@ -13657,6 +13770,33 @@ namespace hyperbrowse::ui
             browserModel_->FolderPath(),
             recursiveBrowsingEnabled_,
             showSubfoldersInBrowser_);
+    }
+
+    bool MainWindow::CanNavigateToParentFolder() const
+    {
+        if (!browserModel_ || browserModel_->FolderPath().empty() || !folderLoadCoordinator_
+            || folderLoadCoordinator_->IsEnumerationActive()
+            || folderLoadCoordinator_->HasPendingNavigation())
+        {
+            return false;
+        }
+
+        const fs::path currentFolder(browserModel_->FolderPath());
+        const fs::path parentFolder = currentFolder.parent_path();
+        return !parentFolder.empty()
+            && !FolderPathsEqual(parentFolder.wstring(), currentFolder.wstring());
+    }
+
+    bool MainWindow::NavigateToParentFolder()
+    {
+        if (!CanNavigateToParentFolder())
+        {
+            return false;
+        }
+
+        const fs::path parentFolder = fs::path(browserModel_->FolderPath()).parent_path();
+        LoadFolderAsync(NormalizeFolderPath(parentFolder.wstring()));
+        return true;
     }
 
     void MainWindow::RecordRecentDestination(std::wstring folderPath)
@@ -20960,6 +21100,7 @@ namespace hyperbrowse::ui
             && folderLoadCoordinator_ && folderLoadCoordinator_->CanNavigateBack();
         const bool canNavigateForward = hasFolder && historyNavigationSettled
             && folderLoadCoordinator_ && folderLoadCoordinator_->CanNavigateForward();
+        const bool canNavigateParent = hasFolder && CanNavigateToParentFolder();
         const bool thumbnailSteppingEnabled = hasFolder && browserMode_ == BrowserMode::Thumbnails
             && !folderEnumerationActive;
 
@@ -21024,6 +21165,7 @@ namespace hyperbrowse::ui
         EnableMenuItem(menu_, ID_VIEW_SETTINGS, MF_BYCOMMAND | MF_ENABLED);
         EnableMenuItem(menu_, ID_VIEW_NAVIGATE_BACK_FOLDER, MF_BYCOMMAND | (canNavigateBack ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_NAVIGATE_FORWARD_FOLDER, MF_BYCOMMAND | (canNavigateForward ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu_, ID_VIEW_NAVIGATE_PARENT_FOLDER, MF_BYCOMMAND | (canNavigateParent ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_THUMBNAIL_SIZE_INCREASE, MF_BYCOMMAND | (thumbnailSteppingEnabled ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu_, ID_VIEW_THUMBNAIL_SIZE_DECREASE, MF_BYCOMMAND | (thumbnailSteppingEnabled ? MF_ENABLED : MF_GRAYED));
 

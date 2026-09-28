@@ -32,6 +32,7 @@ namespace hyperbrowse::ui
             CommandHandler onNewFolder;
             CommandHandler onNavigateBackFolder;
             CommandHandler onNavigateForwardFolder;
+            CommandHandler onNavigateParentFolder;
             CommandHandler onToggleCurrentFolderFavorite;
             CommandHandler onClearFavoriteDestinations;
             CommandHandler onClearRecentFolders;

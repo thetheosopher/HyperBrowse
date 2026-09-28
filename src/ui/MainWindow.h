@@ -543,6 +543,8 @@ namespace hyperbrowse::ui
         void SyncQuickSendModel();
         bool NavigateBackToLastOpenedFolder();
         bool NavigateForwardToLastOpenedFolder();
+        bool CanNavigateToParentFolder() const;
+        bool NavigateToParentFolder();
         void RefreshQuickAccessMenus();
         void RefreshPersistentMenuOwnerDraw();
         void PrepareMenuForOwnerDraw(HMENU menu,
@@ -577,6 +579,7 @@ namespace hyperbrowse::ui
         void DeactivateCommandBarKeyboardMode(bool restoreFocus);
         bool HandleCommandBarKeyboardInput(UINT message, WPARAM wParam, LPARAM lParam);
         bool HandleKeyboardFocusInput(UINT message, WPARAM wParam, LPARAM lParam);
+        bool CycleKeyboardPaneFocus(bool reverse);
         std::vector<KeyboardFocusTarget> BuildKeyboardFocusSequence() const;
         KeyboardFocusTarget CurrentKeyboardFocusTarget() const;
         bool IsKeyboardFocusTargetAvailable(const KeyboardFocusTarget& target) const;

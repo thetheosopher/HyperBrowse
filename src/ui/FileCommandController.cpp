@@ -69,6 +69,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onNavigateBackFolder);
         case ID_VIEW_NAVIGATE_FORWARD_FOLDER:
             return Invoke(handlers_.onNavigateForwardFolder);
+        case ID_VIEW_NAVIGATE_PARENT_FOLDER:
+            return Invoke(handlers_.onNavigateParentFolder);
         case ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION:
             return Invoke(handlers_.onToggleCurrentFolderFavorite);
         case ID_FILE_CLEAR_FAVORITE_DESTINATIONS:

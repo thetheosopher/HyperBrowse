@@ -379,6 +379,7 @@ namespace hyperbrowse::tests
             std::size_t recentFolderIndex = 0;
             std::size_t favoriteIndex = 0;
             bool resumeFilingCalled = false;
+            bool navigateParentCalled = false;
 
             FileCommandController::Handlers handlers;
             handlers.onCopySelection = [&copyCallCount]
@@ -410,6 +411,10 @@ namespace hyperbrowse::tests
             {
                 resumeFilingCalled = true;
             };
+            handlers.onNavigateParentFolder = [&navigateParentCalled]
+            {
+                navigateParentCalled = true;
+            };
             controller.Configure(std::move(handlers));
 
                  Expect(controller.Handle(ID_FILE_COPY_SELECTION),
@@ -430,6 +435,8 @@ namespace hyperbrowse::tests
                    "File command controller did not decode recent-folder index");
                  Expect(controller.Handle(ID_FILE_RESUME_FILING) && resumeFilingCalled,
                      "File command controller did not forward resume filing");
+                     Expect(controller.Handle(ID_VIEW_NAVIGATE_PARENT_FOLDER) && navigateParentCalled,
+                         "File command controller did not forward parent-folder navigation");
             Expect(!controller.Handle(ID_VIEW_THUMBNAILS),
                    "File command controller claimed a view command outside its ownership");
         }

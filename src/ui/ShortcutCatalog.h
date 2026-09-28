@@ -26,6 +26,9 @@ namespace hyperbrowse::ui
         std::wstring_view group;
     };
 
+    inline constexpr std::wstring_view kDetailsPanelMenuLabel =
+        L"Show &Details Panel\tCtrl+3 / Alt+Shift+P";
+
     struct MenuMnemonicDefinition
     {
         wchar_t mnemonic;
@@ -80,6 +83,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_BACK_FOLDER, VK_BACK, 0, L"Backspace", L"Navigate to the previous folder", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_BACK_FOLDER, VK_LEFT, FALT, L"Alt+Left", L"Navigate to the previous folder", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_FORWARD_FOLDER, VK_RIGHT, FALT, L"Alt+Right", L"Navigate to the next folder", L"View and navigation"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_NAVIGATE_PARENT_FOLDER, VK_UP, FALT, L"Alt+Up", L"Navigate to the parent folder", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_ESCAPE, VK_ESCAPE, 0, L"Esc", L"Close the main window when enabled", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_MINIMIZE, static_cast<WORD>('W'), FCONTROL, L"Ctrl+W", L"Minimize the main window", L"File"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_REFRESH_TREE, VK_F5, 0, L"F5", L"Refresh the folder tree", L"File"},
@@ -96,7 +100,10 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_EDIT_CUT, static_cast<WORD>('X'), FCONTROL, L"Ctrl+X", L"Cut selected files", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_SELECT_ALL, static_cast<WORD>('A'), FCONTROL, L"Ctrl+A", L"Select all items", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_DUPLICATE_SELECTION, static_cast<WORD>('D'), FCONTROL, L"Ctrl+D", L"Duplicate selected files", L"File and selection actions"},
+        ShortcutDefinition{ShortcutContext::MainWindow, 0, static_cast<WORD>('F'), FCONTROL, L"Ctrl+F", L"Focus and select the browser filter", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, 0, static_cast<WORD>('G'), FCONTROL, L"Ctrl+G", L"Go to a file by number", L"View and navigation"},
+        ShortcutDefinition{ShortcutContext::MainWindow, 0, VK_F6, 0, L"F6", L"Cycle to the next main-window pane", L"View and navigation"},
+        ShortcutDefinition{ShortcutContext::MainWindow, 0, VK_F6, FSHIFT, L"Shift+F6", L"Cycle to the previous main-window pane", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_EDIT_UNDO, static_cast<WORD>('Z'), FCONTROL, L"Ctrl+Z", L"Undo the last file operation", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_EDIT_REDO, static_cast<WORD>('Y'), FCONTROL, L"Ctrl+Y", L"Redo the last file operation", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_REVEAL_IN_EXPLORER, static_cast<WORD>('E'), FCONTROL, L"Ctrl+E", L"Reveal the selection in Explorer", L"File and selection actions"},
@@ -106,6 +113,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_THUMBNAILS, static_cast<WORD>('1'), FCONTROL, L"Ctrl+1", L"Use thumbnail mode", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_DETAILS, static_cast<WORD>('2'), FCONTROL, L"Ctrl+2", L"Use details mode", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_DETAILS_STRIP, static_cast<WORD>('3'), FCONTROL, L"Ctrl+3", L"Toggle the details panel", L"View and navigation"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_DETAILS_STRIP, static_cast<WORD>('P'), FALT | FSHIFT, L"Alt+Shift+P", L"Toggle the details panel", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_RECURSIVE, static_cast<WORD>('R'), FCONTROL, L"Ctrl+R", L"Toggle recursive browsing", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_OEM_PLUS, 0, L"+ / =", L"Increase thumbnail size", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_OEM_PLUS, FSHIFT, L"+ / =", L"Increase thumbnail size", L"View and navigation"},

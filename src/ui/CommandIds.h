@@ -41,6 +41,7 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW = 1042;
     inline constexpr UINT ID_VIEW_NAVIGATE_BACK_FOLDER = 1049;
     inline constexpr UINT ID_VIEW_NAVIGATE_FORWARD_FOLDER = 1050;
+    inline constexpr UINT ID_VIEW_NAVIGATE_PARENT_FOLDER = 1052;
 
     inline constexpr UINT CommandIdFromXButton(UINT xButton) noexcept
     {

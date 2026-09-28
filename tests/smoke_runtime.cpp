@@ -90,8 +90,21 @@ namespace hyperbrowse::tests
                    "Ctrl+X is missing from the main-window shortcut catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_NAVIGATE_FORWARD_FOLDER, VK_RIGHT, FALT),
                    "Alt+Right is missing from the folder navigation catalog");
+            Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_NAVIGATE_PARENT_FOLDER, VK_UP, FALT),
+                   "Alt+Up is missing from the parent-folder navigation catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_ADD, 0),
                    "Numpad plus is missing from the thumbnail stepping catalog");
+            Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_DETAILS_STRIP, '3', FCONTROL)
+                       && hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_DETAILS_STRIP, 'P', FALT | FSHIFT),
+                   "Details Panel Ctrl+3 and Alt+Shift+P aliases must share the same command");
+            Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, 0, 'F', FCONTROL),
+                   "Ctrl+F browser-filter shortcut is missing from the catalog");
+            Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, 0, VK_F6, 0)
+                       && hasShortcut(mainShortcuts, ShortcutContext::MainWindow, 0, VK_F6, FSHIFT),
+                   "F6 and Shift+F6 pane-navigation shortcuts are missing from the catalog");
+            Expect(hyperbrowse::ui::kDetailsPanelMenuLabel.find(L"Ctrl+3") != std::wstring_view::npos
+                       && hyperbrowse::ui::kDetailsPanelMenuLabel.find(L"Alt+Shift+P") != std::wstring_view::npos,
+                   "Details Panel menu label must display both registered shortcuts");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
                                ShortcutContext::Viewer,
                                ID_FILE_COPY_IMAGE_PIXELS,
