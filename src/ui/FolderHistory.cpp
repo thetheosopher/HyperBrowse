@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cwchar>
+#include <filesystem>
 #include <utility>
 
 namespace hyperbrowse::ui
@@ -12,6 +13,115 @@ namespace hyperbrowse::ui
         {
             return _wcsicmp(std::wstring(lhs).c_str(), std::wstring(rhs).c_str()) == 0;
         }
+        bool StartsWithInsensitive(std::wstring_view value, std::wstring_view prefix)
+        {
+            return value.size() >= prefix.size()
+                && _wcsnicmp(value.data(), prefix.data(), prefix.size()) == 0;
+        }
+        std::size_t UncRootLength(std::wstring_view path, std::size_t serverStart)
+        {
+            const std::size_t serverEnd = path.find(L'\\', serverStart);
+            if (serverEnd == std::wstring_view::npos)
+            {
+                return path.size();
+            }
+            const std::size_t shareEnd = path.find(L'\\', serverEnd + 1);
+            return shareEnd == std::wstring_view::npos ? path.size() : shareEnd;
+        }
+    }
+    std::vector<FolderBreadcrumbSegment> BuildFolderBreadcrumbSegments(std::wstring_view folderPath)
+    {
+        if (folderPath.empty())
+        {
+            return {};
+        }
+        std::wstring normalized = std::filesystem::path(folderPath).lexically_normal().wstring();
+        std::replace(normalized.begin(), normalized.end(), L'/', L'\\');
+        if (normalized.empty())
+        {
+            return {};
+        }
+        std::wstring rootLabel;
+        std::wstring currentPath;
+        std::size_t componentStart = 0;
+        const std::wstring_view normalizedView(normalized);
+        if (StartsWithInsensitive(normalizedView, L"\\\\?\\UNC\\"))
+        {
+            const std::size_t rootLength = UncRootLength(normalizedView, 8);
+            rootLabel = normalized.substr(0, rootLength);
+            currentPath = rootLabel;
+        }
+        else if (normalizedView.starts_with(L"\\\\")
+                 && !StartsWithInsensitive(normalizedView, L"\\\\?\\")
+                 && !StartsWithInsensitive(normalizedView, L"\\\\.\\"))
+        {
+            const std::size_t rootLength = UncRootLength(normalizedView, 2);
+            rootLabel = normalized.substr(0, rootLength);
+            currentPath = rootLabel;
+        }
+        else if (StartsWithInsensitive(normalizedView, L"\\\\?\\")
+                 && normalized.size() >= 7
+                 && normalized[5] == L':'
+                 && normalized[6] == L'\\')
+        {
+            rootLabel = normalized.substr(0, 7);
+            currentPath = rootLabel;
+        }
+        else if (normalized.size() >= 3
+                 && normalized[1] == L':'
+                 && normalized[2] == L'\\')
+        {
+            rootLabel = normalized.substr(0, 3);
+            currentPath = rootLabel;
+        }
+        else if (normalized.front() == L'\\')
+        {
+            rootLabel = L"\\";
+            currentPath = rootLabel;
+        }
+        if (!rootLabel.empty())
+        {
+            componentStart = rootLabel.size();
+        }
+        std::vector<FolderBreadcrumbSegment> segments;
+        if (!rootLabel.empty())
+        {
+            std::wstring targetPath = currentPath;
+            if (targetPath.back() != L'\\')
+            {
+                targetPath.push_back(L'\\');
+            }
+            segments.push_back(FolderBreadcrumbSegment{rootLabel, std::move(targetPath)});
+        }
+        while (componentStart < normalized.size())
+        {
+            while (componentStart < normalized.size() && normalized[componentStart] == L'\\')
+            {
+                ++componentStart;
+            }
+            if (componentStart >= normalized.size())
+            {
+                break;
+            }
+            const std::size_t componentEnd = normalized.find(L'\\', componentStart);
+            const std::size_t end = componentEnd == std::wstring::npos ? normalized.size() : componentEnd;
+            std::wstring label = normalized.substr(componentStart, end - componentStart);
+            if (!label.empty() && label != L".")
+            {
+                if (!currentPath.empty() && currentPath.back() != L'\\')
+                {
+                    currentPath.push_back(L'\\');
+                }
+                currentPath.append(label);
+                segments.push_back(FolderBreadcrumbSegment{std::move(label), currentPath});
+            }
+            componentStart = end;
+        }
+        if (segments.empty())
+        {
+            segments.push_back(FolderBreadcrumbSegment{normalized, normalized});
+        }
+        return segments;
     }
 
     FolderHistory::FolderHistory(std::size_t historyLimit)

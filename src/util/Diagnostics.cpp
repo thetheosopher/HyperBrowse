@@ -322,6 +322,23 @@ namespace hyperbrowse::util
         }
     }
 
+    StartupDiagnosticsSnapshot CaptureStartupDiagnosticsSnapshot()
+    {
+        DiagnosticsStore& store = GetStore();
+        std::scoped_lock lock(store.mutex);
+
+        StartupDiagnosticsSnapshot snapshot;
+        if (store.startupWindowVisibleRecorded)
+        {
+            snapshot.processToFirstWindowVisibleMs = store.startupFirstWindowVisibleMs;
+        }
+        if (store.startupThumbnailPaintedRecorded)
+        {
+            snapshot.firstWindowVisibleToFirstThumbnailPaintedMs = store.startupFirstThumbnailPaintedMs;
+        }
+        return snapshot;
+    }
+
     bool WriteStartupBenchmarkSnapshot(std::wstring* outputPath)
     {
         DiagnosticsSnapshot snapshot = CaptureDiagnosticsSnapshot();

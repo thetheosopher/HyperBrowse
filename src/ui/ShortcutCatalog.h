@@ -116,6 +116,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_SLIDESHOW_SELECTION, static_cast<WORD>('S'), FCONTROL | FSHIFT, L"Ctrl+Shift+S", L"Start a slideshow from the selection", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_SLIDESHOW_FOLDER, static_cast<WORD>('F'), FCONTROL | FSHIFT, L"Ctrl+Shift+F", L"Start a slideshow from the folder", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_SETTINGS, static_cast<WORD>('T'), FCONTROL | FSHIFT, L"Ctrl+Shift+T", L"Open Settings", L"Tools"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_PERFORMANCE_HUD, static_cast<WORD>('P'), FCONTROL | FSHIFT, L"Ctrl+Shift+P", L"Toggle the performance HUD", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_HELP_DIAGNOSTICS_SNAPSHOT, static_cast<WORD>('D'), FCONTROL | FSHIFT, L"Ctrl+Shift+D", L"Capture a diagnostics snapshot", L"Tools"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_HELP_DIAGNOSTICS_RESET, static_cast<WORD>('X'), FCONTROL | FSHIFT, L"Ctrl+Shift+X", L"Reset diagnostics state", L"Tools"},
     };

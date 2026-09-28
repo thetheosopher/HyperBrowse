@@ -95,6 +95,14 @@ conversion, and low-friction culling.
   Settings > Performance**
 - A non-modal **Cache Stats** tab in the details panel for asynchronous
   thumbnail, metadata, and persistent-cache usage statistics
+- A custom About dialog with version/build identity, display-adapter vendor,
+  and A8 startup timings when they have been recorded
+- Muted brand-art watermarks for the browser's no-folder state and the viewer's
+  no-image state, without replacing loading or error presentations
+- A root-aware browser breadcrumb with clickable parent folders and overflow
+  navigation for long drive/UNC paths
+- An off-by-default **Performance HUD** for live thumbnail decode/queue state,
+  sampled scale/cache statistics, and memory pressure
 
 ### Deferred or intentionally out of scope
 - Heavy image editing
@@ -170,6 +178,30 @@ Support:
 - update UI incrementally
 - preserve selection where practical
 - avoid full reload when a smaller delta update is sufficient
+
+### Breadcrumb navigation and empty states
+
+- When a folder is active, the breadcrumb shows its drive or UNC root and
+  ancestor folders above the right-side browser content. Activating a segment
+  uses the existing folder-load path and synchronizes the tree and history.
+- When the path is too long for the available width, the bar keeps the root and
+  current folder visible and exposes hidden ancestors through **More parent
+  folders**.
+- The browser's no-folder state and viewer's no-image state show muted brand
+  art above their prompts. Loading, error, filtered-empty, empty-folder, and
+  valid-image presentations remain distinct.
+
+### Performance HUD
+
+- Toggle the HUD from **View > Performance HUD** or with `Ctrl+Shift+P`. It is
+  off by default and is not persisted.
+- Active thumbnail decodes and queued jobs are instantaneous counts. Scale
+  time is the average of recorded `thumbnail.scale` timings; cache hit rate is
+  derived from the current in-memory thumbnail-cache hit/miss counters. These
+  sampled values can be unavailable before samples exist or after diagnostics
+  reset.
+- Memory pressure reflects the current adaptive pressure state. Refresh and
+  display work stop when the HUD is disabled.
 
 ## 8. Viewer Window
 

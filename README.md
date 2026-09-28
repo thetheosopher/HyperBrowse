@@ -67,11 +67,11 @@ This release expands HyperBrowse's image-review and desktop file-management work
 
 | Area | Included today |
 | --- | --- |
-| Browser | Explorer-style folder tree, resizable splitter, thumbnail mode, details mode, recursive browsing, live filename/rating/tag filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
-| Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, overlay HUD with size presets, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
+| Browser | Explorer-style folder tree, resizable splitter, root-aware clickable breadcrumb with long-path overflow, thumbnail mode, details mode, recursive browsing, live filename/rating/tag filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
+| Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, image-information overlays with size presets, muted idle-state watermark, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
-| Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, worker-owned persistent disk thumbnail cache with stats/compact/purge and benchmark gates, metadata cache, folder watch refresh, and optional GPU-assisted JPEG decode |
+| Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, worker-owned persistent disk thumbnail cache with stats/compact/purge and benchmark gates, metadata cache, folder watch refresh, optional GPU-assisted JPEG decode, and an off-by-default performance HUD (`Ctrl+Shift+P`) |
 | Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
 
 ### Viewer Quick Actions
@@ -119,6 +119,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Del` / `Shift+Del` | Move the selection to the Recycle Bin / delete it permanently |
 | `Ctrl+1` / `Ctrl+2` | Use thumbnail / details mode |
 | `Ctrl+3` | Toggle the details panel |
+| `Ctrl+Shift+P` | Toggle the Performance HUD |
 | `Ctrl+R` | Toggle recursive browsing |
 | `+` / `=` / Numpad `+` | Increase thumbnail size |
 | `-` / `_` / Numpad `-` | Decrease thumbnail size |

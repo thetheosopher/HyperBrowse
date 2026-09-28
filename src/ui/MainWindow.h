@@ -45,6 +45,7 @@
 #include "ui/QuickSend.h"
 #include "ui/ViewerPendingOperationState.h"
 #include "ui/ViewCommandController.h"
+#include "ui/FolderHistory.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowTimerRouter.h"
 
@@ -270,12 +271,24 @@ namespace hyperbrowse::ui
         FolderTreeNodeData* GetFolderTreeNodeData(HTREEITEM item) const;
         std::wstring GetSelectedFolderTreePath() const;
         void LayoutChildren();
+        void UpdateBreadcrumbBar();
+        void LayoutBreadcrumbBar(int left, int top, int width, int height);
+        void DrawBreadcrumbButton(const DRAWITEMSTRUCT& drawItem) const;
+        static LRESULT CALLBACK BreadcrumbButtonSubclassProc(HWND hwnd,
+                                      UINT message,
+                                      WPARAM wParam,
+                                      LPARAM lParam,
+                                      UINT_PTR subclassId,
+                                      DWORD_PTR refData);
+        void ShowBreadcrumbOverflowMenu();
         void UpdateStatusText();
+        void SetPerformanceHudEnabled(bool enabled);
+        void UpdatePerformanceHud();
         void ShowQuickSendConfirmation(std::wstring message, HWND viewerHwnd = nullptr);
         void LayoutQuickSendConfirmationToast();
         void PaintQuickSendConfirmationToast(HDC hdc) const;
         void UpdateMenuState();
-        void UpdateWindowTitle() const;
+        void UpdateWindowTitle();
         void ApplyViewerMouseWheelSetting();
         void ApplyViewerEscapeKeyBehavior();
         void ApplyViewerTransitionSettings();
@@ -623,6 +636,10 @@ namespace hyperbrowse::ui
         HWND treePane_{};
         HWND browserPane_{};
         HWND statusBar_{};
+        std::vector<HWND> breadcrumbSegmentButtons_;
+        HWND breadcrumbMoreButton_{};
+        std::vector<FolderBreadcrumbSegment> breadcrumbSegments_;
+        std::wstring breadcrumbFolderPath_;
         HWND detailsPanelText_{};
         HWND quickAccessScrollBar_{};
         HWND tooltipControl_{};
@@ -791,6 +808,7 @@ namespace hyperbrowse::ui
         bool fileOperationActive_{};
         UINT_PTR quickSendConfirmationTimerId_{};
         UINT_PTR detailsPanelPerformanceTimerId_{};
+        UINT_PTR performanceHudTimerId_{};
         HWND quickSendConfirmationToastWindow_{};
         std::wstring quickSendConfirmationText_;
         bool cacheMaintenanceActive_{};
@@ -879,6 +897,7 @@ namespace hyperbrowse::ui
         bool sortAscending_{true};
         bool compactThumbnailLayout_{true};
         bool thumbnailDetailsVisible_{true};
+        bool performanceHudEnabled_{};
         UINT slideshowIntervalMs_{3000};
         viewer::TransitionStyle slideshowTransitionStyle_{};
         UINT slideshowTransitionDurationMs_{350};

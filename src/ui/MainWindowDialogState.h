@@ -123,6 +123,9 @@ namespace hyperbrowse::ui::dialog_detail
         std::wstring title;
         std::wstring subtitle;
         std::wstring intro;
+        std::wstring version;
+        std::wstring buildConfiguration;
+        std::wstring gpuVendor;
         std::wstring bodyHeading;
         std::wstring bodyContent;
         std::wstring footer;

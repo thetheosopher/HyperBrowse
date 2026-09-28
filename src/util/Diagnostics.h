@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,6 +37,12 @@ namespace hyperbrowse::util
         std::vector<DiagnosticTimingRow> timings;
         std::vector<DiagnosticCounterRow> counters;
         std::vector<DiagnosticValueRow> derived;
+    };
+
+    struct StartupDiagnosticsSnapshot
+    {
+        std::optional<double> processToFirstWindowVisibleMs;
+        std::optional<double> firstWindowVisibleToFirstThumbnailPaintedMs;
     };
 
     class Stopwatch
@@ -75,5 +82,6 @@ namespace hyperbrowse::util
     bool WriteRedactedDiagnosticsSnapshot(const std::wstring& outputPath);
     void ResetDiagnostics();
     DiagnosticsSnapshot CaptureDiagnosticsSnapshot();
+    StartupDiagnosticsSnapshot CaptureStartupDiagnosticsSnapshot();
     std::wstring BuildDiagnosticsReport();
 }

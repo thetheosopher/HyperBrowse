@@ -33,6 +33,7 @@
 #include "ui/FilingResumePersistence.h"
 #include "ui/FolderTreeDropPolicy.h"
 #include "ui/FolderHistory.h"
+#include "ui/PerformanceHud.h"
 #include "ui/ImageWorkflowPersistence.h"
 #include "ui/ItemNumberNavigationPolicy.h"
 #include "ui/PairedRawJpegResolver.h"
@@ -47,6 +48,7 @@
 #include "ui/SelectedPathPersistence.h"
 #include "ui/SelectionRatingPolicy.h"
 #include "ui/ViewCommandController.h"
+#include "ui/ShortcutCatalog.h"
 #include "ui/ViewerItemSelectionPolicy.h"
 #include "ui/ViewerPendingOperationState.h"
 #include "ui/ViewerSynchronizer.h"
@@ -248,6 +250,26 @@ namespace hyperbrowse::tests
 
                  Expect(CommandIdFromXButton(XBUTTON1) == ID_VIEW_NAVIGATE_BACK_FOLDER,
                      "Mouse back button did not map to folder back navigation");
+            const auto driveSegments = hyperbrowse::ui::BuildFolderBreadcrumbSegments(L"C:\\Pictures\\Trips\\");
+            Expect(driveSegments.size() == 3
+                       && driveSegments[0].label == L"C:\\"
+                       && driveSegments[0].targetFolderPath == L"C:\\"
+                       && driveSegments[1].label == L"Pictures"
+                       && driveSegments[1].targetFolderPath == L"C:\\Pictures"
+                       && driveSegments[2].label == L"Trips"
+                       && driveSegments[2].targetFolderPath == L"C:\\Pictures\\Trips",
+                   "Drive breadcrumb segments did not preserve root and ancestor paths");
+
+            const auto uncSegments = hyperbrowse::ui::BuildFolderBreadcrumbSegments(L"\\\\server\\share\\photos");
+            Expect(uncSegments.size() == 2
+                       && uncSegments[0].label == L"\\\\server\\share"
+                       && uncSegments[0].targetFolderPath == L"\\\\server\\share\\"
+                       && uncSegments[1].label == L"photos"
+                       && uncSegments[1].targetFolderPath == L"\\\\server\\share\\photos",
+                   "UNC breadcrumb segments did not keep the share as the navigable root");
+
+            Expect(hyperbrowse::ui::BuildFolderBreadcrumbSegments(L"").empty(),
+                   "An empty folder path produced breadcrumb segments");
                  Expect(CommandIdFromXButton(XBUTTON2) == ID_VIEW_NAVIGATE_FORWARD_FOLDER,
                      "Mouse forward button did not map to folder forward navigation");
                  Expect(CommandIdFromXButton(0) == 0,
@@ -422,6 +444,7 @@ namespace hyperbrowse::tests
             UINT thumbnailSizeCommand = 0;
             UINT sortCommand = 0;
             UINT performanceProfileCommand = 0;
+            int performanceHudCallCount = 0;
             int detailsCallCount = 0;
 
             ViewCommandController::Handlers handlers;
@@ -441,6 +464,10 @@ namespace hyperbrowse::tests
             {
                 performanceProfileCommand = commandId;
             };
+            handlers.onPerformanceHud = [&performanceHudCallCount]
+            {
+                ++performanceHudCallCount;
+            };
             handlers.onDetails = [&detailsCallCount]
             {
                 ++detailsCallCount;
@@ -458,6 +485,17 @@ namespace hyperbrowse::tests
             Expect(controller.Handle(ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE)
                        && performanceProfileCommand == ID_HELP_PERFORMANCE_PROFILE_AGGRESSIVE,
                    "View command controller did not route performance-profile commands");
+                 Expect(controller.Handle(ID_VIEW_PERFORMANCE_HUD) && performanceHudCallCount == 1,
+                     "View command controller did not route the performance HUD toggle");
+                const auto shortcuts = hyperbrowse::ui::MainWindowShortcuts();
+                const auto performanceHudShortcut = std::find_if(shortcuts.begin(), shortcuts.end(), [](const auto& shortcut)
+                {
+                    return shortcut.commandId == ID_VIEW_PERFORMANCE_HUD;
+                });
+                Expect(performanceHudShortcut != shortcuts.end()
+                           && performanceHudShortcut->virtualKey == static_cast<WORD>('P')
+                           && performanceHudShortcut->modifiers == (FCONTROL | FSHIFT),
+                       "Performance HUD shortcut catalog entry changed or is missing");
             Expect(controller.Handle(ID_VIEW_DETAILS) && detailsCallCount == 1,
                    "View command controller did not route fixed view commands");
             Expect(!controller.Handle(ID_FILE_OPEN_FOLDER),
@@ -2210,6 +2248,29 @@ namespace hyperbrowse::tests
         }
     }
 
+    void RunPerformanceHudFormattingScenario()
+    {
+        hyperbrowse::ui::PerformanceHudSnapshot snapshot;
+        snapshot.activeDecodes = 3;
+        snapshot.scaleAverageMs = 12.34;
+        snapshot.thumbnailCacheHitRatePercent = 75.0;
+        snapshot.memoryPressureActive = true;
+        snapshot.pendingThumbnailJobs = 9;
+
+        const std::wstring text = hyperbrowse::ui::FormatPerformanceHudText(snapshot);
+        Expect(text == L"Active decodes: 3\r\nScale average: 12.3 ms\r\nThumbnail cache hit rate: 75%\r\nMemory pressure: Active\r\nThumbnail queue: 9",
+               "Performance HUD formatting changed metric labels or units");
+
+        snapshot.scaleAverageMs.reset();
+        snapshot.thumbnailCacheHitRatePercent.reset();
+        snapshot.memoryPressureActive = false;
+        const std::wstring unavailableText = hyperbrowse::ui::FormatPerformanceHudText(snapshot);
+        Expect(unavailableText.find(L"Scale average: Not available") != std::wstring::npos
+                   && unavailableText.find(L"Thumbnail cache hit rate: Not available") != std::wstring::npos
+                   && unavailableText.find(L"Memory pressure: Normal") != std::wstring::npos,
+               "Performance HUD did not distinguish unavailable metrics from zero");
+    }
+
     void RunPolicyScenarios()
     {
         RunPrefetchSizingScenario();
@@ -2218,6 +2279,7 @@ namespace hyperbrowse::tests
         RunCompareSessionPolicyScenario();
         RunFileOperationMediaCacheInvalidationScenario();
         RunFolderHistoryScenario();
+        RunPerformanceHudFormattingScenario();
         RunFileOperationJournalScenario();
         RunFileCommandControllerScenario();
         RunViewCommandControllerScenario();

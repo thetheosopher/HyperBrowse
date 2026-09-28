@@ -142,6 +142,7 @@ namespace hyperbrowse::browser
         void SetResourceProfile(hyperbrowse::util::ResourceProfile profile);
         void SetPrefetchDepthOverride(int depth);
         void SetThumbnailMemoryPressureActive(bool active);
+        void SetPerformanceHudText(std::wstring text);
         void SetCacheCapacityOverrides(std::size_t thumbnailCacheCapacityBytes,
                            std::size_t metadataCacheCapacityEntries,
                            std::size_t persistentThumbnailCacheCapacityBytes = 0);
@@ -278,6 +279,8 @@ namespace hyperbrowse::browser
         void RebuildDetailsListFont();
         void D2DDrawPlaceholderState(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
         void D2DDrawThumbnailCells(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
+        void D2DDrawPerformanceHud(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const;
+        void DrawDetailsListPerformanceHud(HDC hdc) const;
         void D2DDrawUnavailableThumbnailState(ID2D1RenderTarget* rt,
                               const D2D1_RECT_F& previewRect,
                               decode::ThumbnailDecodeFailureKind failureKind,
@@ -326,6 +329,7 @@ namespace hyperbrowse::browser
         HIMAGELIST shellImageList_{};
         int folderIconIndex_{-1};
         ThemeColors colors_{};
+        std::wstring performanceHudText_;
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
         hyperbrowse::services::UserMetadataStore* userMetadataStore_{};
@@ -384,6 +388,7 @@ namespace hyperbrowse::browser
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSelectedCellBrush_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSelectedPreviewBrush_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dPlaceholderBrush_;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dPerformanceHudBackgroundBrush_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dBorderBrush_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dSelectedBorderBrush_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dRubberBandBrush_;
@@ -396,6 +401,7 @@ namespace hyperbrowse::browser
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dStatusFormat_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dPlaceholderTitleFormat_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dPlaceholderBodyFormat_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dPerformanceHudTextFormat_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dPlaceholderArtBitmap_;
         mutable std::unordered_map<HBITMAP, Microsoft::WRL::ComPtr<ID2D1Bitmap>> d2dBitmapCache_;
 

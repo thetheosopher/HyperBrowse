@@ -22,6 +22,12 @@ namespace hyperbrowse::ui
         std::size_t targetIndex{};
         std::wstring folderPath;
     };
+    struct FolderBreadcrumbSegment
+    {
+        std::wstring label;
+        std::wstring targetFolderPath;
+    };
+    std::vector<FolderBreadcrumbSegment> BuildFolderBreadcrumbSegments(std::wstring_view folderPath);
 
     class FolderHistory
     {

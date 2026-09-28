@@ -49,6 +49,7 @@ namespace hyperbrowse::ui
             CommandHandler onViewerDetailOverlays;
             CommandHandler onViewerFullMetadata;
             CommandHandler onPressureStateStatus;
+            CommandHandler onPerformanceHud;
             CommandHandler onSlideshowSelection;
             CommandHandler onSlideshowFolder;
             CommandHandler onUserGuide;

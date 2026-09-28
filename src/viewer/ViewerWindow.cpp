@@ -6475,6 +6475,7 @@ namespace hyperbrowse::viewer
                 else if (!currentImage_)
                 {
                     const bool showIcon = loading_ || errorMessage_.empty();
+                    const bool stackedEmptyState = !loading_ && errorMessage_.empty() && d2dStatusArtBitmap_;
                     constexpr float kPanelPaddingLeft = 28.0f;
                     constexpr float kPanelPaddingRight = 32.0f;
                     constexpr float kPanelPaddingVertical = 16.0f;
@@ -6498,17 +6499,36 @@ namespace hyperbrowse::viewer
                     if (showIcon && d2dStatusArtBitmap_)
                     {
                         const float artW = d2dStatusArtBitmap_->GetSize().width;
-                        const float maxIconW = std::max(96.0f, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
-                        const float maxIconH = std::max(96.0f, maxPanelHeight - (kPanelPaddingVertical * 2.0f));
-                        renderedIconSize = std::min({artW, maxIconW, maxIconH});
+                        if (stackedEmptyState)
+                        {
+                            const float stackedMaxWidth = std::max(180.0f, clientWidth - 32.0f);
+                            const float textBlockWidth = std::min(kDesiredTextBlockWidth,
+                                stackedMaxWidth - kPanelPaddingLeft - kPanelPaddingRight);
+                            const float maxIconHeight = std::max(24.0f,
+                                maxPanelHeight - (kPanelPaddingVertical * 2.0f) - kIconTextGap - loadingTextBlockHeight);
+                            renderedIconSize = std::min({128.0f,
+                                                         artW,
+                                                         std::max(24.0f, stackedMaxWidth - kPanelPaddingLeft - kPanelPaddingRight),
+                                                         maxIconHeight});
+                            panelWidth = std::min(stackedMaxWidth,
+                                std::max(240.0f, textBlockWidth + kPanelPaddingLeft + kPanelPaddingRight));
+                            panelHeight = std::min(maxPanelHeight,
+                                (kPanelPaddingVertical * 2.0f) + renderedIconSize + kIconTextGap + loadingTextBlockHeight);
+                        }
+                        else
+                        {
+                            const float maxIconW = std::max(96.0f, maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - kMinimumTextBlockWidth);
+                            const float maxIconH = std::max(96.0f, maxPanelHeight - (kPanelPaddingVertical * 2.0f));
+                            renderedIconSize = std::min({artW, maxIconW, maxIconH});
 
-                        const float textBlockWidth = std::max(kMinimumTextBlockWidth,
-                            std::min(kDesiredTextBlockWidth,
-                                     maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - renderedIconSize));
-                        panelWidth = std::min(maxPanelWidth,
-                            kPanelPaddingLeft + renderedIconSize + kIconTextGap + textBlockWidth + kPanelPaddingRight);
-                        panelHeight = std::min(maxPanelHeight,
-                            (kPanelPaddingVertical * 2.0f) + std::max(renderedIconSize, loadingTextBlockHeight));
+                            const float textBlockWidth = std::max(kMinimumTextBlockWidth,
+                                std::min(kDesiredTextBlockWidth,
+                                         maxPanelWidth - kPanelPaddingLeft - kPanelPaddingRight - kIconTextGap - renderedIconSize));
+                            panelWidth = std::min(maxPanelWidth,
+                                kPanelPaddingLeft + renderedIconSize + kIconTextGap + textBlockWidth + kPanelPaddingRight);
+                            panelHeight = std::min(maxPanelHeight,
+                                (kPanelPaddingVertical * 2.0f) + std::max(renderedIconSize, loadingTextBlockHeight));
+                        }
                     }
                     else
                     {
@@ -6529,32 +6549,54 @@ namespace hyperbrowse::viewer
                         : (errorMessage_.empty() ? L"No Image Loaded" : L"Unable to Open Image");
                     const std::wstring messageText = loading_
                         ? L"Opening image..."
-                        : (errorMessage_.empty() ? L"Choose an image to continue." : errorMessage_);
+                        : (errorMessage_.empty() ? L"Open an image to begin viewing." : errorMessage_);
 
                     D2D1_RECT_F titleRect{};
                     D2D1_RECT_F bodyRect{};
                     if (showIcon && d2dStatusArtBitmap_)
                     {
-                        const float iconX = panelLeft + kPanelPaddingLeft;
-                        const float iconY = panelTop + (panelHeight - renderedIconSize) / 2.0f;
+                        const float iconX = stackedEmptyState
+                            ? panelLeft + (panelWidth - renderedIconSize) / 2.0f
+                            : panelLeft + kPanelPaddingLeft;
+                        const float iconY = stackedEmptyState
+                            ? panelTop + kPanelPaddingVertical
+                            : panelTop + (panelHeight - renderedIconSize) / 2.0f;
                         d2dRenderTarget_->DrawBitmap(d2dStatusArtBitmap_.Get(),
                             D2D1::RectF(iconX, iconY, iconX + renderedIconSize, iconY + renderedIconSize),
-                            1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                            stackedEmptyState ? 0.62f : 1.0f,
+                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 
-                        const float contentLeft = iconX + renderedIconSize + kIconTextGap;
-                        const float contentRight = panelLeft + panelWidth - kPanelPaddingRight;
-                        const float textBlockHeight = overlayMetrics.loadingTitleHeight
-                            + overlayMetrics.loadingGap
-                            + overlayMetrics.loadingBodyHeight;
-                        const float contentTop = panelTop + std::max(kPanelPaddingVertical, (panelHeight - textBlockHeight) / 2.0f);
-                        titleRect = D2D1::RectF(contentLeft,
-                                                contentTop,
-                                                contentRight,
-                                                contentTop + overlayMetrics.loadingTitleHeight);
-                        bodyRect = D2D1::RectF(contentLeft,
-                                              titleRect.bottom + overlayMetrics.loadingGap,
-                                              contentRight,
-                                              titleRect.bottom + overlayMetrics.loadingGap + overlayMetrics.loadingBodyHeight);
+                        if (stackedEmptyState)
+                        {
+                            const float contentLeft = panelLeft + kPanelPaddingLeft;
+                            const float contentRight = panelLeft + panelWidth - kPanelPaddingRight;
+                            const float contentTop = iconY + renderedIconSize + kIconTextGap;
+                            titleRect = D2D1::RectF(contentLeft,
+                                                    contentTop,
+                                                    contentRight,
+                                                    contentTop + overlayMetrics.loadingTitleHeight);
+                            bodyRect = D2D1::RectF(contentLeft,
+                                                   titleRect.bottom + overlayMetrics.loadingGap,
+                                                   contentRight,
+                                                   titleRect.bottom + overlayMetrics.loadingGap + overlayMetrics.loadingBodyHeight);
+                        }
+                        else
+                        {
+                            const float contentLeft = iconX + renderedIconSize + kIconTextGap;
+                            const float contentRight = panelLeft + panelWidth - kPanelPaddingRight;
+                            const float textBlockHeight = overlayMetrics.loadingTitleHeight
+                                + overlayMetrics.loadingGap
+                                + overlayMetrics.loadingBodyHeight;
+                            const float contentTop = panelTop + std::max(kPanelPaddingVertical, (panelHeight - textBlockHeight) / 2.0f);
+                            titleRect = D2D1::RectF(contentLeft,
+                                                    contentTop,
+                                                    contentRight,
+                                                    contentTop + overlayMetrics.loadingTitleHeight);
+                            bodyRect = D2D1::RectF(contentLeft,
+                                                   titleRect.bottom + overlayMetrics.loadingGap,
+                                                   contentRight,
+                                                   titleRect.bottom + overlayMetrics.loadingGap + overlayMetrics.loadingBodyHeight);
+                        }
                     }
                     else
                     {

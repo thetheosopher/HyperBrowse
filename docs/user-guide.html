@@ -219,6 +219,7 @@
                 <li>Double-click an image, or select it and choose <strong>File &gt; Open</strong>, to open or replace the existing viewer. Choose <strong>File &gt; Open in New Viewer Window</strong> when the image should remain in its own viewer window.</li>
                 <li>Use the <strong>Help &gt; User Guide</strong> command or press <kbd>F1</kbd> whenever you need this guide again.</li>
             </ol>
+            <p><strong>About HyperBrowse.</strong> <strong>Help &gt; About</strong> shows the version, build configuration, display-adapter vendor, and startup timings when diagnostics recorded them.</p>
             <div class="callout"><strong>Keep the layout together.</strong> Portable builds locate the guide beside the application. Do not separate the <code>docs</code> folder from the executable.</div>
             <figure>
                 <img src="MainWindow.PNG" alt="HyperBrowse main window showing a folder tree, image thumbnails, and the action strip">
@@ -236,6 +237,7 @@
                         <li><strong>Details mode</strong> is useful for comparing filenames, dates, dimensions, file sizes, ratings, and tags.</li>
                         <li>The details panel shows information for the current selection. It can be toggled from <strong>View &gt; Show Details Panel</strong>.</li>
                         <li>Use <strong>View &gt; Show Subfolders</strong> to include folder entries while browsing.</li>
+                        <li>With a folder open, click a segment in the breadcrumb above the browser to navigate to that parent. Long paths put hidden ancestors in the <strong>More parent folders</strong> menu.</li>
                     </ul>
                 </div>
                 <div>
@@ -245,9 +247,11 @@
                         <li>Use <strong>View &gt; Sort</strong> to sort by filename, modified date, file size, dimensions, type, date taken, rating, tags, or random order.</li>
                         <li>Toggle <strong>View &gt; Sort &gt; Descending</strong> to switch between ascending and descending order.</li>
                         <li>Turn on <strong>View &gt; Recursive Browsing</strong> when the current folder and its descendants should be treated as one image collection.</li>
+                        <li>Choose <strong>View &gt; Performance HUD</strong> or press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> to show active thumbnail decodes, average scale time, cache hit rate, memory pressure, and queue depth. The HUD is off by default.</li>
                     </ul>
                 </div>
             </div>
+            <p>When no folder is selected, the browser shows a muted watermark above its prompt. The viewer uses the same treatment when no image is loaded; loading and error states remain separate.</p>
             <h3>Selection and drag-and-drop</h3>
             <p>Use Ctrl-click to add or remove individual items, Shift-click for a range, and <kbd>Ctrl</kbd> + <kbd>A</kbd> to select all visible items. Selected files can be dragged to a folder in the tree or to another shell-aware application such as File Explorer. Dropping files onto HyperBrowse can open an image in the viewer or copy files into the current folder, depending on where they are dropped. Holding <kbd>Ctrl</kbd> requests copy and holding <kbd>Shift</kbd> requests move where the destination supports both effects.</p>
             <p>Right-click a selection for copy, move, delete, rename, duplicate, properties, ratings, tags, image information, and other actions. Shift-right-click opens the Windows shell context menu.</p>
@@ -395,6 +399,7 @@
                     <tr><td>Quick Actions</td><td><kbd>F4</kbd></td><td>Resume the saved filing position in the current folder</td></tr>
                     <tr><td>View</td><td><kbd>Ctrl</kbd> + <kbd>1</kbd> / <kbd>Ctrl</kbd> + <kbd>2</kbd></td><td>Thumbnail / details mode</td></tr>
                     <tr><td>View</td><td><kbd>Ctrl</kbd> + <kbd>3</kbd></td><td>Toggle the details panel</td></tr>
+                    <tr><td>View</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd></td><td>Toggle the Performance HUD</td></tr>
                     <tr><td>View</td><td><kbd>Ctrl</kbd> + <kbd>R</kbd></td><td>Toggle recursive browsing</td></tr>
                     <tr><td>Navigation</td><td><kbd>Ctrl</kbd> + <kbd>G</kbd></td><td>Go to a file by its number</td></tr>
                     <tr><td>View</td><td><kbd>+</kbd> / <kbd>=</kbd> / Numpad <kbd>+</kbd></td><td>Increase thumbnail size</td></tr>

@@ -82,6 +82,7 @@ Implementation notes:
 
 - The main window serves `WM_GETOBJECT` for `OBJID_CLIENT` through an MSAA provider without changing native child controls.
 - The provider exposes command-bar menus, toolbar actions/toggles/dropdowns, the image browser surface, details tabs/close, and Quick Actions rows/buttons with names, roles, screen bounds, states, default actions, and focus/state notifications.
+- Breadcrumb segments are owner-drawn native Button controls with full target paths as accessible names; the overflow button is named **More parent folders** and exposes hidden ancestors through a native menu. The Performance HUD remains a checked View-menu toggle rather than a focusable overlay surface.
 
 ### Slice 6: Regression and release gates
 

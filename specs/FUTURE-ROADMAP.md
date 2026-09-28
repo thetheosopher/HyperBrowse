@@ -301,22 +301,26 @@ The brand is "fast". The product should look the part.
 
 ### `C1` Custom About Dialog (P1)
 
-- Replace the `MessageBoxW` About with a small custom dialog showing the
-  app icon at 64 px, version, build info, GPU vendor, and a one-line
-  "started in N ms / first thumbnail in M ms" performance summary pulled
-  from the diagnostics layer.
+**Implementation status: Implemented locally.** The existing DPI-aware custom About
+dialog shows the 64 px app icon, generated version, build configuration, and
+the display-adapter vendor for its monitor via a background query. It shows
+the A8 startup spans when recorded and reports unavailable timings explicitly.
 
 ### `C2` Empty-State Watermark (P2)
 
-- Render a muted app icon above the existing "Select a folder to begin
-  browsing" text. Same in viewer for "Open an image to begin viewing".
+**Implementation status: Implemented locally.** The browser no-folder state and viewer
+no-image state show muted brand art above their prompts. Loading, error,
+filtered-empty, and empty-folder states retain their distinct presentations.
 
 ### `C3` Performance HUD Overlay (P1)
 
-- Optional translucent overlay (toggle `Ctrl+Shift+P`) showing live decode
-  count, scale ms, cache hit rate, memory-pressure state, and thumbnail
-  worker queue depth.
-- Reuses diagnostics counters; zero cost when disabled.
+**Implementation status: Implemented locally.** The off-by-default HUD is available from
+View and `Ctrl+Shift+P` in thumbnail and details modes. It shows active
+thumbnail decodes and pending jobs as live counts, average thumbnail scale time
+from recorded diagnostics samples, the in-memory thumbnail-cache hit rate,
+and current memory-pressure state. Missing scale/cache samples are shown as
+unavailable. Its one-second refresh timer and prepared display text are removed
+when disabled; no preference is persisted.
 
 ### `C4` Settings Reorganization (P1)
 
@@ -353,8 +357,17 @@ editing of image labels in thumbnail/details surfaces remains deferred.
 
 ### `C7` Breadcrumb / Path Bar (P2)
 
-- Lightweight breadcrumb above the browser pane with clickable segments
-  for fast parent navigation; complements the folder tree.
+**Implementation status: Implemented locally.** A breadcrumb above the right-side browser
+content exposes drive/UNC roots and parent folders. Long paths collapse to a
+root, current folder, and a **More parent folders** menu; all navigation uses
+the existing folder-load path and keeps the folder tree and history in sync.
+
+The coordinated implementation brief for C1, C2, C3, and C7 is the
+[long-horizon UI surfaces prompt](FUTURE-ROADMAP-PROMPT-06-PERFORMANCE-UI-SURFACES.md).
+
+**Validation note:** The full Debug CTest matrix passes 25/25 and the final
+Release application target builds. Release CTest and manual theme/DPI visual
+review remain unverified.
 
 ### `C8` Accessibility Completion and Release Verification (P1)
 

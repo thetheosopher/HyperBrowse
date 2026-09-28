@@ -192,6 +192,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/FolderTreeController.cpp
     src/ui/FolderWatchChangeCoordinator.cpp
     src/ui/FolderHistory.cpp
+    src/ui/PerformanceHud.cpp
     src/ui/MainWindow.cpp
     src/ui/MainWindowDialogs.cpp
     src/ui/MenuMessageHandling.cpp

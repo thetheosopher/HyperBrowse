@@ -87,6 +87,7 @@
 #include "ui/ImageWorkflowPersistence.h"
 #include "ui/ItemNumberNavigationPolicy.h"
 #include "ui/PerformanceSettingsPersistence.h"
+#include "ui/PerformanceHud.h"
 #include "ui/PairedRawJpegResolver.h"
 #include "ui/ViewerSettingsPersistence.h"
 #include "ui/ViewerItemSelectionPolicy.h"
@@ -168,6 +169,11 @@ namespace
     constexpr int kDetailsPanelCloseButtonSize = 18;
     constexpr int kDetailsPanelCloseButtonMargin = 8;
     constexpr int kDetailsPanelCloseButtonGap = 8;
+    constexpr UINT kBreadcrumbMoreControlId = 11999;
+    constexpr UINT kBreadcrumbSegmentControlIdBase = 12000;
+    constexpr int kBreadcrumbBarHeightDip = 32;
+    constexpr UINT_PTR kPerformanceHudTimerId = 9108;
+    constexpr UINT kPerformanceHudIntervalMs = 1000;
     constexpr UINT kMemoryPressureSampledMessage = WM_APP + 72;
     constexpr UINT kPersistentThumbnailCacheMaintenanceMessage = WM_APP + 75;
     constexpr UINT kAppTextSizeChangedMessage = WM_APP + 78;
@@ -304,6 +310,17 @@ namespace
     constexpr int kTextInputButtonHeight = 28;
     constexpr int kTextInputEditControlId = 100;
     constexpr wchar_t kAboutDialogClassName[] = L"HyperBrowseAboutDialog";
+    constexpr UINT kAboutAdapterVendorMessage = WM_APP + 80;
+    enum class AboutAdapterVendor : UINT_PTR
+    {
+        Unavailable,
+        Nvidia,
+        Amd,
+        Intel,
+        Qualcomm,
+        Microsoft,
+        Other,
+    };
     constexpr wchar_t kShortcutReferenceClassName[] = L"HyperBrowseShortcutReference";
     constexpr int kShortcutReferenceWidth = 820;
     constexpr int kShortcutReferenceHeight = 620;
@@ -339,6 +356,7 @@ namespace
     constexpr int kAboutDialogSupportButtonWidth = 196;
     constexpr int kAboutDialogButtonGap = 12;
     constexpr int kAboutDialogBrandArtSize = 152;
+    constexpr int kAboutDialogIconSize = 64;
     constexpr wchar_t kPerformanceSettingsDialogClassName[] = L"HyperBrowsePerformanceSettingsDialog";
     constexpr int kPerformanceSettingsDialogWidth = 640;
     constexpr int kPerformanceSettingsDialogHeight = 432;
@@ -1157,6 +1175,98 @@ namespace
         return std::max(ScaleAboutDialogDimension(kAboutDialogWidth, state), minimumWidth);
     }
 
+    std::wstring BuildAboutDialogBodyContent(const AboutDialogState& state)
+    {
+        std::wstring content = L"Version: ";
+        content.append(state.version);
+        content.append(L"\r\nBuild configuration: ");
+        content.append(state.buildConfiguration);
+        content.append(L"\r\nGPU vendor: ");
+        content.append(state.gpuVendor.empty() ? L"Not available" : state.gpuVendor);
+        content.append(L"\r\n\r\n");
+        content.append(state.bodyContent);
+        return content;
+    }
+
+    std::wstring DisplayDeviceNameForWindow(HWND window)
+    {
+        const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+        if (!monitor)
+        {
+            return {};
+        }
+
+        MONITORINFOEXW monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (GetMonitorInfoW(monitor, reinterpret_cast<LPMONITORINFO>(&monitorInfo)) == FALSE)
+        {
+            return {};
+        }
+        return monitorInfo.szDevice;
+    }
+
+    AboutAdapterVendor QueryAboutAdapterVendor(std::wstring_view displayDeviceName)
+    {
+        if (displayDeviceName.empty())
+        {
+            return AboutAdapterVendor::Unavailable;
+        }
+
+        const std::wstring targetName(displayDeviceName);
+        DISPLAY_DEVICEW displayDevice{};
+        displayDevice.cb = sizeof(displayDevice);
+        for (DWORD index = 0; EnumDisplayDevicesW(nullptr, index, &displayDevice, 0) != FALSE; ++index)
+        {
+            if (_wcsicmp(displayDevice.DeviceName, targetName.c_str()) == 0)
+            {
+                const std::wstring deviceId = ToLowercaseCopy(displayDevice.DeviceID);
+                const std::wstring deviceDescription = ToLowercaseCopy(displayDevice.DeviceString);
+                if (deviceId.find(L"ven_10de") != std::wstring::npos || deviceDescription.find(L"nvidia") != std::wstring::npos)
+                {
+                    return AboutAdapterVendor::Nvidia;
+                }
+                if (deviceId.find(L"ven_1002") != std::wstring::npos
+                    || deviceId.find(L"ven_1022") != std::wstring::npos
+                    || deviceDescription.find(L"amd") != std::wstring::npos
+                    || deviceDescription.find(L"radeon") != std::wstring::npos)
+                {
+                    return AboutAdapterVendor::Amd;
+                }
+                if (deviceId.find(L"ven_8086") != std::wstring::npos || deviceDescription.find(L"intel") != std::wstring::npos)
+                {
+                    return AboutAdapterVendor::Intel;
+                }
+                if (deviceId.find(L"ven_5143") != std::wstring::npos || deviceDescription.find(L"qualcomm") != std::wstring::npos)
+                {
+                    return AboutAdapterVendor::Qualcomm;
+                }
+                if (deviceId.find(L"ven_1414") != std::wstring::npos || deviceDescription.find(L"microsoft") != std::wstring::npos)
+                {
+                    return AboutAdapterVendor::Microsoft;
+                }
+                return AboutAdapterVendor::Other;
+            }
+
+            displayDevice = {};
+            displayDevice.cb = sizeof(displayDevice);
+        }
+        return AboutAdapterVendor::Unavailable;
+    }
+
+    std::wstring AboutAdapterVendorLabel(WPARAM vendorValue)
+    {
+        switch (static_cast<AboutAdapterVendor>(vendorValue))
+        {
+        case AboutAdapterVendor::Nvidia: return L"NVIDIA";
+        case AboutAdapterVendor::Amd: return L"AMD";
+        case AboutAdapterVendor::Intel: return L"Intel";
+        case AboutAdapterVendor::Qualcomm: return L"Qualcomm";
+        case AboutAdapterVendor::Microsoft: return L"Microsoft";
+        case AboutAdapterVendor::Other: return L"Other";
+        default: return L"Not available";
+        }
+    }
+
     int MeasureAboutDialogClientHeight(const AboutDialogState& state, int clientWidth)
     {
         const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
@@ -1164,7 +1274,7 @@ namespace
         const int contentRight = clientWidth - margin;
         const int artLeft = contentRight - brandArtSize;
         const int iconLeft = margin;
-        const int iconSize = ScaleAboutDialogDimension(48, state);
+        const int iconSize = ScaleAboutDialogDimension(kAboutDialogIconSize, state);
         const int textLeft = iconLeft + iconSize + ScaleAboutDialogDimension(20, state);
         const int textRight = artLeft - ScaleAboutDialogDimension(28, state);
         const int textWidth = std::max(1, textRight - textLeft);
@@ -1182,7 +1292,8 @@ namespace
 
         const int bodyWidth = std::max(1, clientWidth - (margin * 2));
         const int headingHeight = MeasureTextBlockHeight(state.subtitleFont, state.bodyHeading, bodyWidth, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE, ScaleAboutDialogDimension(28, state));
-        const int bodyTextHeight = MeasureTextBlockHeight(state.bodyFont, state.bodyContent, bodyWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
+        const std::wstring bodyContent = BuildAboutDialogBodyContent(state);
+        const int bodyTextHeight = MeasureTextBlockHeight(state.bodyFont, bodyContent, bodyWidth, DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK, 0);
         const int bodyHeight = ScaleAboutDialogDimension(24, state) + headingHeight + ScaleAboutDialogDimension(12, state) + bodyTextHeight + ScaleAboutDialogDimension(26, state);
 
         const int footerActionWidth = state.githubButtonWidth
@@ -2755,6 +2866,7 @@ namespace
 
     void PaintAboutDialog(HDC hdc, const RECT& clientRect, const AboutDialogState& state)
     {
+        const std::wstring bodyContent = BuildAboutDialogBodyContent(state);
         const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
         const int brandArtSize = ScaleAboutDialogDimension(kAboutDialogBrandArtSize, state);
         const int contentRight = clientRect.right - margin;
@@ -2762,7 +2874,7 @@ namespace
         const int artTop = margin - ScaleAboutDialogDimension(4, state);
         const int iconLeft = margin;
         const int iconTop = margin + ScaleAboutDialogDimension(2, state);
-        const int iconSize = ScaleAboutDialogDimension(48, state);
+        const int iconSize = ScaleAboutDialogDimension(kAboutDialogIconSize, state);
         const int textLeft = iconLeft + iconSize + ScaleAboutDialogDimension(20, state);
         const int textRight = artLeft - ScaleAboutDialogDimension(28, state);
         const int textWidth = std::max(ScaleAboutDialogDimension(320, state), textRight - textLeft);
@@ -2882,7 +2994,7 @@ namespace
         RECT bodyTextRect{margin, headingRect.bottom + ScaleAboutDialogDimension(12, state), clientRect.right - margin, footerRect.top - ScaleAboutDialogDimension(18, state)};
         hyperbrowse::render::DrawGdiText(hdc,
                     state.bodyFont ? state.bodyFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)),
-                    state.bodyContent.c_str(),
+                    bodyContent.c_str(),
                     -1,
                     bodyTextRect,
                     DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK,
@@ -2965,6 +3077,7 @@ namespace
             return;
         }
 
+        const std::wstring bodyContent = BuildAboutDialogBodyContent(state);
         const int clientWidth = static_cast<int>(size.width);
         const int clientHeight = static_cast<int>(size.height);
         const int margin = ScaleAboutDialogDimension(kAboutDialogMargin, state);
@@ -2974,7 +3087,7 @@ namespace
         const int artTop = margin - ScaleAboutDialogDimension(4, state);
         const int iconLeft = margin;
         const int iconTop = margin + ScaleAboutDialogDimension(2, state);
-        const int iconSize = ScaleAboutDialogDimension(48, state);
+        const int iconSize = ScaleAboutDialogDimension(kAboutDialogIconSize, state);
         const int textLeft = iconLeft + iconSize + ScaleAboutDialogDimension(20, state);
         const int textRight = artLeft - ScaleAboutDialogDimension(28, state);
         const int textWidth = std::max(ScaleAboutDialogDimension(320, state), textRight - textLeft);
@@ -3104,7 +3217,7 @@ namespace
         const RECT headingRect{margin, headerHeight + bodyTopInset, clientWidth - margin, headerHeight + bodyTopInset + headingHeight};
         const RECT bodyTextRect{margin, headingRect.bottom + ScaleAboutDialogDimension(12, state), clientWidth - margin, clientHeight - footerHeight - ScaleAboutDialogDimension(18, state)};
         drawText(state.bodyHeading, state.d2dSubtitleFormat.Get(), headingRect, accentBrush.Get());
-        drawText(state.bodyContent, state.d2dBodyFormat.Get(), bodyTextRect, textBrush.Get());
+        drawText(bodyContent, state.d2dBodyFormat.Get(), bodyTextRect, textBrush.Get());
 
         const RECT footerTextRect{margin,
                       clientHeight - footerHeight + ScaleAboutDialogDimension(18, state),
@@ -3214,6 +3327,13 @@ namespace
             if (state)
             {
                 LayoutAboutDialogControls(hwnd, *state);
+            }
+            return 0;
+        case kAboutAdapterVendorMessage:
+            if (state)
+            {
+                state->gpuVendor = AboutAdapterVendorLabel(wParam);
+                InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
         case WM_DPICHANGED:
@@ -3332,7 +3452,7 @@ namespace
             if (paintedWithD2D && state->heroIcon)
             {
                 const int iconInset = ScaleAboutDialogDimension(2, *state);
-                const int iconSize = ScaleAboutDialogDimension(48, *state);
+                const int iconSize = ScaleAboutDialogDimension(kAboutDialogIconSize, *state);
                 DrawIconEx(hdc,
                            ScaleAboutDialogDimension(kAboutDialogMargin, *state),
                            ScaleAboutDialogDimension(kAboutDialogMargin, *state) + iconInset,
@@ -9970,6 +10090,10 @@ namespace hyperbrowse::ui
             UpdateStatusText();
             UpdateMenuState();
         };
+        viewCommandHandlers.onPerformanceHud = [this]
+        {
+            SetPerformanceHudEnabled(!performanceHudEnabled_);
+        };
         viewCommandHandlers.onSlideshowSelection = std::bind_front(&MainWindow::StartSlideshow, this, true);
         viewCommandHandlers.onSlideshowFolder = std::bind_front(&MainWindow::StartSlideshow, this, false);
         viewCommandHandlers.onUserGuide = std::bind_front(&MainWindow::ShowUserGuide, this);
@@ -9996,6 +10120,11 @@ namespace hyperbrowse::ui
 
     MainWindow::~MainWindow()
     {
+        if (performanceHudTimerId_ != 0 && hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            KillTimer(hwnd_, performanceHudTimerId_);
+        }
+        performanceHudTimerId_ = 0;
         StopDetailsPanelPerformanceUpdates();
         accessibility_.reset();
 
@@ -10637,6 +10766,7 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SHOW_SUBFOLDERS, L"Show &Subfolders");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERFORMANCE_HUD, L"Performance &HUD\tCtrl+Shift+P");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"&Compact Thumbnail Layout");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By &Filename");
@@ -11840,6 +11970,8 @@ namespace hyperbrowse::ui
             : 0;
         const int clientHeight = std::max(0, static_cast<int>(client.bottom - client.top) - statusHeight - actionStripHeight_);
         const int contentTop = actionStripHeight_;
+        const int breadcrumbHeight = breadcrumbSegments_.empty() ? 0 : menuMetrics.ScaleDip(kBreadcrumbBarHeightDip);
+        const int browserContentHeight = std::max(0, clientHeight - breadcrumbHeight);
 
         const int maxLeft = std::max(kMinLeftPaneWidth,
                                      clientWidth - desiredDetailsPanelWidth - kMinRightPaneWidth - kSplitterWidth - detailsSplitterWidth);
@@ -11847,6 +11979,8 @@ namespace hyperbrowse::ui
 
         const int browserWidth = std::max(kMinRightPaneWidth,
                                           clientWidth - leftPaneWidth_ - kSplitterWidth - detailsSplitterWidth - desiredDetailsPanelWidth);
+        const int rightContentLeft = leftPaneWidth_ + kSplitterWidth;
+        const int rightContentWidth = std::max(0, clientWidth - rightContentLeft);
         const int detailsPanelWidth = detailsStripVisible_
             ? std::max(0, clientWidth - leftPaneWidth_ - kSplitterWidth - browserWidth - detailsSplitterWidth)
             : 0;
@@ -11859,13 +11993,14 @@ namespace hyperbrowse::ui
                TRUE);
 
         MoveWindow(treePane_, 0, contentTop, leftPaneWidth_, clientHeight, TRUE);
-        MoveWindow(browserPane_, leftPaneWidth_ + kSplitterWidth, contentTop,
-                   browserWidth, clientHeight, TRUE);
+        LayoutBreadcrumbBar(rightContentLeft, contentTop, rightContentWidth, breadcrumbHeight);
+        MoveWindow(browserPane_, rightContentLeft, contentTop + breadcrumbHeight,
+               browserWidth, browserContentHeight, TRUE);
 
         detailsPanelRect_ = RECT{leftPaneWidth_ + kSplitterWidth + browserWidth + detailsSplitterWidth,
-                                 contentTop,
+                     contentTop + breadcrumbHeight,
                                  clientWidth,
-                                 contentTop + clientHeight};
+                     contentTop + clientHeight};
         detailsPanelTabStripRect_ = RECT{};
         detailsPanelTabRects_ = {};
         detailsPanelContentRect_ = RECT{};
@@ -14000,6 +14135,79 @@ namespace hyperbrowse::ui
 
         detailsPanelPerformanceStats_ = stats;
         detailsPanelPerformanceText_ = std::move(text);
+    }
+
+    void MainWindow::SetPerformanceHudEnabled(bool enabled)
+    {
+        if (performanceHudEnabled_ == enabled)
+        {
+            return;
+        }
+
+        if (enabled)
+        {
+            if (!hwnd_)
+            {
+                return;
+            }
+
+            performanceHudTimerId_ = SetTimer(hwnd_,
+                                              kPerformanceHudTimerId,
+                                              kPerformanceHudIntervalMs,
+                                              nullptr);
+            if (performanceHudTimerId_ == 0)
+            {
+                util::LogError(L"Unable to start the performance HUD refresh timer.");
+                UpdateMenuState();
+                return;
+            }
+
+            performanceHudEnabled_ = true;
+            UpdatePerformanceHud();
+        }
+        else
+        {
+            performanceHudEnabled_ = false;
+            if (performanceHudTimerId_ != 0 && hwnd_ && IsWindow(hwnd_) != FALSE)
+            {
+                KillTimer(hwnd_, performanceHudTimerId_);
+            }
+            performanceHudTimerId_ = 0;
+            if (browserPaneController_)
+            {
+                browserPaneController_->SetPerformanceHudText({});
+            }
+        }
+
+        UpdateMenuState();
+    }
+
+    void MainWindow::UpdatePerformanceHud()
+    {
+        if (!performanceHudEnabled_ || !browserPaneController_)
+        {
+            return;
+        }
+
+        UpdateDetailsPanelPerformanceStats();
+        const DetailsPanelPerformanceStats& stats = detailsPanelPerformanceStats_;
+        PerformanceHudSnapshot snapshot;
+        snapshot.activeDecodes = stats.thumbnailInflightDecodes;
+        if (stats.scaleSampleCount > 0)
+        {
+            snapshot.scaleAverageMs = stats.scaleAverageMs;
+        }
+
+        const std::uint64_t thumbnailCacheSamples = stats.thumbnailHits + stats.thumbnailMisses;
+        if (thumbnailCacheSamples > 0)
+        {
+            snapshot.thumbnailCacheHitRatePercent =
+                (static_cast<double>(stats.thumbnailHits) * 100.0)
+                / static_cast<double>(thumbnailCacheSamples);
+        }
+        snapshot.memoryPressureActive = thumbnailMemoryPressureActive_;
+        snapshot.pendingThumbnailJobs = stats.thumbnailPendingJobs;
+        browserPaneController_->SetPerformanceHudText(FormatPerformanceHudText(snapshot));
     }
 
     void MainWindow::UpdateDetailsPanel()
@@ -17160,6 +17368,20 @@ namespace hyperbrowse::ui
         }
 
         const ThemePalette palette = GetThemePalette();
+        const util::StartupDiagnosticsSnapshot startupDiagnostics = util::CaptureStartupDiagnosticsSnapshot();
+        const auto formatStartupMilliseconds = [](const std::optional<double>& milliseconds)
+        {
+            if (!milliseconds)
+            {
+            return std::wstring(L"Not available");
+            }
+            return std::to_wstring(static_cast<std::uint64_t>(std::max(0.0, *milliseconds) + 0.5)) + L" ms";
+        };
+    #if defined(NDEBUG)
+        constexpr const wchar_t* kBuildConfiguration = L"Release";
+    #else
+        constexpr const wchar_t* kBuildConfiguration = L"Debug";
+    #endif
 
         AboutDialogState state;
         state.ownerWindow = hwnd_;
@@ -17177,8 +17399,15 @@ namespace hyperbrowse::ui
         state.accent = palette.accent;
         state.title = hyperbrowse::build::kDisplayName;
         state.subtitle = L"High-performance native image browser for Windows";
-        state.intro = L"High-performance browsing and viewing for large Windows image folders.";
-        state.bodyHeading = L"What sets it apart";
+        state.intro = L"Started in "
+            + formatStartupMilliseconds(startupDiagnostics.processToFirstWindowVisibleMs)
+            + L" / first thumbnail in "
+            + formatStartupMilliseconds(startupDiagnostics.firstWindowVisibleToFirstThumbnailPaintedMs)
+            + L" after window visibility.";
+        state.version = hyperbrowse::build::kVersion;
+        state.buildConfiguration = kBuildConfiguration;
+        state.gpuVendor = L"Not available";
+        state.bodyHeading = L"Build details and highlights";
         state.bodyContent =
             L"- Native Win32 shell tuned for fast startup, compact chrome, and direct file-system browsing.\r\n"
             L"- Async folder enumeration, incremental folder watching, and responsive refresh in large image collections.\r\n"
@@ -17192,7 +17421,7 @@ namespace hyperbrowse::ui
             + std::to_wstring(CurrentCalendarYear())
             + L" Michael A. McCloskey\r\nLicensed under the MIT License.";
         state.brandArt = util::LoadPngResourceBitmap(instance_, IDB_HYPERBROWSE_BRAND_PNG, kAboutDialogBrandArtSize, kAboutDialogBrandArtSize);
-        state.heroIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, 48, 48, LR_DEFAULTCOLOR));
+        state.heroIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, kAboutDialogIconSize, kAboutDialogIconSize, LR_DEFAULTCOLOR));
         state.windowIcon = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_HYPERBROWSE), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
         RebuildAboutDialogFonts(state);
 
@@ -17247,6 +17476,19 @@ namespace hyperbrowse::ui
             if (state.heroIcon) DestroyIcon(state.heroIcon);
             if (state.windowIcon) DestroyIcon(state.windowIcon);
             return;
+        }
+
+        const std::wstring displayDeviceName = DisplayDeviceNameForWindow(hwnd_);
+        if (memoryPressureExecutor_ && !displayDeviceName.empty())
+        {
+            memoryPressureExecutor_->Post([dialogWindow, displayDeviceName]
+            {
+                const AboutAdapterVendor vendor = QueryAboutAdapterVendor(displayDeviceName);
+                PostMessageW(dialogWindow,
+                             kAboutAdapterVendorMessage,
+                             static_cast<WPARAM>(vendor),
+                             0);
+            });
         }
 
         ShowWindow(dialogWindow, SW_SHOWNORMAL);
@@ -20819,6 +21061,10 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_DETAILS_STRIP,
             MF_BYCOMMAND | (detailsStripVisible_ ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_PERFORMANCE_HUD,
+            MF_BYCOMMAND | (performanceHudEnabled_ ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
@@ -20979,7 +21225,7 @@ namespace hyperbrowse::ui
         displaySurfaceRecoveryPolicy_.ClearViewerTargets();
     }
 
-    void MainWindow::UpdateWindowTitle() const
+    void MainWindow::UpdateWindowTitle()
     {
         if (!hwnd_)
         {
@@ -20993,6 +21239,494 @@ namespace hyperbrowse::ui
             title.append(browserModel_->FolderPath());
         }
         SetWindowTextW(hwnd_, title.c_str());
+        UpdateBreadcrumbBar();
+    }
+
+    void MainWindow::UpdateBreadcrumbBar()
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        const std::wstring folderPath = browserModel_ ? browserModel_->FolderPath() : std::wstring{};
+        if (folderPath == breadcrumbFolderPath_)
+        {
+            return;
+        }
+
+        const HWND focusedWindow = GetFocus();
+        bool breadcrumbHadFocus = focusedWindow == breadcrumbMoreButton_
+            || std::find(breadcrumbSegmentButtons_.begin(), breadcrumbSegmentButtons_.end(), focusedWindow)
+                != breadcrumbSegmentButtons_.end();
+        breadcrumbFolderPath_ = folderPath;
+        breadcrumbSegments_ = BuildFolderBreadcrumbSegments(folderPath);
+
+        while (breadcrumbSegmentButtons_.size() > breadcrumbSegments_.size())
+        {
+            const HWND button = breadcrumbSegmentButtons_.back();
+            if (button && IsWindow(button) != FALSE)
+            {
+                DestroyWindow(button);
+            }
+            breadcrumbSegmentButtons_.pop_back();
+        }
+
+        if (breadcrumbSegments_.empty())
+        {
+            if (breadcrumbMoreButton_ && IsWindow(breadcrumbMoreButton_) != FALSE)
+            {
+                DestroyWindow(breadcrumbMoreButton_);
+            }
+            breadcrumbMoreButton_ = nullptr;
+            LayoutChildren();
+            if (breadcrumbHadFocus && hwnd_ && IsWindow(hwnd_) != FALSE)
+            {
+                SetFocus(hwnd_);
+            }
+            return;
+        }
+
+        const auto createBreadcrumbButton = [this](UINT controlId, const wchar_t* accessibleName)
+        {
+            const HWND button = CreateWindowExW(
+                0,
+                L"BUTTON",
+                accessibleName,
+                WS_CHILD | WS_TABSTOP | BS_OWNERDRAW | BS_NOTIFY,
+                0,
+                0,
+                0,
+                0,
+                hwnd_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
+                instance_,
+                nullptr);
+            if (button)
+            {
+                SetWindowSubclass(button, &MainWindow::BreadcrumbButtonSubclassProc, 1, 0);
+            }
+            return button;
+        };
+
+        if (breadcrumbSegmentButtons_.empty())
+        {
+            breadcrumbSegmentButtons_.push_back(nullptr);
+        }
+        if (!breadcrumbSegmentButtons_.front())
+        {
+            breadcrumbSegmentButtons_.front() = createBreadcrumbButton(
+                kBreadcrumbSegmentControlIdBase,
+                L"Navigate to folder root");
+        }
+        if (!breadcrumbMoreButton_)
+        {
+            breadcrumbMoreButton_ = createBreadcrumbButton(
+                kBreadcrumbMoreControlId,
+                L"More parent folders");
+        }
+
+        while (breadcrumbSegmentButtons_.size() < breadcrumbSegments_.size())
+        {
+            const UINT controlId = kBreadcrumbSegmentControlIdBase
+                + static_cast<UINT>(breadcrumbSegmentButtons_.size());
+            breadcrumbSegmentButtons_.push_back(createBreadcrumbButton(controlId, L"Navigate to folder"));
+        }
+
+        const HFONT font = appTextUiFont_
+            ? appTextUiFont_
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        for (std::size_t index = 0; index < breadcrumbSegments_.size(); ++index)
+        {
+            const HWND button = breadcrumbSegmentButtons_[index];
+            if (!button)
+            {
+                continue;
+            }
+
+            std::wstring accessibleName = L"Navigate to ";
+            accessibleName.append(breadcrumbSegments_[index].targetFolderPath);
+            SetWindowTextW(button, accessibleName.c_str());
+            SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+        }
+        if (breadcrumbMoreButton_)
+        {
+            SendMessageW(breadcrumbMoreButton_, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+        }
+
+        LayoutChildren();
+        if (breadcrumbHadFocus)
+        {
+            HWND focusTarget = !breadcrumbSegmentButtons_.empty() ? breadcrumbSegmentButtons_.back() : nullptr;
+            if (focusTarget && IsWindowVisible(focusTarget) != FALSE)
+            {
+                SetFocus(focusTarget);
+            }
+            else if (breadcrumbMoreButton_ && IsWindowVisible(breadcrumbMoreButton_) != FALSE)
+            {
+                SetFocus(breadcrumbMoreButton_);
+            }
+        }
+    }
+
+    void MainWindow::LayoutBreadcrumbBar(int left, int top, int width, int height)
+    {
+        const HWND focusedWindow = GetFocus();
+        bool moveFocus = false;
+        const auto hideControl = [&](HWND control)
+        {
+            if (!control || IsWindow(control) == FALSE)
+            {
+                return;
+            }
+            if (focusedWindow == control)
+            {
+                moveFocus = true;
+            }
+            if (IsWindowVisible(control) != FALSE)
+            {
+                ShowWindow(control, SW_HIDE);
+            }
+        };
+
+        if (breadcrumbSegments_.empty() || height <= 0 || width <= 0)
+        {
+            for (HWND button : breadcrumbSegmentButtons_)
+            {
+                hideControl(button);
+            }
+            hideControl(breadcrumbMoreButton_);
+            if (moveFocus && hwnd_)
+            {
+                SetFocus(hwnd_);
+            }
+            return;
+        }
+
+        const UINT dpi = hwnd_ ? (std::max)(96u, GetDpiForWindow(hwnd_)) : 96u;
+        const MenuMetrics metrics = MakeMenuMetrics(appTextSize_, dpi);
+        const int horizontalPadding = metrics.ScaleDip(8);
+        const int gap = metrics.ScaleDip(4);
+        const int minimumButtonWidth = metrics.ScaleDip(42);
+        const int maximumButtonWidth = metrics.ScaleDip(190);
+        const int chevronWidth = metrics.ScaleDip(14);
+        const int availableWidth = std::max(0, width - (horizontalPadding * 2));
+        const HFONT font = appTextUiFont_
+            ? appTextUiFont_
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+        std::vector<int> preferredWidths;
+        preferredWidths.reserve(breadcrumbSegments_.size());
+        int preferredTotal = 0;
+        for (std::size_t index = 0; index < breadcrumbSegments_.size(); ++index)
+        {
+            const int arrowSpace = index + 1 < breadcrumbSegments_.size() ? chevronWidth : 0;
+            const int desiredWidth = MeasureTextWidth(font, breadcrumbSegments_[index].label)
+                + metrics.ScaleDip(16)
+                + arrowSpace;
+            const int preferredWidth = std::clamp(desiredWidth, minimumButtonWidth, maximumButtonWidth);
+            preferredWidths.push_back(preferredWidth);
+            preferredTotal += preferredWidth;
+        }
+
+        const std::size_t segmentCount = breadcrumbSegments_.size();
+        const bool showOverflow = segmentCount > 2
+            && preferredTotal + gap * static_cast<int>(segmentCount - 1) > availableWidth;
+        std::vector<std::size_t> visibleIndices;
+        std::vector<int> visibleWidths;
+        int moreWidth = 0;
+        if (showOverflow)
+        {
+            visibleIndices = {0, segmentCount - 1};
+            moreWidth = std::min(metrics.ScaleDip(76),
+                                 std::max(0, availableWidth - (minimumButtonWidth * 2) - (gap * 2)));
+            const int segmentWidth = std::max(0, availableWidth - moreWidth - (gap * 2));
+            int rootWidth = std::min(preferredWidths.front(), std::max(minimumButtonWidth, segmentWidth / 2));
+            rootWidth = std::min(rootWidth, segmentWidth);
+            const int leafWidth = std::min(preferredWidths.back(), std::max(0, segmentWidth - rootWidth));
+            visibleWidths = {rootWidth, leafWidth};
+        }
+        else
+        {
+            for (std::size_t index = 0; index < segmentCount; ++index)
+            {
+                visibleIndices.push_back(index);
+                visibleWidths.push_back(preferredWidths[index]);
+            }
+
+            const int buttonSpace = std::max(0, availableWidth - gap * static_cast<int>(segmentCount - 1));
+            int visibleTotal = 0;
+            for (int buttonWidth : visibleWidths)
+            {
+                visibleTotal += buttonWidth;
+            }
+            if (visibleTotal > buttonSpace && segmentCount == 1)
+            {
+                visibleWidths.front() = buttonSpace;
+            }
+            else if (visibleTotal > buttonSpace && segmentCount == 2)
+            {
+                int rootWidth = std::min(preferredWidths.front(),
+                                         std::max(minimumButtonWidth, buttonSpace / 3));
+                rootWidth = std::min(rootWidth, buttonSpace);
+                const int leafWidth = std::min(preferredWidths.back(), std::max(0, buttonSpace - rootWidth));
+                visibleWidths = {rootWidth, leafWidth};
+            }
+        }
+
+        std::vector<bool> visibleButtons(segmentCount, false);
+        int x = left + horizontalPadding;
+        for (std::size_t position = 0; position < visibleIndices.size(); ++position)
+        {
+            const std::size_t segmentIndex = visibleIndices[position];
+            visibleButtons[segmentIndex] = true;
+            const HWND button = breadcrumbSegmentButtons_[segmentIndex];
+            if (button && IsWindow(button) != FALSE)
+            {
+                MoveWindow(button, x, top, visibleWidths[position], height, TRUE);
+                if (IsWindowVisible(button) == FALSE)
+                {
+                    ShowWindow(button, SW_SHOW);
+                }
+            }
+            x += visibleWidths[position] + gap;
+
+            if (showOverflow && position == 0 && breadcrumbMoreButton_)
+            {
+                MoveWindow(breadcrumbMoreButton_, x, top, moreWidth, height, TRUE);
+                if (IsWindowVisible(breadcrumbMoreButton_) == FALSE)
+                {
+                    ShowWindow(breadcrumbMoreButton_, SW_SHOW);
+                }
+                x += moreWidth + gap;
+            }
+        }
+
+        for (std::size_t index = 0; index < breadcrumbSegmentButtons_.size(); ++index)
+        {
+            if (visibleButtons[index])
+            {
+                continue;
+            }
+            hideControl(breadcrumbSegmentButtons_[index]);
+        }
+        if (!showOverflow)
+        {
+            hideControl(breadcrumbMoreButton_);
+        }
+
+        if (moveFocus)
+        {
+            const HWND focusTarget = showOverflow
+                ? breadcrumbMoreButton_
+                : breadcrumbSegmentButtons_[visibleIndices.back()];
+            if (focusTarget && IsWindowVisible(focusTarget) != FALSE)
+            {
+                SetFocus(focusTarget);
+            }
+        }
+    }
+
+    void MainWindow::DrawBreadcrumbButton(const DRAWITEMSTRUCT& drawItem) const
+    {
+        if (!drawItem.hwndItem || !drawItem.hDC)
+        {
+            return;
+        }
+
+        const bool moreButton = drawItem.CtlID == kBreadcrumbMoreControlId;
+        const std::size_t segmentIndex = moreButton
+            ? breadcrumbSegments_.size()
+            : static_cast<std::size_t>(drawItem.CtlID - kBreadcrumbSegmentControlIdBase);
+        if (!moreButton && segmentIndex >= breadcrumbSegments_.size())
+        {
+            return;
+        }
+
+        const ThemePalette palette = GetThemePalette();
+        const bool selected = (drawItem.itemState & ODS_SELECTED) != 0;
+        const bool hot = (drawItem.itemState & ODS_HOTLIGHT) != 0;
+        const bool focused = (drawItem.itemState & ODS_FOCUS) != 0;
+        const COLORREF background = selected || hot
+            ? BlendColor(palette.windowBackground, palette.accent, themeMode_ == ThemeMode::Dark ? 28 : 16)
+            : palette.windowBackground;
+        const HFONT font = appTextUiFont_
+            ? appTextUiFont_
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+        const auto paintButton = [&](HDC target, const RECT& buttonRect)
+        {
+            HBRUSH backgroundBrush = CreateSolidBrush(background);
+            FillRect(target, &buttonRect, backgroundBrush);
+            DeleteObject(backgroundBrush);
+
+            const int savedDC = SaveDC(target);
+            SetBkMode(target, TRANSPARENT);
+            SetTextColor(target, hot ? palette.accent : palette.text);
+            const HGDIOBJ previousFont = SelectObject(target, font);
+
+            RECT textRect = buttonRect;
+            const int horizontalInset = ScaleAppTextDimension(6, appTextSize_);
+            InflateRect(&textRect, -horizontalInset, 0);
+            if (moreButton)
+            {
+                DrawTextW(target, L"...", -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            }
+            else
+            {
+                const bool hasNextSegment = segmentIndex + 1 < breadcrumbSegments_.size();
+                const int chevronWidth = hasNextSegment ? ScaleAppTextDimension(14, appTextSize_) : 0;
+                RECT labelRect = textRect;
+                labelRect.right -= chevronWidth;
+                const std::wstring& label = breadcrumbSegments_[segmentIndex].label;
+                DrawTextW(target,
+                          label.c_str(),
+                          static_cast<int>(label.size()),
+                          &labelRect,
+                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+                if (hasNextSegment)
+                {
+                    RECT chevronRect = textRect;
+                    chevronRect.left = chevronRect.right - chevronWidth;
+                    SetTextColor(target, palette.mutedText);
+                    DrawTextW(target, L">", -1, &chevronRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                }
+            }
+
+            if (previousFont)
+            {
+                SelectObject(target, previousFont);
+            }
+            if (focused)
+            {
+                RECT focusRect = buttonRect;
+                InflateRect(&focusRect, -3, -3);
+                DrawFocusRect(target, &focusRect);
+            }
+            if (savedDC != 0)
+            {
+                RestoreDC(target, savedDC);
+            }
+        };
+
+        const int buttonWidth = drawItem.rcItem.right - drawItem.rcItem.left;
+        const int buttonHeight = drawItem.rcItem.bottom - drawItem.rcItem.top;
+        if (buttonWidth <= 0 || buttonHeight <= 0)
+        {
+            return;
+        }
+
+        HDC bufferedDC = CreateCompatibleDC(drawItem.hDC);
+        HBITMAP bufferedBitmap = bufferedDC
+            ? CreateCompatibleBitmap(drawItem.hDC, buttonWidth, buttonHeight)
+            : nullptr;
+        if (!bufferedDC || !bufferedBitmap)
+        {
+            if (bufferedBitmap)
+            {
+                DeleteObject(bufferedBitmap);
+            }
+            if (bufferedDC)
+            {
+                DeleteDC(bufferedDC);
+            }
+            paintButton(drawItem.hDC, drawItem.rcItem);
+            return;
+        }
+
+        const HGDIOBJ previousBitmap = SelectObject(bufferedDC, bufferedBitmap);
+        if (!previousBitmap || previousBitmap == HGDI_ERROR)
+        {
+            DeleteObject(bufferedBitmap);
+            DeleteDC(bufferedDC);
+            paintButton(drawItem.hDC, drawItem.rcItem);
+            return;
+        }
+
+        const RECT bufferedRect{0, 0, buttonWidth, buttonHeight};
+        paintButton(bufferedDC, bufferedRect);
+        const BOOL copied = BitBlt(drawItem.hDC,
+                                   drawItem.rcItem.left,
+                                   drawItem.rcItem.top,
+                                   buttonWidth,
+                                   buttonHeight,
+                                   bufferedDC,
+                                   0,
+                                   0,
+                                   SRCCOPY);
+        SelectObject(bufferedDC, previousBitmap);
+        DeleteObject(bufferedBitmap);
+        DeleteDC(bufferedDC);
+        if (!copied)
+        {
+            paintButton(drawItem.hDC, drawItem.rcItem);
+        }
+    }
+
+    LRESULT CALLBACK MainWindow::BreadcrumbButtonSubclassProc(HWND hwnd,
+                                                                UINT message,
+                                                                WPARAM wParam,
+                                                                LPARAM lParam,
+                                                                UINT_PTR subclassId,
+                                                                DWORD_PTR)
+    {
+        if (message == WM_ERASEBKGND)
+        {
+            return 1;
+        }
+        if (message == WM_NCDESTROY)
+        {
+            RemoveWindowSubclass(hwnd, &MainWindow::BreadcrumbButtonSubclassProc, subclassId);
+        }
+        return DefSubclassProc(hwnd, message, wParam, lParam);
+    }
+
+    void MainWindow::ShowBreadcrumbOverflowMenu()
+    {
+        if (!breadcrumbMoreButton_ || breadcrumbSegments_.size() <= 2)
+        {
+            return;
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return;
+        }
+
+        for (std::size_t index = 1; index + 1 < breadcrumbSegments_.size(); ++index)
+        {
+            const FolderBreadcrumbSegment& segment = breadcrumbSegments_[index];
+            std::wstring label = segment.label;
+            label.append(L"  (");
+            label.append(segment.targetFolderPath);
+            label.push_back(L')');
+            AppendMenuW(menu,
+                        MF_STRING,
+                        kBreadcrumbSegmentControlIdBase + static_cast<UINT>(index),
+                        label.c_str());
+        }
+
+        RECT buttonRect{};
+        GetWindowRect(breadcrumbMoreButton_, &buttonRect);
+        const UINT commandId = TrackPopupMenu(menu,
+                                              TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                                              buttonRect.left,
+                                              buttonRect.bottom,
+                                              0,
+                                              hwnd_,
+                                              nullptr);
+        DestroyMenu(menu);
+        if (commandId >= kBreadcrumbSegmentControlIdBase)
+        {
+            const std::size_t segmentIndex = commandId - kBreadcrumbSegmentControlIdBase;
+            if (segmentIndex < breadcrumbSegments_.size()
+                && (!browserModel_ || !FolderPathsEqual(browserModel_->FolderPath(),
+                                                        breadcrumbSegments_[segmentIndex].targetFolderPath)))
+            {
+                LoadFolderAsync(breadcrumbSegments_[segmentIndex].targetFolderPath);
+            }
+        }
     }
 
     void MainWindow::RebuildAppTextFonts()
@@ -25031,6 +25765,29 @@ namespace hyperbrowse::ui
 
     std::optional<LRESULT> MainWindow::HandleCommandMessage(WPARAM wParam, LPARAM lParam)
     {
+        if (HIWORD(wParam) == BN_CLICKED)
+        {
+            const UINT commandId = LOWORD(wParam);
+            if (commandId == kBreadcrumbMoreControlId)
+            {
+                ShowBreadcrumbOverflowMenu();
+                return 0;
+            }
+            if (commandId >= kBreadcrumbSegmentControlIdBase)
+            {
+                const std::size_t segmentIndex = commandId - kBreadcrumbSegmentControlIdBase;
+                if (segmentIndex < breadcrumbSegments_.size())
+                {
+                    const std::wstring& targetPath = breadcrumbSegments_[segmentIndex].targetFolderPath;
+                    if (!browserModel_ || !FolderPathsEqual(browserModel_->FolderPath(), targetPath))
+                    {
+                        LoadFolderAsync(targetPath);
+                    }
+                    return 0;
+                }
+            }
+        }
+
         if (LOWORD(wParam) >= kQuickAccessShortcutEditBaseId
             && LOWORD(wParam) < kQuickAccessShortcutEditBaseId + quickAccessShortcutEdits_.size())
         {
@@ -25465,6 +26222,14 @@ namespace hyperbrowse::ui
                 DrawOwnerDrawMenuItem(*drawItem);
                 return TRUE;
             }
+            if (drawItem && drawItem->CtlType == ODT_BUTTON
+                && (drawItem->CtlID == kBreadcrumbMoreControlId
+                    || (drawItem->CtlID >= kBreadcrumbSegmentControlIdBase
+                        && drawItem->CtlID - kBreadcrumbSegmentControlIdBase < breadcrumbSegments_.size())))
+            {
+                DrawBreadcrumbButton(*drawItem);
+                return TRUE;
+            }
             if (drawItem && drawItem->CtlType == ODT_STATIC && drawItem->CtlID == kStatusStripControlId)
             {
                 DrawStatusStrip(*drawItem);
@@ -25475,6 +26240,12 @@ namespace hyperbrowse::ui
         case WM_MENUCHAR:
             return HandleMenuCharMessage(wParam, lParam);
         case WM_TIMER:
+            if (performanceHudTimerId_ != 0
+                && static_cast<UINT_PTR>(wParam) == performanceHudTimerId_)
+            {
+                UpdatePerformanceHud();
+                return 0;
+            }
             if (const std::optional<LRESULT> result = timerRouter_.Handle(static_cast<UINT_PTR>(wParam)))
             {
                 return *result;

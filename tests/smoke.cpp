@@ -2359,6 +2359,23 @@ namespace
          TempFolder root(L"HyperBrowseRedactedDiagnostics");
          const fs::path outputPath = root.Root() / L"diagnostics.json";
          hyperbrowse::util::ResetDiagnostics();
+         hyperbrowse::util::EnableStartupBenchmark();
+         auto startupSnapshot = hyperbrowse::util::CaptureStartupDiagnosticsSnapshot();
+         Expect(!startupSnapshot.processToFirstWindowVisibleMs.has_value()
+                    && !startupSnapshot.firstWindowVisibleToFirstThumbnailPaintedMs.has_value(),
+                "Unrecorded startup timings were not represented as unavailable");
+         hyperbrowse::util::MarkStartupWindowVisible();
+         startupSnapshot = hyperbrowse::util::CaptureStartupDiagnosticsSnapshot();
+         Expect(startupSnapshot.processToFirstWindowVisibleMs.has_value()
+                    && !startupSnapshot.firstWindowVisibleToFirstThumbnailPaintedMs.has_value(),
+                "First-window timing availability was not tracked independently");
+         hyperbrowse::util::MarkStartupFirstThumbnailPainted();
+         startupSnapshot = hyperbrowse::util::CaptureStartupDiagnosticsSnapshot();
+         Expect(startupSnapshot.processToFirstWindowVisibleMs.has_value()
+                    && startupSnapshot.firstWindowVisibleToFirstThumbnailPaintedMs.has_value()
+                    && *startupSnapshot.processToFirstWindowVisibleMs >= 0.0
+                    && *startupSnapshot.firstWindowVisibleToFirstThumbnailPaintedMs >= 0.0,
+                "Recorded startup spans were not exposed with non-negative values");
          hyperbrowse::util::RecordTiming(L"diagnostics.test.timing", 1.0);
          hyperbrowse::util::IncrementCounter(L"diagnostics.test.counter", 3);
 
@@ -6633,10 +6650,125 @@ namespace
         {
          ScopedRegistryDwordBackup detailsStripBackup(kRegistryPath, L"DetailsStripVisible");
          SetRegistryDwordValue(kRegistryPath, L"DetailsStripVisible", 1);
+             TempFolder breadcrumbRoot(L"HyperBrowseAccessibilityBreadcrumb");
+         fs::path breadcrumbFolder = breadcrumbRoot.Root();
+         for (int index = 0; index < 14; ++index)
+         {
+             breadcrumbFolder /= L"Parent";
+         }
+         breadcrumbFolder /= L"Current";
+             std::error_code breadcrumbError;
+             fs::create_directories(breadcrumbFolder, breadcrumbError);
+             Expect(!breadcrumbError, "Failed to create the nested breadcrumb accessibility fixture");
          hyperbrowse::ui::MainWindow mainWindow(instance);
+             mainWindow.SetStartupLaunchPath(breadcrumbFolder.wstring());
          Expect(mainWindow.Create(), "Failed to create MainWindow for accessibility coverage");
          mainWindow.Show(SW_SHOW);
          PumpMessagesFor(100);
+
+             std::vector<HWND> breadcrumbControls;
+             EnumChildWindows(mainWindow.Hwnd(), [](HWND child, LPARAM context) -> BOOL
+             {
+                 wchar_t className[32]{};
+                 if (GetClassNameW(child, className, static_cast<int>(std::size(className))) == 0
+                     || _wcsicmp(className, L"Button") != 0)
+                 {
+                     return TRUE;
+                 }
+
+                 const int textLength = GetWindowTextLengthW(child);
+                 if (textLength <= 0)
+                 {
+                     return TRUE;
+                 }
+                 std::wstring text(static_cast<std::size_t>(textLength) + 1, L'\0');
+                 GetWindowTextW(child, text.data(), static_cast<int>(text.size()));
+                 text.resize(wcslen(text.c_str()));
+                 if (text.rfind(L"Navigate to ", 0) == 0 || text == L"More parent folders")
+                 {
+                     reinterpret_cast<std::vector<HWND>*>(context)->push_back(child);
+                 }
+                 return TRUE;
+             }, reinterpret_cast<LPARAM>(&breadcrumbControls));
+
+             HWND currentFolderButton = nullptr;
+             HWND moreFoldersButton = nullptr;
+             for (HWND button : breadcrumbControls)
+             {
+                 const int textLength = GetWindowTextLengthW(button);
+                 std::wstring text(static_cast<std::size_t>(textLength) + 1, L'\0');
+                 GetWindowTextW(button, text.data(), static_cast<int>(text.size()));
+                 text.resize(wcslen(text.c_str()));
+                 if (text.rfind(L"Navigate to ", 0) == 0 && text.find(L"Current") != std::wstring::npos)
+                 {
+                     currentFolderButton = button;
+                 }
+                 else if (text == L"More parent folders")
+                 {
+                     moreFoldersButton = button;
+                 }
+             }
+             Expect(currentFolderButton && IsWindowVisible(currentFolderButton) != FALSE,
+                    "The active breadcrumb segment was not visible as a native child button");
+             Expect((GetWindowLongPtrW(currentFolderButton, GWL_STYLE) & WS_TABSTOP) != 0,
+                    "The active breadcrumb segment was not keyboard reachable");
+             Expect(moreFoldersButton && IsWindowVisible(moreFoldersButton) != FALSE,
+                    "Long-path breadcrumb overflow was not exposed as a visible button");
+
+             IAccessible* breadcrumbAccessible = nullptr;
+             const HRESULT breadcrumbAccessibleStatus = AccessibleObjectFromWindow(
+                 currentFolderButton,
+                 static_cast<DWORD>(OBJID_CLIENT),
+                 IID_IAccessible,
+                 reinterpret_cast<void**>(&breadcrumbAccessible));
+             Expect(SUCCEEDED(breadcrumbAccessibleStatus) && breadcrumbAccessible != nullptr,
+                    "Breadcrumb button did not expose a native accessibility provider");
+             VARIANT breadcrumbSelf{};
+             breadcrumbSelf.vt = VT_I4;
+             breadcrumbSelf.lVal = CHILDID_SELF;
+             BSTR breadcrumbName = nullptr;
+             Expect(SUCCEEDED(breadcrumbAccessible->get_accName(breadcrumbSelf, &breadcrumbName))
+                        && breadcrumbName != nullptr,
+                    "Breadcrumb button did not expose its full-path accessible name");
+             const std::wstring breadcrumbAccessibleName(breadcrumbName, SysStringLen(breadcrumbName));
+             SysFreeString(breadcrumbName);
+             Expect(breadcrumbAccessibleName.rfind(L"Navigate to ", 0) == 0
+                        && breadcrumbAccessibleName.find(L"Current") != std::wstring::npos,
+                    "Breadcrumb button did not expose its full target path as its accessible name");
+             VARIANT breadcrumbRole{};
+             Expect(SUCCEEDED(breadcrumbAccessible->get_accRole(breadcrumbSelf, &breadcrumbRole))
+                        && breadcrumbRole.vt == VT_I4
+                        && breadcrumbRole.lVal == ROLE_SYSTEM_PUSHBUTTON,
+                    "Breadcrumb button did not expose the push-button role");
+             VariantClear(&breadcrumbRole);
+             breadcrumbAccessible->Release();
+
+              IAccessible* moreFoldersAccessible = nullptr;
+              const HRESULT moreFoldersAccessibleStatus = AccessibleObjectFromWindow(
+                  moreFoldersButton,
+                  static_cast<DWORD>(OBJID_CLIENT),
+                  IID_IAccessible,
+                  reinterpret_cast<void**>(&moreFoldersAccessible));
+              Expect(SUCCEEDED(moreFoldersAccessibleStatus) && moreFoldersAccessible != nullptr,
+                  "Breadcrumb overflow button did not expose a native accessibility provider");
+              VARIANT moreFoldersSelf{};
+              moreFoldersSelf.vt = VT_I4;
+              moreFoldersSelf.lVal = CHILDID_SELF;
+              BSTR moreFoldersName = nullptr;
+              Expect(SUCCEEDED(moreFoldersAccessible->get_accName(moreFoldersSelf, &moreFoldersName))
+                      && moreFoldersName != nullptr,
+                  "Breadcrumb overflow button did not expose an accessible name");
+              const std::wstring moreFoldersAccessibleName(moreFoldersName, SysStringLen(moreFoldersName));
+              SysFreeString(moreFoldersName);
+              Expect(moreFoldersAccessibleName == L"More parent folders",
+                  "Breadcrumb overflow button exposed the wrong accessible name");
+              VARIANT moreFoldersRole{};
+              Expect(SUCCEEDED(moreFoldersAccessible->get_accRole(moreFoldersSelf, &moreFoldersRole))
+                      && moreFoldersRole.vt == VT_I4
+                      && moreFoldersRole.lVal == ROLE_SYSTEM_PUSHBUTTON,
+                  "Breadcrumb overflow button did not expose the push-button role");
+              VariantClear(&moreFoldersRole);
+              moreFoldersAccessible->Release();
 
          const LRESULT objectResult = SendMessageW(mainWindow.Hwnd(), WM_GETOBJECT, 0, OBJID_CLIENT);
          Expect(objectResult != 0, "MainWindow did not return an accessibility object");
