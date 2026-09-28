@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.3.0-2EA043)
+![Version](https://img.shields.io/badge/Version-2.4.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -20,9 +20,9 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Native Win32 desktop application built with CMake and modern C++20.
 - Direct2D and DirectWrite rendering in the browser and viewer, with per-monitor DPI awareness v2.
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
-- WIC baseline decode path including JPEG, PNG, GIF, TIFF, and WebP, LibRaw-based RAW support, and optional nvJPEG acceleration with runtime fallback.
+- WIC decode for JPEG, PNG, GIF, TIFF, WebP, HEIC, and JPEG XL, with HEIC/JPEG XL dependent on compatible Windows codecs; LibRaw-based RAW support and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, filename/rating/tag filtering, thumbnail ratings, and multi-selection workflows.
-- Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, side-by-side compare, scalable info overlays, current-folder slideshow launch, full metadata pane, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
+- Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, 2-4 image N-up comparison with synchronized zoom and pan, scalable info overlays, current-folder slideshow launch, full metadata pane, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
 - Quick Actions with saved destinations, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy for the currently displayed image or selected browser files.
 - Persistent thumbnail cache statistics, deterministic per-shard inspection, asynchronous compact/purge maintenance, bounded migration, one low-priority worker for persistent I/O, and safer remembered window/folder restore on startup.
@@ -36,6 +36,18 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 - A committed Windows CI workflow that builds Debug and Release, runs CTest and startup/cache-performance budget checks, validates release manifests, and publishes build artifacts.
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
+
+## What's New In 2.4.0
+
+This release expands format coverage, comparison workflows, and performance visibility while continuing to harden large-library browsing.
+
+- Added HEIC (`.heic`) and JPEG XL (`.jxl`) routing through WIC when compatible Windows codecs are installed.
+- Added two-to-four-image N-up comparison with synchronized zoom and pan, focused-tile navigation, and per-image actions.
+- Added root-aware breadcrumb navigation for long paths and an optional Performance HUD for thumbnail, queue, cache, and memory-pressure state.
+- Expanded Performance settings with adaptive resource profiles, cache and prefetch overrides, cache statistics, and asynchronous persistent-cache maintenance.
+- Improved persistent thumbnail-cache durability and large-cache performance with worker-owned I/O, bounded migration, sharded storage, and benchmark coverage.
+- Aligned folder-thumbnail label sizing with the application's Small, Medium, and Large text settings.
+- Added a direct keyboard shortcut for opening a selected image in a new viewer window and expanded focused smoke coverage.
 
 ## What's New In 2.3.0
 
@@ -68,8 +80,8 @@ This release expands HyperBrowse's image-review and desktop file-management work
 | Area | Included today |
 | --- | --- |
 | Browser | Explorer-style folder tree, resizable splitter, root-aware clickable breadcrumb with long-path overflow, thumbnail mode, details mode, recursive browsing, live filename/rating/tag filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
-| Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, side-by-side compare, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, image-information overlays with size presets, muted idle-state watermark, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
-| Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
+| Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, 2-4 image N-up compare with synchronized zoom and pan, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, image-information overlays with size presets, muted idle-state watermark, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
+| Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; HEIC and JPEG XL via compatible installed WIC codecs; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, worker-owned persistent disk thumbnail cache with stats/compact/purge and benchmark gates, metadata cache, folder watch refresh, optional GPU-assisted JPEG decode, and an off-by-default performance HUD (`Ctrl+Shift+P`) |
 | Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
@@ -258,13 +270,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.3.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.4.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.3.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.4.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -334,11 +346,18 @@ For the current backlog in detail, start with [specs/FUTURE-ROADMAP.md](specs/FU
 
 ## Version
 
-Current release: **2.3.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.3.0-portable-win64.zip` and `HyperBrowse-2.3.0-installer.exe`).
+Current release: **2.4.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.4.0-portable-win64.zip` and `HyperBrowse-2.4.0-installer.exe`).
 
 Release **2.0.0** expanded HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It added richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.4.0
+
+- Added HEIC and JPEG XL format routing through WIC when compatible Windows codecs are installed.
+- Added synchronized 2-4 image N-up comparison, long-path breadcrumbs, and the optional Performance HUD.
+- Expanded adaptive resource and cache controls, persistent-cache maintenance, and benchmark-backed validation.
+- Aligned folder-thumbnail text sizing with application text-size preferences.
 
 ### 2.3.0
 

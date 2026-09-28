@@ -2645,12 +2645,7 @@ namespace hyperbrowse::browser
         const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
 
         thumbnailTitleFont_ = CreateSizedUiFont(layout.titlePointSize, FW_SEMIBOLD, layout.textDpi);
-        folderTitleFont_ = CreateSizedUiFont(
-            std::clamp(layout.titlePointSize + hyperbrowse::util::ScaleAppTextDimension(3, appTextSize_),
-                       hyperbrowse::util::ScaleAppTextDimension(14, appTextSize_),
-                       hyperbrowse::util::ScaleAppTextDimension(20, appTextSize_)),
-            FW_SEMIBOLD,
-            layout.textDpi);
+        folderTitleFont_ = CreateSizedUiFont(layout.titlePointSize, FW_SEMIBOLD, layout.textDpi);
         thumbnailMetaFont_ = CreateSizedUiFont(layout.metaPointSize, FW_NORMAL, layout.textDpi);
         thumbnailStatusFont_ = CreateSizedUiFont(layout.statusPointSize, FW_SEMIBOLD, layout.textDpi);
         placeholderTitleFont_ = CreateSizedUiFont(

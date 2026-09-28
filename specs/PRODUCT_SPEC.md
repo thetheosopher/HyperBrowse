@@ -1,6 +1,6 @@
 # HyperBrowse Product Specification (Authoritative)
 
-**Current release:** 2.3.0
+**Current release:** 2.4.0
 **Status:** Current product contract
 **Authority:** Source code, smoke tests, and this document define shipped
 behavior. Proposed work belongs in [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) and
@@ -41,6 +41,8 @@ conversion, and low-friction culling.
 - GIF
 - TIFF / TIF
 - WebP
+- HEIC (`.heic`), when a compatible Windows WIC codec is installed
+- JPEG XL (`.jxl`), when a compatible Windows WIC codec is installed
 
 ### RAW formats
 - Sony ARW
@@ -80,8 +82,9 @@ conversion, and low-friction culling.
 - Background prefetch of next/previous viewer images
 - Dark mode and light mode
 - Portable build and installer build
-- Two-up compare, ratings, tags, structured in-folder filtering, date-taken
-  sorting, and ascending/descending sort direction
+- Two-to-four-image N-up compare with synchronized zoom and pan, ratings, tags,
+  structured in-folder filtering, date-taken sorting, and ascending/descending
+  sort direction
 - Copy, move, rename, batch rename, delete, permanent delete, duplicate,
   clipboard transfer, shell drag/drop, Quick Actions, paired RAW/JPEG
   operations, taskbar progress, and supported file-operation undo/redo
@@ -116,10 +119,12 @@ conversion, and low-friction culling.
 - Cross-folder indexed search, duplicate finding, face detection, and a
   library/database back end
 
-WebP is supported through WIC for static decode and thumbnails. GIF and TIFF
-browsing presents the available first frame or page. Animated playback remains
-deferred. See [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) for proposed work and
-explicit product boundaries.
+WebP, HEIC, and JPEG XL are routed through WIC for static decode and
+thumbnails. HEIC and JPEG XL decoding depends on a compatible installed Windows
+codec; codec availability is not detected in advance. GIF and TIFF browsing
+presents the available first frame or page. Animated playback remains deferred.
+See [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) for proposed work and explicit
+product boundaries.
 
 ## 6. Main Window Layout
 

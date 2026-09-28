@@ -202,6 +202,7 @@
                 <a href="#viewer">Viewer</a>
                 <a href="#file-workflows">File workflows</a>
                 <a href="#quick-actions">Quick Actions</a>
+                <a href="#release-2-4">2.4 notes</a>
                 <a href="#release-2-3">2.3 notes</a>
                 <a href="#release-2-2">2.2 history</a>
                 <a href="#shortcuts">Shortcuts</a>
@@ -353,6 +354,12 @@
                 <li><strong>View &gt; Thumbnail Size</strong> still provides fixed presets and keyboard stepping.</li>
             </ul>
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
+        </section>
+
+        <section id="release-2-4">
+            <h2>What changed in 2.4</h2>
+            <p>Version 2.4 adds HEIC and JPEG XL decoding through Windows Imaging Component (WIC) when compatible codecs are installed. It also adds two-to-four-image N-up comparison with synchronized zoom and pan, long-path breadcrumb navigation, an optional Performance HUD, and expanded resource-profile, cache, and prefetch controls. Persistent-cache maintenance and benchmark coverage have been strengthened, and folder-thumbnail labels now follow the application's text-size setting.</p>
+            <div class="callout"><strong>Format boundary.</strong> HEIC and JPEG XL decoding depends on a compatible Windows WIC codec being installed; HyperBrowse does not detect codec availability in advance. GIF and TIFF browsing shows the first frame or page, and animated playback remains deferred.</div>
         </section>
 
         <section id="release-2-3">

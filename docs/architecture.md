@@ -31,8 +31,9 @@ The core library is organized by responsibility:
 - `src/render/`: Direct2D/DirectWrite factories and shared rendering helpers.
 - `src/util/`: logging, diagnostics, path/string helpers, settings, sizing, and common utilities.
 
-The WIC path covers the standard browser/viewer formats JPEG, PNG, GIF, TIFF,
-and WebP when the Windows codec is available. LibRaw handles the supported RAW
+The WIC path covers JPEG, PNG, GIF, TIFF, WebP, HEIC, and JPEG XL. HEIC and
+JPEG XL decoding require a compatible installed Windows codec; codec
+availability is not detected in advance. LibRaw handles the supported RAW
 families, and nvJPEG is an optional accelerated JPEG path with WIC fallback.
 Animated playback and multipage navigation are outside the current decode
 contract; multi-frame WIC files are presented through the available frame.

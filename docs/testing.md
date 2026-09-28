@@ -32,10 +32,13 @@ ctest --preset release-tests
 The current test target registers:
 
 - `HyperBrowseSmoke`
+- `HyperBrowsePerformanceBenchmark`
 - `HyperBrowseFolderHistorySmoke`
 - `HyperBrowseFileOperationMediaCacheSmoke`
 - `HyperBrowseViewerFitSmoke`
 - `HyperBrowseViewerInteractionSmoke`
+- `HyperBrowseRuntimePolicySmoke`
+- `HyperBrowseCompareSessionPolicySmoke`
 - `HyperBrowseThumbnailPersistenceSmoke`
 - `HyperBrowseThumbnailPathSafetySmoke`
 - `HyperBrowseThumbnailMaintenanceSmoke`
@@ -43,6 +46,7 @@ The current test target registers:
 - `HyperBrowseThumbnailFailureSmoke`
 - `HyperBrowseFileRenameSmoke`
 - `HyperBrowseAppTextSizeSmoke`
+- `HyperBrowseFolderTreeRestoreSmoke`
 - `HyperBrowseAccessibilitySmoke`
 - `HyperBrowseDialogGeometrySmoke`
 - `HyperBrowseSettingsSmoke`
@@ -52,9 +56,8 @@ The current test target registers:
 - `HyperBrowseExternalDropTargetSmoke`
 - `HyperBrowseMenuMetricsSmoke`
 - `HyperBrowseResponsivePanelSmoke`
-- `HyperBrowsePerformanceBenchmark`
 
-All 22 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+All 25 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
 
 The `vs2026-x64` development preset explicitly sets `HYPERBROWSE_BUILD_FUZZ_TESTS=OFF`. An opt-in configuration may set it to `ON`; building `HyperBrowseTests` then builds `HyperBrowseBoundaryFuzz` before the two boundary tests are run.
 
@@ -183,7 +186,7 @@ Check the affected workflow and its neighboring state transitions. Depending on 
 - settings Apply/OK/Cancel and persistence across restart;
 - multi-monitor and high-DPI behavior for geometry or rendering changes;
 - keyboard-only focus, Inspect/MSAA names and states, a screen reader, and both Windows high-contrast schemes for accessibility changes;
-- RAW, WIC (including WebP where the Windows codec is available), and optional nvJPEG fallback paths for decoder changes.
+- RAW, WIC (including WebP, HEIC, and JPEG XL when compatible Windows codecs are available), and optional nvJPEG fallback paths for decoder changes.
 
 ## Diagnostics
 

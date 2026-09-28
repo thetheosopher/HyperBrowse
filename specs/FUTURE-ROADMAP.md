@@ -57,9 +57,12 @@ The active plan assumes the following are already shipped and stable:
 - File management: copy, move, rename, batch rename, delete, permanent
   delete, reveal, copy path, properties, recent destinations, pinned
   favorites, RAW+JPEG paired operations.
-- Compare/cull lite (two-up viewer), ratings/tags, filter-box (including
-  `rating:>=N` / `tag:*`), date-taken sort, sort direction toggle,
-  configurable viewer mouse wheel, slideshow with transition styles.
+- Two-to-four-image N-up compare with synchronized zoom/pan, ratings/tags,
+  filter-box (including `rating:>=N` / `tag:*`), date-taken sort, sort
+  direction toggle, configurable viewer mouse wheel, slideshow with transition
+  styles.
+- Root-aware long-path breadcrumbs and an optional Performance HUD for
+  thumbnail, queue, cache, and memory-pressure state.
 - Diagnostics window, structured log, smoke + integration tests, GitHub
   Actions CI workflow (currently disabled; no cloud runs are active), portable
   zip + Inno Setup 6 installer.
