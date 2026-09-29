@@ -30,7 +30,9 @@ namespace hyperbrowse::viewer
 
     std::vector<RECT> CompareTileBounds(const RECT& clientRect, std::size_t tileCount, LONG requestedGap)
     {
-        if (tileCount < 2 || tileCount > 4 || clientRect.right <= clientRect.left || clientRect.bottom <= clientRect.top)
+        if (!IsSupportedCompareTileCount(tileCount)
+            || clientRect.right <= clientRect.left
+            || clientRect.bottom <= clientRect.top)
         {
             return {};
         }

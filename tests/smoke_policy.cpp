@@ -136,11 +136,17 @@ namespace hyperbrowse::tests
              using hyperbrowse::viewer::CompareTileBounds;
              using hyperbrowse::viewer::HitTestCompareTile;
              using hyperbrowse::viewer::ImageCenterFromPan;
+             using hyperbrowse::viewer::IsSupportedCompareTileCount;
              using hyperbrowse::viewer::NormalizedImageCenter;
              using hyperbrowse::viewer::NextAvailableCompareCandidate;
              using hyperbrowse::viewer::PanFromImageCenter;
 
              const RECT client{0, 0, 1000, 800};
+             Expect(!IsSupportedCompareTileCount(1)
+                        && IsSupportedCompareTileCount(2)
+                        && IsSupportedCompareTileCount(4)
+                        && !IsSupportedCompareTileCount(5),
+                    "Compare selection eligibility did not enforce the two-to-four tile range");
              const std::vector<RECT> pairBounds = CompareTileBounds(client, 2, 16);
              Expect(pairBounds.size() == 2 && pairBounds[0].right < pairBounds[1].left,
                  "Two-image compare panes were not separated by a gap");

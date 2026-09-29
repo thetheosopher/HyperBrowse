@@ -103,6 +103,7 @@
 #include "util/Timing.h"
 #include "util/UiTextSize.h"
 #include "render/GdiText.h"
+#include "viewer/CompareSessionPolicy.h"
 #include "viewer/ViewerWindow.h"
 
 #include "app/resource.h"
@@ -16265,7 +16266,7 @@ namespace hyperbrowse::ui
         }
 
         std::vector<browser::BrowserItem> selectedItems = CollectItemsForScope(true);
-        if (selectedItems.size() < 2 || selectedItems.size() > 4
+        if (!viewer::IsSupportedCompareTileCount(selectedItems.size())
             || std::any_of(selectedItems.begin(), selectedItems.end(), [](const browser::BrowserItem& item)
             {
                 return item.isDirectory;
@@ -16770,6 +16771,8 @@ namespace hyperbrowse::ui
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
         const bool hasSingleSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 1;
         const bool hasBatchRenameSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 1;
+        const bool hasCompareSelection = browserPaneController_
+            && viewer::IsSupportedCompareTileCount(browserPaneController_->SelectedCount());
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool allowMutatingFileCommands = hasSelection && !fileOperationActive_;
         const int commonSelectionRating = hasSelection ? CommonSelectionRating() : -1;
@@ -16887,7 +16890,7 @@ namespace hyperbrowse::ui
             EnableMenuItem(menu, ID_FILE_OPEN_SELECTED, MF_BYCOMMAND | MF_ENABLED);
             EnableMenuItem(menu, ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, MF_BYCOMMAND | MF_ENABLED);
             EnableMenuItem(menu, ID_FILE_COMPARE_SELECTED,
-                           MF_BYCOMMAND | ((browserPaneController_ && browserPaneController_->SelectedCount() == 2) ? MF_ENABLED : MF_GRAYED));
+                           MF_BYCOMMAND | (hasCompareSelection ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_FILE_VIEW_ON_SECONDARY_MONITOR,
                            MF_BYCOMMAND | ((hasSelection && hasSecondaryMonitor) ? MF_ENABLED : MF_GRAYED));
             EnableMenuItem(menu, ID_VIEW_SLIDESHOW_SELECTION, MF_BYCOMMAND | MF_ENABLED);
@@ -21071,7 +21074,8 @@ namespace hyperbrowse::ui
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
         const bool hasSingleSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 1;
         const bool hasBatchRenameSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 1;
-        const bool hasCompareSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 2;
+        const bool hasCompareSelection = browserPaneController_
+            && viewer::IsSupportedCompareTileCount(browserPaneController_->SelectedCount());
         const bool hasSelectedJpeg = HasSelectedJpegItems();
         const bool hasSecondaryMonitor = FindAlternateMonitorForWindow(hwnd_) != nullptr;
         const bool allowMetadataEdit = hasSelection && !fileOperationActive_;
@@ -21228,7 +21232,8 @@ namespace hyperbrowse::ui
     void MainWindow::UpdateToolbarItemStates()
     {
         const bool hasSelection = browserPaneController_ && browserPaneController_->SelectedCount() > 0;
-        const bool hasCompareSelection = browserPaneController_ && browserPaneController_->SelectedCount() == 2;
+        const bool hasCompareSelection = browserPaneController_
+            && viewer::IsSupportedCompareTileCount(browserPaneController_->SelectedCount());
         const bool folderEnumerationActive = folderLoadCoordinator_
             && folderLoadCoordinator_->IsEnumerationActive();
         CommandBarController::ToolbarState state;

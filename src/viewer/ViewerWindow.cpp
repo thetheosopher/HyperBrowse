@@ -1252,7 +1252,7 @@ namespace hyperbrowse::viewer
     bool ViewerWindow::BeginCompareSession(const std::vector<int>& tileIndexes,
                                           const std::vector<CompareTileMetadata>& candidateMetadata)
     {
-        if (tileIndexes.size() < 2 || tileIndexes.size() > 4)
+        if (!IsSupportedCompareTileCount(tileIndexes.size()))
         {
             return false;
         }

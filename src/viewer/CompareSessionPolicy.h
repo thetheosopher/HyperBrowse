@@ -8,6 +8,11 @@
 
 namespace hyperbrowse::viewer
 {
+    constexpr bool IsSupportedCompareTileCount(std::size_t tileCount) noexcept
+    {
+        return tileCount >= 2 && tileCount <= 4;
+    }
+
     struct NormalizedImageCenter
     {
         double x{0.5};

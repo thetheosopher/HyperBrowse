@@ -1,6 +1,6 @@
 # HyperBrowse Future Roadmap
 
-Last reviewed: 2026-09-26
+Last reviewed: 2026-09-29
 
 This is the single forward-looking product backlog for HyperBrowse. It is
 intentionally separate from the authoritative shipped contract in
@@ -80,30 +80,6 @@ Competitors expose almost no resource controls. HyperBrowse should ship a
 small, opinionated set that is **safe by default** and **explicit when
 asked**.
 
-### `A3` Persistent Thumbnail Cache Maturity (P0)
-
-**Implementation status: Shipped on 2026-09-14.** The first persistence pass
-has been replaced by the hardened worker-owned path below. Detailed history
-and validation evidence are retained in the [A3 implementation plan](A3-PERSISTENT-CACHE-PLAN.md)
-and summarized in Appendix A.
-
-- Sharded directory layout (`xx/yy/<hash>.bin`) to keep per-directory entry
-  counts low on huge libraries.
-- LRU eviction by size, driven by the configured persistent thumbnail-cache
-  budget, default `min(totalRam/2, 8 GB)` capped by free-disk headroom on the
-  cache volume.
-- Background compaction pass on idle: reconcile orphan files, drop entries
-  for confirmed-missing files, and enforce byte LRU using actual file sizes.
-- Move all persistent-cache I/O onto one low-priority cache worker, including
-  asynchronous lookup, store, invalidation, statistics, access-journal flush,
-  and maintenance operations.
-- Surface live cache metrics in the **Cache Stats** details-panel tab and
-  detailed persistent-cache/per-shard information in the asynchronous
-  **Persistent Thumbnail Cache** dialog (see D4), with compact and confirmed
-  purge actions.
-- Enforce cache-hit, store-throughput, compaction, cache-worker queue-delay,
-  scroll-dispatch, and first-thumbnail regression bars in the benchmark suite.
-
 ### `A5` Decode/Scale Buffer Pools (P1)
 
 **Implementation status:** In progress. An initial low-risk slice now pools the
@@ -143,21 +119,6 @@ scaling remains gated on reviewed evidence and an explicit go decision.
 - Fall back transparently when D2D device is lost or unavailable.
 - Target to validate in benchmarks: ≥30 % thumb-scale CPU reduction at
   256 px on a representative folder.
-
-### `A7` Folder Warm-Up Window (P1)
-
-**Implementation status:** Shipped. Browser refresh already schedules
-low-priority top-of-folder warm-up thumbnail and metadata work after
-enumeration, request epochs cancel stale warm-up batches on scroll, and the
-warm-up window now scales with effective prefetch depth instead of using only
-fixed prefetch multipliers.
-
-- After enumeration completes, schedule a small batch of "top-of-folder
-  warm-up" thumbnail jobs at low priority so the first scroll feels instant
-  even before the user clicks the grid.
-- Window size uses the effective prefetch depth and visible row estimate;
-  Auto follows `ResourceProfile`, an explicit override takes precedence, and
-  the work is cancellable on scroll.
 
 ### `A8` Startup Latency Budget Gate (P1)
 
@@ -201,43 +162,18 @@ deleted permanently without an extra confirmation prompt, the viewer advances
 to the next image, compare mode is preserved when a valid neighbor remains,
 and browser focus is restored if the delete fails.
 
-### `B1` Drag-and-Drop File Operations (P0)
-
-**Implementation status:** Shipped for shell drag-out, in-app file drops, and
-the existing Copy/Move operation path. Content-based duplicate finding is a
-separate deferred idea and is not implied by the duplicate-file command.
-
-- **Drag out (implemented):** selected thumbnails or image rows are exposed as
-  a shell data object so users can drag them into Explorer, mail clients, or
-  other shell-aware apps. The external drag begins when the pointer leaves
-  the HyperBrowse window, preserving the existing in-app destination drag.
-- **Drag in:** drop folders or files onto the browser pane to navigate or
-  copy into the current folder.
-- Holding `Ctrl` forces copy, `Shift` forces move; default mirrors Explorer
-  semantics by destination type.
-- Reuses `FileOperationService` for in-app handling.
-
 ### `B2` n-Up Compare & Side-by-Side Zoom Sync (P0)
 
-**Implementation status:** The local implementation now supports two-to-four
-selected images, focused candidate replacement, synchronized or independent
-zoom/pan, and per-tile rating/tag commands through the existing metadata store.
-The full local Debug CTest suite passes; manual DPI and forced-GDI-fallback
-validation remain. See the
+**Implementation status:** The compare workflow is implemented locally; its
+implementation summary is in Appendix B. This entry now tracks acceptance
+verification only. See the
 [B2 long-horizon prompt](FUTURE-ROADMAP-PROMPT-05-N-UP-COMPARE-AND-ZOOM-SYNC.md)
-for the interaction contract and acceptance gates.
+for the complete interaction contract.
 
-- Two images remain side by side; three/four images use a responsive 2x2
-  viewer layout with a visible focus indicator.
-- `Ctrl+Tab` / `Ctrl+Shift+Tab` focus tiles; `,` / `.` replace the focused
-  tile from the captured browser candidate order, skipping visible images.
-- Synchronized fit-relative zoom and normalized pan are on by default and can
-  be toggled from the viewer context menu. Independent tile views are retained
-  when synchronization is off.
-- Per-tile rating/tag context-menu actions reuse the existing metadata store.
-- Preserve `1` for Actual Size and bare `Tab` for overlay visibility; in n-up
-  mode `Shift+Left/Right` also cycles the focused tile, while two-up retains
-  adjacent comparison behavior.
+- Complete manual review at 100%, 150%, and 200% DPI, including forced GDI
+  fallback.
+- Add focused per-tile rating/tag isolation and persistence coverage.
+- Complete the local Debug and Release build and CTest gates.
 
 ### `B3` Quick-Pick Destination Panel (P1)
 
@@ -302,53 +238,11 @@ available first-frame WIC presentation.
 
 The brand is "fast". The product should look the part.
 
-### `C1` Custom About Dialog (P1)
-
-**Implementation status: Implemented locally.** The existing DPI-aware custom About
-dialog shows the 64 px app icon, generated version, build configuration, and
-the display-adapter vendor for its monitor via a background query. It shows
-the A8 startup spans when recorded and reports unavailable timings explicitly.
-
-### `C2` Empty-State Watermark (P2)
-
-**Implementation status: Implemented locally.** The browser no-folder state and viewer
-no-image state show muted brand art above their prompts. Loading, error,
-filtered-empty, and empty-folder states retain their distinct presentations.
-
-### `C3` Performance HUD Overlay (P1)
-
-**Implementation status: Implemented locally.** The off-by-default HUD is available from
-View and `Ctrl+Shift+P` in thumbnail and details modes. It shows active
-thumbnail decodes and pending jobs as live counts, average thumbnail scale time
-from recorded diagnostics samples, the in-memory thumbnail-cache hit rate,
-and current memory-pressure state. Missing scale/cache samples are shown as
-unavailable. Its one-second refresh timer and prepared display text are removed
-when disabled; no preference is persisted.
-
-### `C4` Settings Reorganization (P1)
-
-**Implementation status:** Shipped. Performance, diagnostics, and integration
-surfaces are grouped under Tools, while the consolidated Settings dialog owns
-the appearance, viewer, performance, behavior, and slideshow preferences.
-
-- Move **Enable NVIDIA JPEG Acceleration** and **Use Out-of-Process LibRaw
-  Fallback** out of the View menu into the new Settings dialog (Performance
-  tab).
-- Trim the browser context menu to selection-relevant actions only
-  (carry-over from prior P2 backlog).
-
 ### `C5` Tools Menu (P1)
 
-**Implementation status:** Shipped. The current command bar exposes Tools with
-Settings, Performance, Diagnostics, and Integration submenus. Benchmark and
-log-folder commands remain backlog ideas.
-
-- New top-level Tools menu:
-  - Settings…
-  - Benchmark…
-  - Cache Inspector…
-  - Diagnostics Snapshot
-  - Open Log Folder
+The core Tools menu and Settings organization are shipped and summarized in
+Appendix A. Remaining command ideas are **Benchmark** and **Open Log Folder**;
+the separate Cache Inspector window was superseded by D4's existing surfaces.
 
 ### `C6` Inline Rename / In-Place Label Edit (P2)
 
@@ -358,19 +252,13 @@ editing of image labels in thumbnail/details surfaces remains deferred.
 - True in-place label editing in the thumbnail and details surfaces; `F2`
   currently opens a dialog.
 
-### `C7` Breadcrumb / Path Bar (P2)
+### C1-C3 / C7 UI Surface Verification
 
-**Implementation status: Implemented locally.** A breadcrumb above the right-side browser
-content exposes drive/UNC roots and parent folders. Long paths collapse to a
-root, current folder, and a **More parent folders** menu; all navigation uses
-the existing folder-load path and keeps the folder tree and history in sync.
-
-The coordinated implementation brief for C1, C2, C3, and C7 is the
+The local implementations are summarized in Appendix B. The coordinated
+implementation brief is the
 [long-horizon UI surfaces prompt](FUTURE-ROADMAP-PROMPT-06-PERFORMANCE-UI-SURFACES.md).
 
-**Validation note:** The full Debug CTest matrix passes 25/25 and the final
-Release application target builds. Release CTest and manual theme/DPI visual
-review remain unverified.
+- Complete Release CTest and manual theme/DPI visual review.
 
 ### `C8` Accessibility Completion and Release Verification (P1)
 
@@ -409,22 +297,6 @@ Performance branding requires evidence.
 
 D1-D3 and the remaining A8 work are one evidence-closure effort. Its execution
 brief is the [performance-evidence prompt](FUTURE-ROADMAP-PROMPT-02-PERFORMANCE-EVIDENCE.md).
-
-### `D0` Trustworthy Validation Baseline (P0)
-
-**Implementation status: Shipped on 2026-09-26.** The normal Debug and Release
-CTest matrices now pass with 23/23 tests in each configuration. Single-instance
-smoke coverage uses a per-test mutex and named-pipe namespace, so an installed
-or separately running HyperBrowse process cannot contaminate the result. The
-stale-completion scenario uses fresh persistent-cache identities on each run
-and verifies both memory retention and worker-owned disk persistence without
-posting a stale UI update. Optional fuzz tests are excluded from the normal
-preset and the opt-in configuration builds and runs both boundary tests.
-
-The execution brief and root-cause history are retained in the
-[validation-baseline prompt](FUTURE-ROADMAP-PROMPT-01-VALIDATION-BASELINE.md).
-This baseline is a prerequisite for starting new roadmap feature work and
-remains the hold-the-line gate for future cache, startup, and decode changes.
 
 ### `D1` Standard Benchmark Datasets (P0)
 
@@ -465,20 +337,6 @@ samples and thresholds under an explicitly approved evidence policy.
   against the Release build, compares compatible results against a reviewed
   baseline (`docs/perf/baseline.json`), retains JSON results, and fails on a
   supported threshold breach.
-
-### `D4` Cache Inspector Window (P1)
-
-**Implementation status:** Functionally shipped through existing UI surfaces.
-The Cache Stats details-panel tab is the live, non-modal view for thumbnail and
-metadata cache usage, hit rates, decode queue, scale timing, memory pressure,
-and persistent-cache totals. The asynchronous Persistent Thumbnail Cache
-dialog provides expanded aggregate and per-shard details plus compact and
-confirmed purge actions; Settings provides persistent-cache trim. Decision:
-keep these focused surfaces and do not build a separate Diagnostics-style
-Cache Inspector window unless user research identifies a concrete gap.
-
-The original single-window proposal is superseded by this split-surface
-implementation; there is no remaining D4 feature work.
 
 ### `D5` ETW / WPR Trace Hooks (P2)
 
@@ -615,6 +473,32 @@ focused. The summarized status as of this revision:
 - **Toolbar:** owner-drawn double-buffered toolbar strip with grouped icon
   buttons and right-aligned actions
   ([archived toolbar redesign](archive/16-toolbar-ux-redesign.md)).
+- **A7 Folder Warm-Up Window:** cancellable top-of-folder thumbnail and
+  metadata warm-up uses the effective prefetch depth and visible-row estimate.
+- **B1 Drag-and-Drop File Operations:** shell drag-out and browser drops use
+  the existing file-operation path; modifier keys preserve Explorer-style
+  copy/move behavior.
+- **C4/C5 Core UI Organization:** Settings owns the consolidated appearance,
+  viewer, performance, behavior, and slideshow preferences. The Tools menu
+  groups Settings, Performance, Diagnostics, and Integration commands.
+- **D0 Trustworthy Validation Baseline:** shipped 2026-09-26 with per-test
+  single-instance isolation and stale-completion coverage; the original gate
+  recorded 23/23 Debug and Release CTest passes. See the
+  [validation-baseline prompt](FUTURE-ROADMAP-PROMPT-01-VALIDATION-BASELINE.md).
+- **D4 Cache Inspection:** shipped through the Cache Stats tab, asynchronous
+  Persistent Thumbnail Cache dialog, and Settings trim action; no separate
+  Diagnostics-style Cache Inspector window is planned.
 
 For a deeper change log, consult the git history; this appendix exists only
 to anchor the active plan above.
+
+## Appendix B — Implemented Locally, Verification Pending
+
+- **B2 N-Up Compare:** implementation supports two-to-four tiles, captured
+  candidate cycling, synchronized or independent zoom/pan, and focused-tile
+  rating/tag actions through the existing metadata store. Manual DPI and
+  forced-GDI-fallback review, per-tile metadata isolation/persistence tests,
+  and the current Debug/Release build and CTest gates remain open in Theme B.
+- **C1/C2/C3/C7 UI Surfaces:** the About dialog, empty-state watermarks,
+  Performance HUD, and breadcrumb/path bar are implemented locally. Release
+  CTest and manual theme/DPI visual review remain open in Theme C.
