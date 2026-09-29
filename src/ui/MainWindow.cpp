@@ -18918,6 +18918,7 @@ namespace hyperbrowse::ui
         else if (browserPaneController_)
         {
             focusWindowAtFileOperationStart_ = browserPaneController_->Hwnd();
+            FocusKeyboardTarget({KeyboardFocusTargetKind::BrowserPane});
         }
         else if (currentFocusWindow
             && (currentFocusWindow == hwnd_ || IsChild(hwnd_, currentFocusWindow)))
