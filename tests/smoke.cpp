@@ -3994,6 +3994,19 @@ namespace
                "Thumbnail navigation did not return keyboard focus to the browser pane");
         Expect(browserPane.FocusedFilePathSnapshot() == L"C:\\Alpha\\delta.nef",
                "Arrow navigation from main window focus did not advance the focused thumbnail");
+        SetFocus(hostWindow);
+        Expect(browserPane.HandleNavigationKey(WM_KEYDOWN, VK_RETURN, 0),
+               "Enter from main window focus was not forwarded to the thumbnail browser");
+        MSG openItemMessage{};
+        Expect(PeekMessageW(&openItemMessage,
+                            hostWindow,
+                            hyperbrowse::browser::BrowserPane::kOpenItemMessage,
+                            hyperbrowse::browser::BrowserPane::kOpenItemMessage,
+                            PM_REMOVE) != FALSE,
+               "Enter forwarded to the thumbnail browser did not request opening the focused item");
+        Expect(openItemMessage.wParam == reinterpret_cast<WPARAM>(browserPane.Hwnd())
+                   && openItemMessage.lParam == model.FindItemIndexByPath(L"C:\\Alpha\\delta.nef"),
+               "Enter did not request opening the focused thumbnail");
          Expect(browserPane.GoToItemNumber(2) && browserPane.CurrentItemNumber() == 2,
              "Browser item-number navigation did not select the requested visible item");
          Expect(!browserPane.GoToItemNumber(5) && browserPane.CurrentItemNumber() == 2,

@@ -10577,6 +10577,8 @@ namespace hyperbrowse::ui
             && message->hwnd
             && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
             && browserPaneController_
+            && (message->wParam != VK_RETURN
+                || CurrentKeyboardFocusTarget().kind == KeyboardFocusTargetKind::BrowserPane)
             && browserPaneController_->HandleNavigationKey(message->message,
                                                             message->wParam,
                                                             message->lParam))
