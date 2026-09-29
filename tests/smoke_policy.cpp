@@ -453,6 +453,7 @@ namespace hyperbrowse::tests
             UINT performanceProfileCommand = 0;
             int performanceHudCallCount = 0;
             int detailsCallCount = 0;
+            int itemNumberCallCount = 0;
 
             ViewCommandController::Handlers handlers;
             handlers.onAppTextSize = [&appTextSizeCommand](UINT commandId)
@@ -479,6 +480,10 @@ namespace hyperbrowse::tests
             {
                 ++detailsCallCount;
             };
+            handlers.onGoToItemNumber = [&itemNumberCallCount]
+            {
+                ++itemNumberCallCount;
+            };
             controller.Configure(std::move(handlers));
 
             Expect(controller.Handle(ID_VIEW_APP_TEXT_SIZE_LARGE)
@@ -494,6 +499,8 @@ namespace hyperbrowse::tests
                    "View command controller did not route performance-profile commands");
                  Expect(controller.Handle(ID_VIEW_PERFORMANCE_HUD) && performanceHudCallCount == 1,
                      "View command controller did not route the performance HUD toggle");
+                     Expect(controller.Handle(ID_VIEW_GO_TO_ITEM_NUMBER) && itemNumberCallCount == 1,
+                         "View command controller did not route go-to-item-number");
                 const auto shortcuts = hyperbrowse::ui::MainWindowShortcuts();
                 const auto performanceHudShortcut = std::find_if(shortcuts.begin(), shortcuts.end(), [](const auto& shortcut)
                 {

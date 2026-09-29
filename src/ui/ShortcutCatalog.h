@@ -28,6 +28,12 @@ namespace hyperbrowse::ui
 
     inline constexpr std::wstring_view kDetailsPanelMenuLabel =
         L"Show &Details Panel\tCtrl+3 / Alt+Shift+P";
+    inline constexpr std::wstring_view kRecursiveBrowsingMenuLabel =
+        L"&Recursive Browsing\tCtrl+R";
+    inline constexpr std::wstring_view kThumbnailDetailsMenuLabel =
+        L"Show Thumbnail &Details\tCtrl+Shift+M";
+    inline constexpr std::wstring_view kGoToItemNumberMenuLabel =
+        L"Go to Item by &Number...\tCtrl+G";
 
     struct MenuMnemonicDefinition
     {
@@ -101,7 +107,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_SELECT_ALL, static_cast<WORD>('A'), FCONTROL, L"Ctrl+A", L"Select all items", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_FILE_DUPLICATE_SELECTION, static_cast<WORD>('D'), FCONTROL, L"Ctrl+D", L"Duplicate selected files", L"File and selection actions"},
         ShortcutDefinition{ShortcutContext::MainWindow, 0, static_cast<WORD>('F'), FCONTROL, L"Ctrl+F", L"Focus and select the browser filter", L"View and navigation"},
-        ShortcutDefinition{ShortcutContext::MainWindow, 0, static_cast<WORD>('G'), FCONTROL, L"Ctrl+G", L"Go to a file by number", L"View and navigation"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_GO_TO_ITEM_NUMBER, static_cast<WORD>('G'), FCONTROL, L"Ctrl+G", L"Go to a file by number", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, 0, VK_F6, 0, L"F6", L"Cycle to the next main-window pane", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, 0, VK_F6, FSHIFT, L"Shift+F6", L"Cycle to the previous main-window pane", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_EDIT_UNDO, static_cast<WORD>('Z'), FCONTROL, L"Ctrl+Z", L"Undo the last file operation", L"File and selection actions"},
@@ -115,6 +121,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_DETAILS_STRIP, static_cast<WORD>('3'), FCONTROL, L"Ctrl+3", L"Toggle the details panel", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_DETAILS_STRIP, static_cast<WORD>('P'), FALT | FSHIFT, L"Alt+Shift+P", L"Toggle the details panel", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_RECURSIVE, static_cast<WORD>('R'), FCONTROL, L"Ctrl+R", L"Toggle recursive browsing", L"View and navigation"},
+        ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_THUMBNAIL_DETAILS, static_cast<WORD>('M'), FCONTROL | FSHIFT, L"Ctrl+Shift+M", L"Toggle thumbnail metadata details", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_OEM_PLUS, 0, L"+ / =", L"Increase thumbnail size", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_OEM_PLUS, FSHIFT, L"+ / =", L"Increase thumbnail size", L"View and navigation"},
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_ADD, 0, L"Numpad +", L"Increase thumbnail size", L"View and navigation"},

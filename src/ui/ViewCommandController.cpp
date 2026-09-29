@@ -64,6 +64,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onRecursive);
         case ID_VIEW_SHOW_SUBFOLDERS:
             return Invoke(handlers_.onShowSubfolders);
+        case ID_VIEW_GO_TO_ITEM_NUMBER:
+            return Invoke(handlers_.onGoToItemNumber);
         case ID_VIEW_SETTINGS:
             return Invoke(handlers_.onSettings);
         case ID_FILE_ASSOCIATIONS:

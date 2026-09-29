@@ -25,6 +25,7 @@ namespace hyperbrowse::ui
             CommandHandler onThemeMenu;
             CommandHandler onRecursive;
             CommandHandler onShowSubfolders;
+            CommandHandler onGoToItemNumber;
             CommandHandler onSettings;
             CommandHandler onAssociations;
             CommandHandler onNvJpeg;

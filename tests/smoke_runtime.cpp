@@ -82,7 +82,7 @@ namespace hyperbrowse::tests
                    "Ctrl+Shift+N is missing from the new-folder shortcut catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, 'W', FCONTROL),
                    "Ctrl+W no longer owns the main-window minimize command");
-            Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, 0, 'G', FCONTROL),
+            Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_GO_TO_ITEM_NUMBER, 'G', FCONTROL),
                    "Main-window Ctrl+G item navigation shortcut is missing from the shared catalog");
             Expect(!hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, VK_ESCAPE, 0),
                    "Escape still shares the Ctrl+W minimize command");
@@ -92,6 +92,8 @@ namespace hyperbrowse::tests
                    "Alt+Right is missing from the folder navigation catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_NAVIGATE_PARENT_FOLDER, VK_UP, FALT),
                    "Alt+Up is missing from the parent-folder navigation catalog");
+            Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_THUMBNAIL_DETAILS, 'M', FCONTROL | FSHIFT),
+                   "Ctrl+Shift+M is missing from the thumbnail-details shortcut catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_THUMBNAIL_SIZE_INCREASE, VK_ADD, 0),
                    "Numpad plus is missing from the thumbnail stepping catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_DETAILS_STRIP, '3', FCONTROL)
@@ -105,6 +107,10 @@ namespace hyperbrowse::tests
             Expect(hyperbrowse::ui::kDetailsPanelMenuLabel.find(L"Ctrl+3") != std::wstring_view::npos
                        && hyperbrowse::ui::kDetailsPanelMenuLabel.find(L"Alt+Shift+P") != std::wstring_view::npos,
                    "Details Panel menu label must display both registered shortcuts");
+                     Expect(hyperbrowse::ui::kRecursiveBrowsingMenuLabel.find(L"Ctrl+R") != std::wstring_view::npos
+                                      && hyperbrowse::ui::kThumbnailDetailsMenuLabel.find(L"Ctrl+Shift+M") != std::wstring_view::npos
+                                      && hyperbrowse::ui::kGoToItemNumberMenuLabel.find(L"Ctrl+G") != std::wstring_view::npos,
+                               "View menu labels must display their registered shortcuts");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
                                ShortcutContext::Viewer,
                                ID_FILE_COPY_IMAGE_PIXELS,

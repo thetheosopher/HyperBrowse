@@ -12,7 +12,7 @@ This plan concerns command accelerators and shortcut consistency. Focus traversa
 
 - `ui/ShortcutCatalog.h` is the source for MainWindow accelerator-table creation and the in-app shortcut reference. It also describes Viewer shortcuts, but ViewerWindow currently dispatches most of those keys in its own `WM_KEYDOWN` handling.
 - The catalog, menu labels, toolbar tooltips, in-app reference, and HTML user guide are maintained through separate code or markup. They can drift.
-- `Ctrl+3` is catalogued and documented as toggling the Details Panel, but the View menu item `Show Details Panel` does not display that chord. The separate `Show Thumbnail Details` command has no accelerator. These are distinct features and should not be conflated.
+- `Ctrl+3` and `Alt+Shift+P` toggle the Details Panel; `Ctrl+R` toggles recursive browsing. The main View menu previously omitted those chord labels. `Show Thumbnail Details` is a separate metadata-display toggle and now has its own app-specific `Ctrl+Shift+M` shortcut.
 - The main-window catalog checks duplicate chords. Smoke coverage separately checks Viewer chord uniqueness and selected catalog entries, but does not enforce that every bound menu command displays its chord or that high-value menu actions were considered.
 - Several useful Windows conventions are already present: `F2` rename, `F5` refresh, `Alt+Enter` properties, `Alt+Left`/`Alt+Right` navigation, `Backspace` back, and `Ctrl+Shift+N` new folder.
 - `F6`, `Ctrl+F`, and `Alt+Up` are not currently assigned in the main-window shortcut catalog or its manual key handling. They are strong candidates for pane traversal, filter focus, and parent-folder navigation respectively.
@@ -40,11 +40,12 @@ Compatibility decisions for this implementation:
 | P0 | Details Panel | Add `Alt+Shift+P` as an alias for the existing `Ctrl+3` command. Show both chords on the View menu item and in the shortcut reference. | File Explorer uses `Alt+Shift+P` for its Details pane. Preserve `Ctrl+3` for existing users; both chords must invoke the same toggle and checked state. |
 | P1 | Browser filter | Assign `Ctrl+F` to focus the existing filter field; when already focused, select its query for replacement. | `Ctrl+F` is the familiar Find chord and the filter is HyperBrowse's closest equivalent. Do not consume ordinary text editing or IME input. |
 | P1 | Main-window panes | Assign `F6` / `Shift+F6` to cycle forward/backward through the major visible regions: folder tree, browser, and visible details/Quick Actions panel. | Microsoft documents F6 for cycling panes/important regions. Keep the order stable, skip hidden or unavailable regions, and reuse the existing focus model rather than creating duplicate tab stops. |
+| P1 | Thumbnail metadata | `Ctrl+Shift+M` toggles thumbnail metadata details. | An application-specific mnemonic for metadata; it is distinct from the Details Panel (`Ctrl+3` / `Alt+Shift+P`) and unique in HyperBrowse's MainWindow context. |
 | P2 | Folder navigation | `Alt+Up` navigates to the parent of the current browser folder, independent of pane focus. | Matches File Explorer and remains distinct from `Alt+Left` history navigation. It is disabled/no-op at a root or while navigation/enumeration is unsettled; text editors retain the key. |
 
-Do not assign a dedicated global accelerator to every View or Settings option in the first pass. `Show Subfolders`, `Show Thumbnail Details`, compact thumbnail layout, sort modes/direction, fixed thumbnail-size presets, ratings, tags, batch conversion, RAW/JPEG preferences, and diagnostics are available through menus or Settings and are less frequent, more numerous, or more context-sensitive. Preserve menu access keys and existing `+`/`-` stepping. Revisit a specific option only when usage evidence or user testing shows a recurring mouse-only bottleneck.
+Do not assign a dedicated global accelerator to every View or Settings option. `Show Subfolders`, compact thumbnail layout, sort modes/direction, fixed thumbnail-size presets, ratings, tags, batch conversion, RAW/JPEG preferences, and diagnostics are available through menus or Settings and are less frequent, more numerous, or more context-sensitive. Preserve menu access keys and existing `+`/`-` stepping. Revisit a specific option when usage evidence or user testing shows a recurring mouse-only bottleneck.
 
-In particular, keep `Show Thumbnail Details` separate from the Details Panel. It changes per-thumbnail metadata presentation rather than showing the right-side panel; do not give it `Alt+Shift+P`. Consider a dedicated chord only after the first pass, with a collision and discoverability review.
+Keep `Show Thumbnail Details` separate from the Details Panel. It changes per-thumbnail metadata presentation rather than showing the right-side panel; its `Ctrl+Shift+M` binding is app-specific and must remain distinct from `Alt+Shift+P`.
 
 ## Consistency Rules
 
@@ -77,7 +78,7 @@ Status: Implemented and smoke-validated for catalog/controller behavior. Interac
 
 ### Phase 3: Make the shortcut inventory authoritative
 
-Status: Partially implemented. MainWindow accelerators and the in-app reference use the shared catalog; the Details Panel menu label is shared and smoke-checked. General menu/user-guide generation remains deferred because those surfaces are currently hand-authored in Win32 and static HTML.
+Status: Partially implemented. MainWindow accelerators and the in-app reference use the shared catalog; menu labels for the Details Panel, recursive browsing, thumbnail details, and item-number navigation are shared and smoke-checked. General menu/user-guide generation remains deferred because those surfaces are currently hand-authored in Win32 and static HTML.
 
 - Keep one structured definition per chord/action/context, including aliases, display text, group, and input-scope/precedence information needed by the router and help surfaces.
 - Generate or validate MainWindow accelerator registration, Viewer shortcut documentation, menu display text, the in-app reference, and user-guide entries from that inventory. Viewer may retain custom `WM_KEYDOWN` dispatch; the catalog must still describe and test the same behavior.

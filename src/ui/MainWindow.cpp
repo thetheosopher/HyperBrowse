@@ -9954,6 +9954,7 @@ namespace hyperbrowse::ui
         };
         viewCommandHandlers.onRecursive = std::bind_front(&MainWindow::ToggleRecursiveBrowsing, this);
         viewCommandHandlers.onShowSubfolders = std::bind_front(&MainWindow::ToggleShowSubfoldersInBrowser, this);
+        viewCommandHandlers.onGoToItemNumber = std::bind_front(&MainWindow::PromptForBrowserItemNumber, this);
         viewCommandHandlers.onSettings = std::bind_front(&MainWindow::ShowConsolidatedSettingsDialog, this);
         viewCommandHandlers.onAssociations = std::bind_front(&MainWindow::ShowFileAssociationsDialog, this);
         viewCommandHandlers.onNvJpeg = [this]
@@ -10555,6 +10556,7 @@ namespace hyperbrowse::ui
                 || message->wParam == VK_OEM_PLUS
                 || ((message->wParam == static_cast<WPARAM>('A')
                      || message->wParam == static_cast<WPARAM>('C')
+                     || message->wParam == static_cast<WPARAM>('G')
                      || message->wParam == static_cast<WPARAM>('V')
                      || message->wParam == static_cast<WPARAM>('X')
                      || message->wParam == static_cast<WPARAM>('Y')
@@ -10569,20 +10571,6 @@ namespace hyperbrowse::ui
             && IsTextInputControlWindow(message->hwnd))
         {
             return false;
-        }
-
-        if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
-            && message->wParam == static_cast<WPARAM>('G')
-            && (GetKeyState(VK_CONTROL) & 0x8000) != 0
-            && (GetKeyState(VK_SHIFT) & 0x8000) == 0
-            && (GetKeyState(VK_MENU) & 0x8000) == 0
-            && (message->lParam & (1LL << 30)) == 0
-            && message->hwnd
-            && (message->hwnd == hwnd_ || IsChild(hwnd_, message->hwnd))
-            && !IsTextInputControlWindow(message->hwnd))
-        {
-            PromptForBrowserItemNumber();
-            return true;
         }
 
         if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)
@@ -10796,9 +10784,10 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_FORWARD_FOLDER, L"Navigate &Forward\tAlt+Right");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_NAVIGATE_PARENT_FOLDER, L"Navigate to &Parent\tAlt+Up");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_RECURSIVE, L"&Recursive Browsing");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_GO_TO_ITEM_NUMBER, kGoToItemNumberMenuLabel.data());
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_RECURSIVE, kRecursiveBrowsingMenuLabel.data());
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_SHOW_SUBFOLDERS, L"Show &Subfolders");
-        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, kThumbnailDetailsMenuLabel.data());
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, kDetailsPanelMenuLabel.data());
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERFORMANCE_HUD, L"Performance &HUD\tCtrl+Shift+P");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"&Compact Thumbnail Layout");
@@ -16932,8 +16921,9 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAILS, L"&Thumbnail Mode");
             AppendMenuW(menu, MF_STRING, ID_VIEW_DETAILS, L"&Details Mode");
-            AppendMenuW(menu, MF_STRING, ID_VIEW_RECURSIVE, L"&Recursive Browsing");
-            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, L"Show Thumbnail &Details");
+            AppendMenuW(menu, MF_STRING, ID_VIEW_GO_TO_ITEM_NUMBER, kGoToItemNumberMenuLabel.data());
+            AppendMenuW(menu, MF_STRING, ID_VIEW_RECURSIVE, kRecursiveBrowsingMenuLabel.data());
+            AppendMenuW(menu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, kThumbnailDetailsMenuLabel.data());
             AppendMenuW(menu, MF_STRING, ID_VIEW_DETAILS_STRIP, L"Show &Details Panel");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(sortMenu), L"&Sort By");
