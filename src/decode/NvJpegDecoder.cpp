@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "decode/WicDecodeHelpers.h"
+#include "decode/WicColorTransform.h"
 #include "util/Diagnostics.h"
 
 namespace fs = std::filesystem;
@@ -1100,7 +1101,8 @@ namespace
         std::uint16_t orientation,
         UINT scaledWidth,
         UINT scaledHeight,
-        std::wstring* errorMessage)
+        std::wstring* errorMessage,
+        std::span<const unsigned char> encodedBytes)
     {
         void* bitmapBits = nullptr;
         HRESULT bitmapResult = E_FAIL;
@@ -1145,7 +1147,8 @@ namespace
                                                                      static_cast<int>(scaledHeight),
                                                                      outputByteCount,
                                                                      orientedWidth,
-                                                                     orientedHeight);
+                                                                     orientedHeight,
+                                                                     hyperbrowse::decode::color::ReadSourceColorInfo(encodedBytes));
     }
 
     class ScopedNvJpegBatchReservation
@@ -1377,7 +1380,8 @@ namespace hyperbrowse::decode
                                                  request.orientation,
                                                  request.scaledWidth,
                                                  request.scaledHeight,
-                                                 errorMessage);
+                                                 errorMessage,
+                                                 request.fileBytes);
 #endif
     }
 
@@ -1527,7 +1531,8 @@ namespace hyperbrowse::decode
                                                                   requests[index].orientation,
                                                                   requests[index].scaledWidth,
                                                                   requests[index].scaledHeight,
-                                                                  errorMessages ? &(*errorMessages)[index] : nullptr);
+                                                                  errorMessages ? &(*errorMessages)[index] : nullptr,
+                                                                  requests[index].fileBytes);
         }
 
         return thumbnails;

@@ -142,6 +142,7 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_VIEW_APP_TEXT_SIZE_MEDIUM = 2224;
     inline constexpr UINT ID_VIEW_APP_TEXT_SIZE_LARGE = 2225;
     inline constexpr UINT ID_VIEW_PERFORMANCE_HUD = 2226;
+    inline constexpr UINT ID_VIEW_COLOR_MANAGEMENT = 2227;
     inline constexpr UINT ID_VIEW_SLIDESHOW_SELECTION = 2301;
     inline constexpr UINT ID_VIEW_SLIDESHOW_FOLDER = 2302;
     inline constexpr UINT ID_VIEW_SLIDESHOW_SETTINGS = 2307;

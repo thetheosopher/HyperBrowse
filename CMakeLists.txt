@@ -137,8 +137,10 @@ add_library(HyperBrowseCore STATIC
     src/decode/ImageDecoder.cpp
     src/decode/NvJpegDecoder.cpp
     src/decode/RawHelperProtocol.cpp
+    src/decode/WicColorTransform.cpp
     src/decode/WicThumbnailDecoder.cpp
     src/services/BatchConvertService.cpp
+    src/services/DisplayColorService.cpp
     src/services/FileAssociationService.cpp
     src/services/FileOperationService.cpp
     src/services/FolderEnumerationService.cpp
@@ -233,6 +235,7 @@ target_link_libraries(HyperBrowseCore PUBLIC
     d2d1
     d3d11
     dwrite
+    mscms
     msimg32
     oleacc
     propsys
@@ -275,6 +278,7 @@ if(HYPERBROWSE_ENABLE_LIBRAW)
         src/decode/ImageDecoder.cpp
         src/decode/NvJpegDecoder.cpp
         src/decode/RawHelperProtocol.cpp
+        src/decode/WicColorTransform.cpp
         src/decode/WicThumbnailDecoder.cpp
         src/util/Diagnostics.cpp
         "${HYPERBROWSE_VERSION_RESOURCE}"
@@ -285,6 +289,7 @@ if(HYPERBROWSE_ENABLE_LIBRAW)
     )
 
     target_link_libraries(HyperBrowseRawHelper PRIVATE
+        mscms
         msimg32
         propsys
         shell32

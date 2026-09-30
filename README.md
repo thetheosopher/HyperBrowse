@@ -19,6 +19,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 
 - Native Win32 desktop application built with CMake and modern C++20.
 - Direct2D and DirectWrite rendering in the browser and viewer, with per-monitor DPI awareness v2.
+- Default-on SDR color-managed thumbnails, viewer, and all compare tiles use each window's monitor profile. **View > Color Management** is a persisted opt-out; unavailable profiles or transforms preserve existing pixels.
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
 - WIC decode for JPEG, PNG, GIF, TIFF, WebP, HEIC, and JPEG XL, with HEIC/JPEG XL dependent on compatible Windows codecs; LibRaw-based RAW support and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, filename/rating/tag filtering, thumbnail ratings, and multi-selection workflows.

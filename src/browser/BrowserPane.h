@@ -16,6 +16,7 @@
 
 #include "browser/BrowserModel.h"
 #include "cache/ThumbnailCache.h"
+#include "services/DisplayColorService.h"
 #include "services/ImageMetadataService.h"
 #include "services/ThumbnailScheduler.h"
 #include "util/ResourceSizing.h"
@@ -161,6 +162,13 @@ namespace hyperbrowse::browser
         std::size_t MetadataCacheEntryCount() const;
         hyperbrowse::services::ImageMetadataService::CacheStatistics MetadataCacheStatistics() const;
         void SetDarkTheme(bool enabled);
+        void SetColorManagementEnabled(bool enabled);
+        bool IsColorManagementEnabled() const;
+        void SetColorProfileProvider(services::DisplayColorService::ProfileProvider provider);
+        services::DisplayColorService::Statistics DisplayColorStatistics() const;
+        void RefreshColorProfile(bool force = false);
+        std::shared_ptr<const cache::CachedThumbnail> ImageForDisplay(
+            const cache::ThumbnailCacheKey& key, std::shared_ptr<const cache::CachedThumbnail> source) const;
 
         void ClearSelection();
         void SelectAll();
@@ -286,7 +294,7 @@ namespace hyperbrowse::browser
                               decode::ThumbnailDecodeFailureKind failureKind,
                               bool selected) const;
         void D2DDrawPreviewThumbnail(ID2D1RenderTarget* rt, const D2D1_RECT_F& previewRect, const BrowserItem& item, bool selected) const;
-        ID2D1Bitmap* GetOrCreateD2DBitmap(ID2D1RenderTarget* rt, const cache::CachedThumbnail& thumbnail) const;
+        ID2D1Bitmap* GetOrCreateD2DBitmap(ID2D1RenderTarget* rt, std::shared_ptr<const cache::CachedThumbnail> thumbnail) const;
         void DrawPlaceholderState(HDC hdc, const RECT& clientRect) const;
         void DrawThumbnailCells(HDC hdc, const RECT& clientRect) const;
         void DrawUnavailableThumbnailState(HDC hdc,
@@ -332,6 +340,7 @@ namespace hyperbrowse::browser
         std::wstring performanceHudText_;
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
+        std::unique_ptr<services::DisplayColorService> displayColors_{std::make_unique<services::DisplayColorService>(64ULL * 1024 * 1024)};
         hyperbrowse::services::UserMetadataStore* userMetadataStore_{};
         hyperbrowse::util::ResourceProfile resourceProfile_{hyperbrowse::util::ResourceProfile::Balanced};
         int prefetchDepthOverride_{hyperbrowse::util::kAutomaticPrefetchDepth};
@@ -403,7 +412,12 @@ namespace hyperbrowse::browser
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dPlaceholderBodyFormat_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dPerformanceHudTextFormat_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dPlaceholderArtBitmap_;
-        mutable std::unordered_map<HBITMAP, Microsoft::WRL::ComPtr<ID2D1Bitmap>> d2dBitmapCache_;
+        struct BitmapEntry
+        {
+            Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+            std::weak_ptr<const cache::CachedThumbnail> pixels;
+        };
+        mutable std::unordered_map<HBITMAP, BitmapEntry> d2dBitmapCache_;
 
         double smoothScrollTarget_{};
         double smoothScrollCurrent_{};

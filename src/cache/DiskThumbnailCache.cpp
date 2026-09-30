@@ -44,8 +44,9 @@ namespace
 #pragma pack(pop)
 
     constexpr std::array<char, 8> kDiskThumbnailMagic{{'H', 'B', 'T', 'H', 'M', 'B', '0', '1'}};
+    constexpr std::array<char, 8> kDiskThumbnailColorMagic{{'H', 'B', 'T', 'H', 'M', 'B', '0', '2'}};
     constexpr std::uint64_t kMaximumThumbnailFileBytes = sizeof(DiskThumbnailHeader)
-        + kMaximumThumbnailPixelBytes;
+        + kMaximumThumbnailPixelBytes + 8 + hyperbrowse::cache::kMaximumSourceProfileBytes;
     constexpr std::size_t kAccessPersistenceInterval = 64;
     constexpr std::size_t kMaximumCompactionRemovals = 256;
     constexpr std::size_t kLegacyMigrationBatchSize = 32;
@@ -717,7 +718,9 @@ namespace hyperbrowse::cache
 
         DiskThumbnailHeader header{};
         stream.read(reinterpret_cast<char*>(&header), sizeof(header));
-        if (!stream || !std::equal(std::begin(header.magic), std::end(header.magic), kDiskThumbnailMagic.begin(), kDiskThumbnailMagic.end()))
+        const bool hasColorMetadata = std::equal(std::begin(header.magic), std::end(header.magic), kDiskThumbnailColorMagic.begin());
+        if (!stream || (!hasColorMetadata
+            && !std::equal(std::begin(header.magic), std::end(header.magic), kDiskThumbnailMagic.begin())))
         {
             removeInvalidEntry();
             return {};
@@ -751,7 +754,9 @@ namespace hyperbrowse::cache
         std::error_code fileSizeError;
         const std::uintmax_t fileSize = fs::file_size(fs::path(cachePath), fileSizeError);
         if (fileSizeError
-            || fileSize != sizeof(DiskThumbnailHeader) + header.pixelBytes)
+            || fileSize < sizeof(DiskThumbnailHeader) + header.pixelBytes
+            || fileSize > kMaximumThumbnailFileBytes
+            || (!hasColorMetadata && fileSize != sizeof(DiskThumbnailHeader) + header.pixelBytes))
         {
             removeInvalidEntry();
             return {};
@@ -769,7 +774,9 @@ namespace hyperbrowse::cache
         }
 
         stream.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
-        if (!stream)
+        SourceColorInfo sourceColor;
+        if (!stream || (hasColorMetadata && !ReadSourceColorInfo(stream,
+            static_cast<std::size_t>(fileSize - sizeof(DiskThumbnailHeader) - header.pixelBytes), &sourceColor)))
         {
             removeInvalidEntry();
             return {};
@@ -787,12 +794,13 @@ namespace hyperbrowse::cache
                                                  static_cast<int>(header.height),
                                                  pixels.size(),
                                                  static_cast<int>(header.sourceWidth),
-                                                 static_cast<int>(header.sourceHeight));
+                                                 static_cast<int>(header.sourceHeight),
+                                                 std::move(sourceColor));
     }
 
     void DiskThumbnailCache::Store(const ThumbnailCacheKey& key, std::shared_ptr<const CachedThumbnail> thumbnail)
     {
-        if (!thumbnail)
+        if (!thumbnail || SerializedSourceColorBytes(thumbnail->SourceColor()) == 0)
         {
             return;
         }
@@ -825,7 +833,7 @@ namespace hyperbrowse::cache
                     return;
                 }
             }
-            entry.fileBytes = sizeof(DiskThumbnailHeader) + pixels.size();
+            entry.fileBytes = sizeof(DiskThumbnailHeader) + pixels.size() + SerializedSourceColorBytes(thumbnail->SourceColor());
             entry.lastAccessOrdinal = nextAccessOrdinal_++;
         }
 
@@ -843,7 +851,7 @@ namespace hyperbrowse::cache
         }
 
         DiskThumbnailHeader header{};
-        std::copy(kDiskThumbnailMagic.begin(), kDiskThumbnailMagic.end(), std::begin(header.magic));
+        std::copy(kDiskThumbnailColorMagic.begin(), kDiskThumbnailColorMagic.end(), std::begin(header.magic));
         header.width = static_cast<std::uint32_t>(width);
         header.height = static_cast<std::uint32_t>(height);
         header.sourceWidth = static_cast<std::uint32_t>(thumbnail->SourceWidth());
@@ -859,7 +867,7 @@ namespace hyperbrowse::cache
 
         stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
         stream.write(reinterpret_cast<const char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
-        if (!stream)
+        if (!WriteSourceColorInfo(stream, thumbnail->SourceColor()))
         {
             stream.close();
             std::error_code error;

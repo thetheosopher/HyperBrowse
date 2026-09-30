@@ -24,6 +24,7 @@
 
 #include "decode/NvJpegDecoder.h"
 #include "decode/RawHelperProtocol.h"
+#include "decode/WicColorTransform.h"
 #include "decode/WicDecodeHelpers.h"
 #include "decode/WicThumbnailDecoder.h"
 #include "util/Diagnostics.h"
@@ -590,7 +591,8 @@ namespace
                                                                       static_cast<int>(scaledHeight),
                                                                       bufferSize,
                                                                       sourceWidthOverride > 0 ? sourceWidthOverride : static_cast<int>(orientedWidth),
-                                                                      sourceHeightOverride > 0 ? sourceHeightOverride : static_cast<int>(orientedHeight));
+                                                                      sourceHeightOverride > 0 ? sourceHeightOverride : static_cast<int>(orientedHeight),
+                                                                      hyperbrowse::decode::color::ReadSourceColorInfo(frame.Get()));
     }
 
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeWicMemoryJpeg(const unsigned char* data,
@@ -745,7 +747,8 @@ namespace
                                                                                               int targetHeight,
                                                                                               int sourceWidthMetadata,
                                                                                               int sourceHeightMetadata,
-                                                                                              std::wstring* errorMessage)
+                                                                                              std::wstring* errorMessage,
+                                                                                              hyperbrowse::cache::SourceColorInfo sourceColor = {hyperbrowse::cache::SourceColorKind::Srgb, {}})
     {
         std::size_t sourceByteCount = 0;
         if (!ComputeBgraByteCount(sourceBitmapWidth, sourceBitmapHeight, &sourceByteCount)
@@ -833,7 +836,8 @@ namespace
                                                                       destinationHeight,
                                                                       byteCount,
                                                                       sourceWidthMetadata > 0 ? sourceWidthMetadata : sourceBitmapWidth,
-                                                                      sourceHeightMetadata > 0 ? sourceHeightMetadata : sourceBitmapHeight);
+                                                                      sourceHeightMetadata > 0 ? sourceHeightMetadata : sourceBitmapHeight,
+                                                                      std::move(sourceColor));
     }
 
 #if defined(HYPERBROWSE_ENABLE_LIBRAW)
@@ -942,6 +946,7 @@ namespace
     void ConfigureRawPostprocess(LibRaw& processor, bool halfSize)
     {
         processor.imgdata.params.output_bps = 8;
+        processor.imgdata.params.output_color = 1;
         processor.imgdata.params.use_camera_wb = 1;
         processor.imgdata.params.half_size = halfSize ? 1 : 0;
     }
@@ -1353,7 +1358,8 @@ namespace
                                             0,
                                             payload.sourceWidth,
                                             payload.sourceHeight,
-                                            errorMessage);
+                                            errorMessage,
+                                            std::move(payload.sourceColor));
     }
 
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeRawFullImageWithHelper(const hyperbrowse::browser::BrowserItem& item,
@@ -1390,7 +1396,8 @@ namespace
                                             0,
                                             payload.sourceWidth,
                                             payload.sourceHeight,
-                                            errorMessage);
+                                            errorMessage,
+                                            std::move(payload.sourceColor));
     }
 #endif
 }
@@ -1500,6 +1507,7 @@ namespace hyperbrowse::decode
         payload.bitmapHeight = decodedImage->Height();
         payload.sourceWidth = decodedImage->SourceWidth();
         payload.sourceHeight = decodedImage->SourceHeight();
+        payload.sourceColor = decodedImage->SourceColor();
         if (!ExtractBgraPixelsFromBitmap(decodedImage->Bitmap(),
                                          decodedImage->Width(),
                                          decodedImage->Height(),

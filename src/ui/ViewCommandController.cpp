@@ -134,6 +134,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onPressureStateStatus);
         case ID_VIEW_PERFORMANCE_HUD:
             return Invoke(handlers_.onPerformanceHud);
+        case ID_VIEW_COLOR_MANAGEMENT:
+            return Invoke(handlers_.onColorManagement);
         case ID_VIEW_SLIDESHOW_SELECTION:
             return Invoke(handlers_.onSlideshowSelection);
         case ID_VIEW_SLIDESHOW_FOLDER:

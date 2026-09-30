@@ -9,7 +9,7 @@ namespace fs = std::filesystem;
 namespace
 {
     constexpr std::uint32_t kRawHelperMagic = 0x52425748; // 'HWBR'
-    constexpr std::uint32_t kRawHelperVersion = 1;
+    constexpr std::uint32_t kRawHelperVersion = 2;
     constexpr std::uint32_t kMaximumBitmapDimension = 32768;
     constexpr std::uint64_t kMaximumPixelBytes = 512ULL * 1024ULL * 1024ULL;
 
@@ -77,7 +77,8 @@ namespace hyperbrowse::decode
             || payload.sourceWidth > static_cast<int>(kMaximumBitmapDimension)
             || payload.sourceHeight > static_cast<int>(kMaximumBitmapDimension)
             || expectedBytes > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())
-            || payload.bgraPixels.size() != static_cast<std::size_t>(expectedBytes))
+            || payload.bgraPixels.size() != static_cast<std::size_t>(expectedBytes)
+            || cache::SerializedSourceColorBytes(payload.sourceColor) == 0)
         {
             return SetError(errorMessage, L"The RAW helper payload pixel buffer does not match the bitmap dimensions.");
         }
@@ -105,7 +106,7 @@ namespace hyperbrowse::decode
         output.write(reinterpret_cast<const char*>(&header), sizeof(header));
         output.write(reinterpret_cast<const char*>(payload.bgraPixels.data()),
                      static_cast<std::streamsize>(payload.bgraPixels.size()));
-        if (!output)
+        if (!cache::WriteSourceColorInfo(output, payload.sourceColor))
         {
             if (errorMessage)
             {
@@ -131,6 +132,7 @@ namespace hyperbrowse::decode
         payload->bitmapHeight = 0;
         payload->sourceWidth = 0;
         payload->sourceHeight = 0;
+        payload->sourceColor = {cache::SourceColorKind::Srgb, {}};
 
         std::ifstream input(fs::path(filePath), std::ios::binary);
         if (!input)
@@ -153,7 +155,7 @@ namespace hyperbrowse::decode
             return false;
         }
 
-        if (header.magic != kRawHelperMagic || header.version != kRawHelperVersion)
+        if (header.magic != kRawHelperMagic || (header.version != 1 && header.version != kRawHelperVersion))
         {
             if (errorMessage)
             {
@@ -179,8 +181,11 @@ namespace hyperbrowse::decode
 
         input.seekg(0, std::ios::end);
         const std::streamoff fileSize = input.tellg();
+        const std::uint64_t pixelEnd = sizeof(RawHelperFileHeader) + expectedBytes;
         if (fileSize < 0
-            || static_cast<std::uint64_t>(fileSize) != sizeof(RawHelperFileHeader) + expectedBytes)
+            || static_cast<std::uint64_t>(fileSize) < pixelEnd
+            || static_cast<std::uint64_t>(fileSize) > pixelEnd + 8 + cache::kMaximumSourceProfileBytes
+            || (header.version == 1 && static_cast<std::uint64_t>(fileSize) != pixelEnd))
         {
             return SetError(errorMessage, L"The RAW helper output file length does not match its header.");
         }
@@ -203,7 +208,8 @@ namespace hyperbrowse::decode
 
         input.read(reinterpret_cast<char*>(payload->bgraPixels.data()),
                    static_cast<std::streamsize>(payload->bgraPixels.size()));
-        if (!input)
+        if (!input || (header.version == kRawHelperVersion
+            && !cache::ReadSourceColorInfo(input, static_cast<std::size_t>(static_cast<std::uint64_t>(fileSize) - pixelEnd), &payload->sourceColor)))
         {
             payload->bgraPixels.clear();
             if (errorMessage)

@@ -919,10 +919,14 @@ namespace hyperbrowse::viewer
         backgroundExecutor_ = std::make_unique<util::BackgroundExecutor>(
             6,
             ViewerBackgroundQueueCapacity(resourceProfile_));
+        displayColors_ = std::make_unique<services::DisplayColorService>(
+            512ULL * 1024 * 1024, services::DisplayColorService::ProfileProvider{},
+            services::DisplayColorService::Converter{}, backgroundExecutor_.get());
     }
 
     ViewerWindow::~ViewerWindow()
     {
+        displayColors_->BindTargetWindow(nullptr);
         asyncState_->shutdown.store(true, std::memory_order_release);
         asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
         asyncState_->targetWindow.store(nullptr, std::memory_order_release);
@@ -1066,6 +1070,17 @@ namespace hyperbrowse::viewer
         SetActiveWindow(hwnd_);
         SetFocus(hwnd_);
         NotifyCurrentItemChanged();
+        if (!reusedExistingWindow)
+        {
+            displayColors_->BindTargetWindow(hwnd_);
+            SetTimer(hwnd_, services::DisplayColorService::kProfilePollTimer,
+                     services::DisplayColorService::kProfilePollIntervalMs, nullptr);
+        }
+        else
+        {
+            displayColors_->InvalidateImages();
+        }
+        RefreshColorProfile(true);
         LoadCurrentImageAsync(LoadReason::Open);
         return true;
     }
@@ -1073,6 +1088,41 @@ namespace hyperbrowse::viewer
     HWND ViewerWindow::Hwnd() const noexcept
     {
         return hwnd_;
+    }
+
+    void ViewerWindow::SetColorManagementEnabled(bool enabled)
+    {
+        displayColors_->SetEnabled(enabled);
+        RefreshColorProfile(true);
+        RequestRepaint();
+    }
+
+    bool ViewerWindow::IsColorManagementEnabled() const
+    {
+        return displayColors_->IsEnabled();
+    }
+
+    void ViewerWindow::SetColorProfileProvider(services::DisplayColorService::ProfileProvider provider)
+    {
+        displayColors_->SetProfileProvider(std::move(provider));
+        RefreshColorProfile(true);
+    }
+
+    services::DisplayColorService::Statistics ViewerWindow::DisplayColorStatistics() const
+    {
+        return displayColors_->GetStatistics();
+    }
+
+    void ViewerWindow::RefreshColorProfile(bool force)
+    {
+        displayColors_->RefreshMonitor(services::MonitorDeviceForWindow(hwnd_), force);
+    }
+
+    std::shared_ptr<const cache::CachedThumbnail> ViewerWindow::ImageForDisplay(
+        int itemIndex, std::shared_ptr<const cache::CachedThumbnail> source) const
+    {
+        if (itemIndex < 0 || itemIndex >= static_cast<int>(items_.size())) return source;
+        return displayColors_->ImageForDisplay(MakeViewerFullImageCacheKey(items_[static_cast<std::size_t>(itemIndex)]), std::move(source));
     }
 
     bool ViewerWindow::IsOpen() const noexcept
@@ -1843,10 +1893,12 @@ namespace hyperbrowse::viewer
                 static_cast<float>(tileRect.top),
                 static_cast<float>(tileRect.right),
                 static_cast<float>(tileRect.bottom));
-            if (tile.image && !tile.bitmap)
+            const auto displayPixels = ImageForDisplay(tile.itemIndex, tile.image);
+            if (displayPixels && (!tile.bitmap || tile.displayPixels.lock() != displayPixels))
             {
                 tile.bitmap = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(
-                    renderTarget, *tile.image);
+                    renderTarget, *displayPixels);
+                tile.displayPixels = displayPixels;
             }
 
             if (tile.image && tile.bitmap)
@@ -2017,7 +2069,8 @@ namespace hyperbrowse::viewer
                 HDC bitmapDc = CreateCompatibleDC(dc);
                 if (bitmapDc)
                 {
-                    HGDIOBJ oldBitmap = SelectObject(bitmapDc, tile.image->Bitmap());
+                    const auto displayPixels = ImageForDisplay(tile.itemIndex, tile.image);
+                    HGDIOBJ oldBitmap = SelectObject(bitmapDc, displayPixels->Bitmap());
                     SetStretchBltMode(dc, HALFTONE);
                     SetBrushOrgEx(dc, 0, 0, nullptr);
                     if (rotationQuarterTurns_ == 0)
@@ -2646,6 +2699,7 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::RecoverDisplaySurface()
     {
+        RefreshColorProfile(true);
         if (!hwnd_ || IsWindow(hwnd_) == FALSE)
         {
             return;
@@ -2758,12 +2812,17 @@ namespace hyperbrowse::viewer
 
         d2dCurrentImageBitmap_.Reset();
         d2dCompareImageBitmap_.Reset();
+        d2dCurrentDisplayImage_.reset();
+        d2dCompareDisplayImage_.reset();
         for (CompareTileState& tile : compareTiles_)
         {
             tile.bitmap.Reset();
+            tile.displayPixels.reset();
         }
         transitionFromBitmap_.Reset();
+        transitionFromDisplayImage_.reset();
         pendingTransitionFromBitmap_.Reset();
+        pendingTransitionFromDisplayImage_.reset();
         d2dStatusArtBitmap_.Reset();
         d2dNameFormat_.Reset();
         d2dInfoFormat_.Reset();
@@ -5075,6 +5134,7 @@ namespace hyperbrowse::viewer
             : TransitionStyle::Cut;
 
         pendingTransitionFromImage_.reset();
+        pendingTransitionFromDisplayImage_.reset();
         pendingTransitionFromBitmap_.Reset();
         pendingTransitionFromIndex_ = -1;
         pendingTransitionForward_ = forward;
@@ -5089,6 +5149,7 @@ namespace hyperbrowse::viewer
         if (d2dCurrentImageIndex_ == pendingTransitionFromIndex_ && d2dCurrentImageBitmap_)
         {
             pendingTransitionFromBitmap_ = d2dCurrentImageBitmap_;
+            pendingTransitionFromDisplayImage_ = d2dCurrentDisplayImage_;
         }
     }
 
@@ -5110,27 +5171,34 @@ namespace hyperbrowse::viewer
 
         transitionFromImage_ = pendingTransitionFromImage_;
         transitionFromBitmap_ = pendingTransitionFromBitmap_;
+        transitionFromDisplayImage_ = pendingTransitionFromDisplayImage_;
         transitionFromIndex_ = pendingTransitionFromIndex_;
         transitionForward_ = pendingTransitionForward_;
 
         pendingTransitionFromImage_.reset();
         pendingTransitionFromBitmap_.Reset();
+        pendingTransitionFromDisplayImage_.reset();
         pendingTransitionFromIndex_ = -1;
 
         if (d2dRenderTarget_)
         {
             auto& renderer = render::D2DRenderer::Instance();
-            if (!transitionFromBitmap_ && transitionFromImage_)
+            const auto transitionDisplay = ImageForDisplay(transitionFromIndex_, transitionFromImage_);
+            if (transitionDisplay && (!transitionFromBitmap_ || transitionFromDisplayImage_.lock() != transitionDisplay))
             {
                 transitionFromBitmap_ = renderer.CreateBitmapFromCachedThumbnail(
-                    d2dRenderTarget_.Get(), *transitionFromImage_);
+                    d2dRenderTarget_.Get(), *transitionDisplay);
+                transitionFromDisplayImage_ = transitionDisplay;
             }
 
-            if ((!d2dCurrentImageBitmap_ || d2dCurrentImageIndex_ != currentIndex_) && currentImage_)
+            const auto currentDisplay = ImageForDisplay(DisplayedImageIndex(), currentImage_);
+            if (currentDisplay && (!d2dCurrentImageBitmap_ || d2dCurrentImageIndex_ != currentIndex_
+                                  || d2dCurrentDisplayImage_.lock() != currentDisplay))
             {
                 const auto uploadStartedAt = std::chrono::steady_clock::now();
                 d2dCurrentImageBitmap_ = renderer.CreateBitmapFromCachedThumbnail(
-                    d2dRenderTarget_.Get(), *currentImage_);
+                    d2dRenderTarget_.Get(), *currentDisplay);
+                d2dCurrentDisplayImage_ = currentDisplay;
                 const double uploadMs = std::chrono::duration<double, std::milli>(
                     std::chrono::steady_clock::now() - uploadStartedAt).count();
                 util::RecordTiming(L"viewer.upload.d2d", uploadMs);
@@ -5162,6 +5230,7 @@ namespace hyperbrowse::viewer
         transitionTimerId_ = 0;
         transitionActive_ = false;
         transitionFromImage_.reset();
+        transitionFromDisplayImage_.reset();
         transitionFromBitmap_.Reset();
         transitionFromIndex_ = -1;
         transitionStartedAt_ = std::chrono::steady_clock::time_point{};
@@ -5169,6 +5238,7 @@ namespace hyperbrowse::viewer
         if (clearPending)
         {
             pendingTransitionFromImage_.reset();
+            pendingTransitionFromDisplayImage_.reset();
             pendingTransitionFromBitmap_.Reset();
             pendingTransitionFromIndex_ = -1;
             pendingTransitionIsSlideshowNavigation_ = false;
@@ -5669,6 +5739,17 @@ namespace hyperbrowse::viewer
 
     LRESULT ViewerWindow::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
+        if (message == services::DisplayColorService::kReadyMessage)
+        {
+            displayColors_->AcknowledgeNotification();
+            RequestRepaint();
+            return 0;
+        }
+        if (message == WM_TIMER && wParam == services::DisplayColorService::kProfilePollTimer)
+        {
+            if (!IsIconic(hwnd_)) RefreshColorProfile(true);
+            return 0;
+        }
         switch (message)
         {
         case WM_GETMINMAXINFO:
@@ -5699,13 +5780,20 @@ namespace hyperbrowse::viewer
                          suggested->bottom - suggested->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
             RebuildD2DTextFormats();
+            RefreshColorProfile(true);
             RequestRepaint();
             return 0;
         }
         case WM_DISPLAYCHANGE:
             RecoverDisplaySurface();
             return 0;
+        case WM_WINDOWPOSCHANGED:
+            RefreshColorProfile();
+            break;
         case WM_SETTINGCHANGE:
+            RefreshColorProfile(true);
+            SetDarkTheme(darkTheme_);
+            return 0;
         case WM_SYSCOLORCHANGE:
         case WM_THEMECHANGED:
             SetDarkTheme(darkTheme_);
@@ -6664,14 +6752,17 @@ namespace hyperbrowse::viewer
                         }
 
                         const int displayedImageIndex = DisplayedImageIndex();
-                        if (d2dCurrentImageIndex_ == displayedImageIndex && d2dCurrentImageBitmap_)
+                        const auto displayImage = ImageForDisplay(displayedImageIndex, currentImage_);
+                        if (d2dCurrentImageIndex_ == displayedImageIndex && d2dCurrentImageBitmap_
+                            && d2dCurrentDisplayImage_.lock() == displayImage)
                         {
                             return;
                         }
 
                         const auto uploadStartedAt = std::chrono::steady_clock::now();
                         d2dCurrentImageBitmap_ = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(
-                            d2dRenderTarget_.Get(), *currentImage_);
+                            d2dRenderTarget_.Get(), *displayImage);
+                        d2dCurrentDisplayImage_ = displayImage;
                         const double uploadMs = std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - uploadStartedAt).count();
                         util::RecordTiming(L"viewer.upload.d2d", uploadMs);
@@ -6704,14 +6795,17 @@ namespace hyperbrowse::viewer
                         }
 
                         compareImage = compareSlot.image.get();
-                        if (d2dCompareImageIndex_ == compareIndex && d2dCompareImageBitmap_)
+                        const auto displayImage = ImageForDisplay(compareIndex, compareSlot.image);
+                        if (d2dCompareImageIndex_ == compareIndex && d2dCompareImageBitmap_
+                            && d2dCompareDisplayImage_.lock() == displayImage)
                         {
                             return;
                         }
 
                         const auto uploadStartedAt = std::chrono::steady_clock::now();
                         d2dCompareImageBitmap_ = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(
-                            d2dRenderTarget_.Get(), *compareSlot.image);
+                            d2dRenderTarget_.Get(), *displayImage);
+                        d2dCompareDisplayImage_ = displayImage;
                         const double uploadMs = std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - uploadStartedAt).count();
                         util::RecordTiming(L"viewer.upload.d2d.compare", uploadMs);
@@ -6783,10 +6877,13 @@ namespace hyperbrowse::viewer
                         }
                         else
                         {
-                            if (!transitionFromBitmap_ && d2dRenderTarget_)
+                            const auto transitionDisplay = ImageForDisplay(transitionFromIndex_, transitionFromImage_);
+                            if (transitionDisplay && d2dRenderTarget_
+                                && (!transitionFromBitmap_ || transitionFromDisplayImage_.lock() != transitionDisplay))
                             {
                                 transitionFromBitmap_ = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(
-                                    d2dRenderTarget_.Get(), *transitionFromImage_);
+                                    d2dRenderTarget_.Get(), *transitionDisplay);
+                                transitionFromDisplayImage_ = transitionDisplay;
                             }
 
                             if (transitionFromBitmap_ && d2dCurrentImageBitmap_)
@@ -7880,7 +7977,8 @@ namespace hyperbrowse::viewer
                 HDC bitmapDc = CreateCompatibleDC(frameDc);
                 if (bitmapDc)
                 {
-                    HGDIOBJ oldBitmap = SelectObject(bitmapDc, currentImage_->Bitmap());
+                    const auto displayImage = ImageForDisplay(DisplayedImageIndex(), currentImage_);
+                    HGDIOBJ oldBitmap = SelectObject(bitmapDc, displayImage->Bitmap());
                     SetStretchBltMode(frameDc, HALFTONE);
                     SetBrushOrgEx(frameDc, 0, 0, nullptr);
 
@@ -7972,6 +8070,8 @@ namespace hyperbrowse::viewer
             return 0;
         case WM_DESTROY:
             util::LogInfo(L"ViewerWindow WM_DESTROY hwnd=" + FormatWindowHandle(hwnd));
+            displayColors_->BindTargetWindow(nullptr);
+            KillTimer(hwnd_, services::DisplayColorService::kProfilePollTimer);
             ClearWraparoundMessage();
             StopSlideshow();
             StopTransition();

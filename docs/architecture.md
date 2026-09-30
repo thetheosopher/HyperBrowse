@@ -309,6 +309,67 @@ The current rendering split is intentional:
 
 When changing rendering code, preserve resource recovery on device/display loss, DPI-aware dimensions, and the distinction between content identity and list position. A numeric index alone is not a safe render-cache key across insertions, removals, or reordering.
 
+### B4 display-color contract
+
+Color management is an opt-out SDR image-display feature, enabled by default
+and persisted through `ViewerSettingsPersistence`. **View > Color Management**
+changes the browser and every open viewer, including all two-, three-, and
+four-image compare tiles. It does not transform chrome, icons, text, metadata,
+histograms, exports, or source files, and adds no keyboard shortcut.
+
+Each rendering window captures its own monitor's `MONITORINFOEX::szDevice`.
+A worker resolves that device's effective ICC association: WCS per-user
+associations when enabled, otherwise system associations, using `CPT_ICC` /
+`CPST_NONE` (not the device-independent RGB working space). A fresh DC for that
+specific display and `GetICMProfileW` provides the effective Windows default
+when explicit WCS lookup is unavailable. Neither the primary monitor nor an
+owner window substitutes for the rendering window. Profile contents, not HWND
+or HMONITOR values, identify a destination. Monitor comparisons on window
+movement detect equal-DPI moves; display/settings notifications and a bounded
+asynchronous poll detect profile replacement without a move.
+
+Canonical memory and disk cache entries retain source-oriented PBGRA pixels
+and source color information, independent of any destination. Valid embedded
+RGB ICC profiles take precedence; untagged images are sRGB. Malformed profiles,
+unsupported profile/pixel-format combinations, inaccessible destination
+profiles, and failed transforms use the existing untransformed image and
+record diagnostics without a per-image dialog. LibRaw processed RGB is sRGB;
+an embedded JPEG preview retains its exposed ICC information. nvJPEG supplies
+RGB pixels but not ICC metadata, so WIC reads the original encoded bytes on the
+decode worker and attaches that context to the canonical result, with the same
+untagged sRGB fallback. Legacy cache entries lacking source context are resolved
+on a worker, never in paint or a window procedure; legacy RAW pixels assume
+sRGB. A codec that exposes neither ICC context nor profile metadata is treated
+as untagged. Rejected PNG/TIFF profile metadata selects unchanged fallback.
+
+Orientation and scaling remain in the canonical decoder. Display conversion
+uses straight-alpha BGRA with `IWICColorTransform`, then restores the original
+alpha and premultiplies once for D2D/GDI. Low-alpha 8-bit round trips can incur
+rounding; premultiplied channels are never treated as straight colors. Non-RGB
+embedded profiles incompatible with the canonical RGB surface are explicitly
+unsupported and fall back unchanged rather than applying an incorrect profile.
+
+A bounded per-window display cache keys results by the existing source identity,
+canonical pixel-object identity, destination content/version, and setting
+generation. Navigation/content replacement, monitor/profile changes, toggles,
+and recipient shutdown reject obsolete completions. Previous valid output
+remains visible while conversion runs; disabling immediately selects canonical
+pixels. Display recovery reuses these representations, never transforms an
+already converted bitmap, and preserves selection, tile identity, zoom, and pan.
+Display entries use weak canonical references after conversion so they do not
+pin evicted source-cache images; upload identity references are also weak and
+validate ownership before reusing an HBITMAP. Each window retains at most 128 entries and
+64 MiB (browser) or 512 MiB (viewer) of converted pixels. Larger images use
+canonical rendering with `color.display_cache.too_large` diagnostics.
+ICC payloads are limited to 4 MiB at extraction, persistence, and profile lookup;
+oversized profiles select unchanged fallback.
+
+Correctness gates use generated ICC profiles and expected pixel tolerances,
+not successful initialization or whichever monitor profile is installed.
+Physical sRGB/wide-gamut multi-monitor and 100/150/200% scaling review remains
+a separate manual gate. Cloud Actions are disabled and are not a validation
+dependency for this work.
+
 ## Dialog Layout
 
 Application-owned dialog frames use `src/ui/DialogShell.*` for monitor work-area discovery, application text-size metrics, frame clamping, and centering. `src/ui/SettingsLayout.*` is the pure measured layout engine for the Settings pages; `MainWindow` converts its logical rectangles to physical pixels only when positioning Win32 child windows or drawing through Direct2D.

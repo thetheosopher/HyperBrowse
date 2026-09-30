@@ -17,6 +17,7 @@
 
 #include "browser/BrowserModel.h"
 #include "cache/ThumbnailCache.h"
+#include "services/DisplayColorService.h"
 #include "viewer/CompareSessionPolicy.h"
 #include "util/BackgroundExecutor.h"
 #include "util/ResourceSizing.h"
@@ -181,6 +182,11 @@ namespace hyperbrowse::viewer
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
         void SetPrefetchDepthOverride(int depth) noexcept;
         void SetDarkTheme(bool enabled);
+        void SetColorManagementEnabled(bool enabled);
+        bool IsColorManagementEnabled() const;
+        void SetColorProfileProvider(services::DisplayColorService::ProfileProvider provider);
+        services::DisplayColorService::Statistics DisplayColorStatistics() const;
+        void RefreshColorProfile(bool force = false);
         bool ReplaceItems(std::vector<browser::BrowserItem> items, int selectedIndex);
         bool GetDeleteCurrentPaths(std::wstring* sourcePath, std::wstring* preferredFocusPath) const;
         std::wstring FilingResumeTargetPathForMove() const;
@@ -245,6 +251,7 @@ namespace hyperbrowse::viewer
             std::wstring pendingFilePath;
             std::shared_ptr<const cache::CachedThumbnail> image;
             Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+            std::weak_ptr<const cache::CachedThumbnail> displayPixels;
             CompareTileMetadata metadata;
             NormalizedImageCenter imageCenter;
             double zoomRatio{1.0};
@@ -383,6 +390,8 @@ namespace hyperbrowse::viewer
         void NotifyActivityChanged(bool isActive) const;
         void NotifyCurrentItemChanged() const;
         void EnsureD2DRenderTarget();
+        std::shared_ptr<const cache::CachedThumbnail> ImageForDisplay(
+            int itemIndex, std::shared_ptr<const cache::CachedThumbnail> source) const;
         void ReleaseD2DResources();
         void RebuildD2DBrushes();
         void RebuildD2DTextFormats();
@@ -464,9 +473,11 @@ namespace hyperbrowse::viewer
         bool transitionForward_{true};
         std::chrono::steady_clock::time_point transitionStartedAt_{};
         std::shared_ptr<const cache::CachedThumbnail> transitionFromImage_;
+        std::weak_ptr<const cache::CachedThumbnail> transitionFromDisplayImage_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> transitionFromBitmap_;
         int transitionFromIndex_{-1};
         std::shared_ptr<const cache::CachedThumbnail> pendingTransitionFromImage_;
+        std::weak_ptr<const cache::CachedThumbnail> pendingTransitionFromDisplayImage_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> pendingTransitionFromBitmap_;
         int pendingTransitionFromIndex_{-1};
         bool pendingTransitionForward_{true};
@@ -491,6 +502,7 @@ namespace hyperbrowse::viewer
         UINT_PTR wraparoundTimerId_{};
         mutable RepaintMode repaintMode_{RepaintMode::Full};
         std::unique_ptr<hyperbrowse::util::BackgroundExecutor> backgroundExecutor_;
+        std::unique_ptr<services::DisplayColorService> displayColors_;
 
         Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> d2dRenderTarget_;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> d2dBackgroundBrush_;
@@ -506,6 +518,8 @@ namespace hyperbrowse::viewer
         Microsoft::WRL::ComPtr<IDWriteTextFormat> d2dMetadataFormat_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dCurrentImageBitmap_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dCompareImageBitmap_;
+        std::weak_ptr<const cache::CachedThumbnail> d2dCurrentDisplayImage_;
+        std::weak_ptr<const cache::CachedThumbnail> d2dCompareDisplayImage_;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dStatusArtBitmap_;
         int d2dCurrentImageIndex_{-1};
         int d2dCompareImageIndex_{-1};

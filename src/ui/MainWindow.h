@@ -292,6 +292,8 @@ namespace hyperbrowse::ui
         void ApplyViewerMouseWheelSetting();
         void ApplyViewerEscapeKeyBehavior();
         void ApplyViewerTransitionSettings();
+        void ApplyColorManagementSetting();
+        void RefreshColorProfiles(bool force);
         void ApplyThumbnailMemoryPressureState();
         void ApplyResourceProfileSetting();
         void ApplyPersistentThumbnailCacheSetting();
@@ -901,6 +903,7 @@ namespace hyperbrowse::ui
         bool compactThumbnailLayout_{true};
         bool thumbnailDetailsVisible_{true};
         bool performanceHudEnabled_{};
+        bool colorManagementEnabled_{true};
         UINT slideshowIntervalMs_{3000};
         viewer::TransitionStyle slideshowTransitionStyle_{};
         UINT slideshowTransitionDurationMs_{350};

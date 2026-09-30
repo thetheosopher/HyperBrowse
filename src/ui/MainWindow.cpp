@@ -9895,6 +9895,13 @@ namespace hyperbrowse::ui
         fileCommandController_.Configure(std::move(fileCommandHandlers));
 
         ViewCommandController::Handlers viewCommandHandlers;
+        viewCommandHandlers.onColorManagement = [this]
+        {
+            colorManagementEnabled_ = !colorManagementEnabled_;
+            ApplyColorManagementSetting();
+            UpdateMenuState();
+            SaveWindowState();
+        };
         viewCommandHandlers.onViewerMouseWheelBehavior = [this](UINT commandId)
         {
             viewerMouseWheelBehavior_ = ViewerMouseWheelBehaviorFromCommandId(commandId);
@@ -10247,6 +10254,7 @@ namespace hyperbrowse::ui
         ApplyCacheCapacityOverrideSettings();
         ApplyViewerMouseWheelSetting();
         ApplyViewerTransitionSettings();
+        ApplyColorManagementSetting();
 
         int initialWindowX = CW_USEDEFAULT;
         int initialWindowY = CW_USEDEFAULT;
@@ -10793,6 +10801,7 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_DETAILS, kThumbnailDetailsMenuLabel.data());
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_DETAILS_STRIP, kDetailsPanelMenuLabel.data());
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_PERFORMANCE_HUD, L"Performance &HUD\tCtrl+Shift+P");
+        AppendMenuW(viewMenu, MF_STRING, ID_VIEW_COLOR_MANAGEMENT, L"Color &Management");
         AppendMenuW(viewMenu, MF_STRING, ID_VIEW_THUMBNAIL_LAYOUT_COMPACT, L"&Compact Thumbnail Layout");
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(sortMenu, MF_STRING, ID_VIEW_SORT_FILENAME, L"By &Filename");
@@ -15515,6 +15524,7 @@ namespace hyperbrowse::ui
         viewerWindow_->SetKeyboardPanningInverted(invertKeyboardPanning_);
         viewerWindow_->SetTransitionSettings(slideshowTransitionStyle_, slideshowTransitionDurationMs_);
         viewerWindow_->SetManualTransitionEnabled(useSlideshowTransition_);
+        viewerWindow_->SetColorManagementEnabled(colorManagementEnabled_);
         if (viewerWindow_->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
             if (startSlideshow)
@@ -15593,6 +15603,7 @@ namespace hyperbrowse::ui
         viewer->SetKeyboardPanningInverted(invertKeyboardPanning_);
         viewer->SetTransitionSettings(slideshowTransitionStyle_, slideshowTransitionDurationMs_);
         viewer->SetManualTransitionEnabled(useSlideshowTransition_);
+        viewer->SetColorManagementEnabled(colorManagementEnabled_);
         viewer->SetDarkTheme(themeMode_ == ThemeMode::Dark);
         if (!viewer->Open(hwnd_, std::move(items), selectedIndex, themeMode_ == ThemeMode::Dark, targetMonitor))
         {
@@ -21204,6 +21215,10 @@ namespace hyperbrowse::ui
             menu_,
             ID_VIEW_PERFORMANCE_HUD,
             MF_BYCOMMAND | (performanceHudEnabled_ ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(
+            menu_,
+            ID_VIEW_COLOR_MANAGEMENT,
+            MF_BYCOMMAND | (colorManagementEnabled_ ? MF_CHECKED : MF_UNCHECKED));
         EnableMenuItem(
             menu_,
             ID_FILE_BATCH_CONVERT_CANCEL,
@@ -22144,6 +22159,21 @@ namespace hyperbrowse::ui
         }
     }
 
+    void MainWindow::ApplyColorManagementSetting()
+    {
+        if (browserPaneController_) browserPaneController_->SetColorManagementEnabled(colorManagementEnabled_);
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows())
+        {
+            viewer->SetColorManagementEnabled(colorManagementEnabled_);
+        }
+    }
+
+    void MainWindow::RefreshColorProfiles(bool force)
+    {
+        if (browserPaneController_) browserPaneController_->RefreshColorProfile(force);
+        for (viewer::ViewerWindow* viewer : OpenViewerWindows()) viewer->RefreshColorProfile(force);
+    }
+
     void MainWindow::ApplyThumbnailMemoryPressureState()
     {
         if (browserPaneController_)
@@ -23000,7 +23030,8 @@ namespace hyperbrowse::ui
                     useSlideshowTransition_,
                     viewerMouseWheelBehavior_,
                     invertKeyboardPanning_,
-                    viewerEscapeKeyBehavior_});
+                    viewerEscapeKeyBehavior_,
+                    colorManagementEnabled_});
             slideshowIntervalMs_ = viewerSettings.slideshowIntervalMs;
             slideshowTransitionStyle_ = viewerSettings.slideshowTransitionStyle;
             slideshowTransitionDurationMs_ = viewerSettings.slideshowTransitionDurationMs;
@@ -23008,6 +23039,7 @@ namespace hyperbrowse::ui
             viewerMouseWheelBehavior_ = viewerSettings.mouseWheelBehavior;
             invertKeyboardPanning_ = viewerSettings.invertKeyboardPanning;
             viewerEscapeKeyBehavior_ = viewerSettings.escapeKeyBehavior;
+            colorManagementEnabled_ = viewerSettings.colorManagementEnabled;
             const PerformanceSettingsState performanceState = PerformanceSettingsPersistence::Load(
                 [&](std::wstring_view valueName, DWORD* persistedValue)
                 {
@@ -23186,7 +23218,8 @@ namespace hyperbrowse::ui
                     useSlideshowTransition_,
                     viewerMouseWheelBehavior_,
                     invertKeyboardPanning_,
-                    viewerEscapeKeyBehavior_},
+                    viewerEscapeKeyBehavior_,
+                    colorManagementEnabled_},
                 [&](std::wstring_view valueName, DWORD value)
                 {
                     const std::wstring registryValueName(valueName);
@@ -26227,8 +26260,13 @@ namespace hyperbrowse::ui
         }
         case WM_DISPLAYCHANGE:
             HandleDisplaySurfaceChange();
+            RefreshColorProfiles(true);
             return 0;
+        case WM_WINDOWPOSCHANGED:
+            if (browserPaneController_) browserPaneController_->RefreshColorProfile();
+            break;
         case WM_SETTINGCHANGE:
+            RefreshColorProfiles(true);
             ApplyTheme();
             if (lParam == 0
                 || _wcsicmp(reinterpret_cast<const wchar_t*>(lParam), L"ShellState") == 0)

@@ -733,6 +733,8 @@ namespace hyperbrowse::browser
 
     BrowserPane::~BrowserPane()
     {
+        displayColors_->BindTargetWindow(nullptr);
+        displayColors_.reset();
         ReleaseD2DResources();
 
         if (detailsListFont_ && ownsDetailsListFont_)
@@ -777,6 +779,10 @@ namespace hyperbrowse::browser
         }
         if (hwnd_)
         {
+            displayColors_->BindTargetWindow(hwnd_);
+            SetTimer(hwnd_, services::DisplayColorService::kProfilePollTimer,
+                     services::DisplayColorService::kProfilePollIntervalMs, nullptr);
+            RefreshColorProfile(true);
             RebuildThumbnailFonts();
             RebuildD2DTextFormats();
         }
@@ -789,6 +795,42 @@ namespace hyperbrowse::browser
         return hwnd_;
     }
 
+    void BrowserPane::SetColorManagementEnabled(bool enabled)
+    {
+        displayColors_->SetEnabled(enabled);
+        d2dBitmapCache_.clear();
+        RefreshColorProfile(true);
+        if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+        if (parent_) InvalidateRect(parent_, nullptr, FALSE);
+    }
+
+    bool BrowserPane::IsColorManagementEnabled() const
+    {
+        return displayColors_->IsEnabled();
+    }
+
+    void BrowserPane::SetColorProfileProvider(services::DisplayColorService::ProfileProvider provider)
+    {
+        displayColors_->SetProfileProvider(std::move(provider));
+        RefreshColorProfile(true);
+    }
+
+    services::DisplayColorService::Statistics BrowserPane::DisplayColorStatistics() const
+    {
+        return displayColors_->GetStatistics();
+    }
+
+    void BrowserPane::RefreshColorProfile(bool force)
+    {
+        displayColors_->RefreshMonitor(services::MonitorDeviceForWindow(hwnd_), force);
+    }
+
+    std::shared_ptr<const cache::CachedThumbnail> BrowserPane::ImageForDisplay(
+        const cache::ThumbnailCacheKey& key, std::shared_ptr<const cache::CachedThumbnail> source) const
+    {
+        return displayColors_->ImageForDisplay(key, std::move(source));
+    }
+
     void BrowserPane::SetModel(BrowserModel* model)
     {
         if (model_ == model)
@@ -797,6 +839,7 @@ namespace hyperbrowse::browser
         }
 
         model_ = model;
+        displayColors_->InvalidateImages();
         ++thumbnailSessionId_;
         ++metadataSessionId_;
         HideThumbnailTooltip();
@@ -809,6 +852,8 @@ namespace hyperbrowse::browser
 
     void BrowserPane::BeginFolderLoad()
     {
+        displayColors_->InvalidateImages();
+        d2dBitmapCache_.clear();
         ++thumbnailSessionId_;
         ++metadataSessionId_;
         ++thumbnailRequestEpoch_;
@@ -3651,6 +3696,7 @@ namespace hyperbrowse::browser
 
     void BrowserPane::RecoverDisplaySurface()
     {
+        RefreshColorProfile(true);
         if (!hwnd_ || IsWindow(hwnd_) == FALSE)
         {
             return;
@@ -3822,23 +3868,26 @@ namespace hyperbrowse::browser
         }
     }
 
-    ID2D1Bitmap* BrowserPane::GetOrCreateD2DBitmap(ID2D1RenderTarget* rt, const cache::CachedThumbnail& thumbnail) const
+    ID2D1Bitmap* BrowserPane::GetOrCreateD2DBitmap(ID2D1RenderTarget* rt, std::shared_ptr<const cache::CachedThumbnail> thumbnail) const
     {
-        const HBITMAP key = thumbnail.Bitmap();
+        if (!thumbnail) return nullptr;
+        const HBITMAP key = thumbnail->Bitmap();
         auto it = d2dBitmapCache_.find(key);
         if (it != d2dBitmapCache_.end())
         {
-            return it->second.Get();
+            if (it->second.pixels.lock() == thumbnail) return it->second.bitmap.Get();
+            d2dBitmapCache_.erase(it);
         }
 
-        auto bitmap = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(rt, thumbnail);
+        auto bitmap = render::D2DRenderer::Instance().CreateBitmapFromCachedThumbnail(rt, *thumbnail);
         if (!bitmap)
         {
             return nullptr;
         }
 
-        auto [insertIt, _] = d2dBitmapCache_.emplace(key, std::move(bitmap));
-        return insertIt->second.Get();
+        if (d2dBitmapCache_.size() >= 128) d2dBitmapCache_.clear();
+        auto [insertIt, inserted] = d2dBitmapCache_.emplace(key, BitmapEntry{std::move(bitmap), std::move(thumbnail)});
+        return insertIt->second.bitmap.Get();
     }
 
     void BrowserPane::D2DDrawPlaceholderState(ID2D1RenderTarget* rt, const D2D1_SIZE_F& size) const
@@ -4248,7 +4297,7 @@ namespace hyperbrowse::browser
 
             if (folderArt_ && iconSize > 0.0f)
             {
-                if (ID2D1Bitmap* iconBitmap = GetOrCreateD2DBitmap(rt, *folderArt_))
+                if (ID2D1Bitmap* iconBitmap = GetOrCreateD2DBitmap(rt, folderArt_))
                 {
                     const float iconX = previewRect.left + ((previewRect.right - previewRect.left - iconSize) / 2.0f);
                     rt->DrawBitmap(iconBitmap,
@@ -4329,7 +4378,8 @@ namespace hyperbrowse::browser
             return;
         }
 
-        ID2D1Bitmap* d2dBitmap = GetOrCreateD2DBitmap(rt, *thumbnail);
+        const auto displayImage = ImageForDisplay(cacheKey, thumbnail);
+        ID2D1Bitmap* d2dBitmap = GetOrCreateD2DBitmap(rt, displayImage);
         if (!d2dBitmap)
         {
             return;
@@ -4377,7 +4427,7 @@ namespace hyperbrowse::browser
         float textTop = previewRect.top + (previewHeight * 0.34f);
         if (iconSize > 0.0f && unavailableThumbnailArt_)
         {
-            if (ID2D1Bitmap* iconBitmap = GetOrCreateD2DBitmap(rt, *unavailableThumbnailArt_))
+            if (ID2D1Bitmap* iconBitmap = GetOrCreateD2DBitmap(rt, unavailableThumbnailArt_))
             {
                 const float iconX = previewRect.left + ((previewWidth - iconSize) / 2.0f);
                 const float iconY = previewRect.top + std::max(10.0f, previewHeight * 0.14f);
@@ -4847,7 +4897,8 @@ namespace hyperbrowse::browser
         const int drawX = previewRect.left + (((previewRect.right - previewRect.left) - thumbnail->Width()) / 2);
         const int drawY = previewRect.top + (((previewRect.bottom - previewRect.top) - thumbnail->Height()) / 2);
         HDC bitmapDc = CreateCompatibleDC(hdc);
-        HGDIOBJ oldBitmap = SelectObject(bitmapDc, thumbnail->Bitmap());
+        const auto displayImage = ImageForDisplay(cacheKey, thumbnail);
+        HGDIOBJ oldBitmap = SelectObject(bitmapDc, displayImage->Bitmap());
 
         BLENDFUNCTION blend{};
         blend.BlendOp = AC_SRC_OVER;
@@ -5189,6 +5240,19 @@ namespace hyperbrowse::browser
 
     LRESULT BrowserPane::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
+        if (message == services::DisplayColorService::kReadyMessage)
+        {
+            displayColors_->AcknowledgeNotification();
+            d2dBitmapCache_.clear();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            if (parent_) InvalidateRect(parent_, nullptr, FALSE);
+            return 0;
+        }
+        if (message == WM_TIMER && wParam == services::DisplayColorService::kProfilePollTimer)
+        {
+            if (!IsIconic(GetAncestor(hwnd_, GA_ROOT))) RefreshColorProfile(true);
+            return 0;
+        }
         switch (message)
         {
         case WM_CREATE:
@@ -5201,6 +5265,17 @@ namespace hyperbrowse::browser
         case WM_SIZE:
             LayoutChildren();
             return 0;
+        case WM_WINDOWPOSCHANGED:
+            RefreshColorProfile();
+            break;
+        case WM_DISPLAYCHANGE:
+        case WM_SETTINGCHANGE:
+            RefreshColorProfile(true);
+            break;
+        case WM_NCDESTROY:
+            if (displayColors_) displayColors_->BindTargetWindow(nullptr);
+            KillTimer(hwnd_, services::DisplayColorService::kProfilePollTimer);
+            break;
         case WM_ERASEBKGND:
             return 1;
         case WM_SETFOCUS:

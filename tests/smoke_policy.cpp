@@ -458,6 +458,7 @@ namespace hyperbrowse::tests
             UINT sortCommand = 0;
             UINT performanceProfileCommand = 0;
             int performanceHudCallCount = 0;
+            int colorManagementCallCount = 0;
             int detailsCallCount = 0;
             int itemNumberCallCount = 0;
 
@@ -482,6 +483,10 @@ namespace hyperbrowse::tests
             {
                 ++performanceHudCallCount;
             };
+            handlers.onColorManagement = [&colorManagementCallCount]
+            {
+                ++colorManagementCallCount;
+            };
             handlers.onDetails = [&detailsCallCount]
             {
                 ++detailsCallCount;
@@ -492,6 +497,13 @@ namespace hyperbrowse::tests
             };
             controller.Configure(std::move(handlers));
 
+                 Expect(controller.Handle(ID_VIEW_COLOR_MANAGEMENT) && colorManagementCallCount == 1,
+                     "View command controller did not route the color-management toggle");
+                const auto colorShortcuts = hyperbrowse::ui::MainWindowShortcuts();
+                Expect(std::none_of(colorShortcuts.begin(), colorShortcuts.end(), [](const auto& shortcut)
+                {
+                    return shortcut.commandId == ID_VIEW_COLOR_MANAGEMENT;
+                }), "Color management added an undocumented shortcut");
             Expect(controller.Handle(ID_VIEW_APP_TEXT_SIZE_LARGE)
                        && appTextSizeCommand == ID_VIEW_APP_TEXT_SIZE_LARGE,
                    "View command controller did not route app text-size commands");
@@ -1275,6 +1287,7 @@ namespace hyperbrowse::tests
                 {L"ViewerMouseWheelBehavior", static_cast<DWORD>(MouseWheelBehavior::Navigate)},
                 {L"ViewerEscapeKeyBehavior", static_cast<DWORD>(EscapeKeyBehavior::ActualSize)},
                 {L"InvertKeyboardPanning", 1},
+                {L"ColorManagementEnabled", 0},
             };
 
             const ViewerSettingsState restored = ViewerSettingsPersistence::Load(
@@ -1295,7 +1308,8 @@ namespace hyperbrowse::tests
                        && restored.useSlideshowTransition
                        && restored.mouseWheelBehavior == MouseWheelBehavior::Navigate
                        && restored.escapeKeyBehavior == EscapeKeyBehavior::ActualSize
-                       && restored.invertKeyboardPanning,
+                       && restored.invertKeyboardPanning
+                       && !restored.colorManagementEnabled,
                    "Viewer settings persistence did not restore valid viewer and slideshow values");
 
             values[L"SlideshowIntervalMs"] = 1;
@@ -1303,6 +1317,7 @@ namespace hyperbrowse::tests
             values[L"SlideshowTransitionDurationMs"] = 6001;
             values[L"ViewerMouseWheelBehavior"] = 99;
             values[L"ViewerEscapeKeyBehavior"] = 99;
+            values[L"ColorManagementEnabled"] = 99;
             const ViewerSettingsState fallback = ViewerSettingsPersistence::Load(
                 [&values](std::wstring_view valueName, DWORD* value)
                 {
@@ -1319,7 +1334,8 @@ namespace hyperbrowse::tests
                        && fallback.slideshowTransitionStyle == TransitionStyle::Crossfade
                        && fallback.slideshowTransitionDurationMs == 350
                        && fallback.mouseWheelBehavior == MouseWheelBehavior::Zoom
-                       && fallback.escapeKeyBehavior == EscapeKeyBehavior::Close,
+                       && fallback.escapeKeyBehavior == EscapeKeyBehavior::Close
+                       && fallback.colorManagementEnabled,
                    "Viewer settings persistence did not apply defaults to invalid persisted values");
 
             values.clear();
@@ -1335,8 +1351,11 @@ namespace hyperbrowse::tests
                        && values[L"UseSlideshowTransition"] == 1
                        && values[L"ViewerMouseWheelBehavior"] == static_cast<DWORD>(MouseWheelBehavior::Navigate)
                        && values[L"ViewerEscapeKeyBehavior"] == static_cast<DWORD>(EscapeKeyBehavior::ActualSize)
-                       && values[L"InvertKeyboardPanning"] == 1,
+                       && values[L"InvertKeyboardPanning"] == 1
+                       && values[L"ColorManagementEnabled"] == 0,
                    "Viewer settings persistence did not write the expected registry value contract");
+            const auto defaults = ViewerSettingsPersistence::Load([](std::wstring_view, DWORD*) { return false; });
+            Expect(defaults.colorManagementEnabled, "Missing color-management preference did not default on");
         }
 
         void RunBrowserPresentationPersistenceScenario()

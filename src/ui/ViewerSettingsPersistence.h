@@ -18,6 +18,7 @@ namespace hyperbrowse::ui
         viewer::MouseWheelBehavior mouseWheelBehavior{};
         bool invertKeyboardPanning{};
         viewer::EscapeKeyBehavior escapeKeyBehavior{};
+        bool colorManagementEnabled{true};
     };
 
     class ViewerSettingsPersistence

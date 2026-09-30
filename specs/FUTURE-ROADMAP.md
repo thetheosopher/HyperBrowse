@@ -192,12 +192,28 @@ in-app drag source beyond the new row drop targets.
 
 ### `B4` Color-Managed Display Path (P1)
 
-- Use WIC's color management transform to convert decoded bitmaps to the
-  active monitor profile.
-- Per-monitor refresh when the user drags the viewer across displays
-  (`WM_DPICHANGED` / `WM_DISPLAYCHANGE`).
-- Toggle under **View ▸ Color Management** so users on accurate displays
-  can opt out for raw speed.
+**Implementation status:** Implemented in the working tree; final validation
+gates remain open. The focused local color smoke covers generated ICC pixel
+conversion, alpha/orientation, browser/viewer/all compare counts, per-window
+profiles, settings/menu accessibility, fallbacks, stale results, bounded caches,
+and close during lookup. Local Debug and Release application/test/benchmark
+builds succeeded; the final full presets each passed 25 of 26 tests, including
+the color smoke. `HyperBrowseSmoke` still fails the pre-existing idle
+single-instance shutdown check. Settings passed the final presets but also
+showed the baseline's intermittent failure/timeout in earlier runs. Physical
+sRGB/wide-gamut multi-monitor and 100/150/200% scaling review is unverified.
+These gates remain open, so B4 is not marked complete. Cloud Actions remain
+disabled; no workflow, packaging, commit, or push was performed.
+
+- Default-on, persisted **View > Color Management** opt-out, applied to the
+  browser and every viewer/compare tile.
+- WIC source-to-own-monitor SDR conversion, with explicit RGB ICC/sRGB,
+  LibRaw, nvJPEG, and failure contracts documented in the product spec.
+- Equal-DPI movement detection through monitor comparison on window-position
+  changes, plus display/settings notifications and asynchronous profile polling.
+- Canonical shared caches stay monitor-independent; bounded per-window output
+  rejects obsolete source/profile/setting/window work and preserves valid pixels.
+- Implementation brief: [B4 long-horizon prompt](FUTURE-ROADMAP-PROMPT-07-COLOR-MANAGED-DISPLAY-PATH.md).
 
 ### `B5` Saved Searches / Smart Folders (P1)
 

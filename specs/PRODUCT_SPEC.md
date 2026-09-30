@@ -106,6 +106,9 @@ conversion, and low-friction culling.
   navigation for long drive/UNC paths
 - An off-by-default **Performance HUD** for live thumbnail decode/queue state,
   sampled scale/cache statistics, and memory pressure
+- Default-on SDR display color management for browser thumbnails, the viewer,
+  and all two-to-four-image compare tiles, with a persisted **View > Color
+  Management** opt-out and independent per-window monitor profiles
 
 ### Deferred or intentionally out of scope
 - Heavy image editing
@@ -209,6 +212,37 @@ Support:
   display work stop when the HUD is disabled.
 
 ## 8. Viewer Window
+
+### Display color
+
+- **View > Color Management** is checked by default and persists per user.
+  Missing or invalid settings enable it. Toggling updates the browser and all
+  open viewers; newly opened viewers inherit the preference. No shortcut is
+  added.
+- Each rendering window resolves its own monitor's current-user or system ICC
+  association. Movement between equal-DPI monitors, display/settings changes,
+  and asynchronous polling refresh only destination-specific output.
+- WIC-exposed valid RGB ICC profiles are transformed to that destination;
+  untagged sources are sRGB. Malformed/non-RGB profiles, unavailable monitor
+  profiles, and transform failures retain untransformed pixels with diagnostics.
+  A codec that exposes neither a profile nor ICC metadata is treated as untagged.
+- LibRaw processed output is explicitly sRGB. Embedded RAW JPEG previews keep
+  their exposed ICC profile. nvJPEG resolves ICC metadata from its original
+  encoded bytes using WIC on a worker; legacy RAW cache entries assume sRGB.
+- Orientation and canonical source pixels stay unchanged. Conversion uses
+  straight-alpha BGRA, restores alpha, and premultiplies once. Low-alpha 8-bit
+  round trips can incur rounding.
+- Conversion and profile I/O are asynchronous. Prior valid output remains
+  visible during refresh; source, profile, setting, and window generations
+  prevent obsolete output from replacing current content. Zoom, pan, selection,
+  and compare identity are preserved.
+- Display caches are per window, limited to 128 entries and 64 MiB for the
+  browser or 512 MiB for a viewer. Over-budget images use canonical output and
+  record a diagnostic. ICC payloads are limited to 4 MiB; larger profiles select
+  unchanged fallback. Shared memory/disk caches never store display pixels.
+- HDR tone mapping, soft proofing, print conversion, exports, UI chrome, icons,
+  text, and histograms are outside this SDR display feature. Physical display
+  accuracy and scaling review remain separate validation gates.
 
 ### Viewer interactions
 - next / previous image

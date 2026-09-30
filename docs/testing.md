@@ -7,7 +7,7 @@
 The normal development configuration is the `vs2026-x64` CMake preset. It uses the Visual Studio 2026 generator, x64 architecture, and builds tests by default.
 
 ```powershell
-cmake --preset vs2026-x64
+cmake --preset vs2026-x64 -DHYPERBROWSE_BUNDLE_CUDA_REDIST=OFF
 cmake --build --preset debug --target HyperBrowse
 cmake --build --preset debug --target HyperBrowseTests HyperBrowsePerformanceBenchmark
 ```
@@ -16,9 +16,15 @@ Use the Release preset for release-sensitive changes:
 
 ```powershell
 cmake --build --preset release --target HyperBrowse
+cmake --build --preset release --target HyperBrowseTests HyperBrowsePerformanceBenchmark
 ```
 
-The CI workflow also builds with warnings as errors and validates both Debug and Release configurations. It runs the build/test/benchmark job twice: once with optional nvJPEG enabled and once with `HYPERBROWSE_ENABLE_NVJPEG=OFF` to exercise the WIC fallback path. The repository's local VS Code build task configures with `--fresh`, so expect a reconfigure when using that task.
+Cloud GitHub Actions are currently held by user choice and the workflow is
+manually disabled. Do not enable, dispatch, push, or open a PR to run validation
+without fresh authorization. The workflow's configured matrix describes
+Debug/Release and optional-nvJPEG fallback coverage, not evidence of a current
+cloud run. Validate locally. The VS Code build task configures with `--fresh`;
+keep CUDA bundling off for normal development and avoid the packaging target.
 
 ### Smoke and integration tests
 
@@ -39,6 +45,7 @@ The current test target registers:
 - `HyperBrowseViewerInteractionSmoke`
 - `HyperBrowseRuntimePolicySmoke`
 - `HyperBrowseCompareSessionPolicySmoke`
+- `HyperBrowseColorManagementSmoke`
 - `HyperBrowseThumbnailPersistenceSmoke`
 - `HyperBrowseThumbnailPathSafetySmoke`
 - `HyperBrowseThumbnailMaintenanceSmoke`
@@ -57,7 +64,7 @@ The current test target registers:
 - `HyperBrowseMenuMetricsSmoke`
 - `HyperBrowseResponsivePanelSmoke`
 
-All 25 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+All 26 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
 
 The `vs2026-x64` development preset explicitly sets `HYPERBROWSE_BUILD_FUZZ_TESTS=OFF`. An opt-in configuration may set it to `ON`; building `HyperBrowseTests` then builds `HyperBrowseBoundaryFuzz` before the two boundary tests are run.
 
@@ -70,6 +77,49 @@ On a machine with a supported NVIDIA GPU, prove that the configured runtime perf
 Run this command from a CUDA-bundled build tree so `cudart64_12.dll` and `nvjpeg64_12.dll` are beside the test executable. A successful exit means an nvJPEG decode completed on the available CUDA device; the normal CTest matrix continues to allow WIC fallback on hosts without suitable hardware.
 
 The tests cover model/service behavior and selected application/viewer state without requiring every workflow to be driven through a live desktop session. The full smoke also exercises persistent-cache sharding, atomic entry replacement, bounded legacy flat-layout migration, restart loading, malformed index paths, corruption cleanup, source-missing maintenance, asynchronous statistics/compact/purge callbacks, per-shard statistics, adjacent invalidation coalescing, and pressure-mode store suppression. Add focused coverage to `tests/smoke.cpp` when a change can be exercised deterministically there.
+
+### SDR display-color checks
+
+`HyperBrowseColorManagementSmoke` reuses `smoke_decode.cpp` and `smoke.cpp`.
+It generates original RGB matrix/TRC ICC profiles and WIC PNG/TIFF fixtures;
+no downloaded assets, installed monitor association, GPU, optional codec, or
+network is required. Expected 8-bit RGB tolerances are 3 levels (4 for the
+oriented alpha fixture), with exact alpha and unchanged canonical pixels.
+
+Coverage includes embedded/untagged source contexts, malformed/non-RGB TIFF
+ICC metadata, unavailable/invalid destinations, transform failure diagnostics,
+LibRaw helper/disk source-context round trips and legacy RAW/nvJPEG sRGB rules,
+GPU-independent encoded-byte ICC extraction, double-conversion rejection,
+independent destination pixels, equal-DPI identity changes, stationary profile
+replacement, toggle generations, source invalidation, bounded memory and source
+lifetime, browser/single-viewer/all compare paint paths, rapid navigation and
+index reuse, display recovery,
+nonblocking close during lookup, persisted opt-out startup, propagation to all
+viewers, and the native popup's accessible name/role/checked state. Native WIC
+PNG encoders may omit malformed ICC contexts; TIFF fixtures explicitly write
+the ICC metadata tag so those tests do not accidentally exercise untagged data.
+The color smoke has a 120-second CTest timeout; its message pump checks deadlines
+between bounded batches rather than draining an unbounded repaint stream.
+
+B4 local implementation validation: Debug and Release application, tests, and
+benchmark targets built successfully with CUDA bundling off. The final full
+presets (`--timeout 120`) each passed 25/26, including color management.
+`HyperBrowseSmoke` reproduced the pre-implementation idle single-instance
+shutdown failure. Settings passed both final presets; earlier baseline and
+intermediate runs failed or timed out, so that instability is not a clean gate.
+No cloud workflow or packaging target ran. Physical multi-monitor color and
+100/150/200% scaling review was unavailable and remains unverified.
+
+For manual review, use a known tagged image and untagged copy on an sRGB display
+and a calibrated or wide-gamut display with distinct assigned profiles. Compare
+enabled/disabled output, move the main window and each of two viewers across
+equal-DPI displays, replace a profile without moving a window, and exercise
+100%, 150%, and 200% scaling, resize, display recovery, all compare counts,
+rapid navigation, and missing/invalid profile fallback. Confirm no blanking,
+blocked input, geometry reset, or cross-window color contamination. Verify the
+exact executable path and timestamp against edited sources. Record unavailable
+hardware/scaling gates as unverified; automated pixel checks do not certify
+physical color accuracy.
 
 ### Startup and performance checks
 

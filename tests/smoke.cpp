@@ -6169,6 +6169,159 @@ namespace
         PumpMessagesFor(100);
     }
 
+    struct ColorMenuProbe
+    {
+        bool found{};
+        bool checked{};
+        bool accessibleFound{};
+        bool accessibleChecked{};
+        bool accessibleRole{};
+        ULONGLONG deadline{};
+    };
+
+    LRESULT CALLBACK ColorMenuProbeSubclass(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                           UINT_PTR subclassId, DWORD_PTR reference)
+    {
+        auto& probe = *reinterpret_cast<ColorMenuProbe*>(reference);
+        if (message == WM_TIMER && wParam == subclassId)
+        {
+            HWND popup = nullptr;
+            EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM context)
+            {
+                wchar_t className[32]{};
+                MENUITEMINFOW item{};
+                item.cbSize = sizeof(item);
+                item.fMask = MIIM_STATE;
+                const HMENU menu = reinterpret_cast<HMENU>(SendMessageW(window, MN_GETHMENU, 0, 0));
+                if (GetClassNameW(window, className, static_cast<int>(std::size(className)))
+                    && _wcsicmp(className, L"#32768") == 0
+                    && GetMenuItemInfoW(menu, hyperbrowse::ui::command_ids::ID_VIEW_COLOR_MANAGEMENT, FALSE, &item))
+                {
+                    *reinterpret_cast<HWND*>(context) = window;
+                    return FALSE;
+                }
+                return TRUE;
+            }, reinterpret_cast<LPARAM>(&popup));
+            if (!popup)
+            {
+                if (GetTickCount64() >= probe.deadline) PostMessageW(hwnd, WM_CANCELMODE, 0, 0);
+                return DefSubclassProc(hwnd, message, wParam, lParam);
+            }
+            MENUITEMINFOW item{};
+            item.cbSize = sizeof(item);
+            item.fMask = MIIM_STATE;
+            const HMENU popupMenu = reinterpret_cast<HMENU>(SendMessageW(popup, MN_GETHMENU, 0, 0));
+            GetMenuItemInfoW(popupMenu, hyperbrowse::ui::command_ids::ID_VIEW_COLOR_MANAGEMENT, FALSE, &item);
+            probe.found = true;
+            probe.checked = (item.fState & MFS_CHECKED) != 0;
+            Microsoft::WRL::ComPtr<IAccessible> menu;
+            if (SUCCEEDED(AccessibleObjectFromWindow(popup, static_cast<DWORD>(OBJID_CLIENT),
+                                                    IID_IAccessible, reinterpret_cast<void**>(menu.GetAddressOf()))))
+            {
+                long children = 0;
+                menu->get_accChildCount(&children);
+                for (long index = 1; index <= children; ++index)
+                {
+                    VARIANT child{};
+                    child.vt = VT_I4;
+                    child.lVal = index;
+                    BSTR name = nullptr;
+                    menu->get_accName(child, &name);
+                    const bool isColor = name && std::wstring_view(name, SysStringLen(name)).find(L"Color Management") != std::wstring_view::npos;
+                    SysFreeString(name);
+                    if (!isColor) continue;
+                    probe.accessibleFound = true;
+                    VARIANT state{}, role{};
+                    if (SUCCEEDED(menu->get_accState(child, &state)) && state.vt == VT_I4)
+                        probe.accessibleChecked = (state.lVal & STATE_SYSTEM_CHECKED) != 0;
+                    if (SUCCEEDED(menu->get_accRole(child, &role)) && role.vt == VT_I4)
+                        probe.accessibleRole = role.lVal == ROLE_SYSTEM_MENUITEM;
+                    VariantClear(&state);
+                    VariantClear(&role);
+                }
+            }
+            PostMessageW(hwnd, WM_CANCELMODE, 0, 0);
+        }
+        return DefSubclassProc(hwnd, message, wParam, lParam);
+    }
+
+    void ExpectColorMenuState(HWND hwnd, bool enabled)
+    {
+        constexpr UINT_PTR kProbeId = 0x48424350;
+        ColorMenuProbe probe;
+        probe.deadline = GetTickCount64() + 5000;
+        Expect(SetWindowSubclass(hwnd, ColorMenuProbeSubclass, kProbeId, reinterpret_cast<DWORD_PTR>(&probe)) != FALSE,
+               "Could not inspect the existing View popup for color-management state");
+        SetTimer(hwnd, kProbeId, 50, nullptr);
+        SendMessageW(hwnd, WM_SYSKEYDOWN, L'V', 0);
+        KillTimer(hwnd, kProbeId);
+        RemoveWindowSubclass(hwnd, ColorMenuProbeSubclass, kProbeId);
+        Expect(probe.found, "The color-management View popup could not be located");
+        Expect(probe.checked == enabled, "Color-management View menu checked state is incorrect");
+        Expect(probe.accessibleFound && probe.accessibleRole && probe.accessibleChecked == enabled,
+               "Color-management popup did not expose its accessible name, menu-item role, and checked state");
+    }
+
+    void RunColorManagementSettingsScenario(HINSTANCE instance)
+    {
+        using hyperbrowse::ui::command_ids::ID_VIEW_COLOR_MANAGEMENT;
+        ScopedRegistryDwordBackup colorBackup(kRegistryPath, L"ColorManagementEnabled");
+        DeleteRegistryValue(kRegistryPath, L"ColorManagementEnabled");
+        TempFolder root(L"HyperBrowseColorSettings");
+        const fs::path path = root.Root() / L"color.png";
+        WriteTestImage(path, TestImageFormat::Png, 64, 32);
+        {
+            hyperbrowse::ui::MainWindow mainWindow(instance);
+            Expect(mainWindow.Create(), "Color-management settings MainWindow did not open");
+            mainWindow.Show(SW_SHOWNORMAL);
+            auto* browser = reinterpret_cast<hyperbrowse::browser::BrowserPane*>(GetWindowLongPtrW(
+                FindWindowExW(mainWindow.Hwnd(), nullptr, L"HyperBrowseBrowserPane", nullptr), GWLP_USERDATA));
+            Expect(browser && browser->IsColorManagementEnabled(), "Missing color-management setting did not default on in the browser");
+            ExpectColorMenuState(mainWindow.Hwnd(), true);
+            mainWindow.OpenViewerAtPath(path.wstring());
+            Expect(PumpMessagesUntil([]() { return !FindOpenViewerWindowHandles().empty(); }, 10000),
+                   "Color-management primary viewer did not open");
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND,
+                         hyperbrowse::ui::command_ids::ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, 0);
+            Expect(PumpMessagesUntil([]() { return FindOpenViewerWindowHandles().size() >= 2; }, 10000),
+                   "Color-management independent viewer did not open");
+            const auto expectViewers = [](bool enabled)
+            {
+                for (HWND hwnd : FindOpenViewerWindowHandles())
+                {
+                    auto* viewer = reinterpret_cast<hyperbrowse::viewer::ViewerWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+                    Expect(viewer && viewer->IsColorManagementEnabled() == enabled,
+                           "Color-management toggle did not propagate to every open viewer");
+                }
+            };
+            expectViewers(true);
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND, ID_VIEW_COLOR_MANAGEMENT, 0);
+            Expect(!browser->IsColorManagementEnabled(), "Color-management opt-out did not propagate immediately to the browser");
+            expectViewers(false);
+            ExpectColorMenuState(mainWindow.Hwnd(), false);
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND,
+                         hyperbrowse::ui::command_ids::ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, 0);
+            Expect(PumpMessagesUntil([]() { return FindOpenViewerWindowHandles().size() >= 3; }, 10000),
+                   "Color-management opt-out new viewer did not open");
+            expectViewers(false);
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND, ID_VIEW_COLOR_MANAGEMENT, 0);
+            Expect(browser->IsColorManagementEnabled(), "Color-management re-enable did not propagate immediately to the browser");
+            expectViewers(true);
+            ExpectColorMenuState(mainWindow.Hwnd(), true);
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND, ID_VIEW_COLOR_MANAGEMENT, 0);
+            for (HWND hwnd : FindOpenViewerWindowHandles()) SendMessageW(hwnd, WM_CLOSE, 0, 0);
+            DestroyWindow(mainWindow.Hwnd());
+            PumpMessagesFor(100);
+        }
+        hyperbrowse::ui::MainWindow restored(instance);
+        Expect(restored.Create(), "Persisted color-management MainWindow did not reopen");
+        auto* browser = reinterpret_cast<hyperbrowse::browser::BrowserPane*>(GetWindowLongPtrW(
+            FindWindowExW(restored.Hwnd(), nullptr, L"HyperBrowseBrowserPane", nullptr), GWLP_USERDATA));
+        Expect(browser && !browser->IsColorManagementEnabled(), "Persisted opt-out was not applied before browser creation");
+        DestroyWindow(restored.Hwnd());
+        PumpMessagesFor(100);
+    }
+
     void RunMultiViewerSettingsScenario(HINSTANCE instance)
     {
         using hyperbrowse::ui::command_ids::ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW;
@@ -7026,6 +7179,7 @@ int main(int argc, char* argv[])
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
         const bool viewerInteractionOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-interaction";
         const bool runtimeOnly = argc > 1 && std::string_view(argv[1]) == "--runtime";
+        const bool colorManagementOnly = argc > 1 && std::string_view(argv[1]) == "--color-management";
         const bool thumbnailPersistenceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-persistence";
         const bool thumbnailPathSafetyOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-path-safety";
         const bool thumbnailMaintenanceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-maintenance";
@@ -7049,6 +7203,12 @@ int main(int argc, char* argv[])
         else if (runtimeOnly)
         {
             hyperbrowse::tests::RunRuntimeScenarios();
+        }
+        else if (colorManagementOnly)
+        {
+            hyperbrowse::tests::RunColorManagementScenarios();
+            hyperbrowse::tests::RunColorManagementWindowScenarios(instance, hwnd);
+            RunColorManagementSettingsScenario(instance);
         }
         else if (viewerFitOnly)
         {
@@ -7140,6 +7300,8 @@ int main(int argc, char* argv[])
             RunPersistentCacheCollisionAndLongPathScenario();
             RunRedactedDiagnosticsExportScenario();
             RunWicDecoderScenario();
+            hyperbrowse::tests::RunColorManagementWindowScenarios(instance, hwnd);
+            RunColorManagementSettingsScenario(instance);
             RunWicErrorReportingScenario();
             RunJpegOrientationAdjustmentScenario();
             RunImageCommandServiceScenario(hwnd, &state);

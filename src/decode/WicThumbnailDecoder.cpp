@@ -3,6 +3,7 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include "decode/WicColorTransform.h"
 #include "decode/WicDecodeHelpers.h"
 #include "util/Diagnostics.h"
 
@@ -214,6 +215,7 @@ namespace hyperbrowse::decode
                                                         static_cast<int>(scaledHeight),
                                                         bufferSize,
                                                         static_cast<int>(orientedWidth),
-                                                        static_cast<int>(orientedHeight));
+                                                        static_cast<int>(orientedHeight),
+                                                        color::ReadSourceColorInfo(frame.Get()));
     }
 }

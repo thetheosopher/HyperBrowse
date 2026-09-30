@@ -1,6 +1,8 @@
 #include "cache/ThumbnailCache.h"
 
 #include <algorithm>
+#include <istream>
+#include <ostream>
 #include <unordered_set>
 
 #include "util/HashUtils.h"
@@ -10,6 +12,74 @@ namespace hyperbrowse::cache
     namespace
     {
         constexpr std::size_t kMaximumEntryCount = 2048;
+
+        struct SourceColorHeader
+        {
+            std::uint32_t kind{};
+            std::uint32_t profileBytes{};
+        };
+    }
+
+    std::size_t SerializedSourceColorBytes(const SourceColorInfo& info) noexcept
+    {
+        if (info.kind > SourceColorKind::Unsupported || info.iccProfile.size() > kMaximumSourceProfileBytes
+            || ((info.kind == SourceColorKind::Icc) != !info.iccProfile.empty()))
+        {
+            return 0;
+        }
+        return sizeof(SourceColorHeader) + info.iccProfile.size();
+    }
+
+    bool WriteSourceColorInfo(std::ostream& stream, const SourceColorInfo& info)
+    {
+        if (SerializedSourceColorBytes(info) == 0)
+        {
+            return false;
+        }
+        const SourceColorHeader header{static_cast<std::uint32_t>(info.kind), static_cast<std::uint32_t>(info.iccProfile.size())};
+        stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        if (!info.iccProfile.empty())
+        {
+            stream.write(reinterpret_cast<const char*>(info.iccProfile.data()), static_cast<std::streamsize>(info.iccProfile.size()));
+        }
+        return static_cast<bool>(stream);
+    }
+
+    bool ReadSourceColorInfo(std::istream& stream, std::size_t availableBytes, SourceColorInfo* info)
+    {
+        if (!info || availableBytes < sizeof(SourceColorHeader)
+            || availableBytes > sizeof(SourceColorHeader) + kMaximumSourceProfileBytes)
+        {
+            return false;
+        }
+        SourceColorHeader header{};
+        stream.read(reinterpret_cast<char*>(&header), sizeof(header));
+        if (!stream || header.kind > static_cast<std::uint32_t>(SourceColorKind::Unsupported)
+            || header.profileBytes > kMaximumSourceProfileBytes
+            || availableBytes != sizeof(header) + header.profileBytes
+            || ((header.kind == static_cast<std::uint32_t>(SourceColorKind::Icc)) != (header.profileBytes != 0)))
+        {
+            return false;
+        }
+        SourceColorInfo decoded{static_cast<SourceColorKind>(header.kind), {}};
+        try
+        {
+            decoded.iccProfile.resize(header.profileBytes);
+        }
+        catch (const std::exception&)
+        {
+            return false;
+        }
+        if (header.profileBytes != 0)
+        {
+            stream.read(reinterpret_cast<char*>(decoded.iccProfile.data()), header.profileBytes);
+        }
+        if (!stream)
+        {
+            return false;
+        }
+        *info = std::move(decoded);
+        return true;
     }
 
     std::size_t ThumbnailCacheKeyHasher::operator()(const ThumbnailCacheKey& key) const noexcept
@@ -27,13 +97,15 @@ namespace hyperbrowse::cache
                                      int height,
                                      std::size_t byteCount,
                                      int sourceWidth,
-                                     int sourceHeight)
+                                     int sourceHeight,
+                                     SourceColorInfo sourceColor)
         : bitmap_(bitmap)
         , width_(width)
         , height_(height)
         , byteCount_(byteCount)
         , sourceWidth_(sourceWidth)
         , sourceHeight_(sourceHeight)
+        , sourceColor_(std::move(sourceColor))
     {
     }
 
@@ -62,7 +134,7 @@ namespace hyperbrowse::cache
 
     std::size_t CachedThumbnail::ByteCount() const noexcept
     {
-        return byteCount_;
+        return byteCount_ + sourceColor_.iccProfile.size();
     }
 
     int CachedThumbnail::SourceWidth() const noexcept
@@ -73,6 +145,11 @@ namespace hyperbrowse::cache
     int CachedThumbnail::SourceHeight() const noexcept
     {
         return sourceHeight_;
+    }
+
+    const SourceColorInfo& CachedThumbnail::SourceColor() const noexcept
+    {
+        return sourceColor_;
     }
 
     ThumbnailCache::ThumbnailCache(std::size_t capacityBytes)
@@ -100,7 +177,7 @@ namespace hyperbrowse::cache
 
     void ThumbnailCache::Insert(ThumbnailCacheKey key, std::shared_ptr<const CachedThumbnail> thumbnail)
     {
-        if (!thumbnail)
+        if (!thumbnail || thumbnail->SourceColor().kind == SourceColorKind::DisplayConverted)
         {
             return;
         }

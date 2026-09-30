@@ -11,6 +11,7 @@ namespace hyperbrowse::ui
         constexpr std::wstring_view kMouseWheelBehaviorValue = L"ViewerMouseWheelBehavior";
         constexpr std::wstring_view kEscapeKeyBehaviorValue = L"ViewerEscapeKeyBehavior";
         constexpr std::wstring_view kInvertKeyboardPanningValue = L"InvertKeyboardPanning";
+        constexpr std::wstring_view kColorManagementValue = L"ColorManagementEnabled";
         constexpr UINT kMinimumSlideshowDurationMs = 250U;
         constexpr UINT kMaximumSlideshowDurationMs = 60000U;
         constexpr UINT kDefaultSlideshowDurationMs = 3000U;
@@ -75,6 +76,11 @@ namespace hyperbrowse::ui
             state.invertKeyboardPanning = value != 0;
         }
 
+        if (readDword(kColorManagementValue, &value))
+        {
+            state.colorManagementEnabled = value > 1 ? true : value != 0;
+        }
+
         return state;
     }
 
@@ -88,5 +94,6 @@ namespace hyperbrowse::ui
         writeDword(kMouseWheelBehaviorValue, static_cast<DWORD>(state.mouseWheelBehavior));
         writeDword(kEscapeKeyBehaviorValue, static_cast<DWORD>(state.escapeKeyBehavior));
         writeDword(kInvertKeyboardPanningValue, state.invertKeyboardPanning ? 1UL : 0UL);
+        writeDword(kColorManagementValue, state.colorManagementEnabled ? 1UL : 0UL);
     }
 }

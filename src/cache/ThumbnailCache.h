@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iosfwd>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -36,6 +37,26 @@ namespace hyperbrowse::cache
         std::size_t operator()(const ThumbnailCacheKey& key) const noexcept;
     };
 
+    enum class SourceColorKind : std::uint32_t
+    {
+        Unspecified,
+        Srgb,
+        Icc,
+        Unsupported,
+        DisplayConverted,
+    };
+
+    struct SourceColorInfo
+    {
+        SourceColorKind kind{SourceColorKind::Unspecified};
+        std::vector<unsigned char> iccProfile;
+    };
+
+    inline constexpr std::size_t kMaximumSourceProfileBytes = 4 * 1024 * 1024;
+    std::size_t SerializedSourceColorBytes(const SourceColorInfo& info) noexcept;
+    bool WriteSourceColorInfo(std::ostream& stream, const SourceColorInfo& info);
+    bool ReadSourceColorInfo(std::istream& stream, std::size_t availableBytes, SourceColorInfo* info);
+
     class CachedThumbnail
     {
     public:
@@ -44,7 +65,8 @@ namespace hyperbrowse::cache
                         int height,
                         std::size_t byteCount,
                         int sourceWidth,
-                        int sourceHeight);
+                        int sourceHeight,
+                        SourceColorInfo sourceColor = {});
         ~CachedThumbnail();
 
         CachedThumbnail(const CachedThumbnail&) = delete;
@@ -56,6 +78,7 @@ namespace hyperbrowse::cache
         std::size_t ByteCount() const noexcept;
         int SourceWidth() const noexcept;
         int SourceHeight() const noexcept;
+        const SourceColorInfo& SourceColor() const noexcept;
 
     private:
         HBITMAP bitmap_{};
@@ -64,6 +87,7 @@ namespace hyperbrowse::cache
         std::size_t byteCount_{};
         int sourceWidth_{};
         int sourceHeight_{};
+        SourceColorInfo sourceColor_;
     };
 
     class ThumbnailCache
