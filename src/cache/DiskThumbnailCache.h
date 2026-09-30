@@ -14,6 +14,8 @@
 
 namespace hyperbrowse::cache
 {
+    inline constexpr wchar_t kCacheDirectoryEnvironmentVariable[] = L"HYPERBROWSE_THUMBNAIL_CACHE_DIRECTORY";
+
     class DiskThumbnailCache
     {
     public:

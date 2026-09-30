@@ -308,6 +308,26 @@ namespace
         return fields;
     }
 
+    std::wstring TryGetCacheDirectoryOverride()
+    {
+        const DWORD requiredLength = GetEnvironmentVariableW(
+            hyperbrowse::cache::kCacheDirectoryEnvironmentVariable, nullptr, 0);
+        if (requiredLength == 0)
+        {
+            return {};
+        }
+
+        std::wstring path(requiredLength, L'\0');
+        const DWORD copiedLength = GetEnvironmentVariableW(
+            hyperbrowse::cache::kCacheDirectoryEnvironmentVariable, path.data(), requiredLength);
+        if (copiedLength == 0 || copiedLength >= requiredLength)
+        {
+            return {};
+        }
+        path.resize(copiedLength);
+        return path;
+    }
+
     std::wstring TryGetLocalAppDataPath()
     {
         PWSTR rawPath = nullptr;
@@ -623,14 +643,18 @@ namespace hyperbrowse::cache
 {
     std::uint64_t DiskThumbnailCache::QueryDefaultCacheVolumeFreeBytes() noexcept
     {
-        const std::wstring localAppDataPath = TryGetLocalAppDataPath();
-        if (localAppDataPath.empty())
+        std::wstring cacheVolumePath = TryGetCacheDirectoryOverride();
+        if (cacheVolumePath.empty())
+        {
+            cacheVolumePath = TryGetLocalAppDataPath();
+        }
+        if (cacheVolumePath.empty())
         {
             return 0;
         }
 
         ULARGE_INTEGER availableBytes{};
-        if (!GetDiskFreeSpaceExW(localAppDataPath.c_str(), &availableBytes, nullptr, nullptr))
+        if (!GetDiskFreeSpaceExW(cacheVolumePath.c_str(), &availableBytes, nullptr, nullptr))
         {
             return 0;
         }
@@ -642,6 +666,10 @@ namespace hyperbrowse::cache
         : capacityBytes_(capacityBytes == 0 ? kDefaultDiskThumbnailCacheCapacityBytes : capacityBytes)
         , cacheDirectory_(std::move(cacheDirectory))
     {
+        if (cacheDirectory_.empty())
+        {
+            cacheDirectory_ = TryGetCacheDirectoryOverride();
+        }
     }
 
     DiskThumbnailCache::~DiskThumbnailCache()

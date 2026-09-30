@@ -192,18 +192,20 @@ in-app drag source beyond the new row drop targets.
 
 ### `B4` Color-Managed Display Path (P1)
 
-**Implementation status:** Implemented in the working tree; final validation
-gates remain open. The focused local color smoke covers generated ICC pixel
+**Implementation status:** Implemented; local automated validation gates passed
+on 2026-09-30. The focused local color smoke covers generated ICC pixel
 conversion, alpha/orientation, browser/viewer/all compare counts, per-window
 profiles, settings/menu accessibility, fallbacks, stale results, bounded caches,
-and close during lookup. Local Debug and Release application/test/benchmark
-builds succeeded; the final full presets each passed 25 of 26 tests, including
-the color smoke. `HyperBrowseSmoke` still fails the pre-existing idle
-single-instance shutdown check. Settings passed the final presets but also
-showed the baseline's intermittent failure/timeout in earlier runs. Physical
-sRGB/wide-gamut multi-monitor and 100/150/200% scaling review is unverified.
-These gates remain open, so B4 is not marked complete. Cloud Actions remain
-disabled; no workflow, packaging, commit, or push was performed.
+and close during lookup. Debug and Release application/test/benchmark builds
+succeeded; both exact full CTest presets passed 27/27 (50.77 s Debug, 47.03 s
+Release). The prior idle-client failure was traced to live-cache journal replay
+and generic WCS lookup's printer-spooler RPC, not pipe cancellation. Test-cache
+isolation, exact-display DC profile lookup, and bounded message pumping closed
+the software gates. Physical sRGB/wide-gamut multi-monitor and 100/150/200%
+visual review remains unverified: this session exposes one 1024x768 display at
+100% with a system sRGB profile. B4 remains pending that physical sign-off;
+automated pixel checks do not certify physical color accuracy. Cloud Actions
+remain disabled; no workflow, packaging, commit, or push was performed.
 
 - Default-on, persisted **View > Color Management** opt-out, applied to the
   browser and every viewer/compare tile.

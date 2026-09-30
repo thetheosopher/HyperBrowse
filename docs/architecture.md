@@ -318,12 +318,14 @@ four-image compare tiles. It does not transform chrome, icons, text, metadata,
 histograms, exports, or source files, and adds no keyboard shortcut.
 
 Each rendering window captures its own monitor's `MONITORINFOEX::szDevice`.
-A worker resolves that device's effective ICC association: WCS per-user
-associations when enabled, otherwise system associations, using `CPT_ICC` /
-`CPST_NONE` (not the device-independent RGB working space). A fresh DC for that
-specific display and `GetICMProfileW` provides the effective Windows default
-when explicit WCS lookup is unavailable. Neither the primary monitor nor an
-owner window substitutes for the rendering window. Profile contents, not HWND
+A worker creates a fresh DC for that exact display and uses `GetICMProfileW`
+to obtain its effective Windows default output profile. No `SetICMProfile`
+override or device-independent working space is used. `WcsGetUsePerUserProfiles`
+reports whether per-user or system associations are selected. The Unicode
+profile buffer size is in WCHARs. Generic device-name WCS default-profile lookup
+is not used: local native stack captures showed it entering printer-spooler RPC
+and blocking shutdown. Neither the primary monitor nor an owner window
+substitutes for the rendering window. Profile contents, not HWND
 or HMONITOR values, identify a destination. Monitor comparisons on window
 movement detect equal-DPI moves; display/settings notifications and a bounded
 asynchronous poll detect profile replacement without a move.

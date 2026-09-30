@@ -38,6 +38,7 @@ ctest --preset release-tests
 The current test target registers:
 
 - `HyperBrowseSmoke`
+- `HyperBrowseSingleInstanceSmoke`
 - `HyperBrowsePerformanceBenchmark`
 - `HyperBrowseFolderHistorySmoke`
 - `HyperBrowseFileOperationMediaCacheSmoke`
@@ -64,7 +65,20 @@ The current test target registers:
 - `HyperBrowseMenuMetricsSmoke`
 - `HyperBrowseResponsivePanelSmoke`
 
-All 26 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+All 27 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+
+Smoke processes isolate both registry settings and the default persistent cache.
+`HYPERBROWSE_SETTINGS_REGISTRY_PATH` selects the per-process registry key;
+`HYPERBROWSE_THUMBNAIL_CACHE_DIRECTORY` selects a generated temporary cache root
+inherited by child applications. Explicit cache-directory constructor arguments
+still take precedence. The harness checks both cases and removes only its own
+key and cache root on normal completion. It never purges the user's live cache.
+The shared message pumps process at most 64 messages per deadline check so
+continuous repaint cannot indefinitely postpone assertions or timed steps.
+Combined smoke, viewer interaction, single-instance, and color smoke have
+120-second CTest timeouts. `HyperBrowseSingleInstanceSmoke` runs the existing
+idle-client and resident-mode scenarios through `--single-instance`, retaining
+the five-second application-exit assertion.
 
 The `vs2026-x64` development preset explicitly sets `HYPERBROWSE_BUILD_FUZZ_TESTS=OFF`. An opt-in configuration may set it to `ON`; building `HyperBrowseTests` then builds `HyperBrowseBoundaryFuzz` before the two boundary tests are run.
 
@@ -101,14 +115,32 @@ the ICC metadata tag so those tests do not accidentally exercise untagged data.
 The color smoke has a 120-second CTest timeout; its message pump checks deadlines
 between bounded batches rather than draining an unbounded repaint stream.
 
-B4 local implementation validation: Debug and Release application, tests, and
-benchmark targets built successfully with CUDA bundling off. The final full
-presets (`--timeout 120`) each passed 25/26, including color management.
-`HyperBrowseSmoke` reproduced the pre-implementation idle single-instance
-shutdown failure. Settings passed both final presets; earlier baseline and
-intermediate runs failed or timed out, so that instability is not a clean gate.
-No cloud workflow or packaging target ran. Physical multi-monitor color and
-100/150/200% scaling review was unavailable and remains unverified.
+B4 final local validation on 2026-09-30: Debug and Release application, tests,
+and benchmark targets built successfully with CUDA bundling off and tests on.
+Both exact full presets passed all 27 tests:
+
+| Preset | Result | Total Time | Color Smoke |
+| --- | --- | --- | --- |
+| `debug-tests --timeout 120` | 27/27 passed | 50.77 s | 1.59 s |
+| `release-tests --timeout 120` | 27/27 passed | 47.03 s | 1.43 s |
+
+These results supersede the earlier 25/26 status and intermittent settings
+failures. Native shutdown stacks identified two independent waits: replay of
+the user's persistent-cache journal and generic WCS profile lookup entering
+printer-spooler RPC. Isolating the test cache and resolving the effective
+profile through the exact display DC fixed those waits; no IPC cancellation
+change or increased exit timeout was needed. Bounded shared message pumping
+also resolved combined-smoke and viewer-interaction timeouts. The application
+and test binaries were confirmed newer than their respective source changes.
+No cloud workflow, packaging target, commit, or push ran.
+
+The accessible Windows session exposed one 1024x768 display at 100% scaling,
+with the system `sRGB Color Space Profile.icm` association. Automated native
+lookup and pixel checks passed; they are not physical color-accuracy evidence.
+Physical sRGB/wide-gamut multi-monitor review and 100/150/200% visual scaling
+review remain unverified. A second display and 150%/200% configurations were
+not available in this session; no display setting or profile association was
+changed to manufacture a passing hardware gate.
 
 For manual review, use a known tagged image and untagged copy on an sRGB display
 and a calibrated or wide-gamut display with distinct assigned profiles. Compare

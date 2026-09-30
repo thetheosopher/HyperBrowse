@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <type_traits>
 #include <unordered_map>
 
 #include "decode/ImageDecoder.h"
@@ -92,32 +93,19 @@ namespace hyperbrowse::services
         BOOL perUser = FALSE;
         const BOOL scopeResolved = WcsGetUsePerUserProfiles(deviceName.c_str(), CLASS_MONITOR, &perUser);
         profile.scope = MonitorProfileScopeFor(scopeResolved && perUser);
-        const auto scope = profile.scope == MonitorProfileScope::CurrentUser
-            ? WCS_PROFILE_MANAGEMENT_SCOPE_CURRENT_USER : WCS_PROFILE_MANAGEMENT_SCOPE_SYSTEM_WIDE;
-        DWORD nameBytes = 0;
         std::wstring path;
-        if (scopeResolved && WcsGetDefaultColorProfileSize(scope, deviceName.c_str(), CPT_ICC, CPST_NONE, 0, &nameBytes)
-            && nameBytes >= sizeof(wchar_t) && nameBytes <= 65536 && nameBytes % sizeof(wchar_t) == 0)
         {
-            path.resize(nameBytes / sizeof(wchar_t));
-            if (!WcsGetDefaultColorProfile(scope, deviceName.c_str(), CPT_ICC, CPST_NONE, 0, nameBytes, path.data()))
-            {
-                path.clear();
-            }
-        }
-        if (path.empty())
-        {
-            HDC display = CreateDCW(L"DISPLAY", deviceName.c_str(), nullptr, nullptr);
+            std::unique_ptr<std::remove_pointer_t<HDC>, decltype(&DeleteDC)> display(
+                CreateDCW(L"DISPLAY", deviceName.c_str(), nullptr, nullptr), &DeleteDC);
             if (display)
             {
                 DWORD characters = 0;
-                GetICMProfileW(display, &characters, nullptr);
+                GetICMProfileW(display.get(), &characters, nullptr);
                 if (characters > 0 && characters <= 32768)
                 {
                     path.resize(characters);
-                    if (!GetICMProfileW(display, &characters, path.data())) path.clear();
+                    if (!GetICMProfileW(display.get(), &characters, path.data())) path.clear();
                 }
-                DeleteDC(display);
             }
         }
         if (path.empty())

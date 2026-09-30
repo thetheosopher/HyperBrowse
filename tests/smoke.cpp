@@ -77,6 +77,7 @@ namespace
 
     constexpr wchar_t kTestWindowClassName[] = L"HyperBrowseFolderEnumerationTestWindow";
     std::wstring gSmokeRegistryPath;
+    fs::path gSmokeCacheDirectory;
     const wchar_t* kRegistryPath = nullptr;
     constexpr wchar_t kRegistryValueViewerInfoOverlaysVisible[] = L"ViewerInfoOverlaysVisible";
     constexpr wchar_t kRegistryValueViewerInfoOverlayTextSize[] = L"ViewerInfoOverlayTextSize";
@@ -98,36 +99,57 @@ namespace
     constexpr wchar_t kRegistryValueMetadataCacheCapacityOverrideEntries[] = L"MetadataCacheCapacityOverrideEntries";
     constexpr wchar_t kRegistryValuePrefetchDepthOverride[] = L"PrefetchDepthOverride";
 
-    bool ConfigureSmokeSettingsRegistry()
+    bool ConfigureSmokeEnvironment()
     {
         gSmokeRegistryPath = L"Software\\HyperBrowse\\SmokeTests\\" + std::to_wstring(GetCurrentProcessId());
         kRegistryPath = gSmokeRegistryPath.c_str();
-        return SetEnvironmentVariableW(
+        if (!SetEnvironmentVariableW(
             hyperbrowse::util::kSettingsRegistryEnvironmentVariable,
-            gSmokeRegistryPath.c_str()) != FALSE;
+            gSmokeRegistryPath.c_str()))
+        {
+            return false;
+        }
+
+        gSmokeCacheDirectory = fs::temp_directory_path()
+            / (L"HyperBrowseSmokeCache-" + std::to_wstring(GetCurrentProcessId())
+               + L"-" + std::to_wstring(GetTickCount64()));
+        std::error_code directoryError;
+        fs::create_directories(gSmokeCacheDirectory, directoryError);
+        return !directoryError && SetEnvironmentVariableW(
+            hyperbrowse::cache::kCacheDirectoryEnvironmentVariable,
+            gSmokeCacheDirectory.c_str()) != FALSE;
     }
 
-    void CleanupSmokeSettingsRegistry()
+    void CleanupSmokeEnvironment()
     {
-        if (gSmokeRegistryPath.empty())
+        if (!gSmokeRegistryPath.empty())
         {
-            return;
+            const LONG result = RegDeleteTreeW(HKEY_CURRENT_USER, gSmokeRegistryPath.c_str());
+            if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND)
+            {
+                std::cerr << "Failed to remove the smoke-test settings registry key (error "
+                          << result << ")\n";
+            }
         }
 
-        const LONG result = RegDeleteTreeW(HKEY_CURRENT_USER, gSmokeRegistryPath.c_str());
-        if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND)
+        if (!gSmokeCacheDirectory.empty())
         {
-            std::cerr << "Failed to remove the smoke-test settings registry key (error "
-                      << result << ")\n";
+            std::error_code removalError;
+            fs::remove_all(gSmokeCacheDirectory, removalError);
+            if (removalError)
+            {
+                std::cerr << "Failed to remove the smoke-test cache directory: "
+                          << removalError.message() << '\n';
+            }
         }
     }
 
-    class ScopedSmokeSettingsRegistryCleanup
+    class ScopedSmokeEnvironmentCleanup
     {
     public:
-        ~ScopedSmokeSettingsRegistryCleanup()
+        ~ScopedSmokeEnvironmentCleanup()
         {
-            CleanupSmokeSettingsRegistry();
+            CleanupSmokeEnvironment();
         }
     };
 
@@ -704,8 +726,20 @@ namespace
         }
         require(PostMessageW(mainWindow, WM_CLOSE, 0, 0) != FALSE,
                 "Failed to request HyperBrowse shutdown during idle-client testing");
-        require(WaitForSingleObject(processInfo.hProcess, 5000) == WAIT_OBJECT_0,
-                "An idle single-instance client prevented HyperBrowse from shutting down");
+        const DWORD shutdownWait = WaitForSingleObject(processInfo.hProcess, 5000);
+        if (shutdownWait != WAIT_OBJECT_0)
+        {
+            const bool windowExists = IsWindow(mainWindow) != FALSE;
+            const bool windowVisible = IsWindowVisible(mainWindow) != FALSE;
+            const bool residentEnabled = hyperbrowse::app::Application::IsKeepInNotificationAreaEnabled();
+            cleanup();
+            throw std::runtime_error(
+            "An idle single-instance client prevented HyperBrowse from shutting down"
+            " (window exists=" + std::to_string(windowExists)
+            + ", visible=" + std::to_string(windowVisible)
+            + ", resident=" + std::to_string(residentEnabled)
+            + ", wait=" + std::to_string(shutdownWait) + ")");
+        }
 
         DWORD exitCode = 1;
         require(GetExitCodeProcess(processInfo.hProcess, &exitCode) != FALSE && exitCode == 0,
@@ -1042,7 +1076,9 @@ namespace
         MSG msg{};
         while (GetTickCount64() < deadline)
         {
-            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+            for (std::size_t processed = 0;
+                 processed < 64 && GetTickCount64() < deadline && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE);
+                 ++processed)
             {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -1065,7 +1101,9 @@ namespace
         MSG msg{};
         while (GetTickCount64() < deadline)
         {
-            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+            for (std::size_t processed = 0;
+                 processed < 64 && GetTickCount64() < deadline && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE);
+                 ++processed)
             {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -7164,9 +7202,18 @@ int main(int argc, char* argv[])
     try
     {
         ComScope comScope;
-        ScopedSmokeSettingsRegistryCleanup smokeSettingsRegistryCleanup;
+        ScopedSmokeEnvironmentCleanup smokeEnvironmentCleanup;
         HINSTANCE instance = GetModuleHandleW(nullptr);
-        Expect(ConfigureSmokeSettingsRegistry(), "Failed to configure the smoke-test settings registry path");
+        Expect(ConfigureSmokeEnvironment(), "Failed to configure the isolated smoke-test environment");
+        {
+            hyperbrowse::cache::DiskThumbnailCache environmentCache(1024 * 1024);
+            Expect(fs::path(environmentCache.QueryStatistics().cacheDirectory) == gSmokeCacheDirectory,
+                   "Default persistent cache did not use the isolated smoke-test directory");
+            const fs::path explicitDirectory = gSmokeCacheDirectory / L"explicit";
+            hyperbrowse::cache::DiskThumbnailCache explicitCache(1024 * 1024, explicitDirectory.wstring());
+            Expect(fs::path(explicitCache.QueryStatistics().cacheDirectory) == explicitDirectory,
+                   "Environment cache directory overrode an explicit cache directory");
+        }
         INITCOMMONCONTROLSEX commonControls{};
         commonControls.dwSize = sizeof(commonControls);
         commonControls.dwICC = ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES | ICC_STANDARD_CLASSES;
@@ -7179,6 +7226,7 @@ int main(int argc, char* argv[])
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
         const bool viewerInteractionOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-interaction";
         const bool runtimeOnly = argc > 1 && std::string_view(argv[1]) == "--runtime";
+        const bool singleInstanceOnly = argc > 1 && std::string_view(argv[1]) == "--single-instance";
         const bool colorManagementOnly = argc > 1 && std::string_view(argv[1]) == "--color-management";
         const bool thumbnailPersistenceOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-persistence";
         const bool thumbnailPathSafetyOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-path-safety";
@@ -7203,6 +7251,11 @@ int main(int argc, char* argv[])
         else if (runtimeOnly)
         {
             hyperbrowse::tests::RunRuntimeScenarios();
+        }
+        else if (singleInstanceOnly)
+        {
+            RunSingleInstanceIdleClientScenario();
+            RunResidentSingleInstanceScenario();
         }
         else if (colorManagementOnly)
         {
