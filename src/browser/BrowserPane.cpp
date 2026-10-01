@@ -1184,21 +1184,56 @@ namespace hyperbrowse::browser
 
     void BrowserPane::SetResourceProfile(hyperbrowse::util::ResourceProfile profile)
     {
-        if (resourceProfile_ == profile)
+        SetResourceAndCacheSettings(profile,
+                                    prefetchDepthOverride_,
+                                    thumbnailCacheCapacityOverrideBytes_,
+                                    metadataCacheCapacityOverrideEntries_,
+                                    persistentThumbnailCacheCapacityOverrideBytes_);
+    }
+
+    void BrowserPane::SetResourceAndCacheSettings(hyperbrowse::util::ResourceProfile profile,
+                                                  int prefetchDepthOverride,
+                                                  std::size_t thumbnailCacheCapacityBytes,
+                                                  std::size_t metadataCacheCapacityEntries,
+                                                  std::size_t persistentThumbnailCacheCapacityBytes)
+    {
+        const int normalizedPrefetchDepthOverride = prefetchDepthOverride == hyperbrowse::util::kAutomaticPrefetchDepth
+            ? hyperbrowse::util::kAutomaticPrefetchDepth
+            : std::clamp(prefetchDepthOverride,
+                         hyperbrowse::util::kMinimumPrefetchDepth,
+                         hyperbrowse::util::kMaximumPrefetchDepth);
+        const bool resourceProfileChanged = resourceProfile_ != profile;
+        const bool prefetchDepthChanged = prefetchDepthOverride_ != normalizedPrefetchDepthOverride;
+        const bool cacheCapacityChanged = thumbnailCacheCapacityOverrideBytes_ != thumbnailCacheCapacityBytes
+            || metadataCacheCapacityOverrideEntries_ != metadataCacheCapacityEntries
+            || persistentThumbnailCacheCapacityOverrideBytes_ != persistentThumbnailCacheCapacityBytes;
+        if (!resourceProfileChanged && !prefetchDepthChanged && !cacheCapacityChanged)
         {
             return;
         }
 
         resourceProfile_ = profile;
-        ++thumbnailSessionId_;
-        ++metadataSessionId_;
-        ++thumbnailRequestEpoch_;
-        HideThumbnailTooltip();
-        RecreateBackgroundServices();
-        if (hwnd_)
+        prefetchDepthOverride_ = normalizedPrefetchDepthOverride;
+        thumbnailCacheCapacityOverrideBytes_ = thumbnailCacheCapacityBytes;
+        metadataCacheCapacityOverrideEntries_ = metadataCacheCapacityEntries;
+        persistentThumbnailCacheCapacityOverrideBytes_ = persistentThumbnailCacheCapacityBytes;
+
+        if (resourceProfileChanged || cacheCapacityChanged)
         {
-            RefreshFromModel();
+            ++thumbnailSessionId_;
+            ++metadataSessionId_;
+            ++thumbnailRequestEpoch_;
+            HideThumbnailTooltip();
+            RecreateBackgroundServices();
+            if (hwnd_)
+            {
+                RefreshFromModel();
+            }
+            return;
         }
+
+        ScheduleVisibleThumbnailWork();
+        ScheduleVisibleMetadataWork();
     }
 
     void BrowserPane::SetPrefetchDepthOverride(int depth)
@@ -1272,25 +1307,11 @@ namespace hyperbrowse::browser
                                                 std::size_t metadataCacheCapacityEntries,
                                                 std::size_t persistentThumbnailCacheCapacityBytes)
     {
-        if (thumbnailCacheCapacityOverrideBytes_ == thumbnailCacheCapacityBytes
-            && metadataCacheCapacityOverrideEntries_ == metadataCacheCapacityEntries
-            && persistentThumbnailCacheCapacityOverrideBytes_ == persistentThumbnailCacheCapacityBytes)
-        {
-            return;
-        }
-
-        thumbnailCacheCapacityOverrideBytes_ = thumbnailCacheCapacityBytes;
-        metadataCacheCapacityOverrideEntries_ = metadataCacheCapacityEntries;
-        persistentThumbnailCacheCapacityOverrideBytes_ = persistentThumbnailCacheCapacityBytes;
-        ++thumbnailSessionId_;
-        ++metadataSessionId_;
-        ++thumbnailRequestEpoch_;
-        HideThumbnailTooltip();
-        RecreateBackgroundServices();
-        if (hwnd_)
-        {
-            RefreshFromModel();
-        }
+        SetResourceAndCacheSettings(resourceProfile_,
+                                    prefetchDepthOverride_,
+                                    thumbnailCacheCapacityBytes,
+                                    metadataCacheCapacityEntries,
+                                    persistentThumbnailCacheCapacityBytes);
     }
 
     void BrowserPane::SetPersistentThumbnailCacheEnabled(bool enabled)

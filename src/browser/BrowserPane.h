@@ -141,6 +141,11 @@ namespace hyperbrowse::browser
         void SetAppTextSize(hyperbrowse::util::AppTextSize size);
         hyperbrowse::util::AppTextSize GetAppTextSize() const noexcept;
         void SetResourceProfile(hyperbrowse::util::ResourceProfile profile);
+        void SetResourceAndCacheSettings(hyperbrowse::util::ResourceProfile profile,
+                         int prefetchDepthOverride,
+                         std::size_t thumbnailCacheCapacityBytes,
+                         std::size_t metadataCacheCapacityEntries,
+                         std::size_t persistentThumbnailCacheCapacityBytes);
         void SetPrefetchDepthOverride(int depth);
         void SetThumbnailMemoryPressureActive(bool active);
         void SetPerformanceHudText(std::wstring text);

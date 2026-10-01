@@ -296,7 +296,8 @@ namespace hyperbrowse::ui
         void ApplyColorManagementSetting();
         void RefreshColorProfiles(bool force);
         void ApplyThumbnailMemoryPressureState();
-        void ApplyResourceProfileSetting();
+        void ApplyResourceProfileSetting(bool recreateDetailsPanelScheduler = true,
+                         bool applyBrowserPaneSettings = true);
         void ApplyPersistentThumbnailCacheSetting();
         void ApplyRawJpegPairingSettings();
         void ApplyAppTextSize();
@@ -562,7 +563,8 @@ namespace hyperbrowse::ui
         void ApplyDetailsPanelText(std::wstring title, std::wstring summary, std::wstring body);
         void RefreshDetailsPanelBodyPresentation();
         void RecreateDetailsPanelThumbnailScheduler();
-        void ApplyCacheCapacityOverrideSettings();
+        void ApplyCacheCapacityOverrideSettings(bool recreateDetailsPanelScheduler = true,
+                            bool applyBrowserPaneSettings = true);
         void ResetDetailsPanelHistogram();
         void RequestDetailsPanelHistogram(const browser::BrowserItem& item, int modelIndex);
         void ApplyDetailsPanelHistogram(const cache::CachedThumbnail& thumbnail);

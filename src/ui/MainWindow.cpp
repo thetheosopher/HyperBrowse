@@ -22295,9 +22295,9 @@ namespace hyperbrowse::ui
         UpdateStatusText();
     }
 
-    void MainWindow::ApplyResourceProfileSetting()
+    void MainWindow::ApplyResourceProfileSetting(bool recreateDetailsPanelScheduler, bool applyBrowserPaneSettings)
     {
-        if (browserPaneController_)
+        if (applyBrowserPaneSettings && browserPaneController_)
         {
             browserPaneController_->SetResourceProfile(resourceProfile_);
             browserPaneController_->SetPrefetchDepthOverride(prefetchDepthOverride_);
@@ -22309,7 +22309,10 @@ namespace hyperbrowse::ui
             viewer->SetPrefetchDepthOverride(prefetchDepthOverride_);
         }
 
-        RecreateDetailsPanelThumbnailScheduler();
+        if (recreateDetailsPanelScheduler)
+        {
+            RecreateDetailsPanelThumbnailScheduler();
+        }
     }
 
     void MainWindow::QueueMemoryPressureSample()
@@ -22383,9 +22386,9 @@ namespace hyperbrowse::ui
         }
     }
 
-    void MainWindow::ApplyCacheCapacityOverrideSettings()
+    void MainWindow::ApplyCacheCapacityOverrideSettings(bool recreateDetailsPanelScheduler, bool applyBrowserPaneSettings)
     {
-        if (browserPaneController_)
+        if (applyBrowserPaneSettings && browserPaneController_)
         {
             browserPaneController_->SetCacheCapacityOverrides(
                 thumbnailCacheCapacityOverrideBytes_,
@@ -22393,7 +22396,10 @@ namespace hyperbrowse::ui
                 persistentThumbnailCacheCapacityOverrideBytes_);
         }
 
-        RecreateDetailsPanelThumbnailScheduler();
+        if (recreateDetailsPanelScheduler)
+        {
+            RecreateDetailsPanelThumbnailScheduler();
+        }
     }
 
     void MainWindow::ApplyPersistentThumbnailCacheSetting()
@@ -22782,6 +22788,17 @@ namespace hyperbrowse::ui
                 || viewer::ViewerWindow::DefaultWindowedFullMetadataVisible() != draft.windowedFullMetadataVisible
                 || viewer::ViewerWindow::DefaultFullScreenFullMetadataVisible() != draft.fullScreenFullMetadataVisible;
             const bool quickSendShortcutOrderChanged = quickSendShortcutOrder_ != draft.quickSendShortcutOrder;
+            const int nextPrefetchDepthOverride = hyperbrowse::util::ResolvePrefetchDepth(
+                draft.resourceProfile,
+                draft.prefetchDepthOverride) == draft.prefetchDepthOverride
+                    ? draft.prefetchDepthOverride
+                    : hyperbrowse::util::kAutomaticPrefetchDepth;
+            const bool resourceProfileChanged = resourceProfile_ != draft.resourceProfile
+                || prefetchDepthOverride_ != nextPrefetchDepthOverride;
+            const bool cacheCapacityChanged = thumbnailCacheCapacityOverrideBytes_ != draft.thumbnailCacheCapacityOverrideBytes
+                || metadataCacheCapacityOverrideEntries_ != draft.metadataCacheCapacityOverrideEntries
+                || persistentThumbnailCacheCapacityOverrideBytes_ != draft.persistentThumbnailCacheCapacityOverrideBytes;
+            const bool persistentCacheEnabledChanged = persistentThumbnailCacheEnabled_ != draft.persistentThumbnailCacheEnabled;
 
             slideshowIntervalMs_ = NormalizeSlideshowDuration(draft.slideshowIntervalMs);
             slideshowTransitionStyle_ = draft.slideshowTransitionStyle;
@@ -22800,9 +22817,7 @@ namespace hyperbrowse::ui
             compactThumbnailLayout_ = draft.compactThumbnailLayout;
             detailsStripVisible_ = draft.detailsStripVisible;
             resourceProfile_ = draft.resourceProfile;
-            prefetchDepthOverride_ = hyperbrowse::util::ResolvePrefetchDepth(resourceProfile_, draft.prefetchDepthOverride) == draft.prefetchDepthOverride
-                ? draft.prefetchDepthOverride
-                : hyperbrowse::util::kAutomaticPrefetchDepth;
+            prefetchDepthOverride_ = nextPrefetchDepthOverride;
             persistentThumbnailCacheEnabled_ = draft.persistentThumbnailCacheEnabled;
             thumbnailCacheCapacityOverrideBytes_ = draft.thumbnailCacheCapacityOverrideBytes;
             metadataCacheCapacityOverrideEntries_ = draft.metadataCacheCapacityOverrideEntries;
@@ -22854,9 +22869,31 @@ namespace hyperbrowse::ui
                 ApplyViewerTransitionSettings();
             }
             ApplyRawJpegPairingSettings();
-            ApplyResourceProfileSetting();
-            ApplyCacheCapacityOverrideSettings();
-            ApplyPersistentThumbnailCacheSetting();
+            if (resourceProfileChanged)
+            {
+                ApplyResourceProfileSetting(false, false);
+            }
+            if (cacheCapacityChanged)
+            {
+                ApplyCacheCapacityOverrideSettings(false, false);
+            }
+            if (resourceProfileChanged || cacheCapacityChanged)
+            {
+                if (browserPaneController_)
+                {
+                    browserPaneController_->SetResourceAndCacheSettings(
+                        resourceProfile_,
+                        prefetchDepthOverride_,
+                        thumbnailCacheCapacityOverrideBytes_,
+                        metadataCacheCapacityOverrideEntries_,
+                        persistentThumbnailCacheCapacityOverrideBytes_);
+                }
+                RecreateDetailsPanelThumbnailScheduler();
+            }
+            if (persistentCacheEnabledChanged)
+            {
+                ApplyPersistentThumbnailCacheSetting();
+            }
 
             if (detailsStripVisible_)
             {
