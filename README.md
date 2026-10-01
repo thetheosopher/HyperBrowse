@@ -22,7 +22,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Default-on SDR color-managed thumbnails, viewer, and all compare tiles use each window's monitor profile. **View > Color Management** is a persisted opt-out; unavailable profiles or transforms preserve existing pixels.
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
 - WIC decode for JPEG, PNG, GIF, TIFF, WebP, HEIC, and JPEG XL, with HEIC/JPEG XL dependent on compatible Windows codecs; LibRaw-based RAW support and optional nvJPEG acceleration with runtime fallback.
-- Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, filename/rating/tag filtering, thumbnail ratings, and multi-selection workflows.
+- Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, filename/rating/tag/type filtering, named saved searches, thumbnail ratings, and multi-selection workflows.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, 2-4 image N-up comparison with synchronized zoom and pan, scalable info overlays, current-folder slideshow launch, full metadata pane, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
 - Quick Actions with saved destinations, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy for the currently displayed image or selected browser files.
@@ -80,7 +80,7 @@ This release expands HyperBrowse's image-review and desktop file-management work
 
 | Area | Included today |
 | --- | --- |
-| Browser | Explorer-style folder tree, resizable splitter, root-aware clickable breadcrumb with long-path overflow, thumbnail mode, details mode, recursive browsing, live filename/rating/tag filter, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
+| Browser | Explorer-style folder tree, resizable splitter, root-aware clickable breadcrumb with long-path overflow, thumbnail mode, details mode, recursive browsing, live filename/rating/tag/type filter, named saved searches, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
 | Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, 2-4 image N-up compare with synchronized zoom and pan, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, image-information overlays with size presets, muted idle-state watermark, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; HEIC and JPEG XL via compatible installed WIC codecs; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
@@ -93,7 +93,23 @@ Quick Actions supports saved destinations with one-character shortcuts from digi
 
 In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed. Press `F4` in the main window to restore the most recently recorded filing position for the current folder. Positions follow renamed or moved folders and keep up to 64 folders; the target must still be present in the current view.
 
-The filter field accepts ordinary filename terms plus `tag:value`, `tags:value`, `rating:rated`, `rating:unrated`, and numeric rating constraints such as `rating:4`, `rating:>=3`, or `rating:<2`. Whitespace-separated terms are combined, and tag matching is case-insensitive.
+The filter field accepts ordinary filename terms plus `tag:value`, `tags:value`, `rating:rated`, `rating:unrated`, and numeric rating constraints such as `rating:4`, `rating:>=3`, or `rating:<2`. Use `type:raw` for the supported RAW family or an exact extension such as `type:nef`, `type:.nrw`, or `type:jpg`. Terms are case-insensitive and combined with AND, including multiple type terms. Unsupported or empty `type:` tokens remain literal filename terms rather than matching everything.
+
+### Saved searches
+
+Choose **File > Save Current Filter...** to name a nonempty query, then choose it under **File > Open Saved Search** to apply it to the current folder or recursive scope. The same submenu updates the active search's expression, renames it, deletes it with confirmation, or reloads the list after another window changes it. A manual filter edit clears the active saved-search identity; deleting the saved entry leaves the displayed filter intact. Folder navigation retains the existing filter-reset behavior.
+
+The Save icon beside the filter opens the same naming dialog. It is disabled for empty filters or while saved-search storage is unavailable/busy, and yields its space to the filter in narrow windows; the File command remains available.
+
+Searches persist in `%LOCALAPPDATA%\HyperBrowse\saved-searches.tsv`, with up to 64 entries, names up to 128 UTF-16 code units, and expressions up to 260. Names are trimmed, single-line, and unique case-insensitively; duplicates are rejected rather than overwritten. Persistence runs on a worker, uses a versioned UTF-8 file and atomic replacement, and reloads under an exclusive lock before each mutation to preserve other windows' entries. Failed writes retain the previous file and list; errors appear in the status bar. Malformed or unsupported-version files are not silently overwritten. Saved searches use existing metadata and do not create a background search index.
+
+**Tools > Open Log Folder** opens the actual directory containing `HyperBrowse-debug.log`, normally `%TEMP%`. If temp-path resolution falls back to a relative log file, it opens the working directory. Launch failures are reported without navigating the browser or adding a shortcut.
+
+### HEIC and JPEG XL readiness
+
+**Tools > Diagnostics > Snapshot** (`Ctrl+Shift+D`) refreshes installed WIC decoder discovery on a worker. The Derived list separates `.heic`/`.jxl` recognition from decoder readiness (`Not checked`, `Ready (decoder created)`, `Missing`, or `Discovery failed`) and observed thumbnail/full-image outcomes (`Not observed`, `Succeeded`, or `Decode failed`). Pending discovery updates the open window automatically; it does not block browsing or disable a working decoder. Choose Snapshot again after installing or removing a codec. HyperBrowse never installs codecs automatically.
+
+Decoder creation does not prove a file can be decoded. Successful observations require completed WIC pixels and matching decoder metadata; a PNG renamed to an optional extension is not HEIC/JPEG XL evidence. Reset Diagnostics clears observed outcomes without discarding discovery. Redacted exports omit decoder-supplied names/error text and include no image paths. `.heif` remains outside the recognized allowlist, and no out-of-box or fixture-backed HEIC/JPEG XL compatibility is implied.
 
 ### Multiple viewer windows
 

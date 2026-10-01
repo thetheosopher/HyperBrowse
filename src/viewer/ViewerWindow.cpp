@@ -926,7 +926,7 @@ namespace hyperbrowse::viewer
 
     ViewerWindow::~ViewerWindow()
     {
-        displayColors_->BindTargetWindow(nullptr);
+        displayColors_->Shutdown();
         asyncState_->shutdown.store(true, std::memory_order_release);
         asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
         asyncState_->targetWindow.store(nullptr, std::memory_order_release);

@@ -663,6 +663,7 @@ namespace
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> DecodeWicFile(const hyperbrowse::browser::BrowserItem& item,
                                                                               std::wstring* errorMessage)
     {
+        wic::OptionalCodecDecodeObserver observation(item.fileType, hyperbrowse::services::WicCodecDecodeKind::FullImage);
         wic::ComInitializationScope comInitialization(
             COINIT_MULTITHREADED,
             errorMessage,
@@ -690,7 +691,9 @@ namespace
             return {};
         }
 
-        return DecodeWicSource(factory.Get(), decoder.Get(), 0, 0, 0, 0, errorMessage);
+        auto image = DecodeWicSource(factory.Get(), decoder.Get(), 0, 0, 0, 0, errorMessage);
+        observation.Complete(decoder.Get(), image != nullptr);
+        return image;
     }
 
     std::shared_ptr<const hyperbrowse::cache::CachedThumbnail> TryDecodeRawThumbnailWithWic(const hyperbrowse::cache::ThumbnailCacheKey& key,

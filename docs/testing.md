@@ -47,6 +47,7 @@ The current test target registers:
 - `HyperBrowseRuntimePolicySmoke`
 - `HyperBrowseCompareSessionPolicySmoke`
 - `HyperBrowseColorManagementSmoke`
+- `HyperBrowseSavedSearchSmoke`
 - `HyperBrowseThumbnailPersistenceSmoke`
 - `HyperBrowseThumbnailPathSafetySmoke`
 - `HyperBrowseThumbnailMaintenanceSmoke`
@@ -65,13 +66,16 @@ The current test target registers:
 - `HyperBrowseMenuMetricsSmoke`
 - `HyperBrowseResponsivePanelSmoke`
 
-All 27 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+All 28 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
 
-Smoke processes isolate both registry settings and the default persistent cache.
+Smoke processes isolate registry settings, the default persistent cache, and
+saved searches.
 `HYPERBROWSE_SETTINGS_REGISTRY_PATH` selects the per-process registry key;
 `HYPERBROWSE_THUMBNAIL_CACHE_DIRECTORY` selects a generated temporary cache root
 inherited by child applications. Explicit cache-directory constructor arguments
-still take precedence. The harness checks both cases and removes only its own
+still take precedence. `HYPERBROWSE_SAVED_SEARCH_DIRECTORY` selects a generated
+saved-search profile under the same temporary root; explicit store directories
+still win. The harness checks cache precedence and removes only its own
 key and cache root on normal completion. It never purges the user's live cache.
 The shared message pumps process at most 64 messages per deadline check so
 continuous repaint cannot indefinitely postpone assertions or timed steps.
@@ -92,6 +96,96 @@ Run this command from a CUDA-bundled build tree so `cudart64_12.dll` and `nvjpeg
 
 The tests cover model/service behavior and selected application/viewer state without requiring every workflow to be driven through a live desktop session. The full smoke also exercises persistent-cache sharding, atomic entry replacement, bounded legacy flat-layout migration, restart loading, malformed index paths, corruption cleanup, source-missing maintenance, asynchronous statistics/compact/purge callbacks, per-shard statistics, adjacent invalidation coalescing, and pressure-mode store suppression. Add focused coverage to `tests/smoke.cpp` when a change can be exercised deterministically there.
 
+### Saved-search checks
+
+`HyperBrowseSavedSearchSmoke` reuses `smoke.cpp` through `--saved-searches`,
+with a 120-second timeout. It covers RAW-family and exact-extension predicates,
+mixed rating/tag/name terms, case/dot normalization, conjunction, literal
+unsupported tokens, filter clearing, and thumbnail/details presentation.
+Store checks cover missing files, Unicode/escaped UTF-8 round trips, stable
+order, restart, blank/oversized values, duplicate names, rename/update/delete,
+stale store instances, record/file bounds, invalid UTF-8/version/escapes/rows,
+exclusive-lock contention, failed atomic replacement, and temporary cleanup.
+Controller checks cover bounded requests, worker errors, late active-identity
+rejection, explicit refresh, restart, and shutdown. The native-window check
+drives Save/Rename/Update/Delete through bounded dialog response timers,
+reopens after restart, and verifies that reload never overwrites a manual
+filter. These checks use only the generated saved-search namespace and do not
+modify the user's profile or require an optional codec.
+
+The first integrated Debug saved-search gate passed on 2026-09-30 (3.26 s).
+Final B5 core-menu validation on the same date built the Debug/Release app,
+tests, and benchmark targets with tests on, fuzz off, and CUDA bundling off:
+
+| Preset | Result | Total Time | Saved-Search Smoke |
+| --- | --- | --- | --- |
+| `debug-tests` | 28/28 passed | 75.26 s | 1.73 s |
+| `release-tests` | 28/28 passed | 50.40 s | 1.69 s |
+
+All six exact application/test/benchmark binaries were confirmed newer than
+the touched implementation/test sources. An editor-save timestamp mismatch
+required one final Debug rebuild before recording these results. Initial
+combined/viewer timeouts exposed a native exception-teardown lifetime defect:
+window destruction could refresh the display profile after its borrowed
+executor was released. Explicit display-service shutdown now precedes that
+release; color smoke covers late requests after executor retirement. Temporary
+probes and timeout overrides were removed, and the original viewer pixel
+assertions were unchanged at that core-menu checkpoint;
+the B4 results below remain historical pre-B5 evidence. No cloud, packaging,
+commit, or push operation ran for this checkpoint.
+
+The subsequent B5 inline-Save/C5 checkpoint passed all 28 tests in Debug
+(55.04 s; saved-search smoke 1.71 s) and Release (50.63 s; saved-search smoke
+1.65 s). `HyperBrowseTests --command-bar` directly exercises view-command
+routing, log-directory resolution, and toolbar layout/state; `--runtime` is
+not a substitute for those cases. Policy checks cover narrow/wide layouts at
+96/144/192 DPI metrics and all text sizes. Saved-search smoke verifies a
+nonblank Save bitmap, accessible name/role/default action, empty/busy states,
+and the existing dialog/restart workflow. Its native fixture explicitly
+restores a maximized startup window before requesting wide geometry.
+
+Open Log Folder tests inject the launch callback and cover the logger's actual
+parent plus Unicode, relative, and UNC paths without opening Explorer. The
+viewer metadata pixel check now samples the fixed top-right panel interior,
+away from content-height variation and the centered transient toast; the
+strict visibility comparisons remain. Rendered checks failed intermittently
+while the user was KVM-away and passed on return, including both final full
+presets. This is live-session software evidence, not physical color/DPI sign-off.
+
+### HEIC/JPEG XL readiness checks
+
+`HyperBrowseCodecReadinessSmoke` uses an injected provider for missing, both
+ready states, discovery failure/recovery, cached reads, bounded Unicode text,
+busy rejection, concurrent decode observations, shutdown, and late-result
+rejection. `HyperBrowseCodecReadinessWindowSmoke` drives the native diagnostics
+window through pending/ready/missing/failure/refresh and close-while-busy states.
+Both have 30-second CTest timeouts and reuse existing bounded test pumps.
+
+Generated fixtures use the original `kColorFixturePixels` and WIC PNG encoder
+in `smoke_decode.cpp`, deliberately saved under `.heic`/`.jxl` filenames to
+reject false optional-codec evidence. Malformed fixtures contain original
+ASCII text and verify both WIC failure/error contracts. Neither fixture is a
+real HEIC or JPEG XL image. Injected export checks ensure path-bearing decoder
+names/errors are excluded while state/outcome rows remain. Color and RAW/WIC/
+nvJPEG fallback gates remain unchanged.
+
+For real installed discovery, run `HyperBrowseTests --codec-inventory` from
+the normal Debug or Release test directory. This is an explicit worker-backed
+inventory, not a standard deterministic CTest or a successful image-decode gate.
+On 2026-09-30 it created Microsoft HEIF Decoder and Microsoft JPEG XL Decoder;
+thumbnail/full-image outcomes were `Not observed`. No optional-codec fixtures
+were present under `tests`, and none were downloaded or installed. Actual
+HEIC/JXL decode and `.heif` recognition remain unverified/excluded respectively.
+
+Final normal Debug/Release app, smoke, and benchmark targets built; full
+presets passed 30/30 (56.05 s / 52.66 s). The initial Debug full run passed
+29/30 and failed the existing startup viewer Escape/Fit Height assertion. The
+unchanged combined smoke then passed (22.22 s), followed by the exact full
+Debug pass. No viewer/keyboard fix, skipped assertion, or timeout increase was
+used. Native display/focus sensitivity remains a test risk, not a codec issue
+proven by this observation. Tests remained on, fuzz/CUDA bundling off; no cloud,
+packaging, commit, or dependency installation ran.
+
 ### SDR display-color checks
 
 `HyperBrowseColorManagementSmoke` reuses `smoke_decode.cpp` and `smoke.cpp`.
@@ -109,7 +203,8 @@ replacement, toggle generations, source invalidation, bounded memory and source
 lifetime, browser/single-viewer/all compare paint paths, rapid navigation and
 index reuse, display recovery,
 nonblocking close during lookup, persisted opt-out startup, propagation to all
-viewers, and the native popup's accessible name/role/checked state. Native WIC
+viewers, late requests after a borrowed executor is retired, and the native
+popup's accessible name/role/checked state. Native WIC
 PNG encoders may omit malformed ICC contexts; TIFF fixtures explicitly write
 the ICC metadata tag so those tests do not accidentally exercise untagged data.
 The color smoke has a 120-second CTest timeout; its message pump checks deadlines

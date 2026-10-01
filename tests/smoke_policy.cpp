@@ -23,6 +23,7 @@
 #include "ui/BrowserPresentationPersistence.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
+#include "util/Log.h"
 #include "ui/ClipboardFileTransfer.h"
 #include "ui/DetailsPanelHistogram.h"
 #include "ui/DetailsPanelLayout.h"
@@ -461,6 +462,8 @@ namespace hyperbrowse::tests
             int colorManagementCallCount = 0;
             int detailsCallCount = 0;
             int itemNumberCallCount = 0;
+            int openLogCallCount = 0;
+            std::wstring launchedLogDirectory;
 
             ViewCommandController::Handlers handlers;
             handlers.onAppTextSize = [&appTextSizeCommand](UINT commandId)
@@ -495,7 +498,27 @@ namespace hyperbrowse::tests
             {
                 ++itemNumberCallCount;
             };
+            handlers.onOpenLogFolder = [&](std::wstring_view directory)
+            {
+                ++openLogCallCount;
+                launchedLogDirectory = directory;
+            };
             controller.Configure(std::move(handlers));
+
+            Expect(controller.Handle(ID_HELP_OPEN_LOG_FOLDER) && openLogCallCount == 1
+                && launchedLogDirectory == hyperbrowse::util::GetLogDirectory(hyperbrowse::util::GetLogFilePath()),
+                "Open Log Folder did not route the logger's actual directory to the shell callback");
+            Expect(hyperbrowse::util::GetLogDirectory(L"C:\\Log Profiles\\\u65e5\u672c\\session.log") == L"C:\\Log Profiles\\\u65e5\u672c",
+                "Log directory resolution changed a Unicode destination");
+            Expect(hyperbrowse::util::GetLogDirectory(L"relative.log") == L"."
+                && hyperbrowse::util::GetLogDirectory(L"relative\\session.log") == L"relative",
+                "Log directory resolution changed a relative destination");
+            Expect(hyperbrowse::util::GetLogDirectory(L"\\\\server\\share\\session.log") == L"\\\\server\\share",
+                "Log directory resolution changed a UNC share destination");
+            const auto logShortcuts = hyperbrowse::ui::MainWindowShortcuts();
+            Expect(std::none_of(logShortcuts.begin(), logShortcuts.end(), [](const auto& shortcut)
+                { return shortcut.commandId == ID_HELP_OPEN_LOG_FOLDER; }),
+                "Open Log Folder added an undocumented shortcut");
 
                  Expect(controller.Handle(ID_VIEW_COLOR_MANAGEMENT) && colorManagementCallCount == 1,
                      "View command controller did not route the color-management toggle");
@@ -557,7 +580,7 @@ namespace hyperbrowse::tests
                               });
 
             const auto& menuButtons = controller.MenuButtons();
-            Expect(controller.Items().size() == 17, "Command-bar controller did not initialize toolbar items");
+            Expect(controller.Items().size() == 18, "Command-bar controller did not initialize toolbar items");
                  Expect(menuButtons.size() == 5, "Command-bar controller did not retain all five top-level menus");
             Expect(controller.MenuHitTest(menuButtons[0].rect.left + 1, menuButtons[0].rect.top + 1) == 0,
                    "Command-bar controller did not hit-test the first menu button");
@@ -601,6 +624,47 @@ namespace hyperbrowse::tests
                        && findItem(ID_FILE_COMPARE_SELECTED)->enabled
                        && !findItem(ID_FILE_COPY_SELECTION)->enabled,
                    "Command-bar controller did not apply enabled state");
+
+            const auto saveItem = findItem(ID_FILE_SAVE_CURRENT_FILTER);
+            Expect(saveItem != controller.Items().end() && saveItem->iconName == "save"
+                && saveItem->tooltip == L"Save Current Filter" && !saveItem->enabled,
+                "Inline saved-search command did not expose its icon, tooltip, or disabled state");
+            state.saveFilterEnabled = true;
+            controller.UpdateItemStates(state);
+            Expect(saveItem->enabled, "Inline saved-search command did not enable for an available filter");
+            state.saveFilterEnabled = false;
+            controller.UpdateItemStates(state);
+            Expect(!saveItem->enabled, "Inline saved-search command remained enabled while unavailable");
+
+            for (const auto textSize : {hyperbrowse::util::AppTextSize::Small,
+                                       hyperbrowse::util::AppTextSize::Medium,
+                                       hyperbrowse::util::AppTextSize::Large})
+            {
+                for (const UINT dpi : {96U, 144U, 192U})
+                {
+                    const auto metrics = MakeMenuMetrics(textSize, dpi);
+                    for (const int width : {640, 900, 1600, 2400})
+                    {
+                        controller.Layout(width, 6, metrics, nullptr, [&](HFONT, std::wstring_view label)
+                            { return metrics.ScaleDip(static_cast<int>(label.size() * 8)); });
+                        const auto filter = std::find_if(controller.Items().begin(), controller.Items().end(),
+                            [](const auto& item) { return item.kind == CommandBarController::ToolbarItemKind::FilterEdit; });
+                        Expect(filter != controller.Items().end(), "Inline Save layout lost the filter edit");
+                        if (!IsRectEmpty(&saveItem->rect))
+                        {
+                            Expect(filter->rect.right <= saveItem->rect.left
+                                && filter->rect.right - filter->rect.left >= metrics.ScaleDip(80)
+                                && saveItem->rect.right <= width
+                                && saveItem->rect.right - saveItem->rect.left == metrics.ScaleDip(metrics.commandBarItemSizeDip),
+                                "Inline Save overlapped the filter or lost its fixed scaled bounds");
+                        }
+                        if (width == 640)
+                            Expect(IsRectEmpty(&saveItem->rect), "Inline Save did not yield space in a narrow command bar");
+                        if (width == 2400)
+                            Expect(!IsRectEmpty(&saveItem->rect), "Inline Save did not return in a wide command bar");
+                    }
+                }
+            }
 
             const CommandBarController::KeyboardInputState inactiveState{};
             const auto f10Result = controller.HandleKeyboardInput(WM_SYSKEYDOWN, VK_F10, inactiveState);
@@ -2484,6 +2548,12 @@ namespace hyperbrowse::tests
         else if (scenario == "--async-router")
         {
             RunWindowAsyncMessageRouterScenario();
+        }
+        else if (scenario == "--command-bar")
+        {
+            RunViewCommandControllerScenario();
+            RunCommandBarControllerScenario();
+            RunMenuMetricsScenario();
         }
         else if (scenario == "--menu-metrics")
         {

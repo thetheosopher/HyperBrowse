@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <commctrl.h>
 
 #include <array>
 #include <atomic>
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <thread>
 #include <stdexcept>
@@ -25,6 +27,8 @@
 #include "decode/WicDecodeHelpers.h"
 #include "decode/WicThumbnailDecoder.h"
 #include "services/DisplayColorService.h"
+#include "services/WicCodecReadinessService.h"
+#include "ui/DiagnosticsWindow.h"
 #include "util/Diagnostics.h"
 #include "viewer/ViewerWindow.h"
 
@@ -730,6 +734,18 @@ namespace hyperbrowse::tests
             Expect(untagged && untagged->SourceColor().kind == cache::SourceColorKind::Srgb,
                    "Untagged WIC input did not receive an explicit sRGB source context");
             const cache::ThumbnailCacheKey key{untaggedPath.wstring(), 1, 3, 2};
+            {
+                auto executor = std::make_unique<util::BackgroundExecutor>(1);
+                services::DisplayColorService stopped(4096, provider, {}, executor.get());
+                stopped.Shutdown();
+                executor.reset();
+                stopped.BindTargetWindow(nullptr);
+                stopped.RefreshMonitor(L"available", true);
+                Expect(stopped.ImageForDisplay(key, untagged) == untagged
+                    && !stopped.GetStatistics().profileLookupPending && stopped.GetStatistics().entryCount == 0,
+                    "Stopped display service accessed its retired borrowed executor");
+                stopped.Shutdown();
+            }
             for (const std::wstring device : {L"missing", L"invalid"})
             {
                 const auto counterName = device == L"missing" ? L"color.profile.unavailable" : L"color.profile.invalid";
@@ -987,12 +1003,435 @@ namespace hyperbrowse::tests
                        "Closed viewer accepted an obsolete profile completion");
     }
 
+    void RunCodecReadinessScenarios()
+    {
+        using namespace services;
+        RunHeicFormatAllowlistScenario();
+        RunJpegXlFormatAllowlistScenario();
+        Expect(!decode::IsWicFileType(L"heif") && !browser::IsSupportedImageExtension(L".heif"),
+               "HEIF recognition changed without decoder-backed fixture evidence");
+        Expect(decode::wic_support::DecoderListsExtension(L".jpg,.HEIC,.heif", L"heic"),
+               "WIC decoder extension matching did not normalize case and a leading dot");
+        Expect(decode::wic_support::DecoderListsExtension(L" .webp ; .JXL ", L".jxl"),
+               "WIC decoder extension matching did not handle a separate exact token");
+        Expect(!decode::wic_support::DecoderListsExtension(L".heif,.heic2,.jxl2", L"heic")
+                   && !decode::wic_support::DecoderListsExtension(L".heif,.heic2,.jxl2", L"jxl"),
+               "WIC decoder extension matching accepted an unrelated format or substring");
+        Expect(!decode::wic_support::DecoderListsExtension(L"", L"heic")
+                   && !decode::wic_support::DecoderListsExtension(L".heic", L"")
+                   && !decode::wic_support::DecoderListsExtension(std::wstring(4097, L'x'), L"heic"),
+               "WIC decoder extension matching did not reject empty or oversized input");
+
+        std::atomic<int> phase{};
+        std::atomic<int> calls{};
+        std::atomic<DWORD> workerThread{};
+        WicCodecReadinessService service([&]()
+        {
+            ++calls;
+            workerThread.store(GetCurrentThreadId());
+            if (phase.load() == 2)
+            {
+                throw std::runtime_error("Injected discovery failure");
+            }
+            WicCodecDiscoverySnapshot discovery;
+            if (phase.load() == 1)
+            {
+                discovery.heic = {WicCodecDiscoveryState::Ready, L"Injected HEIC decoder", {}};
+            }
+            else if (phase.load() == 3)
+            {
+                discovery.heic = {WicCodecDiscoveryState::Ready, std::wstring(300, L'x'), {}};
+                discovery.jpegXl = {WicCodecDiscoveryState::DiscoveryFailed, {}, std::wstring(1024, L'y')};
+            }
+            else if (phase.load() == 4)
+            {
+                discovery.jpegXl = {WicCodecDiscoveryState::Ready, L"Injected \u65e5\u672c JPEG XL decoder\r\n", {}};
+            }
+            return discovery;
+        });
+        Expect(calls.load() == 0 && service.Snapshot().heic.discovery.state == WicCodecDiscoveryState::NotChecked,
+               "Codec service performed discovery during construction or a cached read");
+        const auto refresh = [&]()
+        {
+            Expect(service.Refresh(), "Codec readiness refresh was not queued");
+            PumpColorUntil([&]() { return !service.Snapshot().refreshing; }, "Codec discovery did not complete");
+        };
+        refresh();
+        Expect(workerThread.load() != GetCurrentThreadId()
+                   && service.Snapshot().heic.discovery.state == WicCodecDiscoveryState::Missing
+                   && service.Snapshot().jpegXl.discovery.state == WicCodecDiscoveryState::Missing,
+               "Missing decoder discovery was not completed off the calling thread");
+        service.Snapshot();
+        service.Snapshot();
+        Expect(calls.load() == 1, "Cached readiness reads repeated discovery");
+        phase.store(1);
+        refresh();
+        auto snapshot = service.Snapshot();
+        Expect(snapshot.heic.discovery.state == WicCodecDiscoveryState::Ready
+                   && snapshot.heic.fullImage.state == WicCodecDecodeState::NotAttempted,
+               "Registered decoder readiness was incorrectly treated as a successful decode");
+        service.RecordDecode(L".HEIC", WicCodecDecodeKind::Thumbnail, true);
+        service.RecordDecode(L"heic", WicCodecDecodeKind::FullImage, false);
+        service.RecordDecode(L"JXL", WicCodecDecodeKind::FullImage, true);
+        service.RecordDecode(L"jpg", WicCodecDecodeKind::FullImage, false);
+        snapshot = service.Snapshot();
+        Expect(snapshot.heic.thumbnail.state == WicCodecDecodeState::Succeeded
+                   && snapshot.heic.thumbnail.successes == 1
+                   && snapshot.heic.fullImage.state == WicCodecDecodeState::DecodeFailed
+                   && snapshot.heic.fullImage.failures == 1
+                   && snapshot.jpegXl.fullImage.successes == 1,
+               "Codec observations did not distinguish formats and thumbnail/full-image outcomes");
+        phase.store(2);
+        refresh();
+        snapshot = service.Snapshot();
+        Expect(snapshot.heic.discovery.state == WicCodecDiscoveryState::DiscoveryFailed
+                   && !snapshot.heic.discovery.errorMessage.empty()
+                   && snapshot.heic.thumbnail.successes == 1 && snapshot.jpegXl.fullImage.successes == 1
+                   && decode::IsWicFileType(L"heic") && decode::IsWicFileType(L"jxl"),
+               "Discovery failure erased decode evidence or changed extension recognition");
+        phase.store(3);
+        refresh();
+        snapshot = service.Snapshot();
+        Expect(snapshot.heic.discovery.decoderName.size() == 128
+                   && snapshot.jpegXl.discovery.errorMessage.size() == 512,
+               "Codec readiness snapshot retained unbounded provider text");
+        util::DiagnosticsSnapshot diagnostics;
+        diagnostics.derived.push_back({L"existing.metric", L"preserved"});
+        diagnostics.counters.push_back({L"existing.counter", 7});
+        util::UpdateWicCodecReadinessDiagnostics(diagnostics, snapshot);
+        const auto derivedCount = diagnostics.derived.size();
+        const auto counterCount = diagnostics.counters.size();
+        util::UpdateWicCodecReadinessDiagnostics(diagnostics, snapshot);
+        const auto value = [&](std::wstring_view name)
+        {
+            for (const auto& row : diagnostics.derived)
+            {
+                if (row.name == name)
+                {
+                    return row.value;
+                }
+            }
+            return std::wstring{};
+        };
+        Expect(diagnostics.derived.size() == derivedCount && diagnostics.counters.size() == counterCount
+                   && value(L"existing.metric") == L"preserved" && diagnostics.counters.front().value == 7,
+               "Codec diagnostics duplicated rows or replaced unrelated captured metrics");
+        Expect(value(L"codecs.heic.decoder") == L"Ready (decoder created)"
+                   && value(L"codecs.heic.full_image") == L"Decode failed"
+                   && value(L"codecs.jxl.decoder") == L"Discovery failed"
+                   && value(L"codecs.jxl.full_image") == L"Succeeded",
+               "Diagnostics conflated discovery readiness with a completed decode outcome");
+        TempFolder exportRoot(L"HyperBrowseCodecRedaction-" + std::to_wstring(GetCurrentProcessId()));
+        const fs::path exportPath = exportRoot.Root() / L"codec-diagnostics.json";
+        const std::wstring privatePath = L"C:\\Users\\PrivateCodecUser\\codec.dll";
+        for (auto& row : diagnostics.derived)
+        {
+            if (row.name.ends_with(L".decoder_name") || row.name.ends_with(L".discovery_error"))
+            {
+                row.value = privatePath;
+            }
+        }
+        Expect(util::WriteRedactedDiagnosticsSnapshot(exportPath.wstring(), diagnostics),
+               "Injected codec diagnostics could not be exported");
+        std::ifstream exported(exportPath, std::ios::binary);
+        const std::string json((std::istreambuf_iterator<char>(exported)), std::istreambuf_iterator<char>());
+        Expect(json.find("PrivateCodecUser") == std::string::npos && json.find("decoder_name") == std::string::npos
+                   && json.find("discovery_error") == std::string::npos
+                   && json.find("codecs.heic.decoder") != std::string::npos && json.find("Decode failed") != std::string::npos,
+               "Redacted codec export retained external path-bearing text or removed the useful states");
+        phase.store(4);
+        refresh();
+        snapshot = service.Snapshot();
+        Expect(snapshot.heic.discovery.state == WicCodecDiscoveryState::Missing
+                   && snapshot.jpegXl.discovery.state == WicCodecDiscoveryState::Ready
+                   && snapshot.jpegXl.discovery.decoderName.find(L"\u65e5\u672c") != std::wstring::npos
+                   && snapshot.jpegXl.discovery.decoderName.find_first_of(L"\r\n") == std::wstring::npos,
+               "JPEG XL readiness did not recover from failure or preserve bounded Unicode decoder text");
+        service.ResetDecodeObservations();
+        snapshot = service.Snapshot();
+        Expect(snapshot.jpegXl.discovery.state == WicCodecDiscoveryState::Ready
+                   && snapshot.heic.thumbnail.state == WicCodecDecodeState::NotAttempted
+                   && snapshot.jpegXl.fullImage.successes == 0,
+               "Resetting codec observations invalidated decoder discovery or retained decode counts");
+        service.Shutdown();
+        service.Shutdown();
+        service.RecordDecode(L"heic", WicCodecDecodeKind::FullImage, true);
+        Expect(!service.Refresh() && service.Snapshot().heic.fullImage.successes == 0,
+               "Stopped codec service accepted another refresh or decode observation");
+
+        std::mutex discoveryMutex;
+        std::condition_variable discoveryCondition;
+        bool releaseDiscovery = false;
+        std::atomic_bool started{};
+        std::atomic<int> blockedCalls{};
+        WicCodecReadinessService blocked([&]()
+        {
+            const int call = ++blockedCalls;
+            started.store(true);
+            std::unique_lock lock(discoveryMutex);
+            discoveryCondition.wait_for(lock, std::chrono::seconds(5), [&]() { return releaseDiscovery; });
+            WicCodecDiscoverySnapshot discovery;
+            if (call == 1)
+            {
+                discovery.heic = {WicCodecDiscoveryState::Ready, L"Injected concurrent decoder", {}};
+            }
+            else
+            {
+                discovery.jpegXl = {WicCodecDiscoveryState::Ready, L"Injected stale decoder", {}};
+            }
+            return discovery;
+        });
+        Expect(blocked.Refresh(), "Blocking discovery provider was not queued");
+        PumpColorUntil([&]() { return started.load(); }, "Blocking discovery provider did not start");
+        const auto beforeBusyRequest = std::chrono::steady_clock::now();
+        Expect(!blocked.Refresh() && blocked.Snapshot().refreshing
+                   && std::chrono::steady_clock::now() - beforeBusyRequest < std::chrono::seconds(1),
+               "A busy discovery request blocked the caller or queued redundant work");
+        blocked.RecordDecode(L"jxl", WicCodecDecodeKind::FullImage, true);
+        {
+            std::scoped_lock lock(discoveryMutex);
+            releaseDiscovery = true;
+        }
+        discoveryCondition.notify_all();
+        PumpColorUntil([&]() { return !blocked.Snapshot().refreshing; }, "Concurrent codec discovery did not complete");
+        snapshot = blocked.Snapshot();
+        Expect(snapshot.heic.discovery.state == WicCodecDiscoveryState::Ready && snapshot.jpegXl.fullImage.successes == 1,
+               "Completing discovery replaced a decode observation recorded while it was running");
+        {
+            std::scoped_lock lock(discoveryMutex);
+            releaseDiscovery = false;
+        }
+        started.store(false);
+        Expect(blocked.Refresh(), "Codec shutdown fixture could not refresh its cached result");
+        PumpColorUntil([&]() { return started.load(); }, "Codec shutdown provider did not restart");
+        std::jthread shutdown([&]() { blocked.Shutdown(); });
+        PumpColorUntil([&]() { return !blocked.Snapshot().refreshing; }, "Codec shutdown did not reject its pending result");
+        Expect(!blocked.Refresh(), "Codec shutdown accepted new work");
+        {
+            std::scoped_lock lock(discoveryMutex);
+            releaseDiscovery = true;
+        }
+        discoveryCondition.notify_all();
+        shutdown.join();
+        snapshot = blocked.Snapshot();
+        Expect(blockedCalls.load() == 2 && snapshot.heic.discovery.state == WicCodecDiscoveryState::Ready
+               && snapshot.jpegXl.discovery.state == WicCodecDiscoveryState::Missing
+                   && snapshot.jpegXl.fullImage.successes == 1,
+               "Codec service accepted a stale discovery completion or lost a concurrent decode observation");
+
+         TempFolder fixtures(L"HyperBrowseOptionalCodecObservations-" + std::to_wstring(GetCurrentProcessId()));
+         auto& observed = GetWicCodecReadinessService();
+         observed.ResetDecodeObservations();
+         for (std::wstring_view format : {L"heic", L"jxl"})
+         {
+             const fs::path renamed = fixtures.Root() / (L"renamed-png." + std::wstring(format));
+             WriteColorFixture(renamed, {});
+             browser::BrowserItem item;
+             item.filePath = renamed.wstring();
+             item.fileName = renamed.filename().wstring();
+             item.fileType = format;
+             cache::ThumbnailCacheKey key;
+             key.filePath = item.filePath;
+             key.targetWidth = 32;
+             key.targetHeight = 32;
+             std::wstring error;
+             Expect(decode::DecodeFullImage(item, &error) != nullptr
+                  && decode::WicThumbnailDecoder{}.Decode(key, &error) != nullptr,
+                 "Optional codec telemetry altered WIC's content-based decode fallback");
+         }
+         snapshot = observed.Snapshot();
+         Expect(snapshot.heic.fullImage.state == WicCodecDecodeState::NotAttempted
+                 && snapshot.heic.thumbnail.state == WicCodecDecodeState::NotAttempted
+                 && snapshot.jpegXl.fullImage.state == WicCodecDecodeState::NotAttempted
+                 && snapshot.jpegXl.thumbnail.state == WicCodecDecodeState::NotAttempted,
+             "A PNG renamed to an optional extension was treated as HEIC/JPEG XL decode evidence");
+         for (std::wstring_view format : {L"heic", L"jxl"})
+         {
+             const fs::path invalid = fixtures.Root() / (L"malformed." + std::wstring(format));
+             {
+              std::ofstream stream(invalid, std::ios::binary);
+              stream << "HyperBrowse malformed optional-codec smoke fixture";
+             }
+             browser::BrowserItem item;
+             item.filePath = invalid.wstring();
+             item.fileType = format;
+             cache::ThumbnailCacheKey key;
+             key.filePath = item.filePath;
+             key.targetWidth = 32;
+             key.targetHeight = 32;
+             std::wstring error;
+             Expect(decode::DecodeFullImage(item, &error) == nullptr && !error.empty(),
+                 "Malformed optional full-image input did not retain its decode/error contract");
+             Expect(decode::WicThumbnailDecoder{}.Decode(key, &error) == nullptr && !error.empty(),
+                 "Malformed optional thumbnail input did not retain its decode/error contract");
+         }
+         snapshot = observed.Snapshot();
+         Expect(snapshot.heic.fullImage.failures == 1 && snapshot.heic.thumbnail.failures == 1
+                 && snapshot.jpegXl.fullImage.failures == 1 && snapshot.jpegXl.thumbnail.failures == 1,
+             "WIC optional-codec failures were not recorded once at their actual decode owners");
+         Expect(util::BuildDiagnosticsReport().find(fixtures.Root().wstring()) == std::wstring::npos,
+             "Optional codec diagnostics retained a fixture filesystem path");
+         util::ResetDiagnostics();
+         Expect(observed.Snapshot().heic.fullImage.state == WicCodecDecodeState::NotAttempted,
+             "Diagnostics reset did not clear native optional-codec observations");
+    }
+
+    void RunCodecReadinessWindowScenarios(HINSTANCE instance, HWND owner)
+    {
+        using namespace services;
+        std::mutex providerMutex;
+        std::condition_variable providerCondition;
+        bool releaseProvider = false;
+        std::atomic<int> phase{};
+        std::atomic_bool started{};
+        WicCodecReadinessService service([&]()
+        {
+            started.store(true);
+            std::unique_lock lock(providerMutex);
+            providerCondition.wait_for(lock, std::chrono::seconds(5), [&]() { return releaseProvider; });
+            if (phase.load() == 1)
+            {
+                throw std::runtime_error("Injected window discovery failure");
+            }
+            WicCodecDiscoverySnapshot discovery;
+            if (phase.load() == 2)
+            {
+                discovery.jpegXl = {WicCodecDiscoveryState::Ready, L"Injected window JPEG XL decoder", {}};
+            }
+            else
+            {
+                discovery.heic = {WicCodecDiscoveryState::Ready, L"Injected window HEIC decoder", {}};
+            }
+            return discovery;
+        });
+        ui::DiagnosticsWindow window(instance, [&]() { return service.Snapshot(); });
+        const auto begin = [&]()
+        {
+            {
+                std::scoped_lock lock(providerMutex);
+                releaseProvider = false;
+            }
+            started.store(false);
+            Expect(service.Refresh(), "Window codec discovery was not queued");
+            PumpColorUntil([&]() { return started.load(); }, "Window codec provider did not start");
+            util::DiagnosticsSnapshot snapshot;
+            snapshot.derived.push_back({L"existing.metric", L"preserved"});
+            window.Show(owner, L"CPU", L"WIC", L"(test)", std::move(snapshot), false);
+            Expect(window.IsOpen(), "Codec diagnostics window did not open");
+        };
+        const auto release = [&]()
+        {
+            {
+                std::scoped_lock lock(providerMutex);
+                releaseProvider = true;
+            }
+            providerCondition.notify_all();
+        };
+        begin();
+        struct WindowMatch
+        {
+            HWND owner{};
+            HWND found{};
+        } match{owner};
+        EnumWindows([](HWND candidate, LPARAM parameter) -> BOOL
+        {
+            auto& result = *reinterpret_cast<WindowMatch*>(parameter);
+            DWORD processId = 0;
+            GetWindowThreadProcessId(candidate, &processId);
+            std::array<wchar_t, 128> className{};
+            GetClassNameW(candidate, className.data(), static_cast<int>(className.size()));
+            if (processId == GetCurrentProcessId() && GetWindow(candidate, GW_OWNER) == result.owner
+                && std::wstring_view(className.data()) == L"HyperBrowseDiagnosticsWindow")
+            {
+                result.found = candidate;
+                return FALSE;
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&match));
+        Expect(match.found != nullptr, "Native codec diagnostics window was not found by PID, owner, and class");
+        std::vector<HWND> lists;
+        EnumChildWindows(match.found, [](HWND child, LPARAM parameter) -> BOOL
+        {
+            std::array<wchar_t, 64> className{};
+            GetClassNameW(child, className.data(), static_cast<int>(className.size()));
+            if (std::wstring_view(className.data()) == WC_LISTVIEWW)
+            {
+                reinterpret_cast<std::vector<HWND>*>(parameter)->push_back(child);
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&lists));
+        const auto value = [&](std::wstring_view name)
+        {
+            for (HWND list : lists)
+            {
+                for (int row = 0; row < ListView_GetItemCount(list); ++row)
+                {
+                    std::array<wchar_t, 128> label{};
+                    ListView_GetItemText(list, row, 0, label.data(), static_cast<int>(label.size()));
+                    if (std::wstring_view(label.data()) == name)
+                    {
+                        std::array<wchar_t, 768> text{};
+                        ListView_GetItemText(list, row, 1, text.data(), static_cast<int>(text.size()));
+                        return std::wstring(text.data());
+                    }
+                }
+            }
+            return std::wstring{};
+        };
+        Expect(value(L"codecs.discovery") == L"Refreshing" && value(L"existing.metric") == L"preserved",
+               "Native codec diagnostics did not show pending discovery and existing snapshot data");
+        release();
+        PumpColorUntil([&]() { return value(L"codecs.heic.decoder") == L"Ready (decoder created)"; },
+                       "Native codec diagnostics did not consume the completed cached result");
+        Expect(value(L"codecs.jxl.decoder") == L"Missing" && value(L"codecs.heic.full_image") == L"Not observed"
+                   && value(L"existing.metric") == L"preserved",
+               "Native codec diagnostics conflated readiness with decode or dropped unrelated data");
+        phase.store(1);
+        begin();
+        release();
+        PumpColorUntil([&]() { return value(L"codecs.heic.decoder") == L"Discovery failed"; },
+                       "Native codec diagnostics did not expose discovery failure");
+        Expect(value(L"codecs.heic.decoder_name").empty() && !value(L"codecs.heic.discovery_error").empty(),
+               "Native codec diagnostics retained a misleading ready name after failure");
+         phase.store(2);
+         begin();
+         release();
+         PumpColorUntil([&]() { return value(L"codecs.jxl.decoder") == L"Ready (decoder created)"; },
+                  "Native JPEG XL diagnostics did not recover after refresh");
+         Expect(value(L"codecs.heic.decoder") == L"Missing" && value(L"codecs.jxl.discovery_error").empty(),
+             "Native codec refresh retained the previous failure or another format's ready state");
+        phase.store(0);
+        begin();
+        const auto beforeClose = std::chrono::steady_clock::now();
+        SendMessageW(match.found, WM_CLOSE, 0, 0);
+        Expect(!window.IsOpen() && service.Snapshot().refreshing
+                   && std::chrono::steady_clock::now() - beforeClose < std::chrono::seconds(1),
+               "Closing codec diagnostics waited for discovery on the UI thread");
+        release();
+        PumpColorUntil([&]() { return !service.Snapshot().refreshing; },
+                       "Codec discovery did not finish safely after its window closed");
+    }
+
+    std::wstring CaptureInstalledWicCodecReport()
+    {
+        auto& service = services::GetWicCodecReadinessService();
+        Expect(service.Refresh(), "Installed WIC inventory could not be queued");
+        PumpColorUntil([&]() { return !service.Snapshot().refreshing; }, "Installed WIC inventory did not complete");
+        util::DiagnosticsSnapshot diagnostics;
+        util::UpdateWicCodecReadinessDiagnostics(diagnostics, service.Snapshot());
+        std::wstring report = L"Installed WIC inventory: registration/creation only, not fixture decode\n";
+        for (const auto& row : diagnostics.derived)
+        {
+            report.append(row.name + L": " + row.value + L"\n");
+        }
+        return report;
+    }
+
     void RunDecodePolicyScenarios()
     {
         RunRawFormatAllowlistScenario();
         RunWebpFormatAllowlistScenario();
-        RunHeicFormatAllowlistScenario();
-        RunJpegXlFormatAllowlistScenario();
+        RunCodecReadinessScenarios();
         RunRawHelperProtocolScenario();
         RunThumbnailFailureClassificationScenario();
         RunColorManagementScenarios();

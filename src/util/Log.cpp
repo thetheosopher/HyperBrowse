@@ -1,30 +1,12 @@
 #include "util/Log.h"
 
 #include <windows.h>
+#include <filesystem>
 #include <mutex>
 #include <string>
 
 namespace
 {
-    std::wstring LogFilePath()
-    {
-        wchar_t tempPath[MAX_PATH]{};
-        const DWORD length = GetTempPathW(static_cast<DWORD>(std::size(tempPath)), tempPath);
-        if (length == 0 || length >= std::size(tempPath))
-        {
-            return L"HyperBrowse-debug.log";
-        }
-
-        std::wstring path(tempPath, tempPath + length);
-        if (!path.empty() && path.back() != L'\\')
-        {
-            path.push_back(L'\\');
-        }
-
-        path.append(L"HyperBrowse-debug.log");
-        return path;
-    }
-
     std::wstring TimestampPrefix()
     {
         SYSTEMTIME localTime{};
@@ -42,7 +24,7 @@ namespace
 
     void AppendLineToFile(std::wstring_view line)
     {
-        const std::wstring path = LogFilePath();
+        const std::wstring path = hyperbrowse::util::GetLogFilePath();
         HANDLE handle = CreateFileW(path.c_str(),
                                     FILE_APPEND_DATA,
                                     FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -88,6 +70,31 @@ namespace
 
 namespace hyperbrowse::util
 {
+    std::wstring GetLogFilePath()
+    {
+        wchar_t tempPath[MAX_PATH]{};
+        const DWORD length = GetTempPathW(static_cast<DWORD>(std::size(tempPath)), tempPath);
+        if (length == 0 || length >= std::size(tempPath))
+        {
+            return L"HyperBrowse-debug.log";
+        }
+
+        std::wstring path(tempPath, tempPath + length);
+        if (!path.empty() && path.back() != L'\\')
+        {
+            path.push_back(L'\\');
+        }
+        path.append(L"HyperBrowse-debug.log");
+        return path;
+    }
+
+    std::wstring GetLogDirectory(std::wstring_view filePath)
+    {
+        const std::filesystem::path path(filePath.empty() ? GetLogFilePath() : std::wstring(filePath));
+        const auto directory = path.parent_path();
+        return directory.empty() ? L"." : directory.wstring();
+    }
+
     void LogInfo(std::wstring_view message)
     {
         WriteLine(L"[INFO] ", message);

@@ -12,6 +12,8 @@
 #include <sstream>
 #include <string>
 
+#include "services/WicCodecReadinessService.h"
+
 namespace
 {
     struct TimingStats
@@ -490,12 +492,21 @@ namespace hyperbrowse::util
 
     bool WriteRedactedDiagnosticsSnapshot(const std::wstring& outputPath)
     {
+        return WriteRedactedDiagnosticsSnapshot(outputPath, CaptureDiagnosticsSnapshot());
+    }
+
+    bool WriteRedactedDiagnosticsSnapshot(const std::wstring& outputPath, DiagnosticsSnapshot snapshot)
+    {
         if (outputPath.empty())
         {
             return false;
         }
 
-        const DiagnosticsSnapshot snapshot = CaptureDiagnosticsSnapshot();
+        std::erase_if(snapshot.derived, [](const DiagnosticValueRow& row)
+        {
+            return row.name.starts_with(L"codecs.")
+                && (row.name.ends_with(L".decoder_name") || row.name.ends_with(L".discovery_error"));
+        });
         std::string json;
         json.reserve(4096);
         json.append("{\n  \"schemaVersion\": 1,\n  \"redacted\": true,\n  \"product\": ");
@@ -582,9 +593,77 @@ namespace hyperbrowse::util
     void ResetDiagnostics()
     {
         DiagnosticsStore& store = GetStore();
-        std::scoped_lock lock(store.mutex);
-        store.timings.clear();
-        store.counters.clear();
+        {
+            std::scoped_lock lock(store.mutex);
+            store.timings.clear();
+            store.counters.clear();
+        }
+        services::GetWicCodecReadinessService().ResetDecodeObservations();
+    }
+
+    bool RefreshWicCodecReadiness()
+    {
+        return services::GetWicCodecReadinessService().Refresh();
+    }
+
+    void UpdateWicCodecReadinessDiagnostics(DiagnosticsSnapshot& snapshot,
+                                             const services::WicCodecReadinessSnapshot& readiness)
+    {
+        using namespace services;
+        std::erase_if(snapshot.derived, [](const DiagnosticValueRow& row) { return row.name.starts_with(L"codecs."); });
+        std::erase_if(snapshot.counters, [](const DiagnosticCounterRow& row) { return row.name.starts_with(L"codecs."); });
+        snapshot.derived.push_back({L"codecs.discovery", readiness.refreshing ? L"Refreshing"
+            : readiness.generation == 0 ? L"Not checked" : L"Cached"});
+
+        const auto discoveryLabel = [](WicCodecDiscoveryState state)
+        {
+            switch (state)
+            {
+            case WicCodecDiscoveryState::NotChecked: return L"Not checked";
+            case WicCodecDiscoveryState::Ready: return L"Ready (decoder created)";
+            case WicCodecDiscoveryState::Missing: return L"Missing";
+            case WicCodecDiscoveryState::DiscoveryFailed: return L"Discovery failed";
+            }
+            return L"Discovery failed";
+        };
+        const auto decodeLabel = [](WicCodecDecodeState state)
+        {
+            switch (state)
+            {
+            case WicCodecDecodeState::NotAttempted: return L"Not observed";
+            case WicCodecDecodeState::Succeeded: return L"Succeeded";
+            case WicCodecDecodeState::DecodeFailed: return L"Decode failed";
+            }
+            return L"Not observed";
+        };
+        const auto appendCodec = [&](std::wstring_view format, const WicCodecReadiness& codec)
+        {
+            const std::wstring prefix = L"codecs." + std::wstring(format);
+            snapshot.derived.push_back({prefix + L".recognition", L"Recognized (." + std::wstring(format) + L")"});
+            snapshot.derived.push_back({prefix + L".decoder", discoveryLabel(codec.discovery.state)});
+            if (!codec.discovery.decoderName.empty())
+            {
+                snapshot.derived.push_back({prefix + L".decoder_name", codec.discovery.decoderName});
+            }
+            if (!codec.discovery.errorMessage.empty())
+            {
+                snapshot.derived.push_back({prefix + L".discovery_error", codec.discovery.errorMessage});
+            }
+            const auto appendObservation = [&](std::wstring_view kind, const WicCodecDecodeObservation& observation)
+            {
+                const std::wstring name = prefix + L"." + std::wstring(kind);
+                snapshot.derived.push_back({name, decodeLabel(observation.state)});
+                if (observation.state != WicCodecDecodeState::NotAttempted)
+                {
+                    snapshot.counters.push_back({name + L".succeeded", observation.successes});
+                    snapshot.counters.push_back({name + L".failed", observation.failures});
+                }
+            };
+            appendObservation(L"thumbnail", codec.thumbnail);
+            appendObservation(L"full_image", codec.fullImage);
+        };
+        appendCodec(L"heic", readiness.heic);
+        appendCodec(L"jxl", readiness.jpegXl);
     }
 
     DiagnosticsSnapshot CaptureDiagnosticsSnapshot()
@@ -758,6 +837,7 @@ namespace hyperbrowse::util
             }
         }
 
+        UpdateWicCodecReadinessDiagnostics(snapshot, services::GetWicCodecReadinessService().Snapshot());
         return snapshot;
     }
 

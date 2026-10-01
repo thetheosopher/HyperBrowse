@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "ui/CommandIds.h"
+#include "util/Log.h"
 
 namespace hyperbrowse::ui
 {
@@ -159,6 +160,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onDiagnosticsExport);
         case ID_HELP_DIAGNOSTICS_RESET:
             return Invoke(handlers_.onDiagnosticsReset);
+        case ID_HELP_OPEN_LOG_FOLDER:
+            return Invoke(handlers_.onOpenLogFolder, util::GetLogDirectory());
         default:
             return false;
         }

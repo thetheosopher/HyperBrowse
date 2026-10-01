@@ -37,6 +37,7 @@ namespace hyperbrowse::ui
             LParamHandler onFileOperation;
             LParamHandler onFileOperationProgress;
             NoArgumentHandler onUserMetadataSaveError;
+            NoArgumentHandler onSavedSearchChanged;
             LParamHandler onDetailsPanelThumbnail;
             WParamLParamHandler onViewerZoom;
             WParamLParamHandler onViewerActivity;

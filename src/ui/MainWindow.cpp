@@ -78,6 +78,7 @@
 #include "ui/ShellDragSource.h"
 #include "ui/ShellPainter.h"
 #include "ui/SelectionRatingPolicy.h"
+#include "ui/SavedSearchController.h"
 #include "ui/SelectedPathPersistence.h"
 #include "ui/StatusBarPainter.h"
 #include "ui/ToolbarIconLibrary.h"
@@ -9544,6 +9545,12 @@ namespace hyperbrowse::ui
             }
             return static_cast<LRESULT>(0);
         };
+        messageHandlers.onSavedSearchChanged = [this]()
+        {
+            UpdateMenuState();
+            UpdateStatusText();
+            return static_cast<LRESULT>(0);
+        };
         messageHandlers.onDetailsPanelThumbnail = std::bind_front(&MainWindow::OnDetailsPanelThumbnailMessage, this);
         messageHandlers.onViewerZoom = std::bind_front(&MainWindow::OnViewerZoomMessage, this);
         messageHandlers.onViewerActivity = std::bind_front(&MainWindow::OnViewerActivityMessage, this);
@@ -10125,6 +10132,11 @@ namespace hyperbrowse::ui
         viewCommandHandlers.onDiagnosticsSnapshot = std::bind_front(&MainWindow::ShowDiagnosticsSnapshot, this);
         viewCommandHandlers.onDiagnosticsExport = std::bind_front(&MainWindow::ExportRedactedDiagnosticsSnapshot, this);
         viewCommandHandlers.onDiagnosticsReset = std::bind_front(&MainWindow::ResetDiagnosticsState, this);
+        viewCommandHandlers.onOpenLogFolder = [this](std::wstring_view directory)
+        {
+            if (!LaunchShellTarget(hwnd_, L"open", directory))
+                MessageBoxW(hwnd_, L"Failed to open the log folder.", L"Open Log Folder", MB_OK | MB_ICONERROR);
+        };
         viewCommandController_.Configure(std::move(viewCommandHandlers));
     }
 
@@ -10137,6 +10149,7 @@ namespace hyperbrowse::ui
         performanceHudTimerId_ = 0;
         StopDetailsPanelPerformanceUpdates();
         accessibility_.reset();
+        savedSearchController_.reset();
 
         if (userMetadataStore_)
         {
@@ -10360,6 +10373,8 @@ namespace hyperbrowse::ui
             DragAcceptFiles(hwnd_, TRUE);
         }
 
+        savedSearchController_ = std::make_unique<SavedSearchController>(hwnd_);
+        savedSearchController_->Load();
         memoryPressureExecutor_ = std::make_unique<util::BackgroundExecutor>(1);
         if (memoryPressureExecutor_)
         {
@@ -10694,6 +10709,7 @@ namespace hyperbrowse::ui
         toolsMenu_ = CreatePopupMenu();
         helpMenu_ = CreatePopupMenu();
         openRecentFolderMenu_ = CreatePopupMenu();
+        savedSearchMenu_ = CreatePopupMenu();
         copySelectionToMenu_ = CreatePopupMenu();
         moveSelectionToMenu_ = CreatePopupMenu();
         HMENU fileMetadataMenu = CreatePopupMenu();
@@ -10712,7 +10728,7 @@ namespace hyperbrowse::ui
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !toolsMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !advancedViewMenu || !performanceMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !toolsMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !savedSearchMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !advancedViewMenu || !performanceMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -10720,6 +10736,8 @@ namespace hyperbrowse::ui
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_OPEN_FOLDER, L"Open &Folder...\tCtrl+O");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_NEW_FOLDER, L"New &Folder...\tCtrl+Shift+N");
         AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(openRecentFolderMenu_), L"Open &Recent Folder");
+        AppendMenuW(fileMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(savedSearchMenu_), L"Open Saved &Search");
+        AppendMenuW(fileMenu_, MF_STRING, ID_FILE_SAVE_CURRENT_FILTER, L"Save Current &Filter...");
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_REFRESH_TREE, L"Refresh Folder &Tree\tF5");
         AppendMenuW(fileMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileMenu_, MF_STRING, ID_FILE_TOGGLE_CURRENT_FOLDER_FAVORITE_DESTINATION, L"Add Current Folder to Quick &Actions");
@@ -10851,6 +10869,7 @@ namespace hyperbrowse::ui
         AppendMenuW(toolsMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
         AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
+        AppendMenuW(toolsMenu_, MF_STRING, ID_HELP_OPEN_LOG_FOLDER, L"Open &Log Folder");
         AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Integration");
 
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu_), L"&File");
@@ -10900,8 +10919,8 @@ namespace hyperbrowse::ui
         if (filterEdit_)
         {
             SendMessageW(filterEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
-            SendMessageW(filterEdit_, EM_LIMITTEXT, 260, 0);
-            SendMessageW(filterEdit_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"Filter names, rating:>=3, tag:pick (Ctrl+F)"));
+            SendMessageW(filterEdit_, EM_LIMITTEXT, services::SavedSearchStore::kMaximumExpressionCharacters, 0);
+            SendMessageW(filterEdit_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(L"Filter"));
         }
 
         tooltipControl_ = CreateWindowExW(
@@ -12252,6 +12271,15 @@ namespace hyperbrowse::ui
             + (hasActiveFilter ? L" of " + std::to_wstring(folderCount) : L"")
             + (showSubfoldersInBrowser_ ? L" items | " : L" files | ")
             + browser::FormatByteSize(folderBytes);
+        if (savedSearchController_)
+        {
+            if (savedSearchController_->Busy())
+                statusPrimaryText_ = L"Updating saved searches...  |  " + statusPrimaryText_;
+            else if (!savedSearchController_->LastError().empty())
+                statusPrimaryText_ = L"Saved searches: " + savedSearchController_->LastError() + L"  |  " + statusPrimaryText_;
+            else if (savedSearchController_->Active())
+                statusPrimaryText_ = L"Search: " + savedSearchController_->Active()->name + L"  |  " + statusPrimaryText_;
+        }
         const std::uint64_t navigationCount = browserPaneController_
             ? browserPaneController_->DisplayedItemCount()
             : 0;
@@ -13931,7 +13959,72 @@ namespace hyperbrowse::ui
             recentFolders_,
             favoriteDestinationFolders_,
             recentDestinationPaths);
+        RefreshSavedSearchMenu();
         RefreshPersistentMenuOwnerDraw();
+    }
+
+    void MainWindow::RefreshSavedSearchMenu()
+    {
+        if (!savedSearchMenu_) return;
+        while (GetMenuItemCount(savedSearchMenu_) > 0)
+            DeleteMenu(savedSearchMenu_, 0, MF_BYPOSITION);
+        const bool available = savedSearchController_ && savedSearchController_->Ready()
+            && !savedSearchController_->Busy();
+        const bool hasFolder = browserModel_ && !browserModel_->FolderPath().empty();
+        if (savedSearchController_ && !savedSearchController_->Searches().empty())
+        {
+            const auto& searches = savedSearchController_->Searches();
+            for (std::size_t index = 0; index < searches.size(); ++index)
+            {
+                std::wstring label;
+                for (wchar_t character : searches[index].name)
+                {
+                    if (character == L'&') label.push_back(L'&');
+                    label.push_back(character);
+                }
+                const bool checked = savedSearchController_->Active()
+                    && savedSearchController_->Active()->name == searches[index].name;
+                AppendMenuW(savedSearchMenu_, MF_STRING | (available && hasFolder ? MF_ENABLED : MF_GRAYED)
+                    | (checked ? MF_CHECKED : MF_UNCHECKED),
+                    ID_FILE_OPEN_SAVED_SEARCH_BASE + static_cast<UINT>(index), label.c_str());
+            }
+        }
+        else
+        {
+            const wchar_t* label = !savedSearchController_ || savedSearchController_->Busy()
+                ? L"Loading saved searches..."
+                : (savedSearchController_->Ready() ? L"No saved searches" : L"Saved searches unavailable");
+            AppendMenuW(savedSearchMenu_, MF_STRING | MF_GRAYED, 0, label);
+        }
+        AppendMenuW(savedSearchMenu_, MF_SEPARATOR, 0, nullptr);
+        const UINT activeFlags = MF_STRING | (available && savedSearchController_->Active() ? MF_ENABLED : MF_GRAYED);
+        AppendMenuW(savedSearchMenu_, activeFlags, ID_FILE_UPDATE_SAVED_SEARCH, L"&Update Saved Search...");
+        AppendMenuW(savedSearchMenu_, activeFlags, ID_FILE_RENAME_SAVED_SEARCH, L"&Rename Saved Search...");
+        AppendMenuW(savedSearchMenu_, activeFlags, ID_FILE_DELETE_SAVED_SEARCH, L"&Delete Saved Search...");
+        AppendMenuW(savedSearchMenu_, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(savedSearchMenu_, MF_STRING | (savedSearchController_ && !savedSearchController_->Busy()
+                    ? MF_ENABLED : MF_GRAYED), ID_FILE_RELOAD_SAVED_SEARCHES, L"Reload Saved Searches");
+        const bool canSave = available && browserPaneController_ && browserPaneController_->HasActiveFilter();
+        EnableMenuItem(fileMenu_, ID_FILE_SAVE_CURRENT_FILTER, MF_BYCOMMAND | (canSave ? MF_ENABLED : MF_GRAYED));
+    }
+
+    void MainWindow::ApplySavedSearchFilter(std::wstring_view expression)
+    {
+        if (!browserPaneController_ || !filterEdit_) return;
+        applyingSavedSearchFilter_ = true;
+        SetWindowTextW(filterEdit_, std::wstring(expression).c_str());
+        applyingSavedSearchFilter_ = false;
+        browserPaneController_->SetFilterQuery(std::wstring(expression));
+        NotifyWinEvent(EVENT_OBJECT_VALUECHANGE, filterEdit_, OBJID_CLIENT, CHILDID_SELF);
+    }
+
+    void MainWindow::ConsumeSavedSearchResult()
+    {
+        if (!savedSearchController_ || !savedSearchController_->ConsumeResult()) return;
+        if (savedSearchController_->Active() && browserPaneController_
+            && browserPaneController_->GetFilterQuery() != savedSearchController_->Active()->expression)
+            ApplySavedSearchFilter(savedSearchController_->Active()->expression);
+        UpdateStatusText();
     }
 
     void MainWindow::RefreshPersistentMenuOwnerDraw()
@@ -17328,6 +17421,7 @@ namespace hyperbrowse::ui
             return;
         }
 
+        util::RefreshWicCodecReadiness();
         diagnosticsWindow_->Show(
             hwnd_,
             decode::DescribeJpegAccelerationState(),
@@ -21078,6 +21172,7 @@ namespace hyperbrowse::ui
             return;
         }
 
+        ConsumeSavedSearchResult();
         RefreshQuickAccessMenus();
         UpdateUndoRedoMenuState();
 
@@ -21267,6 +21362,8 @@ namespace hyperbrowse::ui
         state.thumbnailSizeEnabled = browserMode_ == BrowserMode::Thumbnails;
         state.compareEnabled = hasCompareSelection;
         state.selectionActionsEnabled = hasSelection && !fileOperationActive_;
+        state.saveFilterEnabled = savedSearchController_ && savedSearchController_->Ready()
+            && !savedSearchController_->Busy() && browserPaneController_ && browserPaneController_->HasActiveFilter();
         commandBarController_.UpdateItemStates(state);
 
         InvalidateToolbarStrip();
@@ -24383,6 +24480,7 @@ namespace hyperbrowse::ui
 
     bool MainWindow::HandleCommand(UINT commandId)
     {
+        if (HandleSavedSearchCommand(commandId)) return true;
         if (fileCommandController_.Handle(commandId))
         {
             return true;
@@ -24395,6 +24493,71 @@ namespace hyperbrowse::ui
 
         return false;
 
+    }
+
+    bool MainWindow::HandleSavedSearchCommand(UINT commandId)
+    {
+        const bool open = commandId >= ID_FILE_OPEN_SAVED_SEARCH_BASE && commandId <= ID_FILE_OPEN_SAVED_SEARCH_LAST;
+        const bool action = commandId >= ID_FILE_SAVE_CURRENT_FILTER && commandId <= ID_FILE_RELOAD_SAVED_SEARCHES;
+        if (!open && !action) return false;
+        if (!savedSearchController_ || savedSearchController_->Busy()) return true;
+        if (commandId == ID_FILE_RELOAD_SAVED_SEARCHES)
+        {
+            savedSearchController_->Load();
+        }
+        else if (open)
+        {
+            if (browserModel_ && !browserModel_->FolderPath().empty())
+            {
+                const auto search = savedSearchController_->Activate(commandId - ID_FILE_OPEN_SAVED_SEARCH_BASE);
+                if (search)
+                {
+                    ApplySavedSearchFilter(search->expression);
+                    SetFocus(browserPane_);
+                }
+            }
+        }
+        else if (savedSearchController_->Ready() && browserPaneController_)
+        {
+            std::wstring text;
+            if (commandId == ID_FILE_SAVE_CURRENT_FILTER && browserPaneController_->HasActiveFilter())
+            {
+                const std::wstring expression = browserPaneController_->GetFilterQuery();
+                if (PromptForSingleLineText(hwnd_, instance_, appTextSize_, themeMode_ == ThemeMode::Dark,
+                    L"Save Current Filter", L"Saved search name", L"Save", {}, 0, -1, &text))
+                {
+                    savedSearchController_->Add({std::move(text), expression});
+                    if (browserPaneController_->GetFilterQuery() != expression)
+                        savedSearchController_->FilterEdited();
+                }
+            }
+            else if (savedSearchController_->Active())
+            {
+                const services::SavedSearch active = *savedSearchController_->Active();
+                if (commandId == ID_FILE_UPDATE_SAVED_SEARCH)
+                {
+                    if (PromptForSingleLineText(hwnd_, instance_, appTextSize_, themeMode_ == ThemeMode::Dark,
+                        L"Update Saved Search", L"Filter expression", L"Update", active.expression, 0, -1, &text))
+                        savedSearchController_->UpdateActive(std::move(text));
+                }
+                else if (commandId == ID_FILE_RENAME_SAVED_SEARCH)
+                {
+                    if (PromptForSingleLineText(hwnd_, instance_, appTextSize_, themeMode_ == ThemeMode::Dark,
+                        L"Rename Saved Search", L"Saved search name", L"Rename", active.name, 0, -1, &text))
+                        savedSearchController_->RenameActive(std::move(text));
+                }
+                else if (commandId == ID_FILE_DELETE_SAVED_SEARCH)
+                {
+                    const std::wstring question = L"Delete saved search \"" + active.name + L"\"?";
+                    if (MessageBoxW(hwnd_, question.c_str(), L"Delete Saved Search",
+                                    MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES)
+                        savedSearchController_->RemoveActive();
+                }
+            }
+        }
+        UpdateStatusText();
+        UpdateMenuState();
+        return true;
     }
 
     void MainWindow::SetBrowserMode(BrowserMode mode)
@@ -26010,11 +26173,15 @@ namespace hyperbrowse::ui
 
         if (LOWORD(wParam) == ID_ACTION_FILTER_EDIT && HIWORD(wParam) == EN_CHANGE && browserPaneController_)
         {
+            if (applyingSavedSearchFilter_) return 0;
+            if (savedSearchController_) savedSearchController_->FilterEdited();
             const int textLength = GetWindowTextLengthW(filterEdit_);
             std::wstring filterText(static_cast<std::size_t>(textLength) + 1, L'\0');
             GetWindowTextW(filterEdit_, filterText.data(), static_cast<int>(filterText.size()));
             filterText.resize(wcslen(filterText.c_str()));
             browserPaneController_->SetFilterQuery(std::move(filterText));
+            UpdateStatusText();
+            UpdateMenuState();
             return 0;
         }
 
@@ -26482,6 +26649,7 @@ namespace hyperbrowse::ui
             {
                 FinishFolderTreeDrag(false);
             }
+            savedSearchController_.reset();
             StopDisplaySurfaceRecoveryRetries();
             if (sessionNotificationRegistered_)
             {

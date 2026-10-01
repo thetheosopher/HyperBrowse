@@ -10,6 +10,7 @@
 #include "services/UserMetadataStore.h"
 #include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
+#include "ui/SavedSearchController.h"
 #include "viewer/ViewerWindow.h"
 
 namespace hyperbrowse::ui
@@ -88,6 +89,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onFileOperationProgress, lParam);
         case services::UserMetadataStore::kMessageId:
             return Invoke(handlers_.onUserMetadataSaveError);
+        case SavedSearchController::kChangedMessage:
+            return Invoke(handlers_.onSavedSearchChanged);
         case services::ThumbnailScheduler::kMessageId:
             return Invoke(handlers_.onDetailsPanelThumbnail, lParam);
         case viewer::ViewerWindow::kZoomChangedMessage:

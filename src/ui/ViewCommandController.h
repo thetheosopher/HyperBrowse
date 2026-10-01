@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <functional>
+#include <string_view>
 
 namespace hyperbrowse::ui
 {
@@ -62,6 +63,7 @@ namespace hyperbrowse::ui
             CommandHandler onDiagnosticsSnapshot;
             CommandHandler onDiagnosticsExport;
             CommandHandler onDiagnosticsReset;
+            std::function<void(std::wstring_view)> onOpenLogFolder;
         };
 
         ViewCommandController() = default;

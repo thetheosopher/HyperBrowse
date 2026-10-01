@@ -260,6 +260,7 @@ namespace
     {
         std::vector<std::wstring> fileNameTerms;
         std::vector<std::wstring> tagTerms;
+        std::vector<std::wstring> fileTypeTerms;
         bool ratingFilterEnabled{};
         int minimumRating{};
         int maximumRating{5};
@@ -297,7 +298,8 @@ namespace
     {
         return queryLower.find(L"rating:") != std::wstring_view::npos
             || queryLower.find(L"tag:") != std::wstring_view::npos
-            || queryLower.find(L"tags:") != std::wstring_view::npos;
+            || queryLower.find(L"tags:") != std::wstring_view::npos
+            || queryLower.find(L"type:") != std::wstring_view::npos;
     }
 
     bool TryApplyRatingConstraint(std::wstring_view rawValue, StructuredFilterQuery* filter)
@@ -397,6 +399,21 @@ namespace
                 continue;
             }
 
+            if (term.rfind(L"type:", 0) == 0)
+            {
+                std::wstring value = term.substr(5);
+                if (!value.empty() && value.front() == L'.') value.erase(0, 1);
+                if (value == L"raw" || hyperbrowse::browser::IsSupportedImageExtension(L"." + value))
+                {
+                    filter.fileTypeTerms.push_back(std::move(value));
+                }
+                else
+                {
+                    filter.fileNameTerms.push_back(term);
+                }
+                continue;
+            }
+
             filter.fileNameTerms.push_back(term);
         }
 
@@ -413,6 +430,19 @@ namespace
             if (fileNameLower.find(term) == std::wstring::npos)
             {
                 return false;
+            }
+        }
+
+        if (!filter.fileTypeTerms.empty())
+        {
+            std::wstring fileType = ToLowercase(item.fileType);
+            if (!fileType.empty() && fileType.front() == L'.') fileType.erase(0, 1);
+            for (const std::wstring& term : filter.fileTypeTerms)
+            {
+                if (term == L"raw" ? !hyperbrowse::decode::IsRawFileType(fileType) : fileType != term)
+                {
+                    return false;
+                }
             }
         }
 

@@ -8,6 +8,11 @@
 #include <string_view>
 #include <vector>
 
+namespace hyperbrowse::services
+{
+    struct WicCodecReadinessSnapshot;
+}
+
 namespace hyperbrowse::util
 {
     struct DiagnosticTimingRow
@@ -80,7 +85,11 @@ namespace hyperbrowse::util
     void MarkStartupFirstThumbnailPainted();
     bool WriteStartupBenchmarkSnapshot(std::wstring* outputPath = nullptr);
     bool WriteRedactedDiagnosticsSnapshot(const std::wstring& outputPath);
+    bool WriteRedactedDiagnosticsSnapshot(const std::wstring& outputPath, DiagnosticsSnapshot snapshot);
     void ResetDiagnostics();
+    bool RefreshWicCodecReadiness();
+    void UpdateWicCodecReadinessDiagnostics(DiagnosticsSnapshot& snapshot,
+                                             const services::WicCodecReadinessSnapshot& readiness);
     DiagnosticsSnapshot CaptureDiagnosticsSnapshot();
     StartupDiagnosticsSnapshot CaptureStartupDiagnosticsSnapshot();
     std::wstring BuildDiagnosticsReport();

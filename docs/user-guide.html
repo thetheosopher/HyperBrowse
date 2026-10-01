@@ -244,7 +244,7 @@
                 <div>
                     <h3>Find and arrange</h3>
                     <ul>
-                        <li>Type ordinary words in the filter field to match filenames. Add <code>tag:value</code> or <code>tags:value</code> for tags, <code>rating:rated</code> or <code>rating:unrated</code>, or numeric constraints such as <code>rating:4</code>, <code>rating:&gt;=3</code>, and <code>rating:&lt;2</code>. Whitespace-separated terms are combined.</li>
+                        <li>Type ordinary words in the filter field to match filenames. Add <code>tag:value</code> or <code>tags:value</code> for tags, <code>rating:rated</code> or <code>rating:unrated</code>, or numeric constraints such as <code>rating:4</code>, <code>rating:&gt;=3</code>, and <code>rating:&lt;2</code>. Use <code>type:raw</code> for the supported RAW family or an exact extension such as <code>type:nef</code>, <code>type:.nrw</code>, or <code>type:jpg</code>. Case-insensitive terms are combined with AND; unsupported or empty type tokens remain literal filename terms.</li>
                         <li>Use <strong>View &gt; Sort</strong> to sort by filename, modified date, file size, dimensions, type, date taken, rating, tags, or random order.</li>
                         <li>Toggle <strong>View &gt; Sort &gt; Descending</strong> to switch between ascending and descending order.</li>
                         <li>Turn on <strong>View &gt; Recursive Browsing</strong> when the current folder and its descendants should be treated as one image collection.</li>
@@ -252,6 +252,10 @@
                     </ul>
                 </div>
             </div>
+            <h3>Saved searches</h3>
+            <p>The Save icon beside the filter opens the same <strong>Save Current Filter</strong> naming dialog as the File command. It is disabled for an empty filter or while saved-search storage is unavailable or busy. In narrow windows it yields space to the filter; use the File command there.</p>
+            <p>Enter a nonempty filter and choose <strong>File &gt; Save Current Filter...</strong> to name it. Choose the name under <strong>File &gt; Open Saved Search</strong> to apply it to the current folder or recursive scope. With a saved search active, the same submenu offers <strong>Update Saved Search...</strong>, <strong>Rename Saved Search...</strong>, and <strong>Delete Saved Search...</strong>. Updating edits its expression; deleting its entry does not clear the displayed filter. Typing in the filter clears the active saved-search identity, and folder navigation resets the filter as usual.</p>
+            <p>Up to 64 searches persist in <code>%LOCALAPPDATA%\HyperBrowse\saved-searches.tsv</code>. Names are unique case-insensitively, single-line, and limited to 128 UTF-16 code units; expressions are limited to 260. Blank values and duplicate names are rejected. Loading and saving run in the background; failures appear in the status bar and leave the prior list and file intact. Choose <strong>Reload Saved Searches</strong> to refresh changes from another window. No separate search index is created.</p>
             <p>When no folder is selected, the browser shows a muted watermark above its prompt. The viewer uses the same treatment when no image is loaded; loading and error states remain separate.</p>
             <h3>Selection and drag-and-drop</h3>
             <p>Use Ctrl-click to add or remove individual items, Shift-click for a range, and <kbd>Ctrl</kbd> + <kbd>A</kbd> to select all visible items. Selected files can be dragged to a folder in the tree or to another shell-aware application such as File Explorer. Dropping files onto HyperBrowse can open an image in the viewer or copy files into the current folder, depending on where they are dropped. Holding <kbd>Ctrl</kbd> requests copy and holding <kbd>Shift</kbd> requests move where the destination supports both effects.</p>
@@ -352,7 +356,8 @@
                 <li><strong>Viewer</strong> contains manual-navigation transitions, mouse-wheel behavior, overlay text size, detail overlays, full metadata, secondary-monitor defaults, and RAW/JPEG display preferences.</li>
                 <li><strong>Appearance</strong> contains the light/dark theme, app text size, thumbnail size, thumbnail details, compact layout, and details panel.</li>
                 <li><strong>Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
-                <li><strong>Tools &gt; Diagnostics</strong> can capture a snapshot or reset diagnostic state when investigating a problem.</li>
+                <li><strong>Tools &gt; Diagnostics &gt; Snapshot</strong> refreshes HEIC and JPEG XL WIC discovery in the background. The Derived list separates recognized extensions, decoder creation or missing/discovery-failed states, and observed thumbnail/full-image success or failure. Pending results update the open window automatically. Choose Snapshot again after installing or removing a codec; HyperBrowse does not install codecs. Reset clears decode observations while retaining discovery, and redacted exports omit decoder-supplied names/error text.</li>
+                <li><strong>Tools &gt; Open Log Folder</strong> opens the directory containing <code>HyperBrowse-debug.log</code>, normally the Windows temporary directory. If temp-path resolution falls back to a relative file, it opens the working directory. A failed launch displays an error; it does not change the browser folder.</li>
                 <li><strong>Tools &gt; Integration</strong> contains file associations. Single-instance behavior is on the Behavior tab.</li>
                 <li><strong>Behavior</strong> can enable recursive browsing, show subfolders, make Esc close the main window instead of doing nothing, and enable single-instance behavior. Main-window <kbd>Ctrl</kbd> + <kbd>W</kbd> minimizes.</li>
                 <li><strong>View &gt; Thumbnail Size</strong> still provides fixed presets and keyboard stepping.</li>
@@ -363,7 +368,7 @@
         <section id="release-2-4">
             <h2>What changed in 2.4</h2>
             <p>Version 2.4 adds HEIC and JPEG XL decoding through Windows Imaging Component (WIC) when compatible codecs are installed. It also adds two-to-four-image N-up comparison with synchronized zoom and pan, long-path breadcrumb navigation, an optional Performance HUD, and expanded resource-profile, cache, and prefetch controls. Persistent-cache maintenance and benchmark coverage have been strengthened, and folder-thumbnail labels now follow the application's text-size setting.</p>
-            <div class="callout"><strong>Format boundary.</strong> HEIC and JPEG XL decoding depends on a compatible Windows WIC codec being installed; HyperBrowse does not detect codec availability in advance. GIF and TIFF browsing shows the first frame or page, and animated playback remains deferred.</div>
+            <div class="callout"><strong>Format boundary.</strong> HEIC and JPEG XL decoding depends on a compatible installed Windows WIC codec. Diagnostics reports decoder creation separately from actual file-decode outcomes; readiness alone does not prove a file or variant works. A renamed PNG is not optional-codec decode evidence, and <code>.heif</code> is not recognized. GIF and TIFF browsing shows the first frame or page, and animated playback remains deferred.</div>
         </section>
 
         <section id="release-2-3">

@@ -58,6 +58,7 @@ namespace hyperbrowse::ui
         filterItem.alignment = ToolbarAlignment::Left;
         items_.push_back(std::move(filterItem));
 
+        addIcon(ID_FILE_SAVE_CURRENT_FILTER, "save", L"Save Current Filter", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
         addSeparator(ToolbarAlignment::Right);
         addIcon(ID_FILE_COMPARE_SELECTED, "compare", L"Compare Selected", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
         addIcon(ID_FILE_COPY_SELECTION, "copy", L"Copy Selection", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
@@ -173,6 +174,13 @@ namespace hyperbrowse::ui
                 continue;
             }
 
+            if (item.commandId == ID_FILE_SAVE_CURRENT_FILTER
+                && rightCursor - itemSize - metrics.ScaleDip(14) < leftCursor + metrics.ScaleDip(80))
+            {
+                item.rect = RECT{};
+                continue;
+            }
+
             rightCursor -= itemSize;
             item.rect = RECT{rightCursor, itemTop, rightCursor + itemSize, itemTop + itemSize};
             rightCursor -= metrics.ScaleDip(2);
@@ -214,6 +222,9 @@ namespace hyperbrowse::ui
                 break;
             case ID_FILE_COMPARE_SELECTED:
                 item.enabled = state.compareEnabled;
+                break;
+            case ID_FILE_SAVE_CURRENT_FILTER:
+                item.enabled = state.saveFilterEnabled;
                 break;
             case ID_FILE_COPY_SELECTION:
             case ID_FILE_MOVE_SELECTION:

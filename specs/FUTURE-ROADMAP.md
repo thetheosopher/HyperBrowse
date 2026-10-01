@@ -219,6 +219,19 @@ remain disabled; no workflow, packaging, commit, or push was performed.
 
 ### `B5` Saved Searches / Smart Folders (P1)
 
+**Implementation status:** Software surface implemented on 2026-09-30.
+RAW/exact-extension filtering, bounded asynchronous UTF-8 storage, and File
+open/save/update/rename/delete/reload commands have Debug/Release smoke coverage,
+including native dialogs and restart. Both complete 28-test presets passed
+(55.04 s / 50.63 s), with fresh application/test binaries. The inline Save icon
+shares the File command, exposes accessible state/action, and yields filter
+space in narrow layouts. Other enhancement phases
+have not been started; this is not a released-version claim.
+
+Execution sequence: [workflow and format enhancements prompt](FUTURE-ROADMAP-PROMPT-08-WORKFLOW-AND-FORMAT-ENHANCEMENTS.md).
+Start with B5, then E2/E5 codec readiness and B7 animation. The prompt records
+the follow-on B6/E1 queue, the small C5 log-folder action, and validation gates.
+
 - Persist named filter expressions (e.g. `rating:>=4 tag:keeper type:raw`)
   in `%LOCALAPPDATA%\HyperBrowse\saved-searches.tsv`.
 - File ▸ Open Saved Search… exposes them; filter box gains an inline
@@ -259,7 +272,9 @@ The brand is "fast". The product should look the part.
 ### `C5` Tools Menu (P1)
 
 The core Tools menu and Settings organization are shipped and summarized in
-Appendix A. Remaining command ideas are **Benchmark** and **Open Log Folder**;
+Appendix A. **Open Log Folder** is implemented locally on 2026-09-30 using the
+actual logger directory and existing shell-launch/error path, with injected
+non-launching routing/path coverage. **Benchmark** remains deferred;
 the separate Cache Inspector window was superseded by D4's existing surfaces.
 
 ### `C6` Inline Rename / In-Place Label Edit (P2)
@@ -375,15 +390,21 @@ Lower priority than A–D but where competitors are starting to differentiate.
 
 ### `E2` HEIC Support via Microsoft HEIF Extensions (P2)
 
-**Implementation status:** Partial. The `.heic` extension is in the browser
-and WIC decoder allowlists and is routed through WIC. Startup detection of the
-Microsoft HEIF Image Extension, explicit codec availability reporting, and a
-clear unsupported state remain open. `.heif` is not currently in the
-allowlist.
+**Implementation status:** Readiness software implemented locally. `.heic`
+remains recognized and routed through WIC. Tools > Diagnostics > Snapshot
+explicitly refreshes bounded worker-owned decoder discovery and reports
+created/missing/discovery-failed states separately from observed thumbnail
+and full-image decode outcomes. Discovery never blocks browsing or disables a
+working decoder; no codec is installed automatically. Discovery is on demand,
+not startup work. `.heif` remains outside the allowlist.
 
-- Detect the Microsoft HEIF Image Extension at startup and report whether
-  HEIC decoding is available; retain graceful failure when its WIC codec is
-  absent.
+Local inventory created Microsoft HEIF Decoder on 2026-09-30; no actual HEIC
+fixture decode was verified. Deterministic and native readiness tests passed,
+with final full Debug/Release presets at 30/30 (56.05 s / 52.66 s). Real media
+compatibility and physical/manual review remain separate from readiness.
+
+- Retain a separate provenance-backed HEIC fixture gate on a supported
+  installed-codec configuration; decoder creation alone is not a decode pass.
 
 ### `E3` Multipage TIFF Navigation (P2)
 
@@ -398,15 +419,17 @@ allowlist.
 
 ### `E5` JPEG XL Support via WIC (P2)
 
-**Implementation status:** Partial. The `.jxl` extension is in the browser and
-WIC decoder allowlists and is routed through WIC. Actual decoding depends on a
-compatible installed WIC codec; HyperBrowse does not currently detect codec
-availability or guarantee out-of-box JPEG XL decoding. Existing smoke coverage
-validates allowlisting and routing, not codec installation or image decoding.
+**Implementation status:** Readiness software implemented locally. `.jxl`
+remains recognized and routed through WIC, with the same on-demand worker
+discovery, independent decode outcomes, explicit refresh, failure fallback,
+and redacted diagnostics as HEIC. Mocked discovery and renamed PNGs are not
+JPEG XL decode evidence. Final full Debug/Release presets passed 30/30.
 
-- Detect and report JPEG XL codec availability, and add codec-backed decode
-  verification on a supported Windows configuration before describing JPEG XL
-  as generally available.
+Local inventory created Microsoft JPEG XL Decoder on 2026-09-30; actual JPEG
+XL fixture decode and out-of-box compatibility remain unverified.
+
+- Add a separate provenance-backed JPEG XL fixture gate before describing
+  JPEG XL decoding as generally available.
 
 ---
 

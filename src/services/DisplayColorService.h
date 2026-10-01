@@ -73,6 +73,7 @@ namespace hyperbrowse::services
         DisplayColorService(const DisplayColorService&) = delete;
         DisplayColorService& operator=(const DisplayColorService&) = delete;
 
+        void Shutdown();
         void BindTargetWindow(HWND window);
         void SetEnabled(bool enabled);
         bool IsEnabled() const;

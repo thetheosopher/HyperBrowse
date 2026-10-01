@@ -32,11 +32,30 @@ The core library is organized by responsibility:
 - `src/util/`: logging, diagnostics, path/string helpers, settings, sizing, and common utilities.
 
 The WIC path covers JPEG, PNG, GIF, TIFF, WebP, HEIC, and JPEG XL. HEIC and
-JPEG XL decoding require a compatible installed Windows codec; codec
-availability is not detected in advance. LibRaw handles the supported RAW
+JPEG XL decoding require a compatible installed Windows codec. On-demand
+worker discovery reports registration/creation separately from file decode.
+LibRaw handles the supported RAW
 families, and nvJPEG is an optional accelerated JPEG path with WIC fallback.
 Animated playback and multipage navigation are outside the current decode
 contract; multi-frame WIC files are presented through the available frame.
+
+`WicCodecReadinessService` retains two format records behind a mutex, with a
+lazy one-worker/one-pending-task executor and injectable discovery provider.
+Native discovery reuses WIC COM/factory helpers, refreshes WIC's component
+enumerator, limits enumeration to 256 decoder records and extension text to
+4096 characters, and only creates matching decoders. Cached names/errors are
+bounded to 128/512 characters. Ready requires a created decoder; errors never
+change format allowlists or suppress normal decode. `.heif` remains excluded.
+
+Tools > Diagnostics > Snapshot explicitly refreshes discovery. The diagnostics
+window reads only cached state on a short-lived timer, replaces codec rows
+without changing its other captured metrics, and closes without joining the
+worker. No worker captures a HWND or UI object. Shutdown rejects late results
+and joins outside the state lock. Thumbnail/full-image WIC owners record
+best-effort outcomes independently; successful evidence requires matching
+decoder/container metadata, not a renamed PNG. Refresh preserves concurrent
+observations, Reset Diagnostics clears them, and redacted export omits external
+decoder names/error text. No image paths or source/profile changes are added.
 
 ## Threading boundary
 
@@ -170,6 +189,37 @@ controller:
   batch-rename preview dialogs. `MainWindow` supplies the owner HWND, theme,
   text-size, and operation-specific inputs, then consumes only the returned
   values.
+- `services/SavedSearchStore.*` owns bounded versioned UTF-8 TSV parsing and
+  atomic persistence. Worker-only mutations reload under a zero-share lock
+  handle, modify the latest list, publish a flushed same-directory temporary
+  file, and return the committed snapshot before releasing the lock. There is
+  no stale whole-file save API. Explicit directories override the optional
+  `HYPERBROWSE_SAVED_SEARCH_DIRECTORY` test namespace; the normal root is
+  LocalAppData/HyperBrowse. Corrupt input and failed publication leave prior
+  storage intact.
+- `ui/SavedSearchController.*` owns a single-worker bounded executor, shared
+  result mailbox, list/active identity, and filter-edit generations. Workers
+  capture values and mailbox ownership, not MainWindow. Load never applies a
+  filter; late mutations cannot reactivate identity after a manual edit. The
+  notification HWND is detached before joining the worker, and MainWindow
+  destroys the controller in `WM_DESTROY`. MainWindow retains menus, dialogs,
+  filter-edit synchronization, visible errors, and browser focus. Results are
+  consumed only outside the menu loop so visible entries remain stable. Reload
+  is explicit: activation refresh must not compete with modal confirmation.
+- `ui/CommandBarController.*` reserves a fixed scaled inline Save slot next to
+  the filter when space permits. It reuses the File save command and controller
+  readiness/busy/filter enablement. Hidden items have empty bounds and are
+  excluded by both painter paths and accessibility targets.
+- `util/Log.*` owns the actual log-file path and its purely lexical parent
+  resolution. ViewCommandController passes the directory to an injected
+  callback; MainWindow retains shell launch and error presentation. Tests
+  capture that callback rather than opening Explorer or changing logging.
+- `services/DisplayColorService.*` can borrow the viewer's background executor.
+  Viewer destruction explicitly shuts down the service before releasing that
+  executor: reentrant window-destruction messages must not enqueue new profile
+  or conversion work through the retired pointer. Shutdown detaches the HWND,
+  invalidates outstanding requests, and makes late image requests return their
+  canonical source without posting work.
 - `ui/MainWindowDialogState.h` owns the private state records and settings
   enums shared by MainWindow's remaining custom dialogs. The header is an
   implementation detail of the dialog procedures; MainWindow retains dialog

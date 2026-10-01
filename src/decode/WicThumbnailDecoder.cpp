@@ -3,6 +3,8 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <filesystem>
+
 #include "decode/WicColorTransform.h"
 #include "decode/WicDecodeHelpers.h"
 #include "util/Diagnostics.h"
@@ -15,6 +17,8 @@ namespace hyperbrowse::decode
         using Microsoft::WRL::ComPtr;
         namespace wic = hyperbrowse::decode::wic_support;
 
+        const auto fileType = std::filesystem::path(key.filePath).extension().wstring();
+        wic::OptionalCodecDecodeObserver observation(fileType, services::WicCodecDecodeKind::Thumbnail);
         std::wstring localErrorMessage;
         std::wstring* decodeError = errorMessage ? errorMessage : &localErrorMessage;
         wic::ComInitializationScope comInitialization(
@@ -210,12 +214,14 @@ namespace hyperbrowse::decode
             hyperbrowse::util::RecordTiming(L"thumbnail.scale", scaleStopwatch.ElapsedMilliseconds());
         }
 
-        return std::make_shared<cache::CachedThumbnail>(bitmap,
+        auto image = std::make_shared<cache::CachedThumbnail>(bitmap,
                                                         static_cast<int>(scaledWidth),
                                                         static_cast<int>(scaledHeight),
                                                         bufferSize,
                                                         static_cast<int>(orientedWidth),
                                                         static_cast<int>(orientedHeight),
                                                         color::ReadSourceColorInfo(frame.Get()));
+        observation.Complete(decoder.Get(), true);
+        return image;
     }
 }

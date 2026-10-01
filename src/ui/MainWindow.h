@@ -100,6 +100,7 @@ namespace hyperbrowse::ui
     class ExternalDropTarget;
     class FolderEnumerationCoordinator;
     class FolderWatchChangeCoordinator;
+    class SavedSearchController;
     class ToolbarIconLibrary;
 
     class MainWindow
@@ -309,6 +310,10 @@ namespace hyperbrowse::ui
         void SaveWindowState() const;
         void SaveFilingResumeStateToRegistry() const;
         bool HandleCommand(UINT commandId);
+        bool HandleSavedSearchCommand(UINT commandId);
+        void ConsumeSavedSearchResult();
+        void RefreshSavedSearchMenu();
+        void ApplySavedSearchFilter(std::wstring_view expression);
         void OpenFolder();
         void LoadFolderAsync(std::wstring folderPath, bool historyNavigation = false);
         void RefreshBrowserPane();
@@ -673,6 +678,7 @@ namespace hyperbrowse::ui
         HMENU toolsMenu_{};
         HMENU helpMenu_{};
         HMENU openRecentFolderMenu_{};
+        HMENU savedSearchMenu_{};
         HMENU copySelectionToMenu_{};
         HMENU moveSelectionToMenu_{};
         HACCEL accelerators_{};
@@ -746,6 +752,8 @@ namespace hyperbrowse::ui
         ViewCommandController viewCommandController_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
+        std::unique_ptr<SavedSearchController> savedSearchController_;
+        bool applyingSavedSearchFilter_{};
         std::unique_ptr<DiagnosticsWindow> diagnosticsWindow_;
         std::unique_ptr<viewer::ViewerWindow> viewerWindow_;
         std::vector<std::unique_ptr<viewer::ViewerWindow>> additionalViewerWindows_;

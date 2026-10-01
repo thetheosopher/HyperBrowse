@@ -235,18 +235,29 @@ namespace hyperbrowse::services
 
     DisplayColorService::~DisplayColorService()
     {
+        Shutdown();
+    }
+
+    void DisplayColorService::Shutdown()
+    {
         {
             std::scoped_lock lock(state_->mutex);
             state_->shutdown = true;
             state_->target = nullptr;
             ++state_->sessionGeneration;
+            ++state_->profileRequest;
+            state_->profileLookupPending = false;
+            state_->entries.clear();
+            state_->convertedBytes = 0;
         }
         ownedExecutor_.reset();
+        executor_ = nullptr;
     }
 
     void DisplayColorService::BindTargetWindow(HWND window)
     {
         std::scoped_lock lock(state_->mutex);
+        if (state_->shutdown) return;
         state_->target = window;
         ++state_->sessionGeneration;
         ++state_->profileRequest;

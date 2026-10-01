@@ -62,6 +62,7 @@ namespace hyperbrowse::ui
             bool thumbnailSizeEnabled{};
             bool compareEnabled{};
             bool selectionActionsEnabled{};
+            bool saveFilterEnabled{};
         };
 
         enum class KeyboardAction

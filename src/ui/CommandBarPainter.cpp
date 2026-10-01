@@ -228,6 +228,7 @@ namespace hyperbrowse::ui
         for (int index = 0; index < static_cast<int>(toolbarItems.size()); ++index)
         {
             const auto& item = toolbarItems[static_cast<std::size_t>(index)];
+            if (IsRectEmpty(&item.rect)) continue;
             if (item.kind == CommandBarController::ToolbarItemKind::Separator)
             {
                 if (borderBrush)
@@ -496,6 +497,7 @@ namespace hyperbrowse::ui
         for (int index = 0; index < static_cast<int>(toolbarItems.size()); ++index)
         {
             const auto& item = toolbarItems[static_cast<std::size_t>(index)];
+            if (IsRectEmpty(&item.rect)) continue;
 
             if (item.kind == CommandBarController::ToolbarItemKind::Separator)
             {

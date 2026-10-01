@@ -62,6 +62,13 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_FILE_QUICK_SEND_MOVE = 1095;
     inline constexpr UINT ID_FILE_QUICK_SEND_COPY = 1096;
     inline constexpr UINT ID_FILE_RESUME_FILING = 1300;
+    inline constexpr UINT ID_FILE_SAVE_CURRENT_FILTER = 1301;
+    inline constexpr UINT ID_FILE_UPDATE_SAVED_SEARCH = 1302;
+    inline constexpr UINT ID_FILE_RENAME_SAVED_SEARCH = 1303;
+    inline constexpr UINT ID_FILE_DELETE_SAVED_SEARCH = 1304;
+    inline constexpr UINT ID_FILE_RELOAD_SAVED_SEARCHES = 1305;
+    inline constexpr UINT ID_FILE_OPEN_SAVED_SEARCH_BASE = 1400;
+    inline constexpr UINT ID_FILE_OPEN_SAVED_SEARCH_LAST = ID_FILE_OPEN_SAVED_SEARCH_BASE + 63;
     inline constexpr UINT ID_FILE_ASSOCIATIONS = 1097;
     inline constexpr UINT ID_EDIT_CUT = 1098;
     inline constexpr UINT ID_EDIT_CLOSE_MAIN_WINDOW_ON_ESCAPE = 1099;
@@ -163,6 +170,7 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_HELP_USER_GUIDE = 9009;
     inline constexpr UINT ID_HELP_KEYBOARD_SHORTCUTS = 9010;
     inline constexpr UINT ID_HELP_DIAGNOSTICS_EXPORT = 9011;
+    inline constexpr UINT ID_HELP_OPEN_LOG_FOLDER = 9012;
     inline constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
     inline constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
 }

@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 
+#include "services/WicCodecReadinessService.h"
 #include "util/Diagnostics.h"
 #include "util/UiTextSize.h"
 
@@ -13,7 +14,9 @@ namespace hyperbrowse::ui
     class DiagnosticsWindow
     {
     public:
-        explicit DiagnosticsWindow(HINSTANCE instance);
+        using CodecSnapshotProvider = std::function<services::WicCodecReadinessSnapshot()>;
+
+        explicit DiagnosticsWindow(HINSTANCE instance, CodecSnapshotProvider codecSnapshotProvider = {});
         ~DiagnosticsWindow();
 
         void Show(HWND owner,
@@ -83,5 +86,6 @@ namespace hyperbrowse::ui
         std::wstring rawPath_;
         std::wstring folderScope_;
         util::DiagnosticsSnapshot snapshot_;
+        CodecSnapshotProvider codecSnapshotProvider_;
     };
 }

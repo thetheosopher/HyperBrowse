@@ -85,6 +85,32 @@ conversion, and low-friction culling.
 - Two-to-four-image N-up compare with synchronized zoom and pan, ratings, tags,
   structured in-folder filtering, date-taken sorting, and ascending/descending
   sort direction
+- Named saved searches through **File > Save Current Filter** and **File > Open
+  Saved Search**, with asynchronous load/save and update/rename/delete/reload
+  commands. Expressions evaluate the current folder or recursive scope through
+  the existing filename/rating/tag filter; `type:raw` uses the supported RAW
+  classifier and `type:extension` matches an exact recognized extension.
+  Predicates are conjunctive and case-insensitive; unknown/empty type tokens
+  remain literal filename terms. Manual edits clear active search identity;
+  deleting a saved entry does not clear the displayed filter.
+- Inline Save Current Filter icon beside the filter edit, sharing the File
+  command and its ready/not-busy/nonempty enablement. Fixed scaled button bounds,
+  tooltip, push-button accessibility, and default action use the existing
+  command bar. Narrow layouts hide the optional icon to preserve filter space;
+  the File command remains available.
+- **Tools > Open Log Folder** resolves the actual logger destination, normally
+  `%TEMP%\HyperBrowse-debug.log`, through the logging owner and opens its parent
+  directory through the existing shell helper. Relative fallback logs use the
+  working directory. Errors are visible, no browser navigation or new shortcut
+  is introduced, and directory resolution does not read or create files.
+- Saved-search persistence under `%LOCALAPPDATA%\HyperBrowse\saved-searches.tsv`:
+  versioned strict UTF-8, escaped fields, insertion order, 64 entries, trimmed
+  single-line names up to 128 UTF-16 code units, expressions up to 260, and a
+  256 KiB input bound. Case-insensitive duplicate names and blank inputs are
+  rejected. Exclusive lock/reload/mutate/atomic publication preserves other
+  windows' entries; failures retain the prior file/list and appear in the status
+  bar. Malformed storage is not silently replaced. Explicit reload refreshes
+  another window's changes; no new indexer or metadata extraction is added.
 - Copy, move, rename, batch rename, delete, permanent delete, duplicate,
   clipboard transfer, shell drag/drop, Quick Actions, paired RAW/JPEG
   operations, taskbar progress, and supported file-operation undo/redo
@@ -124,8 +150,17 @@ conversion, and low-friction culling.
 
 WebP, HEIC, and JPEG XL are routed through WIC for static decode and
 thumbnails. HEIC and JPEG XL decoding depends on a compatible installed Windows
-codec; codec availability is not detected in advance. GIF and TIFF browsing
-presents the available first frame or page. Animated playback remains deferred.
+codec. Tools > Diagnostics > Snapshot refreshes bounded, cached WIC discovery
+on a worker; opening the window never waits for discovery. Recognition,
+decoder creation/missing/discovery failure, and observed thumbnail/full-image
+success/failure are separate. Discovery never gates decoding or installs a
+codec. Results update the open window; another Snapshot refreshes installation
+changes. Successful evidence requires completed pixels and matching decoder
+metadata, not an optional filename extension alone. Reset clears decode
+observations but retains discovery; redacted exports omit external decoder
+names/errors and image paths. `.heif` remains outside the allowlist. Actual
+HEIC/JPEG XL fixture compatibility remains a separate installed-codec gate.
+GIF and TIFF browsing presents the available first frame or page. Animated playback remains deferred.
 See [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) for proposed work and explicit
 product boundaries.
 

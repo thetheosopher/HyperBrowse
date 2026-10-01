@@ -16,6 +16,7 @@ namespace
 {
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
+    constexpr UINT_PTR kCodecReadinessTimerId = 1;
 
     constexpr int kMargin = 18;
     constexpr int kSectionGap = 12;
@@ -162,9 +163,14 @@ namespace
 
 namespace hyperbrowse::ui
 {
-    DiagnosticsWindow::DiagnosticsWindow(HINSTANCE instance)
+    DiagnosticsWindow::DiagnosticsWindow(HINSTANCE instance, CodecSnapshotProvider codecSnapshotProvider)
         : instance_(instance)
+        , codecSnapshotProvider_(std::move(codecSnapshotProvider))
     {
+        if (!codecSnapshotProvider_)
+        {
+            codecSnapshotProvider_ = []() { return services::GetWicCodecReadinessService().Snapshot(); };
+        }
     }
 
     DiagnosticsWindow::~DiagnosticsWindow()
@@ -199,6 +205,16 @@ namespace hyperbrowse::ui
         }
 
         ApplyTheme();
+        const auto readiness = codecSnapshotProvider_();
+        util::UpdateWicCodecReadinessDiagnostics(snapshot_, readiness);
+        if (readiness.refreshing)
+        {
+            SetTimer(hwnd_, kCodecReadinessTimerId, 100, nullptr);
+        }
+        else
+        {
+            KillTimer(hwnd_, kCodecReadinessTimerId);
+        }
         RefreshView();
         ShowWindow(hwnd_, SW_SHOWNORMAL);
         SetWindowPos(hwnd_, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -708,6 +724,21 @@ namespace hyperbrowse::ui
         case WM_SIZE:
             LayoutChildren();
             return 0;
+        case WM_TIMER:
+            if (wParam == kCodecReadinessTimerId)
+            {
+                const auto readiness = codecSnapshotProvider_();
+                if (!readiness.refreshing)
+                {
+                    KillTimer(hwnd_, kCodecReadinessTimerId);
+                    util::UpdateWicCodecReadinessDiagnostics(snapshot_, readiness);
+                    PopulateSummary();
+                    PopulateCounterList();
+                    PopulateDerivedList();
+                }
+                return 0;
+            }
+            break;
         case WM_DISPLAYCHANGE:
             RecoverDisplaySurface();
             return 0;
@@ -777,6 +808,7 @@ namespace hyperbrowse::ui
             DestroyWindow(hwnd_);
             return 0;
         case WM_DESTROY:
+            KillTimer(hwnd_, kCodecReadinessTimerId);
             hwnd_ = nullptr;
             return 0;
         default:

@@ -147,10 +147,12 @@ add_library(HyperBrowseCore STATIC
     src/services/FolderTreeEnumerationService.cpp
     src/services/FolderWatchService.cpp
     src/services/ImageMetadataService.cpp
+    src/services/SavedSearchStore.cpp
     src/services/ImageCommandService.cpp
     src/services/JpegTransformService.cpp
     src/services/ThumbnailScheduler.cpp
     src/services/UserMetadataStore.cpp
+    src/services/WicCodecReadinessService.cpp
     src/viewer/CompareSessionPolicy.cpp
     src/render/D2DRenderer.cpp
     src/ui/DiagnosticsWindow.cpp
@@ -212,6 +214,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/ToolbarIconLibrary.cpp
     src/ui/ViewCommandController.cpp
     src/ui/WindowAsyncMessageRouter.cpp
+    src/ui/SavedSearchController.cpp
     src/ui/WindowBoundsPersistence.cpp
     src/ui/WindowTimerRouter.cpp
     src/ui/ViewerSettingsPersistence.cpp
@@ -280,6 +283,7 @@ if(HYPERBROWSE_ENABLE_LIBRAW)
         src/decode/RawHelperProtocol.cpp
         src/decode/WicColorTransform.cpp
         src/decode/WicThumbnailDecoder.cpp
+        src/services/WicCodecReadinessService.cpp
         src/util/Diagnostics.cpp
         "${HYPERBROWSE_VERSION_RESOURCE}"
     )

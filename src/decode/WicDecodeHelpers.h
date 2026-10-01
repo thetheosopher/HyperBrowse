@@ -5,12 +5,15 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <string>
 #include <string_view>
 #include <sstream>
+
+#include "services/WicCodecReadinessService.h"
 
 namespace hyperbrowse::decode::wic_support
 {
@@ -107,6 +110,135 @@ namespace hyperbrowse::decode::wic_support
 
         return true;
     }
+
+    inline bool DecoderListsExtension(std::wstring_view extensions,
+                                      std::wstring_view extension) noexcept
+    {
+        if (extensions.size() > 4096 || extension.size() > 64)
+        {
+            return false;
+        }
+
+        const auto normalize = [](std::wstring_view value)
+        {
+            const auto first = value.find_first_not_of(L" \t\r\n");
+            if (first == std::wstring_view::npos)
+            {
+                return std::wstring_view{};
+            }
+            value = value.substr(first, value.find_last_not_of(L" \t\r\n") - first + 1);
+            if (value.front() == L'.')
+            {
+                value.remove_prefix(1);
+            }
+            return value;
+        };
+
+        extension = normalize(extension);
+        if (extension.empty())
+        {
+            return false;
+        }
+
+        while (!extensions.empty())
+        {
+            const auto separator = extensions.find_first_of(L",;");
+            const auto candidate = normalize(extensions.substr(0, separator));
+            if (candidate.size() == extension.size()
+                && CompareStringOrdinal(candidate.data(), static_cast<int>(candidate.size()),
+                                        extension.data(), static_cast<int>(extension.size()), TRUE) == CSTR_EQUAL)
+            {
+                return true;
+            }
+            if (separator == std::wstring_view::npos)
+            {
+                break;
+            }
+            extensions.remove_prefix(separator + 1);
+        }
+        return false;
+    }
+
+    inline bool DecoderMatchesExtension(IWICBitmapDecoder* decoder, std::wstring_view extension)
+    {
+        Microsoft::WRL::ComPtr<IWICBitmapDecoderInfo> information;
+        GUID container{};
+        GUID registeredContainer{};
+        if (!decoder || FAILED(decoder->GetDecoderInfo(&information)) || !information
+            || FAILED(decoder->GetContainerFormat(&container))
+            || FAILED(information->GetContainerFormat(&registeredContainer)) || container != registeredContainer)
+        {
+            return false;
+        }
+        std::array<wchar_t, 4096> extensions{};
+        UINT actual = 0;
+        if (FAILED(information->GetFileExtensions(static_cast<UINT>(extensions.size()), extensions.data(), &actual))
+            || actual == 0 || actual > extensions.size() || extensions[actual - 1] != L'\0')
+        {
+            return false;
+        }
+        const std::wstring_view listed(extensions.data(), actual - 1);
+        return DecoderListsExtension(listed, extension)
+            || (DecoderListsExtension(L".heic", extension) && DecoderListsExtension(listed, L"heif"));
+    }
+
+    class OptionalCodecDecodeObserver
+    {
+    public:
+        OptionalCodecDecodeObserver(std::wstring_view fileType, services::WicCodecDecodeKind kind)
+            : fileType_(fileType)
+            , kind_(kind)
+            , optional_(DecoderListsExtension(L".heic,.jxl", fileType))
+        {
+        }
+
+        ~OptionalCodecDecodeObserver()
+        {
+            if (optional_ && !completed_)
+            {
+                Record(false);
+            }
+        }
+
+        OptionalCodecDecodeObserver(const OptionalCodecDecodeObserver&) = delete;
+        OptionalCodecDecodeObserver& operator=(const OptionalCodecDecodeObserver&) = delete;
+
+        void Complete(IWICBitmapDecoder* decoder, bool succeeded) noexcept
+        {
+            if (!optional_ || completed_)
+            {
+                return;
+            }
+            completed_ = true;
+            try
+            {
+                if (!succeeded || DecoderMatchesExtension(decoder, fileType_))
+                {
+                    Record(succeeded);
+                }
+            }
+            catch (...)
+            {
+            }
+        }
+
+    private:
+        void Record(bool succeeded) noexcept
+        {
+            try
+            {
+                services::GetWicCodecReadinessService().RecordDecode(fileType_, kind_, succeeded);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        std::wstring_view fileType_;
+        services::WicCodecDecodeKind kind_;
+        bool optional_{};
+        bool completed_{};
+    };
 
     inline WICBitmapTransformOptions OrientationToTransform(std::uint16_t orientation)
     {
