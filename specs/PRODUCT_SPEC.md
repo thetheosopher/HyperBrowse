@@ -1,6 +1,6 @@
 # HyperBrowse Product Specification (Authoritative)
 
-**Current release:** 2.4.0
+**Current release:** 2.5.0
 **Status:** Current product contract
 **Authority:** Source code, smoke tests, and this document define shipped
 behavior. Proposed work belongs in [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) and

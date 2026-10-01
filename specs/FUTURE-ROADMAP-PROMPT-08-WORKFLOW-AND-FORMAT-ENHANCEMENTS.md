@@ -7,28 +7,29 @@ Created: 2026-09-30
 Execute the next practical HyperBrowse enhancements in small, verified slices.
 Prioritize reusable culling workflows, honest format support, and viewer-only
 animation while preserving the native browser/viewer architecture and speed.
-This is a persistent execution brief, not evidence that any listed feature has
-shipped. The active roadmap and product spec remain authoritative.
+This is a persistent execution brief, not evidence that any remaining feature
+has shipped. The ledger records completed work and unresolved acceptance
+boundaries; the active roadmap and product spec remain authoritative.
+
+Shipped in 2.5.0: B5 saved searches, E2/E5 codec readiness, and C5 Open Log
+Folder. Actual HEIC/JPEG XL file decoding remains unverified.
 
 Primary sequence:
 
-1. B5 saved searches and smart folders.
-2. E2/E5 installed HEIC and JPEG XL codec readiness.
-3. B7 animated GIF/WebP viewer playback.
+1. B7 animated GIF/WebP viewer playback.
 
 Follow-on queue:
 
-4. B6 viewer histogram and clipping overlay.
-5. E1 optional AVIF support, subject to the dependency gate below.
+2. B6 viewer histogram and clipping overlay.
+3. E1 optional AVIF support, subject to the dependency gate below.
 
-Take C5 Open Log Folder as a small adjacent improvement after B5 when its
-existing log-path ownership and shell-launch contract are clear. Do not turn
-that command into a log viewer or start new benchmarking infrastructure.
 
 ## Hard Boundaries
 
 - GitHub Actions remain manually disabled at the user's direction. Do not
-  enable, dispatch, push, or open a PR to trigger cloud execution.
+  enable or dispatch Actions, or push/open a PR for the purpose of triggering
+  cloud execution. Explicitly authorized release pushes are allowed while
+  workflows remain disabled.
 - Preserve all existing worktree changes, especially B4's validated profile
   lookup and smoke-test isolation fixes. Do not reset, stash, revert, commit,
   create branches, or package unless explicitly requested.
@@ -231,7 +232,8 @@ do not open Explorer during unattended tests.
   roadmap as behavior ships. Do not bulk-edit unrelated roadmap statuses.
 - Manual DPI/theme/accessibility/installed-codec/hardware gates remain separate
   from automated checks. Record unsupported or unavailable gates, not passes.
-- Do not trigger GitHub Actions, commit, push, or package to close a gate.
+- Do not trigger GitHub Actions. Commit, push, or package only with explicit
+  user authorization; local release packaging does not replace manual gates.
 
 ## Completion Criteria
 
@@ -239,7 +241,8 @@ Each queue item is complete only when its product behavior, persistence and
 lifetime contract, focused coverage, local build/test gates, and documentation
 are verified. Unavailable external/manual gates are recorded plainly. Never
 mark the entire queue complete because B5 passed, nor claim animation, AVIF,
-codec availability, or physical color accuracy from a partial implementation.
+successful optional-codec decoding, or physical color accuracy from a partial
+implementation.
 
 ## Persistent Execution Ledger
 
@@ -250,17 +253,18 @@ Update this section as work proceeds; keep evidence factual and brief.
 | Baseline preservation | Recorded | B4 profile/isolation fixes are present in HEAD (`6e82fff`); preserve them. Prior exact Debug/Release presets passed 27/27. No commit, cloud run, or packaging operation was performed for Prompt 08. |
 | B5 filter contract | Focused Gate Passed | Existing BrowserPane owner supports RAW/exact-extension conjunction and rating/tag/name composition, including details mode. |
 | B5 persistence | Focused Gate Passed | SavedSearchStore: strict bounded UTF-8 TSV, restart, Unicode/escaping, duplicates, reload-under-lock mutations, committed snapshots, atomic replacement, and failure preservation. |
-| B5 UI/integration | Software Surface Validated | File menu and inline Save share the existing dialog/filter/worker path. Open/save/update/rename/delete/reload, native accessible action, empty/busy state, icon pixels, and restart smoke passed in Debug/Release (1.71 s / 1.65 s in the final full runs). No activation refresh; it competed with modal save enqueueing. |
-| B5 broader software gates | Passed | Debug/Release app, tests, and benchmark targets built; exact final B5/C5 presets passed 28/28 (55.04 s / 50.63 s). Tests on, fuzz off, CUDA bundling off. All six exact binaries verified newer than current changed/untracked implementation and test sources, including preserved user edits. |
+| B5 UI/integration | Shipped in 2.5.0 | File menu and inline Save share the existing dialog/filter/worker path. Open/save/update/rename/delete/reload, native accessible action, empty/busy state, icon pixels, and restart smoke passed in Debug/Release (1.71 s / 1.65 s in the final full runs). No activation refresh; it competed with modal save enqueueing. |
+| B5 broader software gates | Shipped in 2.5.0 | Historical B5/C5 checkpoint passed 28/28 before codec-readiness tests were added (55.04 s / 50.63 s; six binaries fresh). Current full Debug and Release CTest runs pass 30/30; the Release package is recorded below. B5 checkpoint: tests on, fuzz off, CUDA bundling off. |
 | Validation lifecycle repair | Regression Covered | Native exception-teardown stack exposed a display-profile refresh posting through the viewer's retired borrowed executor. DisplayColorService now shuts down before executor release and rejects late requests. Color regression passed in both configurations; temporary probes and timeout overrides were removed, and original viewer pixel assertions are unchanged. |
-| B5 inline Save | Completed | Fixed scaled Lucide icon with ISC notice, shared File command/state, narrow-width fallback, both painter guards, tooltip/MSAA action, and 96/144/192-DPI-metric/all-text-size layout checks. Native fixture restores maximized startup state before wide geometry. Physical DPI/theme review remains separate. |
-| E2/E5 readiness | Software Validated | Bounded one-worker WIC discovery, cached state, explicit Snapshot refresh, native async diagnostics, independent thumbnail/full-image outcomes, concurrent observation preservation, shutdown/stale rejection, and redacted external text. Recognized extensions unchanged; `.heif` excluded. Final full Debug/Release passed 30/30 (56.05 s / 52.66 s). All six exact app/test/benchmark binaries verified fresh; C++ diagnostics and `git diff --check` clean. |
+| B5 inline Save | Shipped in 2.5.0 | Fixed scaled Lucide icon with ISC notice, shared File command/state, narrow-width fallback, both painter guards, tooltip/MSAA action, and 96/144/192-DPI-metric/all-text-size layout checks. Native fixture restores maximized startup state before wide geometry. Physical DPI/theme review remains separate. |
+| E2/E5 readiness | Shipped in 2.5.0 | Bounded one-worker WIC discovery, cached state, explicit Snapshot refresh, native async diagnostics, independent thumbnail/full-image outcomes, concurrent observation preservation, shutdown/stale rejection, and redacted external text. Recognized extensions unchanged; `.heif` excluded. Final full Debug/Release passed 30/30 (56.05 s / 52.66 s). All six exact app/test/benchmark binaries verified fresh; C++ diagnostics and `git diff --check` clean. |
 | E2/E5 installed inventory | Observed | Worker inventory created Microsoft HEIF Decoder and Microsoft JPEG XL Decoder on 2026-09-30. This proves discovery/creation only, not file decode. No optional-codec fixture was present under `tests`; actual HEIC/JXL fixture compatibility remains unverified. Renamed PNGs and injected providers are not optional-codec evidence. |
 | B7 animation | Next | Begin at WIC frame/metadata ownership; lock composition/timing/cache rules with bounded original fixtures. |
 | B6 histogram | Queued | Inspect existing details histogram before adding another producer. |
 | E1 AVIF | Dependency Gated | Review optional decoder/dependency plan before downloading or packaging. |
-| C5 Open Log Folder | Completed | Tools command uses the logger's real parent and existing shell/error helper. View-command callback tests capture the destination without Explorer, covering Unicode/relative/UNC paths and no new shortcut. Logging destination/behavior is unchanged. |
-| Physical/release verification | Unverified | Preserve B2/B4/C8 manual sign-off; do not substitute mocks or this execution brief. |
+| C5 Open Log Folder | Shipped in 2.5.0 | Tools command uses the logger's real parent and existing shell/error helper. View-command callback tests capture the destination without Explorer, covering Unicode/relative/UNC paths and no new shortcut. Logging destination/behavior is unchanged. |
+| 2.5.0 release package | Built and verified | Dedicated Release package preset passed 30/30 CTest; portable ZIP and installer versions/hashes match `SHA256SUMS.txt`. |
+| Physical/manual verification | Pending | Preserve B2/B4/C8 manual sign-off; do not substitute mocks or this execution brief. |
 
 Continuation note: the focused `--runtime` selector does not run command-bar
 policy scenarios; use the new `--command-bar` selector. Rendered checks were

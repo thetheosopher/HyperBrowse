@@ -1,6 +1,6 @@
 # HyperBrowse Future Roadmap
 
-Last reviewed: 2026-09-29
+Last reviewed: 2026-09-30
 
 This is the single forward-looking product backlog for HyperBrowse. It is
 intentionally separate from the authoritative shipped contract in
@@ -8,8 +8,8 @@ intentionally separate from the authoritative shipped contract in
 merely because it is listed here.
 
 This document tracks the **forward-looking** HyperBrowse backlog. Completed
-items have been archived (see [Appendix A](#appendix-a--recently-completed-archive))
-so the active plan stays focused.
+implementation work is summarized in [Appendix A](#appendix-a--recently-completed-archive);
+remaining entries below are active feature work or explicit acceptance gates.
 
 The plan is organized around a single product north star:
 
@@ -46,10 +46,11 @@ The active plan assumes the following are already shipped and stable:
   scheduling, and batch convert.
 - WebP decoding and thumbnails through WIC, with stale thumbnail completion
   rejection and asynchronous folder-tree child-presence probing.
-- HEIC (`.heic`) and JPEG XL (`.jxl`) are recognized by the browser and routed
-  through WIC. Actual decode support depends on an installed WIC codec; codec
-  availability detection is not implemented, and allowlist tests do not prove
-  that a codec is available on a given machine.
+- HEIC (`.heic`) and JPEG XL (`.jxl`) are recognized and routed through WIC.
+  The 2.5.0 Tools > Diagnostics > Snapshot surface reports bounded worker-owned
+  decoder discovery separately from observed thumbnail/full-image results.
+  Decoder creation does not prove real-file compatibility; fixture-backed
+  HEIC/JPEG XL decode remains unverified, and `.heif` stays outside the allowlist.
 - Runtime-adaptive thumbnail cache (128 MB–1 GB) and metadata cache (2,048–
   65,536 entries) sized from `GlobalMemoryStatusEx`.
 - Optional `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache` persistent cache.
@@ -63,6 +64,13 @@ The active plan assumes the following are already shipped and stable:
   styles.
 - Root-aware long-path breadcrumbs and an optional Performance HUD for
   thumbnail, queue, cache, and memory-pressure state.
+- Default-on SDR color management for browser thumbnails, each viewer window,
+  and every compare tile, using independent monitor profiles and preserving
+  canonical shared-cache pixels.
+- Named saved searches with the inline filter Save action, worker-owned bounded
+  UTF-8 persistence, and explicit cross-window reload/update operations.
+- Tools > Open Log Folder resolves the active logger path without changing the
+  browser folder or logging destination.
 - Diagnostics window, structured log, smoke + integration tests, GitHub
   Actions CI workflow (currently disabled; no cloud runs are active), portable
   zip + Inno Setup 6 installer.
@@ -164,7 +172,7 @@ and browser focus is restored if the delete fails.
 
 ### `B2` n-Up Compare & Side-by-Side Zoom Sync (P0)
 
-**Implementation status:** The compare workflow is implemented locally; its
+**Implementation status:** The compare workflow shipped in 2.5.0; its
 implementation summary is in Appendix B. This entry now tracks acceptance
 verification only. See the
 [B2 long-horizon prompt](FUTURE-ROADMAP-PROMPT-05-N-UP-COMPARE-AND-ZOOM-SYNC.md)
@@ -192,7 +200,7 @@ in-app drag source beyond the new row drop targets.
 
 ### `B4` Color-Managed Display Path (P1)
 
-**Implementation status:** Implemented; local automated validation gates passed
+**Implementation status:** Shipped in 2.5.0; local automated validation gates passed
 on 2026-09-30. The focused local color smoke covers generated ICC pixel
 conversion, alpha/orientation, browser/viewer/all compare counts, per-window
 profiles, settings/menu accessibility, fallbacks, stale results, bounded caches,
@@ -219,18 +227,19 @@ remain disabled; no workflow, packaging, commit, or push was performed.
 
 ### `B5` Saved Searches / Smart Folders (P1)
 
-**Implementation status:** Software surface implemented on 2026-09-30.
+**Implementation status:** Software surface shipped in 2.5.0 on 2026-09-30.
 RAW/exact-extension filtering, bounded asynchronous UTF-8 storage, and File
 open/save/update/rename/delete/reload commands have Debug/Release smoke coverage,
-including native dialogs and restart. Both complete 28-test presets passed
-(55.04 s / 50.63 s), with fresh application/test binaries. The inline Save icon
-shares the File command, exposes accessible state/action, and yields filter
-space in narrow layouts. Other enhancement phases
-have not been started; this is not a released-version claim.
+including native dialogs and restart. The original B5 checkpoint passed 28/28
+Debug/Release tests before codec-readiness tests were registered; the current
+complete Debug and Release CTest runs pass 30/30 (see Prompt 08's ledger). The
+inline Save icon shares the File command, exposes accessible state/action, and
+yields filter space in narrow layouts. Viewer animation remains the next
+candidate in this workflow sequence.
 
 Execution sequence: [workflow and format enhancements prompt](FUTURE-ROADMAP-PROMPT-08-WORKFLOW-AND-FORMAT-ENHANCEMENTS.md).
-Start with B5, then E2/E5 codec readiness and B7 animation. The prompt records
-the follow-on B6/E1 queue, the small C5 log-folder action, and validation gates.
+B5, E2/E5 codec readiness, and C5 Open Log Folder shipped in 2.5.0. B7
+animation is the next candidate; B6 and E1 remain in the follow-on queue.
 
 - Persist named filter expressions (e.g. `rating:>=4 tag:keeper type:raw`)
   in `%LOCALAPPDATA%\HyperBrowse\saved-searches.tsv`.
@@ -272,7 +281,7 @@ The brand is "fast". The product should look the part.
 ### `C5` Tools Menu (P1)
 
 The core Tools menu and Settings organization are shipped and summarized in
-Appendix A. **Open Log Folder** is implemented locally on 2026-09-30 using the
+Appendix A. **Open Log Folder** shipped in 2.5.0 on 2026-09-30 using the
 actual logger directory and existing shell-launch/error path, with injected
 non-launching routing/path coverage. **Benchmark** remains deferred;
 the separate Cache Inspector window was superseded by D4's existing surfaces.
@@ -390,7 +399,7 @@ Lower priority than A–D but where competitors are starting to differentiate.
 
 ### `E2` HEIC Support via Microsoft HEIF Extensions (P2)
 
-**Implementation status:** Readiness software implemented locally. `.heic`
+**Implementation status:** Readiness software shipped in 2.5.0. `.heic`
 remains recognized and routed through WIC. Tools > Diagnostics > Snapshot
 explicitly refreshes bounded worker-owned decoder discovery and reports
 created/missing/discovery-failed states separately from observed thumbnail
@@ -419,7 +428,7 @@ compatibility and physical/manual review remain separate from readiness.
 
 ### `E5` JPEG XL Support via WIC (P2)
 
-**Implementation status:** Readiness software implemented locally. `.jxl`
+**Implementation status:** Readiness software shipped in 2.5.0. `.jxl`
 remains recognized and routed through WIC, with the same on-demand worker
 discovery, independent decode outcomes, explicit refresh, failure fallback,
 and redacted diagnostics as HEIC. Mocked discovery and renamed PNGs are not
@@ -533,13 +542,15 @@ focused. The summarized status as of this revision:
 For a deeper change log, consult the git history; this appendix exists only
 to anchor the active plan above.
 
-## Appendix B — Implemented Locally, Verification Pending
+## Appendix B — Shipped Implementations and Remaining Manual Verification
 
-- **B2 N-Up Compare:** implementation supports two-to-four tiles, captured
+- **B2 N-Up Compare:** shipped in 2.5.0 with two-to-four tiles, captured
   candidate cycling, synchronized or independent zoom/pan, and focused-tile
-  rating/tag actions through the existing metadata store. Manual DPI and
-  forced-GDI-fallback review, per-tile metadata isolation/persistence tests,
-  and the current Debug/Release build and CTest gates remain open in Theme B.
+  rating/tag actions through the existing metadata store. The compare-session
+  policy smoke and final Debug/Release CTest gates passed 30/30. Manual DPI,
+  forced-GDI-fallback, and per-tile metadata isolation/persistence review
+  remain open in Theme B.
 - **C1/C2/C3/C7 UI Surfaces:** the About dialog, empty-state watermarks,
-  Performance HUD, and breadcrumb/path bar are implemented locally. Release
-  CTest and manual theme/DPI visual review remain open in Theme C.
+  Performance HUD, and breadcrumb/path bar are implemented and present in
+  2.5.0. Final Debug/Release CTest gates passed 30/30; manual theme/DPI visual
+  review remains open in Theme C.

@@ -202,6 +202,7 @@
                 <a href="#viewer">Viewer</a>
                 <a href="#file-workflows">File workflows</a>
                 <a href="#quick-actions">Quick Actions</a>
+                <a href="#release-2-5">2.5 notes</a>
                 <a href="#release-2-4">2.4 notes</a>
                 <a href="#release-2-3">2.3 notes</a>
                 <a href="#release-2-2">2.2 history</a>
@@ -365,10 +366,16 @@
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
         </section>
 
+        <section id="release-2-5">
+            <h2>What changed in 2.5</h2>
+            <p>Version 2.5 adds default-on SDR color management across browser thumbnails, independent viewer windows, and all compare tiles. It adds named saved searches with an inline Save action, parent-folder and browser Enter navigation, and Tools &gt; Open Log Folder.</p>
+            <p>Tools &gt; Diagnostics &gt; Snapshot now reports HEIC/JPEG XL extension recognition, WIC decoder creation/readiness, and observed thumbnail/full-image outcomes separately. Discovery does not install a codec or prove every file can decode; actual optional-format fixture compatibility remains unverified.</p>
+        </section>
+
         <section id="release-2-4">
             <h2>What changed in 2.4</h2>
             <p>Version 2.4 adds HEIC and JPEG XL decoding through Windows Imaging Component (WIC) when compatible codecs are installed. It also adds two-to-four-image N-up comparison with synchronized zoom and pan, long-path breadcrumb navigation, an optional Performance HUD, and expanded resource-profile, cache, and prefetch controls. Persistent-cache maintenance and benchmark coverage have been strengthened, and folder-thumbnail labels now follow the application's text-size setting.</p>
-            <div class="callout"><strong>Format boundary.</strong> HEIC and JPEG XL decoding depends on a compatible installed Windows WIC codec. Diagnostics reports decoder creation separately from actual file-decode outcomes; readiness alone does not prove a file or variant works. A renamed PNG is not optional-codec decode evidence, and <code>.heif</code> is not recognized. GIF and TIFF browsing shows the first frame or page, and animated playback remains deferred.</div>
+            <div class="callout"><strong>Format boundary.</strong> HEIC and JPEG XL decoding depends on a compatible installed Windows WIC codec. The 2.4 release did not detect codec availability in advance; the 2.5 readiness surface is described above. Decoder creation alone does not prove a file or variant works. A renamed PNG is not optional-codec decode evidence, and <code>.heif</code> is not recognized. GIF and TIFF browsing shows the first frame or page, and animated playback remains deferred.</div>
         </section>
 
         <section id="release-2-3">
@@ -394,6 +401,7 @@
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open a folder</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>Create a folder in the current folder</td></tr>
                     <tr><td>File</td><td><kbd>F2</kbd></td><td>Rename the selected item</td></tr>
+                    <tr><td>Browser</td><td><kbd>Enter</kbd></td><td>Open the selected image in the viewer</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>Open the selected image in a new viewer window</td></tr>
                     <tr><td>File</td><td><kbd>F5</kbd></td><td>Refresh the folder tree</td></tr>
                     <tr><td>File</td><td><kbd>Esc</kbd></td><td>Close when enabled in Settings; otherwise do nothing</td></tr>
