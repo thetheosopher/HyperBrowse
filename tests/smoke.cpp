@@ -60,6 +60,7 @@
 #include "ui/SavedSearchController.h"
 #include "ui/SettingsLayout.h"
 #include "ui/ToolbarIconLibrary.h"
+#include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
 #include "util/ResourceSizing.h"
 #include "util/SettingsRegistry.h"
@@ -3415,6 +3416,83 @@ namespace
              "Thumbnail scheduler did not preserve a 16 GiB memory cache capacity");
          Expect(largeBudgetScheduler.DiskCacheCapacityBytes() == sixteenGigabytes,
              "Thumbnail scheduler did not preserve a 16 GiB persistent cache capacity");
+        }
+
+        void RunBackgroundServiceRetirementScenario()
+        {
+            struct RetirementState
+            {
+                std::mutex mutex;
+                std::condition_variable condition;
+                bool destructionStarted{};
+                bool releaseDestruction{};
+                bool destructionCompleted{};
+            };
+
+            struct BlockingDestruction
+            {
+                explicit BlockingDestruction(std::shared_ptr<RetirementState> sharedState)
+                    : retirementState(std::move(sharedState))
+                {
+                }
+
+                ~BlockingDestruction()
+                {
+                    std::unique_lock lock(retirementState->mutex);
+                    retirementState->destructionStarted = true;
+                    retirementState->condition.notify_all();
+                    retirementState->condition.wait(lock, [&]()
+                    {
+                        return retirementState->releaseDestruction;
+                    });
+                    retirementState->destructionCompleted = true;
+                    lock.unlock();
+                    retirementState->condition.notify_all();
+                }
+
+                std::shared_ptr<RetirementState> retirementState;
+            };
+
+            auto state = std::make_shared<RetirementState>();
+            hyperbrowse::util::BackgroundExecutor reaper(1, 0, true);
+            std::thread unblocker([state]()
+            {
+                std::unique_lock lock(state->mutex);
+                if (!state->condition.wait_for(lock, std::chrono::seconds(5), [&]()
+                    {
+                        return state->destructionStarted;
+                    }))
+                {
+                    state->releaseDestruction = true;
+                    lock.unlock();
+                    state->condition.notify_all();
+                    return;
+                }
+
+                lock.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                lock.lock();
+                state->releaseDestruction = true;
+                lock.unlock();
+                state->condition.notify_all();
+            });
+
+            const auto start = std::chrono::steady_clock::now();
+            const bool accepted = reaper.PostDestruction(std::make_unique<BlockingDestruction>(state));
+            const auto elapsed = std::chrono::steady_clock::now() - start;
+            unblocker.join();
+
+            Expect(accepted, "Background executor rejected service retirement");
+            Expect(elapsed < std::chrono::milliseconds(200),
+                "Posting service retirement blocked while the service destructor was busy");
+            {
+                std::unique_lock lock(state->mutex);
+                Expect(state->condition.wait_for(lock, std::chrono::seconds(5), [&]()
+                    {
+                        return state->destructionCompleted;
+                    }),
+                    "Background service retirement did not complete after the blocked work was released");
+            }
         }
 
         void RunThumbnailPersistenceMaintenanceScenario()
@@ -7766,6 +7844,7 @@ int main(int argc, char* argv[])
             RunDialogShellGeometryScenario();
             RunSettingsLayoutGeometryScenario();
             RunDefaultSettingsScenario(instance);
+            RunBackgroundServiceRetirementScenario();
         }
         else if (multiViewerSettingsOnly)
         {

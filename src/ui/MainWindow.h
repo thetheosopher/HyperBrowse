@@ -753,6 +753,7 @@ namespace hyperbrowse::ui
         FileCommandController fileCommandController_;
         ViewCommandController viewCommandController_;
         std::unique_ptr<services::ThumbnailScheduler> detailsPanelThumbnailScheduler_;
+        std::unique_ptr<util::BackgroundExecutor> serviceRetirementExecutor_;
         std::unique_ptr<services::UserMetadataStore> userMetadataStore_;
         std::unique_ptr<SavedSearchController> savedSearchController_;
         bool applyingSavedSearchFilter_{};

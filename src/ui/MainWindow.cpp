@@ -22382,6 +22382,16 @@ namespace hyperbrowse::ui
                     scheduler->TrimCacheToBytes(std::max<std::size_t>(1, scheduler->CacheCapacityBytes() / 2));
                 }
             }
+            detailsPanelThumbnailScheduler_->CancelOutstanding();
+            detailsPanelThumbnailScheduler_->BindTargetWindow(nullptr);
+            if (!serviceRetirementExecutor_)
+            {
+                serviceRetirementExecutor_ = std::make_unique<util::BackgroundExecutor>(1, 0, true);
+            }
+            if (!serviceRetirementExecutor_->PostDestruction(std::move(detailsPanelThumbnailScheduler_)))
+            {
+                util::LogError(L"Could not queue the old details-panel thumbnail scheduler for background retirement.");
+            }
             detailsPanelThumbnailScheduler_ = std::move(scheduler);
         }
     }
@@ -26825,4 +26835,3 @@ namespace hyperbrowse::ui
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
 }
-

@@ -80,6 +80,11 @@ namespace hyperbrowse::cache
     class CachedThumbnail;
 }
 
+namespace hyperbrowse::util
+{
+    class BackgroundExecutor;
+}
+
 namespace hyperbrowse::browser
 {
     class BrowserPane
@@ -345,6 +350,7 @@ namespace hyperbrowse::browser
         std::wstring performanceHudText_;
         std::unique_ptr<hyperbrowse::services::ThumbnailScheduler> thumbnailScheduler_;
         std::unique_ptr<hyperbrowse::services::ImageMetadataService> metadataService_;
+        std::unique_ptr<hyperbrowse::util::BackgroundExecutor> serviceRetirementExecutor_;
         std::unique_ptr<services::DisplayColorService> displayColors_{std::make_unique<services::DisplayColorService>(64ULL * 1024 * 1024)};
         hyperbrowse::services::UserMetadataStore* userMetadataStore_{};
         hyperbrowse::util::ResourceProfile resourceProfile_{hyperbrowse::util::ResourceProfile::Balanced};

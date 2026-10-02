@@ -26,6 +26,8 @@
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
 #include "util/Diagnostics.h"
+#include "util/BackgroundExecutor.h"
+#include "util/Log.h"
 #include "util/ResourcePng.h"
 #include "ui/SystemTheme.h"
 
@@ -1399,10 +1401,27 @@ namespace hyperbrowse::browser
         if (thumbnailScheduler_)
         {
             thumbnailScheduler_->CancelOutstanding();
+            thumbnailScheduler_->BindTargetWindow(nullptr);
         }
         if (metadataService_)
         {
             metadataService_->CancelOutstanding();
+            metadataService_->BindTargetWindow(nullptr);
+        }
+
+        if ((thumbnailScheduler_ || metadataService_) && !serviceRetirementExecutor_)
+        {
+            serviceRetirementExecutor_ = std::make_unique<util::BackgroundExecutor>(2, 0, true);
+        }
+        if (thumbnailScheduler_
+            && !serviceRetirementExecutor_->PostDestruction(std::move(thumbnailScheduler_)))
+        {
+            util::LogError(L"Could not queue the old thumbnail scheduler for background retirement.");
+        }
+        if (metadataService_
+            && !serviceRetirementExecutor_->PostDestruction(std::move(metadataService_)))
+        {
+            util::LogError(L"Could not queue the old metadata service for background retirement.");
         }
 
         thumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(

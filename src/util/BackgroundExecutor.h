@@ -8,25 +8,29 @@
 #include <deque>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
 
 namespace hyperbrowse::util
 {
-    // Fixed-size FIFO worker pool for short-lived background work. Used in place of
+    // Fixed-size FIFO worker pool for background work. Used in place of
     // per-task std::async calls, which spawn a fresh OS thread for every invocation
     // and have no upper bound on concurrent threads under burst load.
     //
     // Tasks are std::function<void()>. The executor takes no opinion on cancellation;
     // callers should embed their own atomic-flag / generation checks inside the task.
-    // On destruction, all queued (not-yet-running) tasks are dropped, in-flight tasks
-    // run to completion, and worker threads are joined.
+    // By default, queued tasks are dropped at shutdown; cleanup executors can opt into
+    // draining them so their captured resources are destroyed on a worker thread.
     class BackgroundExecutor
     {
     public:
-        explicit BackgroundExecutor(std::size_t workerCount, std::size_t maxPendingTaskCount = 0)
+        explicit BackgroundExecutor(std::size_t workerCount,
+                                    std::size_t maxPendingTaskCount = 0,
+                                    bool drainPendingTasksOnShutdown = false)
             : maxPendingTaskCount_(maxPendingTaskCount)
+            , drainPendingTasksOnShutdown_(drainPendingTasksOnShutdown)
         {
             const std::size_t resolvedWorkerCount = workerCount == 0 ? std::size_t{1} : workerCount;
             workers_.reserve(resolvedWorkerCount);
@@ -48,7 +52,10 @@ namespace hyperbrowse::util
                 {
                     std::scoped_lock lock(mutex_);
                     shuttingDown_ = true;
-                    tasks_.clear();
+                    if (!drainPendingTasksOnShutdown_)
+                    {
+                        tasks_.clear();
+                    }
                 }
                 condition_.notify_all();
                 for (std::thread& worker : workers_)
@@ -89,6 +96,21 @@ namespace hyperbrowse::util
             }
             condition_.notify_one();
             return true;
+        }
+
+        template <typename T>
+        bool PostDestruction(std::unique_ptr<T> object)
+        {
+            if (!object)
+            {
+                return true;
+            }
+
+            auto deferredObject = std::make_shared<std::unique_ptr<T>>(std::move(object));
+            return Post([deferredObject]()
+            {
+                deferredObject->reset();
+            });
         }
 
         void SetMaxPendingTaskCount(std::size_t maxPendingTaskCount)
@@ -168,6 +190,7 @@ namespace hyperbrowse::util
         std::once_flag shutdownOnce_;
         std::size_t maxPendingTaskCount_{};
         std::size_t peakPendingTaskCount_{};
+        bool drainPendingTasksOnShutdown_{};
         bool shuttingDown_{false};
         std::atomic<std::size_t> activeTaskCount_{};
         std::atomic<std::size_t> rejectedTaskCount_{};
