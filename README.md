@@ -148,6 +148,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Ctrl+W` | Minimize the main window |
 | `F5` | Refresh the folder tree |
 | `F2` | Rename the selected item |
+| `Ctrl+Shift+R` | Batch rename the selected items |
 | `Enter` | Open the selected image in the viewer |
 | `Alt+Up` | Navigate to the parent folder |
 | `Ctrl+Shift+Enter` | Open the selected image in a new viewer window |

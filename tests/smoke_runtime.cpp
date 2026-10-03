@@ -84,6 +84,12 @@ namespace hyperbrowse::tests
                    "Ctrl+Shift+N is missing from the new-folder shortcut catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, 'W', FCONTROL),
                    "Ctrl+W no longer owns the main-window minimize command");
+            Expect(hasShortcut(mainShortcuts,
+                               ShortcutContext::MainWindow,
+                               ID_FILE_BATCH_RENAME_SELECTION,
+                               'R',
+                               FCONTROL | FSHIFT),
+                   "Ctrl+Shift+R is missing from the batch-rename shortcut catalog");
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_VIEW_GO_TO_ITEM_NUMBER, 'G', FCONTROL),
                    "Main-window Ctrl+G item navigation shortcut is missing from the shared catalog");
             Expect(!hasShortcut(mainShortcuts, ShortcutContext::MainWindow, ID_FILE_MINIMIZE, VK_ESCAPE, 0),

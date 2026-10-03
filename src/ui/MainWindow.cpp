@@ -11106,11 +11106,11 @@ namespace hyperbrowse::ui
         AppendMenuW(editMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMetadataMenu), L"&Metadata");
 
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...\tF2");
-        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
+        AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...\tCtrl+Shift+R");
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_DUPLICATE_SELECTION, L"Dup&licate\tCtrl+D");
         AppendMenuW(fileOrganizeMenu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To");
-        AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To");
+        AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(copySelectionToMenu_), L"Cop&y Selection To\tF8");
+        AppendMenuW(fileOrganizeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(moveSelectionToMenu_), L"Mo&ve Selection To\tF7");
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_TOGGLE_PAIRED_RAW_JPEG_OPERATIONS, L"Include Paired &RAW+JPEG");
         AppendMenuW(fileOrganizeMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(fileOrganizeMenu, MF_STRING, ID_FILE_DELETE_SELECTION, L"&Delete\tDel");
@@ -17317,7 +17317,7 @@ namespace hyperbrowse::ui
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(metadataMenu), L"&Metadata");
             AppendMenuW(menu, MF_STRING, ID_FILE_RENAME_SELECTED, L"Re&name...");
-            AppendMenuW(menu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...");
+            AppendMenuW(menu, MF_STRING, ID_FILE_BATCH_RENAME_SELECTION, L"Batch R&ename...\tCtrl+Shift+R");
             AppendMenuW(menu, MF_STRING, ID_FILE_DUPLICATE_SELECTION, L"Dup&licate\tCtrl+D");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, ID_FILE_COPY_SELECTION, L"Cop&y Selection...");
