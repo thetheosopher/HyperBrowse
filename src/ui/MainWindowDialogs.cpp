@@ -105,6 +105,7 @@ namespace hyperbrowse::ui
             DialogTheme theme{};
             HBRUSH backgroundBrush{};
             HBRUSH fieldBrush{};
+            HBRUSH borderBrush{};
             HBRUSH surfaceBrush{};
             hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
             std::wstring title;
@@ -115,6 +116,7 @@ namespace hyperbrowse::ui
             std::vector<std::wstring> resultLeafNames;
             std::vector<BatchRenamePreviewRow> previewRows;
             int numberWidth{};
+            int patternEditControlHeight{};
             bool canAccept{};
             bool accepted{};
             bool done{};
@@ -162,19 +164,22 @@ namespace hyperbrowse::ui
             }
         }
 
-        int MeasureTextInputEditControlHeight(const TextInputDialogState& state)
+        int MeasureEditControlHeight(HWND ownerWindow,
+                                     HFONT bodyFont,
+                                     hyperbrowse::util::AppTextSize appTextSize,
+                                     UINT dpi)
         {
             const int frameHeight = ScaleDialogAppTextDimension(
-                kTextInputEditHeight, state.appTextSize, state.dpi);
+                kTextInputEditHeight, appTextSize, dpi);
             const int fallbackHeight = std::max(1, frameHeight - 2);
-            HDC dc = state.ownerWindow ? GetDC(state.ownerWindow) : GetDC(nullptr);
+            HDC dc = ownerWindow ? GetDC(ownerWindow) : GetDC(nullptr);
             if (!dc)
             {
                 return fallbackHeight;
             }
 
-            const HFONT font = state.bodyFont
-                ? state.bodyFont
+            const HFONT font = bodyFont
+                ? bodyFont
                 : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const HGDIOBJ oldFont = font ? SelectObject(dc, font) : nullptr;
             TEXTMETRICW textMetrics{};
@@ -183,9 +188,9 @@ namespace hyperbrowse::ui
             {
                 SelectObject(dc, oldFont);
             }
-            if (state.ownerWindow)
+            if (ownerWindow)
             {
-                ReleaseDC(state.ownerWindow, dc);
+                ReleaseDC(ownerWindow, dc);
             }
             else
             {
@@ -197,8 +202,14 @@ namespace hyperbrowse::ui
                 return fallbackHeight;
             }
 
-            const int padding = ScaleDialogAppTextDimension(2, state.appTextSize, state.dpi);
+            const int padding = ScaleDialogAppTextDimension(2, appTextSize, dpi);
             return std::clamp(static_cast<int>(textMetrics.tmHeight) + padding, 1, fallbackHeight);
+        }
+
+        int MeasureTextInputEditControlHeight(const TextInputDialogState& state)
+        {
+            return MeasureEditControlHeight(
+                state.ownerWindow, state.bodyFont, state.appTextSize, state.dpi);
         }
 
         void CenterWindowOnOwner(HWND window, HWND ownerWindow)
@@ -605,6 +616,12 @@ namespace hyperbrowse::ui
             const int buttonTop = clientHeight - scale(kTextInputDialogMargin) - scale(kTextInputButtonHeight);
             const int listTop = scale(kTextInputDialogMargin) + instructionHeight + scale(6) + scale(kTextInputEditHeight) + scale(10) + helpHeight + scale(8);
             const int listHeight = std::max(scale(120), buttonTop - scale(12) - listTop);
+            const int editFrameTop = scale(kTextInputDialogMargin) + instructionHeight + scale(6);
+            const int editFrameHeight = scale(kTextInputEditHeight);
+            const int editControlHeight = std::clamp(state.patternEditControlHeight,
+                                                     1,
+                                                     std::max(1, editFrameHeight - 2));
+            const int editControlTop = editFrameTop + (editFrameHeight - editControlHeight) / 2;
             const int cancelLeft = clientWidth - scale(kTextInputDialogMargin) - scale(kTextInputButtonWidth);
             const int okLeft = cancelLeft - scale(8) - scale(kTextInputButtonWidth);
 
@@ -622,10 +639,10 @@ namespace hyperbrowse::ui
             if (state.patternEditWindow)
             {
                 MoveWindow(state.patternEditWindow,
-                           scale(kTextInputDialogMargin),
-                           scale(kTextInputDialogMargin) + instructionHeight + scale(6),
-                           contentWidth,
-                           scale(kTextInputEditHeight),
+                           scale(kTextInputDialogMargin) + 1,
+                           editControlTop,
+                           std::max(1, contentWidth - 2),
+                           editControlHeight,
                            TRUE);
             }
 
@@ -1150,6 +1167,7 @@ namespace hyperbrowse::ui
                     : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
                 state->backgroundBrush = CreateSolidBrush(state->theme.windowBackground);
                 state->fieldBrush = CreateSolidBrush(state->theme.fieldBackground);
+                state->borderBrush = CreateSolidBrush(state->theme.border);
                 state->surfaceBrush = CreateSolidBrush(state->theme.surfaceBackground);
                 const HWND instructionWindow = CreateWindowExW(
                     0,
@@ -1166,7 +1184,7 @@ namespace hyperbrowse::ui
                     nullptr);
 
                 state->patternEditWindow = CreateWindowExW(
-                    WS_EX_CLIENTEDGE,
+                    0,
                     L"EDIT",
                     state->initialPattern.c_str(),
                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
@@ -1237,6 +1255,14 @@ namespace hyperbrowse::ui
 
                 if (instructionWindow) SendMessageW(instructionWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 if (state->patternEditWindow) SendMessageW(state->patternEditWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                if (state->patternEditWindow)
+                {
+                    const int margin = ScaleDialogAppTextDimension(6, state->appTextSize, state->dpi);
+                    SendMessageW(state->patternEditWindow,
+                                 EM_SETMARGINS,
+                                 EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                                 MAKELPARAM(margin, margin));
+                }
                 if (helpWindow) SendMessageW(helpWindow, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 if (state->okButton) SendMessageW(state->okButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                 if (cancelButton) SendMessageW(cancelButton, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
@@ -1293,6 +1319,8 @@ namespace hyperbrowse::ui
                     const HFONT font = state->bodyFont
                         ? state->bodyFont
                         : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                    state->patternEditControlHeight = MeasureEditControlHeight(
+                        state->ownerWindow, state->bodyFont, state->appTextSize, state->dpi);
                     for (const HWND child : {GetDlgItem(hwnd, kBatchRenameInstructionControlId),
                                               state->patternEditWindow,
                                               GetDlgItem(hwnd, kBatchRenameHelpControlId),
@@ -1304,6 +1332,14 @@ namespace hyperbrowse::ui
                         {
                             SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
                         }
+                    }
+                    if (state->patternEditWindow)
+                    {
+                        const int margin = ScaleDialogAppTextDimension(6, state->appTextSize, state->dpi);
+                        SendMessageW(state->patternEditWindow,
+                                     EM_SETMARGINS,
+                                     EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                                     MAKELPARAM(margin, margin));
                     }
                     if (state->previewListWindow)
                     {
@@ -1386,6 +1422,27 @@ namespace hyperbrowse::ui
                     return 1;
                 }
                 break;
+            case WM_PAINT:
+            {
+                PAINTSTRUCT paint{};
+                const HDC dc = BeginPaint(hwnd, &paint);
+                if (state && state->borderBrush && state->fieldBrush)
+                {
+                    RECT client{};
+                    GetClientRect(hwnd, &client);
+                    const int margin = ScaleDialogAppTextDimension(
+                        kTextInputDialogMargin, state->appTextSize, state->dpi);
+                    const int editTop = margin + ScaleDialogAppTextDimension(44, state->appTextSize, state->dpi)
+                        + ScaleDialogAppTextDimension(6, state->appTextSize, state->dpi);
+                    const int editHeight = ScaleDialogAppTextDimension(
+                        kTextInputEditHeight, state->appTextSize, state->dpi);
+                    const RECT editFrame{margin, editTop, client.right - margin, editTop + editHeight};
+                    FillRect(dc, &editFrame, state->fieldBrush);
+                    FrameRect(dc, &editFrame, state->borderBrush);
+                }
+                EndPaint(hwnd, &paint);
+                return 0;
+            }
             case WM_COMMAND:
                 if (!state)
                 {
@@ -1429,6 +1486,11 @@ namespace hyperbrowse::ui
                     {
                         DeleteObject(state->fieldBrush);
                         state->fieldBrush = nullptr;
+                    }
+                    if (state->borderBrush)
+                    {
+                        DeleteObject(state->borderBrush);
+                        state->borderBrush = nullptr;
                     }
                     if (state->surfaceBrush)
                     {
@@ -1694,6 +1756,8 @@ namespace hyperbrowse::ui
         {
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
+        state.patternEditControlHeight = MeasureEditControlHeight(
+            state.ownerWindow, state.bodyFont, state.appTextSize, state.dpi);
         state.title = L"Batch Rename";
         state.instruction = L"Enter a rename pattern. HyperBrowse previews every generated file name and preserves extensions unless you place {ext} yourself.";
         state.initialPattern = std::move(initialPattern);
