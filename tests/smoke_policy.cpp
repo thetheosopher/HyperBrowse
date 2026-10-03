@@ -18,6 +18,7 @@
 
 #include "services/BatchConvertService.h"
 #include "services/FileOperationService.h"
+#include "browser/ThumbnailRatingKeyPolicy.h"
 #include "ui/BrowserItemScopeCollector.h"
 #include "viewer/CompareSessionPolicy.h"
 #include "ui/BrowserPresentationPersistence.h"
@@ -2076,6 +2077,33 @@ namespace hyperbrowse::tests
                    "Selection rating policy changed common and mixed-rating behavior");
         }
 
+        void RunThumbnailRatingKeyPolicyScenario()
+        {
+            using hyperbrowse::browser::ThumbnailRatingKeyPolicy;
+
+            for (int rating = 0; rating <= 5; ++rating)
+            {
+                const UINT topRowKey = static_cast<UINT>('0' + rating);
+                const UINT numpadKey = static_cast<UINT>(VK_NUMPAD0 + rating);
+                Expect(ThumbnailRatingKeyPolicy::RatingFromVirtualKey(topRowKey, false, false, false) == rating,
+                       "Top-row thumbnail rating key did not map to its rating");
+                Expect(ThumbnailRatingKeyPolicy::RatingFromVirtualKey(numpadKey, false, false, false) == rating,
+                       "Numpad thumbnail rating key did not map to its rating");
+            }
+
+            Expect(!ThumbnailRatingKeyPolicy::RatingFromVirtualKey('6', false, false, false)
+                       && !ThumbnailRatingKeyPolicy::RatingFromVirtualKey(VK_NUMPAD6, false, false, false)
+                       && !ThumbnailRatingKeyPolicy::RatingFromVirtualKey(VK_F1, false, false, false),
+                   "An unsupported key was mapped to a thumbnail rating");
+            Expect(!ThumbnailRatingKeyPolicy::RatingFromVirtualKey('3', true, false, false)
+                       && !ThumbnailRatingKeyPolicy::RatingFromVirtualKey('3', false, true, false)
+                       && !ThumbnailRatingKeyPolicy::RatingFromVirtualKey('3', false, false, true)
+                       && !ThumbnailRatingKeyPolicy::RatingFromVirtualKey(VK_NUMPAD3, true, false, false)
+                       && !ThumbnailRatingKeyPolicy::RatingFromVirtualKey(VK_NUMPAD3, false, true, false)
+                       && !ThumbnailRatingKeyPolicy::RatingFromVirtualKey(VK_NUMPAD3, false, false, true),
+                   "A modified key was mapped to a thumbnail rating");
+        }
+
         void RunViewerItemSelectionPolicyScenario()
         {
             using hyperbrowse::browser::BrowserItem;
@@ -2397,6 +2425,7 @@ namespace hyperbrowse::tests
         RunBrowserItemScopeCollectorScenario();
         RunFolderTreeDropPolicyScenario();
         RunSelectionRatingPolicyScenario();
+        RunThumbnailRatingKeyPolicyScenario();
         RunViewerItemSelectionPolicyScenario();
         RunItemNumberNavigationPolicyScenario();
         RunViewerPendingOperationStateScenario();

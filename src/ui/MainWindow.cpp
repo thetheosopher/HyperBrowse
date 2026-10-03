@@ -33,6 +33,7 @@
 #include "app/Application.h"
 #include "browser/BrowserModel.h"
 #include "browser/BrowserPane.h"
+#include "browser/ThumbnailRatingKeyPolicy.h"
 #include "cache/DiskThumbnailCache.h"
 #include "decode/ImageDecoder.h"
 #include "services/BatchConvertService.h"
@@ -3910,9 +3911,24 @@ namespace
                 rowKey.push_back(L'\x1f');
                 rowKey.append(shortcut.action);
                 rowKey.push_back(L'\x1f');
-                rowKey.append(shortcut.context == hyperbrowse::ui::ShortcutContext::MainWindow
-                    ? L"main"
-                    : L"viewer");
+                std::wstring_view contextKey;
+                std::wstring_view contextLabel;
+                switch (shortcut.context)
+                {
+                case hyperbrowse::ui::ShortcutContext::MainWindow:
+                    contextKey = L"main";
+                    contextLabel = L"Main window";
+                    break;
+                case hyperbrowse::ui::ShortcutContext::Browser:
+                    contextKey = L"browser";
+                    contextLabel = L"Thumbnail browser";
+                    break;
+                case hyperbrowse::ui::ShortcutContext::Viewer:
+                    contextKey = L"viewer";
+                    contextLabel = L"Viewer";
+                    break;
+                }
+                rowKey.append(contextKey);
                 if (!seenRows.insert(std::move(rowKey)).second)
                 {
                     continue;
@@ -3921,9 +3937,7 @@ namespace
                 const std::wstring category(shortcut.group);
                 const std::wstring chord(shortcut.displayChord);
                 const std::wstring action(shortcut.action);
-                const std::wstring context = shortcut.context == hyperbrowse::ui::ShortcutContext::MainWindow
-                    ? L"Main window"
-                    : L"Viewer";
+                const std::wstring context(contextLabel);
                 LVITEMW item{};
                 item.mask = LVIF_TEXT;
                 item.iItem = ListView_GetItemCount(listWindow);
@@ -3940,6 +3954,7 @@ namespace
         };
 
         appendCatalog(hyperbrowse::ui::MainWindowShortcuts());
+        appendCatalog(hyperbrowse::ui::BrowserShortcuts());
         appendCatalog(hyperbrowse::ui::ViewerShortcuts());
         AutoSizeShortcutReferenceColumns(listWindow);
     }
@@ -10878,6 +10893,31 @@ namespace hyperbrowse::ui
             && IsTextInputControlWindow(message->hwnd))
         {
             return false;
+        }
+
+        const HWND browserPaneHwnd = browserPaneController_ ? browserPaneController_->Hwnd() : nullptr;
+        if (message->message == WM_KEYDOWN
+            && browserPaneHwnd
+            && message->hwnd == browserPaneHwnd
+            && GetFocus() == browserPaneHwnd
+            && browserPaneController_->GetViewMode() == browser::BrowserViewMode::Thumbnails)
+        {
+            const auto rating = browser::ThumbnailRatingKeyPolicy::RatingFromVirtualKey(
+                static_cast<UINT>(message->wParam),
+                GetKeyState(VK_CONTROL) < 0,
+                GetKeyState(VK_SHIFT) < 0,
+                GetKeyState(VK_MENU) < 0);
+            if (rating)
+            {
+                const bool keyRepeat = (message->lParam & (1LL << 30)) != 0;
+                if (!keyRepeat
+                    && !fileOperationActive_
+                    && !browserPaneController_->SelectedFilePathsSnapshot().empty())
+                {
+                    SetSelectionRating(*rating);
+                }
+                return true;
+            }
         }
 
         if ((message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN)

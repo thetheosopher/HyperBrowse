@@ -7427,6 +7427,22 @@ namespace
         Expect(sendKey(mainWindow.Hwnd(), VK_SPACE), "Space did not activate the custom details close button");
         Expect(GetFocus() == browserPane, "Closing the details panel did not restore focus to the browser pane");
 
+        SendMessageW(mainWindow.Hwnd(),
+                     WM_COMMAND,
+                     MAKEWPARAM(hyperbrowse::ui::command_ids::ID_VIEW_THUMBNAILS, 0),
+                     0);
+        SetFocus(browserPane);
+        Expect(GetFocus() == browserPane, "Could not focus the thumbnail browser for rating shortcut coverage");
+        auto* browserPaneController = reinterpret_cast<hyperbrowse::browser::BrowserPane*>(
+            GetWindowLongPtrW(browserPane, GWLP_USERDATA));
+        Expect(browserPaneController != nullptr, "Could not resolve the thumbnail browser for rating shortcut coverage");
+        browserPaneController->ClearSelection();
+        Expect(sendKey(browserPane, '5') && sendKey(browserPane, VK_NUMPAD5),
+               "The focused thumbnail browser did not consume top-row and numpad rating keys");
+        SetFocus(filterEdit);
+        Expect(!sendKey(filterEdit, '5') && !sendKey(filterEdit, VK_NUMPAD5),
+               "Thumbnail rating keys were intercepted while the filter edit owned focus");
+
         DestroyWindow(mainWindow.Hwnd());
         PumpMessagesFor(100);
     }
@@ -7667,6 +7683,19 @@ namespace
             instance,
             nullptr);
         Expect(edit != nullptr, "Failed to create the text-input accelerator test edit control");
+
+        constexpr std::array<WPARAM, 12> ratingKeys{
+            '0', '1', '2', '3', '4', '5',
+            VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD4, VK_NUMPAD5};
+        for (const WPARAM key : ratingKeys)
+        {
+            MSG message{};
+            message.hwnd = edit;
+            message.message = WM_KEYDOWN;
+            message.wParam = key;
+            Expect(!mainWindow.TranslateAcceleratorMessage(&message),
+                   "MainWindow consumed a thumbnail rating key while a text-input control owned focus");
+        }
 
         constexpr std::array<WPARAM, 4> oemSizeKeys{
             VK_OEM_MINUS,

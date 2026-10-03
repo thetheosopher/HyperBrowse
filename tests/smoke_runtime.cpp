@@ -51,6 +51,8 @@ namespace hyperbrowse::tests
 
             Expect(hyperbrowse::ui::kShortcutCatalogValid,
                    "Main-window shortcut catalog contains duplicate accelerator ownership");
+            Expect(hyperbrowse::ui::kBrowserShortcutCatalogValid,
+                   "Thumbnail-browser shortcut catalog contains duplicate keyboard behavior");
             Expect(!hyperbrowse::ui::HasDuplicateShortcuts(hyperbrowse::ui::kViewerShortcutCatalog),
                    "Viewer shortcut catalog contains duplicate keyboard behavior");
 
@@ -104,6 +106,22 @@ namespace hyperbrowse::tests
             Expect(hasShortcut(mainShortcuts, ShortcutContext::MainWindow, 0, VK_F6, 0)
                        && hasShortcut(mainShortcuts, ShortcutContext::MainWindow, 0, VK_F6, FSHIFT),
                    "F6 and Shift+F6 pane-navigation shortcuts are missing from the catalog");
+            const auto browserShortcuts = hyperbrowse::ui::BrowserShortcuts();
+            for (int rating = 0; rating <= 5; ++rating)
+            {
+                const WORD topRowKey = static_cast<WORD>('0' + rating);
+                const WORD numpadKey = static_cast<WORD>(VK_NUMPAD0 + rating);
+                Expect(hasShortcut(browserShortcuts, ShortcutContext::Browser, 0, topRowKey, 0)
+                           && hasShortcut(browserShortcuts, ShortcutContext::Browser, 0, numpadKey, 0),
+                       "A top-row or numpad thumbnail rating key is missing from the browser shortcut catalog");
+                Expect(std::none_of(mainShortcuts.begin(), mainShortcuts.end(), [&](const ShortcutDefinition& shortcut)
+                {
+                    return shortcut.virtualKey == topRowKey && shortcut.modifiers == 0;
+                }) && std::none_of(mainShortcuts.begin(), mainShortcuts.end(), [&](const ShortcutDefinition& shortcut)
+                {
+                    return shortcut.virtualKey == numpadKey && shortcut.modifiers == 0;
+                }), "A thumbnail rating key was added as a global main-window accelerator");
+            }
             Expect(hyperbrowse::ui::kDetailsPanelMenuLabel.find(L"Ctrl+3") != std::wstring_view::npos
                        && hyperbrowse::ui::kDetailsPanelMenuLabel.find(L"Alt+Shift+P") != std::wstring_view::npos,
                    "Details Panel menu label must display both registered shortcuts");

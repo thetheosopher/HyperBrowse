@@ -134,7 +134,7 @@ Opening an image normally reuses the existing viewer window, replacing its image
 
 ## Keyboard shortcuts
 
-The same catalogue is available in the application from Help > Keyboard Shortcuts. Shortcuts are listed by the window that has focus.
+The same catalogue is available in the application from Help > Keyboard Shortcuts. Shortcuts are listed by the focused window or browser pane.
 
 ### Main window
 
@@ -161,6 +161,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Ctrl+A` | Select all items |
 | `Ctrl+D` | Duplicate selected files |
 | `Ctrl+G` | Go to a file by its number |
+| `0-5` / Numpad `0-5` | Set the selected thumbnails' rating when the thumbnail pane is focused (`0` clears) |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo the last supported file operation |
 | `Ctrl+E` | Reveal the selection in Explorer |
 | `Alt+Enter` | Show file properties |

@@ -12,6 +12,7 @@ namespace hyperbrowse::ui
     enum class ShortcutContext
     {
         MainWindow,
+        Browser,
         Viewer,
     };
 
@@ -136,6 +137,21 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::MainWindow, command_ids::ID_HELP_DIAGNOSTICS_RESET, static_cast<WORD>('X'), FCONTROL | FSHIFT, L"Ctrl+Shift+X", L"Reset diagnostics state", L"Tools"},
     };
 
+    inline constexpr std::array kBrowserShortcutCatalog{
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>('0'), 0, L"0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>('1'), 0, L"0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>('2'), 0, L"0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>('3'), 0, L"0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>('4'), 0, L"0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>('5'), 0, L"0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, VK_NUMPAD0, 0, L"Numpad 0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>(VK_NUMPAD0 + 1), 0, L"Numpad 0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>(VK_NUMPAD0 + 2), 0, L"Numpad 0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>(VK_NUMPAD0 + 3), 0, L"Numpad 0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>(VK_NUMPAD0 + 4), 0, L"Numpad 0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+        ShortcutDefinition{ShortcutContext::Browser, 0, static_cast<WORD>(VK_NUMPAD0 + 5), 0, L"Numpad 0-5", L"Set selected thumbnails' rating; 0 clears", L"Thumbnail ratings"},
+    };
+
     inline constexpr std::array kViewerShortcutCatalog{
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_ESCAPE, 0, L"Esc", L"Use the configured full-screen Escape action, or close the viewer when windowed", L"Viewer delete and exit"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, static_cast<WORD>('W'), FCONTROL, L"Ctrl+W", L"Close the viewer", L"Viewer delete and exit"},
@@ -206,6 +222,7 @@ namespace hyperbrowse::ui
         return false;
     }
 
+    inline constexpr bool kBrowserShortcutCatalogValid = !HasDuplicateShortcuts(kBrowserShortcutCatalog);
     inline constexpr bool kShortcutCatalogValid = !HasDuplicateShortcuts(kMainWindowShortcutCatalog);
 
     inline constexpr std::span<const ShortcutDefinition> MainWindowShortcuts() noexcept
@@ -216,5 +233,10 @@ namespace hyperbrowse::ui
     inline constexpr std::span<const ShortcutDefinition> ViewerShortcuts() noexcept
     {
         return kViewerShortcutCatalog;
+    }
+
+    inline constexpr std::span<const ShortcutDefinition> BrowserShortcuts() noexcept
+    {
+        return kBrowserShortcutCatalog;
     }
 }
