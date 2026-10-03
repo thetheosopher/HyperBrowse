@@ -1507,7 +1507,8 @@ namespace
                         UINT height,
                         std::uint16_t orientation = 1,
                         std::wstring_view pngTextKey = {},
-                        std::string_view pngTextValue = {})
+                        std::string_view pngTextValue = {},
+                        std::string_view jpegDescription = {})
     {
         fs::create_directories(path.parent_path());
 
@@ -1547,16 +1548,28 @@ namespace
         WICPixelFormatGUID pixelFormat = GUID_WICPixelFormat32bppBGRA;
         CheckHResult(frame->SetPixelFormat(&pixelFormat), "Failed to set the test image pixel format");
 
-        if (format == TestImageFormat::Jpeg && orientation != 1)
+        if (format == TestImageFormat::Jpeg && (orientation != 1 || !jpegDescription.empty()))
         {
             ComPtr<IWICMetadataQueryWriter> metadataWriter;
             CheckHResult(frame->GetMetadataQueryWriter(&metadataWriter), "Failed to acquire the JPEG metadata writer");
 
-            PROPVARIANT value;
-            PropVariantInit(&value);
-            CheckHResult(InitPropVariantFromUInt16(orientation, &value), "Failed to build the JPEG orientation metadata value");
-            CheckHResult(metadataWriter->SetMetadataByName(L"/app1/ifd/{ushort=274}", &value), "Failed to write the JPEG orientation metadata");
-            PropVariantClear(&value);
+            if (orientation != 1)
+            {
+                PROPVARIANT value;
+                PropVariantInit(&value);
+                CheckHResult(InitPropVariantFromUInt16(orientation, &value), "Failed to build the JPEG orientation metadata value");
+                CheckHResult(metadataWriter->SetMetadataByName(L"/app1/ifd/{ushort=274}", &value), "Failed to write the JPEG orientation metadata");
+                PropVariantClear(&value);
+            }
+            if (!jpegDescription.empty())
+            {
+                PROPVARIANT value;
+                InitPropVariantFromAnsiText(jpegDescription, &value);
+                CheckHResult(
+                    metadataWriter->SetMetadataByName(L"/app1/ifd/{ushort=270}", &value),
+                    "Failed to write the JPEG image description metadata");
+                PropVariantClear(&value);
+            }
         }
         else if (format == TestImageFormat::Png && !pngTextKey.empty() && !pngTextValue.empty())
         {
@@ -1618,6 +1631,81 @@ namespace
 
         PropVariantClear(&value);
         return orientation;
+    }
+
+    std::string ReadJpegMetadataString(const fs::path& path, const wchar_t* query)
+    {
+        ComPtr<IWICImagingFactory> factory;
+        CheckHResult(
+            CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)),
+            "Failed to create the WIC imaging factory for JPEG metadata inspection");
+
+        ComPtr<IWICBitmapDecoder> decoder;
+        CheckHResult(
+            factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &decoder),
+            "Failed to open the JPEG for metadata inspection");
+
+        ComPtr<IWICBitmapFrameDecode> frame;
+        CheckHResult(decoder->GetFrame(0, &frame), "Failed to read the JPEG frame for metadata inspection");
+
+        ComPtr<IWICMetadataQueryReader> metadataReader;
+        CheckHResult(frame->GetMetadataQueryReader(&metadataReader), "Failed to acquire the JPEG metadata reader");
+
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        CheckHResult(metadataReader->GetMetadataByName(query, &value), "Failed to read JPEG string metadata");
+        const bool isAnsiString = value.vt == VT_LPSTR && value.pszVal != nullptr;
+        const std::string result = isAnsiString ? value.pszVal : std::string{};
+        PropVariantClear(&value);
+        Expect(isAnsiString, "JPEG string metadata did not use the expected ANSI representation");
+        return result;
+    }
+
+    std::vector<BYTE> ReadJpegScanData(const fs::path& path)
+    {
+        std::ifstream input(path, std::ios::binary);
+        Expect(static_cast<bool>(input), "Failed to open a JPEG for scan-data comparison");
+        const std::istreambuf_iterator<char> begin(input);
+        const std::istreambuf_iterator<char> end;
+        const std::vector<BYTE> bytes(begin, end);
+        Expect(bytes.size() >= 4 && bytes[0] == 0xff && bytes[1] == 0xd8,
+               "JPEG scan-data comparison received an invalid JPEG");
+
+        std::size_t offset = 2;
+        while (offset < bytes.size())
+        {
+            const std::size_t markerOffset = offset;
+            Expect(bytes[offset] == 0xff, "JPEG scan-data comparison found an invalid marker");
+            while (offset < bytes.size() && bytes[offset] == 0xff)
+            {
+                ++offset;
+            }
+            Expect(offset < bytes.size(), "JPEG scan-data comparison found a truncated marker");
+            const BYTE marker = bytes[offset++];
+            if (marker == 0xda)
+            {
+                return { bytes.begin() + markerOffset, bytes.end() };
+            }
+            if (marker == 0xd9)
+            {
+                break;
+            }
+            if (marker == 0x01 || (marker >= 0xd0 && marker <= 0xd7))
+            {
+                continue;
+            }
+
+            Expect(offset <= bytes.size() && bytes.size() - offset >= 2,
+                   "JPEG scan-data comparison found a truncated segment length");
+            const std::size_t segmentLength = (static_cast<std::size_t>(bytes[offset]) << 8)
+                | static_cast<std::size_t>(bytes[offset + 1]);
+            Expect(segmentLength >= 2 && segmentLength <= bytes.size() - offset,
+                   "JPEG scan-data comparison found an invalid segment length");
+            offset += segmentLength;
+        }
+
+        Expect(false, "JPEG scan-data comparison did not find the image scan");
+        return {};
     }
 
     hyperbrowse::cache::ThumbnailCacheKey MakeCacheKey(const fs::path& path,
@@ -2544,16 +2632,62 @@ namespace
     {
         TempFolder root(L"HyperBrowseJpegOrientation");
 
+        const fs::path missingOrientationPath = root.Root() / L"missing-orientation.jpg";
+        WriteTestImage(missingOrientationPath, TestImageFormat::Jpeg, 24, 48);
+        const std::vector<BYTE> missingOrientationScan = ReadJpegScanData(missingOrientationPath);
+        std::wstring missingOrientationError;
+        const bool adjustedMissingOrientation = hyperbrowse::services::AdjustJpegOrientation(
+            missingOrientationPath.wstring(),
+            1,
+            &missingOrientationError);
+        Expect(adjustedMissingOrientation,
+               std::string("JPEG orientation adjustment without an existing EXIF orientation failed: ")
+                   + Utf8FromWide(missingOrientationError));
+        Expect(ReadJpegOrientation(missingOrientationPath) == 6,
+               "JPEG orientation adjustment did not add the missing EXIF orientation value");
+        Expect(ReadJpegScanData(missingOrientationPath) == missingOrientationScan,
+               "Adding JPEG orientation metadata changed the compressed image data");
+
+        const fs::path existingExifPath = root.Root() / L"existing-exif-no-orientation.jpg";
+        constexpr std::string_view kJpegDescription = "metadata remains intact";
+        WriteTestImage(
+            existingExifPath,
+            TestImageFormat::Jpeg,
+            24,
+            48,
+            1,
+            {},
+            {},
+            kJpegDescription);
+        const std::vector<BYTE> existingExifScan = ReadJpegScanData(existingExifPath);
+        std::wstring existingExifError;
+        const bool adjustedExistingExif = hyperbrowse::services::AdjustJpegOrientation(
+            existingExifPath.wstring(),
+            1,
+            &existingExifError);
+        Expect(adjustedExistingExif,
+               std::string("JPEG orientation adjustment in existing EXIF metadata failed: ")
+                   + Utf8FromWide(existingExifError));
+        Expect(ReadJpegOrientation(existingExifPath) == 6,
+               "JPEG orientation adjustment did not add the missing EXIF Orientation entry");
+        Expect(ReadJpegMetadataString(existingExifPath, L"/app1/ifd/{ushort=270}") == kJpegDescription,
+               "Adding JPEG Orientation did not preserve existing EXIF metadata");
+        Expect(ReadJpegScanData(existingExifPath) == existingExifScan,
+               "Adding JPEG Orientation changed the compressed image data");
+
         const auto runCase = [&](const wchar_t* fileName, int quarterTurnsDelta, std::uint16_t expectedOrientation)
         {
             const fs::path jpegPath = root.Root() / fileName;
             WriteTestImage(jpegPath, TestImageFormat::Jpeg, 24, 48, 6);
+            const std::vector<BYTE> originalScan = ReadJpegScanData(jpegPath);
 
             std::wstring errorMessage;
             Expect(hyperbrowse::services::AdjustJpegOrientation(jpegPath.wstring(), quarterTurnsDelta, &errorMessage),
                    std::string("JPEG orientation adjustment failed: ") + Utf8FromWide(errorMessage));
             Expect(ReadJpegOrientation(jpegPath) == expectedOrientation,
                    "JPEG orientation adjustment wrote the wrong EXIF orientation value");
+            Expect(ReadJpegScanData(jpegPath) == originalScan,
+                   "Updating JPEG orientation metadata changed the compressed image data");
         };
 
         runCase(L"minus-one.jpg", -1, 1);
@@ -8337,6 +8471,7 @@ int main(int argc, char* argv[])
 
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
         const bool viewerInteractionOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-interaction";
+        const bool jpegOrientationOnly = argc > 1 && std::string_view(argv[1]) == "--jpeg-orientation";
         const bool codecReadinessOnly = argc > 1 && std::string_view(argv[1]) == "--codec-readiness";
         const bool codecReadinessWindowOnly = argc > 1 && std::string_view(argv[1]) == "--codec-readiness-window";
         const bool codecInventoryOnly = argc > 1 && std::string_view(argv[1]) == "--codec-inventory";
@@ -8405,6 +8540,10 @@ int main(int argc, char* argv[])
         else if (viewerInteractionOnly)
         {
             RunViewerWindowScenario(instance, hwnd);
+        }
+        else if (jpegOrientationOnly)
+        {
+            RunJpegOrientationAdjustmentScenario();
         }
         else if (thumbnailPersistenceOnly)
         {
