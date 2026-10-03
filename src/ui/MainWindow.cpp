@@ -18978,7 +18978,8 @@ namespace hyperbrowse::ui
                                        initialFolderName,
                                        0,
                                        static_cast<int>(initialFolderName.size()),
-                                       &folderName))
+                                       &folderName,
+                                       L"Parent folder: " + parentPath))
         {
             std::wstring errorMessage;
             if (!IsValidFolderName(folderName, &errorMessage))
@@ -19167,7 +19168,8 @@ namespace hyperbrowse::ui
                                        initialName,
                                        0,
                                        static_cast<int>(initialName.size()),
-                                       &folderName))
+                                       &folderName,
+                                       L"Parent folder: " + parentPath))
         {
             std::wstring errorMessage;
             if (!IsValidFolderName(folderName, &errorMessage))

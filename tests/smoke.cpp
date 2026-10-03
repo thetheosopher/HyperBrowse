@@ -55,6 +55,7 @@
 #include "ui/DialogDpi.h"
 #include "ui/DialogShell.h"
 #include "ui/ExternalDropTarget.h"
+#include "ui/MainWindowDialogs.h"
 #include "ui/MainWindow.h"
 #include "ui/MainWindowDialogState.h"
 #include "ui/SavedSearchController.h"
@@ -4271,6 +4272,8 @@ namespace
                 ULONGLONG deadline{};
                 bool answered{};
                 bool timedOut{};
+                std::wstring expectedContextLine;
+                bool contextLineMatched{};
             };
 
             void CALLBACK SavedSearchDialogTimer(HWND owner, UINT, UINT_PTR timerId, DWORD)
@@ -4288,6 +4291,16 @@ namespace
                     }
                     else
                     {
+                        if (!response->expectedContextLine.empty())
+                        {
+                            const HWND contextWindow = GetDlgItem(dialog, 101);
+                            wchar_t contextText[512]{};
+                            response->contextLineMatched = contextWindow
+                                && GetWindowTextW(contextWindow,
+                                                  contextText,
+                                                  static_cast<int>(std::size(contextText))) > 0
+                                && response->expectedContextLine == contextText;
+                        }
                         if (response->command != IDYES) SetWindowTextW(GetDlgItem(dialog, 100), response->text.c_str());
                         response->answered = true;
                         PostMessageW(dialog, WM_COMMAND, MAKEWPARAM(response->command, BN_CLICKED),
@@ -4338,6 +4351,37 @@ namespace
                         return text() == L"type:raw";
                     }, 5000);
                     Expect(text() == L"type:raw", "File saved-search command did not apply its expression to the filter edit");
+                    const std::wstring expectedContextLine = L"Parent folder: C:\\HyperBrowseSmokeParent";
+                    SavedSearchDialogResponse contextResponse{
+                        L"Parent Folder Context Smoke",
+                        L"New Folder",
+                        IDCANCEL,
+                        GetTickCount64() + 5000};
+                    contextResponse.expectedContextLine = expectedContextLine;
+                    Expect(SetPropW(window.Hwnd(), L"SavedSearchSmokeDialog", &contextResponse) != FALSE,
+                           "Failed to set text-dialog context response state");
+                    constexpr UINT_PTR contextTimerId = 9928;
+                    Expect(SetTimer(window.Hwnd(), contextTimerId, 20, SavedSearchDialogTimer) != 0,
+                           "Failed to set text-dialog context response timer");
+                    std::wstring ignoredFolderName;
+                    const bool contextDialogAccepted = hyperbrowse::ui::PromptForSingleLineText(
+                        window.Hwnd(),
+                        instance,
+                        hyperbrowse::util::kDefaultAppTextSize,
+                        true,
+                        contextResponse.title,
+                        L"Enter a name for the new folder.",
+                        L"Create",
+                        contextResponse.text,
+                        0,
+                        static_cast<int>(contextResponse.text.size()),
+                        &ignoredFolderName,
+                        expectedContextLine);
+                    KillTimer(window.Hwnd(), contextTimerId);
+                    RemovePropW(window.Hwnd(), L"SavedSearchSmokeDialog");
+                    Expect(!contextDialogAccepted && contextResponse.answered
+                               && contextResponse.contextLineMatched && !contextResponse.timedOut,
+                           "Single-line text dialog did not display its parent-folder context");
                     ComPtr<IAccessible> accessible;
                     Expect(SUCCEEDED(ObjectFromLresult(SendMessageW(window.Hwnd(), WM_GETOBJECT, 0, OBJID_CLIENT),
                         IID_IAccessible, 0, reinterpret_cast<void**>(accessible.GetAddressOf()))),

@@ -21,7 +21,8 @@ namespace hyperbrowse::ui
                                  const std::wstring& initialText,
                                  int selectionStart,
                                  int selectionEnd,
-                                 std::wstring* resultText);
+                                 std::wstring* resultText,
+                                 std::wstring contextLine = {});
 
     bool IsValidRenameLeafName(std::wstring_view leafName, std::wstring* errorMessage);
 
