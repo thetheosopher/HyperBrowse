@@ -33,6 +33,12 @@ namespace hyperbrowse::ui
         int commandBarButtonRadiusDip{10};
         int commandBarFocusRingRadiusDip{10};
         int commandBarFilterRadiusDip{14};
+        int commandBarFilterEditMaxWidthDip{320};
+        int commandBarFilterEditHorizontalInsetDip{10};
+        int commandBarFilterEditTextInsetDip{28};
+        int commandBarFilterEditTextVerticalOffsetDip{2};
+        int commandBarFilterSaveButtonGapDip{8};
+        int commandBarFilterClearButtonSizeDip{24};
 
         int ScaleDip(int value) const noexcept
         {

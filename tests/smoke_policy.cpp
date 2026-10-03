@@ -581,7 +581,7 @@ namespace hyperbrowse::tests
                               });
 
             const auto& menuButtons = controller.MenuButtons();
-            Expect(controller.Items().size() == 18, "Command-bar controller did not initialize toolbar items");
+            Expect(controller.Items().size() == 19, "Command-bar controller did not initialize toolbar items");
                  Expect(menuButtons.size() == 5, "Command-bar controller did not retain all five top-level menus");
             Expect(controller.MenuHitTest(menuButtons[0].rect.left + 1, menuButtons[0].rect.top + 1) == 0,
                    "Command-bar controller did not hit-test the first menu button");
@@ -637,6 +637,37 @@ namespace hyperbrowse::tests
             controller.UpdateItemStates(state);
             Expect(!saveItem->enabled, "Inline saved-search command remained enabled while unavailable");
 
+            controller.Layout(2400,
+                              6,
+                              MakeMenuMetrics(hyperbrowse::util::kDefaultAppTextSize),
+                              nullptr,
+                              [](HFONT, std::wstring_view text)
+                              {
+                                  return static_cast<int>(text.size() * 8);
+                              });
+            const auto clearFilterItem = findItem(ID_ACTION_CLEAR_FILTER);
+            Expect(clearFilterItem != controller.Items().end()
+                       && clearFilterItem->kind == CommandBarController::ToolbarItemKind::FilterClear
+                       && clearFilterItem->tooltip == L"Clear Filter"
+                       && !clearFilterItem->enabled
+                       && !IsRectEmpty(&clearFilterItem->rect),
+                   "Clear-filter toolbar action did not expose its tooltip, bounds, or disabled state");
+            state.clearFilterEnabled = true;
+            controller.UpdateItemStates(state);
+            const int clearFilterIndex = static_cast<int>(std::distance(controller.Items().begin(), clearFilterItem));
+            Expect(clearFilterItem->enabled
+                       && controller.ToolbarHitTest((clearFilterItem->rect.left + clearFilterItem->rect.right) / 2,
+                                                    (clearFilterItem->rect.top + clearFilterItem->rect.bottom) / 2)
+                           == clearFilterIndex,
+                   "Clear-filter toolbar action did not become hit-testable with an active filter");
+            state.clearFilterEnabled = false;
+            controller.UpdateItemStates(state);
+            Expect(!clearFilterItem->enabled
+                       && controller.ToolbarHitTest((clearFilterItem->rect.left + clearFilterItem->rect.right) / 2,
+                                                    (clearFilterItem->rect.top + clearFilterItem->rect.bottom) / 2)
+                           == -1,
+                   "Clear-filter toolbar action remained hit-testable without an active filter");
+
             for (const auto textSize : {hyperbrowse::util::AppTextSize::Small,
                                        hyperbrowse::util::AppTextSize::Medium,
                                        hyperbrowse::util::AppTextSize::Large})
@@ -644,6 +675,7 @@ namespace hyperbrowse::tests
                 for (const UINT dpi : {96U, 144U, 192U})
                 {
                     const auto metrics = MakeMenuMetrics(textSize, dpi);
+                    int expectedFilterLeft = -1;
                     for (const int width : {640, 900, 1600, 2400})
                     {
                         controller.Layout(width, 6, metrics, nullptr, [&](HFONT, std::wstring_view label)
@@ -651,13 +683,34 @@ namespace hyperbrowse::tests
                         const auto filter = std::find_if(controller.Items().begin(), controller.Items().end(),
                             [](const auto& item) { return item.kind == CommandBarController::ToolbarItemKind::FilterEdit; });
                         Expect(filter != controller.Items().end(), "Inline Save layout lost the filter edit");
+                        const auto clear = findItem(ID_ACTION_CLEAR_FILTER);
+                        Expect(clear != controller.Items().end()
+                                   && clear->rect.left >= filter->rect.left
+                                   && clear->rect.right <= filter->rect.right
+                                   && clear->rect.top >= filter->rect.top
+                                   && clear->rect.bottom <= filter->rect.bottom,
+                               "Clear-filter action escaped the filter field bounds");
+                        const int filterWidth = static_cast<int>(filter->rect.right - filter->rect.left);
+                        const int filterMaxWidth = metrics.ScaleDip(metrics.commandBarFilterEditMaxWidthDip);
+                        Expect(filterWidth <= filterMaxWidth, "Filter field exceeded its configured maximum width");
+                        if (expectedFilterLeft < 0)
+                            expectedFilterLeft = filter->rect.left;
+                        else
+                            Expect(filter->rect.left == expectedFilterLeft,
+                                   "Filter field moved when the command-bar width changed");
+                        if (width == 2400
+                            && textSize == hyperbrowse::util::AppTextSize::Medium
+                            && dpi == 96U)
+                            Expect(filterWidth == filterMaxWidth,
+                                   "Filter field did not reach its maximum width in a wide command bar");
                         if (!IsRectEmpty(&saveItem->rect))
                         {
-                            Expect(filter->rect.right <= saveItem->rect.left
+                            Expect(filter->rect.right + metrics.ScaleDip(metrics.commandBarFilterSaveButtonGapDip)
+                                       == saveItem->rect.left
                                 && filter->rect.right - filter->rect.left >= metrics.ScaleDip(80)
                                 && saveItem->rect.right <= width
                                 && saveItem->rect.right - saveItem->rect.left == metrics.ScaleDip(metrics.commandBarItemSizeDip),
-                                "Inline Save overlapped the filter or lost its fixed scaled bounds");
+                                "Inline Save lost its padded position or fixed scaled bounds");
                         }
                         if (width == 640)
                             Expect(IsRectEmpty(&saveItem->rect), "Inline Save did not yield space in a narrow command bar");

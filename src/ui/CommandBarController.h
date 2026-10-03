@@ -22,6 +22,7 @@ namespace hyperbrowse::ui
             IconDropdown,
             Separator,
             FilterEdit,
+            FilterClear,
         };
 
         enum class ToolbarAlignment
@@ -63,6 +64,7 @@ namespace hyperbrowse::ui
             bool compareEnabled{};
             bool selectionActionsEnabled{};
             bool saveFilterEnabled{};
+            bool clearFilterEnabled{};
         };
 
         enum class KeyboardAction

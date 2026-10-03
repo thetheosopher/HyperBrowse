@@ -7443,6 +7443,16 @@ namespace
         Expect(!sendKey(filterEdit, '5') && !sendKey(filterEdit, VK_NUMPAD5),
                "Thumbnail rating keys were intercepted while the filter edit owned focus");
 
+        SetWindowTextW(filterEdit, L"clear filter smoke");
+        Expect(GetWindowTextLengthW(filterEdit) > 0, "Could not set the filter text for clear-button coverage");
+        SendMessageW(mainWindow.Hwnd(),
+                     WM_COMMAND,
+                     MAKEWPARAM(hyperbrowse::ui::command_ids::ID_ACTION_CLEAR_FILTER, 0),
+                     0);
+        PumpMessagesFor(50);
+        Expect(GetWindowTextLengthW(filterEdit) == 0, "Clear-filter command did not clear the filter edit");
+        Expect(GetFocus() == filterEdit, "Clear-filter command did not return focus to the filter edit");
+
         DestroyWindow(mainWindow.Hwnd());
         PumpMessagesFor(100);
     }

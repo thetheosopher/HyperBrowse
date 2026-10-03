@@ -158,6 +158,7 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_ACTION_THUMBNAIL_SIZE_MENU = 2402;
     inline constexpr UINT ID_ACTION_THEME_MENU = 2403;
     inline constexpr UINT ID_ACTION_FILTER_EDIT = 2404;
+    inline constexpr UINT ID_ACTION_CLEAR_FILTER = 2405;
 
     inline constexpr UINT ID_HELP_ABOUT = 9001;
     inline constexpr UINT ID_HELP_DIAGNOSTICS_SNAPSHOT = 9002;

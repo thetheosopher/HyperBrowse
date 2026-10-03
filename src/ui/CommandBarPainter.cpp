@@ -280,6 +280,48 @@ namespace hyperbrowse::ui
                 continue;
             }
 
+            if (item.kind == CommandBarController::ToolbarItemKind::FilterClear)
+            {
+                if (item.enabled)
+                {
+                    const bool isHot = index == state.hotToolbarIndex;
+                    const bool isPressed = index == state.pressedToolbarIndex;
+                    const bool isFocused = index == state.focusedToolbarIndex;
+                    if (isHot || isPressed)
+                    {
+                        const COLORREF fillColor = isPressed
+                            ? BlendColor(palette.actionFieldBackground, palette.accent, 48)
+                            : BlendColor(palette.actionFieldBackground, palette.text, 20);
+                        drawRoundedButton(item.rect, fillColor, fillColor);
+                    }
+                    if (isFocused)
+                    {
+                        drawFocusRing(item.rect);
+                    }
+
+                    const COLORREF crossColor = isPressed
+                        ? palette.accentText
+                        : (isHot || isFocused ? palette.text : palette.mutedText);
+                    const auto crossBrush = createBrush(crossColor);
+                    if (crossBrush)
+                    {
+                        const float centerX = static_cast<float>(item.rect.left + item.rect.right) * 0.5f;
+                        const float centerY = static_cast<float>(item.rect.top + item.rect.bottom) * 0.5f;
+                        const float halfSize = static_cast<float>(metrics.ScaleDip(4));
+                        const float strokeWidth = static_cast<float>(std::max(1, metrics.ScaleDip(1)));
+                        renderTarget->DrawLine(D2D1::Point2F(centerX - halfSize, centerY - halfSize),
+                                               D2D1::Point2F(centerX + halfSize, centerY + halfSize),
+                                               crossBrush.Get(),
+                                               strokeWidth);
+                        renderTarget->DrawLine(D2D1::Point2F(centerX + halfSize, centerY - halfSize),
+                                               D2D1::Point2F(centerX - halfSize, centerY + halfSize),
+                                               crossBrush.Get(),
+                                               strokeWidth);
+                    }
+                }
+                continue;
+            }
+
             const bool isHot = index == state.hotToolbarIndex;
             const bool isPressed = index == state.pressedToolbarIndex;
             const bool isFocused = index == state.focusedToolbarIndex;
@@ -538,6 +580,73 @@ namespace hyperbrowse::ui
                                          filterBg.top + metrics.ScaleDip(7),
                                          filterIconSize,
                                          filterIconSize);
+                    }
+                }
+                continue;
+            }
+
+            if (item.kind == CommandBarController::ToolbarItemKind::FilterClear)
+            {
+                if (item.enabled)
+                {
+                    const bool isHot = index == state.hotToolbarIndex;
+                    const bool isPressed = index == state.pressedToolbarIndex;
+                    const bool isFocused = index == state.focusedToolbarIndex;
+                    if (isHot || isPressed)
+                    {
+                        RECT buttonRect = item.rect;
+                        InflateRect(&buttonRect, -1, -1);
+                        const COLORREF fillColor = isPressed
+                            ? BlendColor(palette.actionFieldBackground, palette.accent, 48)
+                            : BlendColor(palette.actionFieldBackground, palette.text, 20);
+                        const HBRUSH buttonBrush = CreateSolidBrush(fillColor);
+                        const HPEN buttonPen = CreatePen(PS_SOLID, 1, fillColor);
+                        if (buttonBrush && buttonPen)
+                        {
+                            const HGDIOBJ oldBrush = SelectObject(hdc, buttonBrush);
+                            const HGDIOBJ oldButtonPen = SelectObject(hdc, buttonPen);
+                            RoundRect(hdc,
+                                      buttonRect.left,
+                                      buttonRect.top,
+                                      buttonRect.right,
+                                      buttonRect.bottom,
+                                      buttonRadius,
+                                      buttonRadius);
+                            SelectObject(hdc, oldButtonPen);
+                            SelectObject(hdc, oldBrush);
+                        }
+                        if (buttonPen)
+                        {
+                            DeleteObject(buttonPen);
+                        }
+                        if (buttonBrush)
+                        {
+                            DeleteObject(buttonBrush);
+                        }
+                    }
+                    if (isFocused)
+                    {
+                        drawFocusRing(item.rect);
+                    }
+
+                    const COLORREF crossColor = isPressed
+                        ? palette.accentText
+                        : (isHot || isFocused ? palette.text : palette.mutedText);
+                    const HPEN crossPen = CreatePen(PS_SOLID,
+                                                    std::max(1, metrics.ScaleDip(1)),
+                                                    crossColor);
+                    if (crossPen)
+                    {
+                        const HGDIOBJ oldCrossPen = SelectObject(hdc, crossPen);
+                        const int centerX = (item.rect.left + item.rect.right) / 2;
+                        const int centerY = (item.rect.top + item.rect.bottom) / 2;
+                        const int halfSize = metrics.ScaleDip(4);
+                        MoveToEx(hdc, centerX - halfSize, centerY - halfSize, nullptr);
+                        LineTo(hdc, centerX + halfSize, centerY + halfSize);
+                        MoveToEx(hdc, centerX + halfSize, centerY - halfSize, nullptr);
+                        LineTo(hdc, centerX - halfSize, centerY + halfSize);
+                        SelectObject(hdc, oldCrossPen);
+                        DeleteObject(crossPen);
                     }
                 }
                 continue;

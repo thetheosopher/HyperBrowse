@@ -223,6 +223,13 @@ namespace
     constexpr int kToolbarSeparatorWidth = 9;
     constexpr int kToolbarSeparatorGap = 4;
     constexpr int kToolbarFilterEditHeight = 24;
+    constexpr wchar_t kFilterEditTooltip[] =
+        L"Case-insensitive; all terms must match.\r\n"
+        L"Words match filenames.\r\n"
+        L"Tags: tag:value or tags:value\r\n"
+        L"Types: type:raw (RAW family) or type:jpg (exact extension)\r\n"
+        L"Ratings (0-5): rating:rated, rating:unrated, rating:4,\r\n"
+        L"rating:>=3, or rating:<2";
     constexpr int kFilterEditMinWidth = 160;
     constexpr int kDetailsStripHeight = 22;
     constexpr UINT kStatusStripControlId = 5001;
@@ -11266,6 +11273,17 @@ namespace hyperbrowse::ui
                          0,
                          hyperbrowse::util::ScaleAppTextDimension(kToolbarTooltipMaxWidth, appTextSize_));
 
+            if (filterEdit_)
+            {
+                TTTOOLINFOW filterToolInfo{};
+                filterToolInfo.cbSize = sizeof(filterToolInfo);
+                filterToolInfo.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+                filterToolInfo.hwnd = hwnd_;
+                filterToolInfo.uId = reinterpret_cast<UINT_PTR>(filterEdit_);
+                filterToolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+                SendMessageW(tooltipControl_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&filterToolInfo));
+            }
+
             for (int index = 0; index < static_cast<int>(toolbarItems_.size()); ++index)
             {
                 TTTOOLINFOW toolInfo{};
@@ -14339,6 +14357,7 @@ namespace hyperbrowse::ui
         applyingSavedSearchFilter_ = false;
         browserPaneController_->SetFilterQuery(std::wstring(expression));
         NotifyWinEvent(EVENT_OBJECT_VALUECHANGE, filterEdit_, OBJID_CLIENT, CHILDID_SELF);
+        UpdateMenuState();
     }
 
     void MainWindow::ConsumeSavedSearchResult()
@@ -21689,6 +21708,7 @@ namespace hyperbrowse::ui
         state.selectionActionsEnabled = hasSelection && !fileOperationActive_;
         state.saveFilterEnabled = savedSearchController_ && savedSearchController_->Ready()
             && !savedSearchController_->Busy() && browserPaneController_ && browserPaneController_->HasActiveFilter();
+        state.clearFilterEnabled = filterEdit_ && GetWindowTextLengthW(filterEdit_) > 0;
         commandBarController_.UpdateItemStates(state);
 
         InvalidateToolbarStrip();
@@ -25010,6 +25030,16 @@ namespace hyperbrowse::ui
 
     bool MainWindow::HandleCommand(UINT commandId)
     {
+        if (commandId == command_ids::ID_ACTION_CLEAR_FILTER)
+        {
+            if (filterEdit_)
+            {
+                SetWindowTextW(filterEdit_, L"");
+                SetFocus(filterEdit_);
+            }
+            return true;
+        }
+
         if (HandleSavedSearchCommand(commandId)) return true;
         if (fileCommandController_.Handle(commandId))
         {
@@ -25289,16 +25319,30 @@ namespace hyperbrowse::ui
         });
         if (filterItem != toolbarItems_.end() && filterEdit_)
         {
+            const auto filterClearItem = std::find_if(toolbarItems_.begin(), toolbarItems_.end(), [](const ToolbarItem& item)
+            {
+                return item.kind == ToolbarItemKind::FilterClear;
+            });
             const RECT& filterRect = filterItem->rect;
             const int toolbarItemSize = menuMetrics.ScaleDip(kToolbarItemSize);
             const int filterEditHeight = menuMetrics.ScaleDip(kToolbarFilterEditHeight);
-            const int filterTop = itemTop + std::max(0, (toolbarItemSize - filterEditHeight) / 2);
-            const int filterWidth = std::max(0, static_cast<int>(filterRect.right - filterRect.left) - menuMetrics.ScaleDip(20));
+            const int filterEditVerticalOffset =
+                menuMetrics.ScaleDip(menuMetrics.commandBarFilterEditTextVerticalOffsetDip);
+            const int filterTop = itemTop + std::max(0, (toolbarItemSize - filterEditHeight) / 2)
+                + filterEditVerticalOffset;
+            const int filterControlHeight = std::max(1, filterEditHeight - filterEditVerticalOffset);
+            const int filterEditLeft = static_cast<int>(filterRect.left)
+                + menuMetrics.ScaleDip(menuMetrics.commandBarFilterEditTextInsetDip);
+            const int filterEditRight = filterClearItem != toolbarItems_.end()
+                ? static_cast<int>(filterClearItem->rect.left)
+                : static_cast<int>(filterRect.right)
+                    - menuMetrics.ScaleDip(menuMetrics.commandBarFilterEditHorizontalInsetDip);
+            const int filterWidth = std::max(0, filterEditRight - filterEditLeft);
             MoveWindow(filterEdit_,
-                       static_cast<int>(filterRect.left) + menuMetrics.ScaleDip(10),
+                       filterEditLeft,
                        filterTop,
                        filterWidth,
-                       filterEditHeight,
+                       filterControlHeight,
                        TRUE);
         }
 
@@ -26409,6 +26453,12 @@ namespace hyperbrowse::ui
         if (nmh->hwndFrom == tooltipControl_ && nmh->code == TTN_GETDISPINFOW)
         {
             auto* di = reinterpret_cast<NMTTDISPINFOW*>(lParam);
+            if (filterEdit_ && di->hdr.idFrom == reinterpret_cast<UINT_PTR>(filterEdit_))
+            {
+                di->lpszText = const_cast<LPWSTR>(kFilterEditTooltip);
+                return 0;
+            }
+
             if (treePane_ && di->hdr.idFrom == reinterpret_cast<UINT_PTR>(treePane_))
             {
                 treeFolderTooltipText_.clear();
@@ -26444,6 +26494,14 @@ namespace hyperbrowse::ui
             }
 
             const auto idx = static_cast<std::size_t>(di->hdr.idFrom);
+            if (idx < toolbarItems_.size()
+                && toolbarItems_[idx].kind == ToolbarItemKind::FilterClear
+                && !toolbarItems_[idx].enabled)
+            {
+                di->lpszText = const_cast<LPWSTR>(L"");
+                return 0;
+            }
+
             if (idx < toolbarItems_.size() && !toolbarItems_[idx].tooltip.empty())
             {
                 di->lpszText = const_cast<wchar_t*>(toolbarItems_[idx].tooltip.c_str());

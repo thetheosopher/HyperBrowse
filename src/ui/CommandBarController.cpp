@@ -58,7 +58,15 @@ namespace hyperbrowse::ui
         filterItem.alignment = ToolbarAlignment::Left;
         items_.push_back(std::move(filterItem));
 
-        addIcon(ID_FILE_SAVE_CURRENT_FILTER, "save", L"Save Current Filter", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
+        ToolbarItem clearFilterItem;
+        clearFilterItem.commandId = ID_ACTION_CLEAR_FILTER;
+        clearFilterItem.tooltip = L"Clear Filter";
+        clearFilterItem.kind = ToolbarItemKind::FilterClear;
+        clearFilterItem.alignment = ToolbarAlignment::Left;
+        clearFilterItem.enabled = false;
+        items_.push_back(std::move(clearFilterItem));
+
+        addIcon(ID_FILE_SAVE_CURRENT_FILTER, "save", L"Save Current Filter");
         addSeparator(ToolbarAlignment::Right);
         addIcon(ID_FILE_COMPARE_SELECTED, "compare", L"Compare Selected", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
         addIcon(ID_FILE_COPY_SELECTION, "copy", L"Copy Selection", ToolbarItemKind::IconButton, ToolbarAlignment::Right);
@@ -109,6 +117,8 @@ namespace hyperbrowse::ui
         int leftCursor = actionStripPaddingX;
         int rightCursor = clientWidth - actionStripPaddingX;
         int filterItemIndex = -1;
+        int filterClearItemIndex = -1;
+        int saveFilterItemIndex = -1;
 
         for (auto& button : menuButtons_)
         {
@@ -152,6 +162,18 @@ namespace hyperbrowse::ui
                 continue;
             }
 
+            if (item.kind == ToolbarItemKind::FilterClear)
+            {
+                filterClearItemIndex = index;
+                continue;
+            }
+
+            if (item.commandId == ID_FILE_SAVE_CURRENT_FILTER)
+            {
+                saveFilterItemIndex = index;
+                continue;
+            }
+
             item.rect = RECT{leftCursor, itemTop, leftCursor + itemSize, itemTop + itemSize};
             leftCursor += itemSize + metrics.ScaleDip(2);
         }
@@ -174,13 +196,6 @@ namespace hyperbrowse::ui
                 continue;
             }
 
-            if (item.commandId == ID_FILE_SAVE_CURRENT_FILTER
-                && rightCursor - itemSize - metrics.ScaleDip(14) < leftCursor + metrics.ScaleDip(80))
-            {
-                item.rect = RECT{};
-                continue;
-            }
-
             rightCursor -= itemSize;
             item.rect = RECT{rightCursor, itemTop, rightCursor + itemSize, itemTop + itemSize};
             rightCursor -= metrics.ScaleDip(2);
@@ -189,10 +204,57 @@ namespace hyperbrowse::ui
         if (filterItemIndex >= 0)
         {
             const int filterLeft = leftCursor + metrics.ScaleDip(6);
-            const int filterRight = rightCursor - metrics.ScaleDip(6);
-            const int filterWidth = std::max(0, filterRight - filterLeft);
+            const int filterRightLimit = std::max(filterLeft, rightCursor - metrics.ScaleDip(6));
+            int availableFilterWidth = filterRightLimit - filterLeft;
+            const int saveButtonGap = metrics.ScaleDip(metrics.commandBarFilterSaveButtonGapDip);
+            const int minimumFilterWidth = metrics.ScaleDip(80);
+            bool showSaveFilter = false;
+            if (saveFilterItemIndex >= 0)
+            {
+                const int availableFilterWidthWithSave =
+                    rightCursor - itemSize - saveButtonGap - filterLeft;
+                if (availableFilterWidthWithSave >= minimumFilterWidth)
+                {
+                    availableFilterWidth = availableFilterWidthWithSave;
+                    showSaveFilter = true;
+                }
+            }
+
+            const int filterWidth = std::min(availableFilterWidth,
+                                             metrics.ScaleDip(metrics.commandBarFilterEditMaxWidthDip));
+            const int filterFieldRight = filterLeft + filterWidth;
             items_[static_cast<std::size_t>(filterItemIndex)].rect =
-                RECT{filterLeft, itemTop, filterLeft + filterWidth, itemTop + itemSize};
+                RECT{filterLeft, itemTop, filterFieldRight, itemTop + itemSize};
+
+            if (filterClearItemIndex >= 0)
+            {
+                const int clearButtonSize = metrics.ScaleDip(metrics.commandBarFilterClearButtonSizeDip);
+                const int clearButtonRight = std::max(
+                    filterLeft,
+                    filterFieldRight - metrics.ScaleDip(metrics.commandBarFilterEditHorizontalInsetDip));
+                const int clearButtonLeft = std::max(filterLeft, clearButtonRight - clearButtonSize);
+                const int clearButtonTop = itemTop + std::max(0, (itemSize - clearButtonSize) / 2);
+                items_[static_cast<std::size_t>(filterClearItemIndex)].rect =
+                    RECT{clearButtonLeft,
+                         clearButtonTop,
+                         clearButtonRight,
+                         clearButtonTop + clearButtonSize};
+            }
+
+            if (saveFilterItemIndex >= 0)
+            {
+                auto& saveFilterItem = items_[static_cast<std::size_t>(saveFilterItemIndex)];
+                if (showSaveFilter)
+                {
+                    const int saveButtonLeft = filterFieldRight + saveButtonGap;
+                    saveFilterItem.rect =
+                        RECT{saveButtonLeft, itemTop, saveButtonLeft + itemSize, itemTop + itemSize};
+                }
+                else
+                {
+                    saveFilterItem.rect = RECT{};
+                }
+            }
         }
     }
 
@@ -225,6 +287,9 @@ namespace hyperbrowse::ui
                 break;
             case ID_FILE_SAVE_CURRENT_FILTER:
                 item.enabled = state.saveFilterEnabled;
+                break;
+            case ID_ACTION_CLEAR_FILTER:
+                item.enabled = state.clearFilterEnabled;
                 break;
             case ID_FILE_COPY_SELECTION:
             case ID_FILE_MOVE_SELECTION:
@@ -369,7 +434,9 @@ namespace hyperbrowse::ui
         for (int index = 0; index < static_cast<int>(items_.size()); ++index)
         {
             const auto& item = items_[static_cast<std::size_t>(index)];
-            if (item.kind == ToolbarItemKind::Separator || item.kind == ToolbarItemKind::FilterEdit)
+            if (item.kind == ToolbarItemKind::Separator
+                || item.kind == ToolbarItemKind::FilterEdit
+                || (item.kind == ToolbarItemKind::FilterClear && !item.enabled))
             {
                 continue;
             }
