@@ -619,6 +619,19 @@ namespace hyperbrowse::tests
                                         return item.commandId == commandId;
                                     });
             };
+            const auto sortItem = findItem(ID_ACTION_SORT_MENU);
+            const auto thumbnailSizeItem = findItem(ID_ACTION_THUMBNAIL_SIZE_MENU);
+            const auto toolbarMetrics = MakeMenuMetrics(hyperbrowse::util::kDefaultAppTextSize);
+            const int expectedDropdownWidth = toolbarMetrics.ScaleDip(toolbarMetrics.commandBarItemSizeDip)
+                + toolbarMetrics.ScaleDip(toolbarMetrics.commandBarDropdownButtonExtraWidthDip);
+            Expect(sortItem != controller.Items().end()
+                       && thumbnailSizeItem != controller.Items().end()
+                       && sortItem->kind == CommandBarController::ToolbarItemKind::IconDropdown
+                       && thumbnailSizeItem->kind == CommandBarController::ToolbarItemKind::IconDropdown
+                       && sortItem->rect.right - sortItem->rect.left == expectedDropdownWidth
+                       && thumbnailSizeItem->rect.right - thumbnailSizeItem->rect.left == expectedDropdownWidth
+                       && sortItem->rect.right < thumbnailSizeItem->rect.left,
+                   "Sort and thumbnail-size dropdowns did not reserve balanced icon and chevron space");
             Expect(findItem(ID_VIEW_RECURSIVE)->checked && findItem(ID_VIEW_THUMBNAILS)->checked,
                    "Command-bar controller did not apply toggle state");
             Expect(!findItem(ID_ACTION_THUMBNAIL_SIZE_MENU)->enabled

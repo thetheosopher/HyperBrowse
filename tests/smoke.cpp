@@ -4579,8 +4579,16 @@ namespace
                     "Inline Save icon did not rasterize at its requested dimensions");
                 const auto* savePixels = static_cast<const unsigned char*>(saveDib.dsBm.bmBits);
                 bool hasSaveInk = false;
-                for (int pixel = 0; pixel < 24 * 24; ++pixel) hasSaveInk = hasSaveInk || savePixels[pixel * 4 + 3] != 0;
+                bool hasAntialiasedSaveInk = false;
+                for (int pixel = 0; pixel < 24 * 24; ++pixel)
+                {
+                    const unsigned char alpha = savePixels[pixel * 4 + 3];
+                    hasSaveInk = hasSaveInk || alpha != 0;
+                    hasAntialiasedSaveInk =
+                        hasAntialiasedSaveInk || (alpha > 0 && alpha < 255);
+                }
                 Expect(hasSaveInk, "Inline Save icon rasterized as a blank bitmap");
+                Expect(hasAntialiasedSaveInk, "Inline Save icon has no antialiased edge coverage");
                 hyperbrowse::services::SavedSearchStore store;
                 std::wstring error;
                 Expect(store.AddOnWorker({L"RAW UI", L"type:raw"}, &error), "Failed to seed the isolated UI saved search");

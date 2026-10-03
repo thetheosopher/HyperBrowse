@@ -32,6 +32,8 @@ namespace fs = std::filesystem;
 
 namespace
 {
+    constexpr int kRasterSupersample = 2;
+
     std::string NarrowUtf8(std::wstring_view wideText)
     {
         if (wideText.empty())
@@ -197,13 +199,17 @@ namespace hyperbrowse::ui
             return nullptr;
         }
 
-        const float sourceWidth = imageIt->second->width > 0.0f ? imageIt->second->width : 24.0f;
-        const float sourceHeight = imageIt->second->height > 0.0f ? imageIt->second->height : 24.0f;
-        const float scale = static_cast<float>(pixelSize) / (std::max)(sourceWidth, sourceHeight);
         const int bitmapWidth = pixelSize;
         const int bitmapHeight = pixelSize;
+        const int rasterWidth = bitmapWidth * kRasterSupersample;
+        const int rasterHeight = bitmapHeight * kRasterSupersample;
+        const float sourceWidth = imageIt->second->width > 0.0f ? imageIt->second->width : 24.0f;
+        const float sourceHeight = imageIt->second->height > 0.0f ? imageIt->second->height : 24.0f;
+        const float scale = static_cast<float>(rasterWidth) / (std::max)(sourceWidth, sourceHeight);
 
-        std::vector<unsigned char> rgbaPixels(static_cast<std::size_t>(bitmapWidth * bitmapHeight * 4), 0);
+        std::vector<unsigned char> rgbaPixels(
+            static_cast<std::size_t>(rasterWidth) * static_cast<std::size_t>(rasterHeight) * 4,
+            0);
         nsvgRasterize(
             rasterizer_,
             imageIt->second,
@@ -211,9 +217,9 @@ namespace hyperbrowse::ui
             0.0f,
             scale,
             rgbaPixels.data(),
-            bitmapWidth,
-            bitmapHeight,
-            bitmapWidth * 4);
+            rasterWidth,
+            rasterHeight,
+            rasterWidth * 4);
 
         BITMAPINFO bitmapInfo{};
         bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
@@ -238,13 +244,32 @@ namespace hyperbrowse::ui
         const BYTE green = GetGValue(color);
         const BYTE blue = GetBValue(color);
         auto* outputPixels = static_cast<unsigned char*>(dibBits);
-        for (int index = 0; index < bitmapWidth * bitmapHeight; ++index)
+        constexpr unsigned int sampleCount = kRasterSupersample * kRasterSupersample;
+        for (int y = 0; y < bitmapHeight; ++y)
         {
-            const BYTE alpha = rgbaPixels[static_cast<std::size_t>(index * 4 + 3)];
-            outputPixels[static_cast<std::size_t>(index * 4 + 0)] = static_cast<BYTE>((blue * alpha + 127) / 255);
-            outputPixels[static_cast<std::size_t>(index * 4 + 1)] = static_cast<BYTE>((green * alpha + 127) / 255);
-            outputPixels[static_cast<std::size_t>(index * 4 + 2)] = static_cast<BYTE>((red * alpha + 127) / 255);
-            outputPixels[static_cast<std::size_t>(index * 4 + 3)] = alpha;
+            for (int x = 0; x < bitmapWidth; ++x)
+            {
+                unsigned int alphaSum = 0;
+                for (int sampleY = 0; sampleY < kRasterSupersample; ++sampleY)
+                {
+                    const int rasterY = y * kRasterSupersample + sampleY;
+                    for (int sampleX = 0; sampleX < kRasterSupersample; ++sampleX)
+                    {
+                        const int rasterX = x * kRasterSupersample + sampleX;
+                        const std::size_t rasterIndex =
+                            (static_cast<std::size_t>(rasterY) * rasterWidth + rasterX) * 4 + 3;
+                        alphaSum += rgbaPixels[rasterIndex];
+                    }
+                }
+
+                const BYTE alpha = static_cast<BYTE>((alphaSum + sampleCount / 2) / sampleCount);
+                const std::size_t outputIndex =
+                    (static_cast<std::size_t>(y) * bitmapWidth + x) * 4;
+                outputPixels[outputIndex + 0] = static_cast<BYTE>((blue * alpha + 127) / 255);
+                outputPixels[outputIndex + 1] = static_cast<BYTE>((green * alpha + 127) / 255);
+                outputPixels[outputIndex + 2] = static_cast<BYTE>((red * alpha + 127) / 255);
+                outputPixels[outputIndex + 3] = alpha;
+            }
         }
 
         bitmapCache_.emplace(key, dib);

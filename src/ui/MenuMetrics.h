@@ -28,7 +28,8 @@ namespace hyperbrowse::ui
         int commandBarMenuButtonPaddingDip{12};
         int commandBarMenuButtonMinWidthDip{56};
         int commandBarMenuChevronWidthDip{8};
-        int commandBarToolbarIconSizeDip{18};
+        int commandBarToolbarIconSizeDip{22};
+        int commandBarDropdownButtonExtraWidthDip{8};
         int commandBarDropdownChevronSizeDip{10};
         int commandBarButtonRadiusDip{10};
         int commandBarFocusRingRadiusDip{10};

@@ -107,6 +107,7 @@ namespace hyperbrowse::ui
     {
         const int actionStripPaddingX = metrics.ScaleDip(metrics.commandBarPaddingXDip);
         const int itemSize = metrics.ScaleDip(metrics.commandBarItemSizeDip);
+        const int dropdownItemExtraWidth = metrics.ScaleDip(metrics.commandBarDropdownButtonExtraWidthDip);
         const int separatorWidth = metrics.ScaleDip(metrics.commandBarSeparatorWidthDip);
         const int separatorGap = metrics.ScaleDip(metrics.commandBarSeparatorGapDip);
         const int menuButtonGap = metrics.ScaleDip(metrics.commandBarMenuButtonGapDip);
@@ -174,8 +175,10 @@ namespace hyperbrowse::ui
                 continue;
             }
 
-            item.rect = RECT{leftCursor, itemTop, leftCursor + itemSize, itemTop + itemSize};
-            leftCursor += itemSize + metrics.ScaleDip(2);
+            const int itemWidth = itemSize
+                + (item.kind == ToolbarItemKind::IconDropdown ? dropdownItemExtraWidth : 0);
+            item.rect = RECT{leftCursor, itemTop, leftCursor + itemWidth, itemTop + itemSize};
+            leftCursor += itemWidth + metrics.ScaleDip(2);
         }
 
         for (int index = static_cast<int>(items_.size()) - 1; index >= 0; --index)
@@ -196,8 +199,10 @@ namespace hyperbrowse::ui
                 continue;
             }
 
-            rightCursor -= itemSize;
-            item.rect = RECT{rightCursor, itemTop, rightCursor + itemSize, itemTop + itemSize};
+            const int itemWidth = itemSize
+                + (item.kind == ToolbarItemKind::IconDropdown ? dropdownItemExtraWidth : 0);
+            rightCursor -= itemWidth;
+            item.rect = RECT{rightCursor, itemTop, rightCursor + itemWidth, itemTop + itemSize};
             rightCursor -= metrics.ScaleDip(2);
         }
 

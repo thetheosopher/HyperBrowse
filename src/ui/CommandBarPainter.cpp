@@ -42,6 +42,73 @@ namespace hyperbrowse::ui
             AlphaBlend(targetDC, x, y, width, height, scratchDC, 0, 0, width, height, blend);
             SelectObject(scratchDC, oldBitmap);
         }
+
+        struct ToolbarButtonColors
+        {
+            COLORREF fill{};
+            COLORREF border{};
+            COLORREF icon{};
+            bool showBackground{};
+        };
+
+        ToolbarButtonColors GetToolbarButtonColors(const CommandBarPalette& palette,
+                                                    bool hot,
+                                                    bool pressed,
+                                                    bool checked,
+                                                    bool enabled)
+        {
+            COLORREF fillColor = palette.actionStripBackground;
+            if (checked)
+            {
+                fillColor = palette.accentFill;
+                if (pressed)
+                {
+                    fillColor = BlendColor(fillColor, palette.accent, 48);
+                }
+                else if (hot)
+                {
+                    fillColor = BlendColor(fillColor, palette.accent, 24);
+                }
+            }
+            else if (pressed)
+            {
+                fillColor = BlendColor(palette.actionStripBackground, palette.accent, 48);
+            }
+            else if (hot)
+            {
+                fillColor = BlendColor(palette.actionStripBackground, palette.text, 20);
+            }
+
+            COLORREF borderColor = fillColor;
+            if (enabled && checked)
+            {
+                borderColor = palette.accent;
+            }
+            else if (enabled && (hot || pressed))
+            {
+                borderColor = BlendColor(palette.actionStripBorder, palette.accent, 48);
+            }
+
+            COLORREF iconColor = palette.mutedText;
+            if (checked)
+            {
+                iconColor = palette.accentText;
+            }
+            else if (!enabled)
+            {
+                iconColor = BlendColor(palette.mutedText, palette.actionStripBackground, 140);
+            }
+            else if (hot || pressed)
+            {
+                iconColor = palette.text;
+            }
+
+            return {
+                fillColor,
+                borderColor,
+                iconColor,
+                enabled && (hot || pressed || checked)};
+        }
     }
 
     void CommandBarPainter::PaintD2D(
@@ -209,7 +276,7 @@ namespace hyperbrowse::ui
 
             const int chevronX = button.rect.right - menuButtonPadding - menuChevronWidth;
             const int chevronY = button.rect.top + ((button.rect.bottom - button.rect.top) - menuChevronWidth) / 2;
-            const auto chevronBrush = createBrush(palette.mutedText);
+            const auto chevronBrush = createBrush(hot || pressed ? palette.text : palette.mutedText);
             if (chevronBrush)
             {
                 renderTarget->DrawLine(
@@ -292,7 +359,10 @@ namespace hyperbrowse::ui
                         const COLORREF fillColor = isPressed
                             ? BlendColor(palette.actionFieldBackground, palette.accent, 48)
                             : BlendColor(palette.actionFieldBackground, palette.text, 20);
-                        drawRoundedButton(item.rect, fillColor, fillColor);
+                        drawRoundedButton(
+                            item.rect,
+                            fillColor,
+                            BlendColor(palette.actionStripBorder, palette.accent, 48));
                     }
                     if (isFocused)
                     {
@@ -327,40 +397,12 @@ namespace hyperbrowse::ui
             const bool isFocused = index == state.focusedToolbarIndex;
             const bool isChecked = item.checked;
             const bool isEnabled = item.enabled;
-            COLORREF iconColor = palette.mutedText;
-            if (isChecked)
-            {
-                iconColor = palette.accentText;
-            }
-            else if (!isEnabled)
-            {
-                iconColor = BlendColor(palette.mutedText, palette.actionStripBackground, 140);
-            }
+            const ToolbarButtonColors buttonColors =
+                GetToolbarButtonColors(palette, isHot, isPressed, isChecked, isEnabled);
 
-            if (isEnabled && (isHot || isPressed || isChecked))
+            if (buttonColors.showBackground)
             {
-                COLORREF backgroundColor = palette.actionStripBackground;
-                if (isChecked)
-                {
-                    backgroundColor = palette.accentFill;
-                    if (isPressed)
-                    {
-                        backgroundColor = BlendColor(backgroundColor, palette.accent, 48);
-                    }
-                    else if (isHot)
-                    {
-                        backgroundColor = BlendColor(backgroundColor, palette.accent, 24);
-                    }
-                }
-                else if (isPressed)
-                {
-                    backgroundColor = BlendColor(palette.actionStripBackground, palette.accent, 48);
-                }
-                else
-                {
-                    backgroundColor = BlendColor(palette.actionStripBackground, palette.text, 20);
-                }
-                drawRoundedButton(item.rect, backgroundColor, backgroundColor);
+                drawRoundedButton(item.rect, buttonColors.fill, buttonColors.border);
             }
 
             if (!item.iconName.empty() && iconLibrary)
@@ -368,11 +410,11 @@ namespace hyperbrowse::ui
                 RECT iconRect = item.rect;
                 if (item.kind == CommandBarController::ToolbarItemKind::IconDropdown)
                 {
-                    iconRect.right -= dropdownChevronSize + metrics.ScaleDip(2);
+                    iconRect.right -= dropdownChevronSize + metrics.ScaleDip(6);
                 }
                 const int iconLeft = iconRect.left + ((iconRect.right - iconRect.left) - toolbarIconSize) / 2;
                 const int iconTop = iconRect.top + ((iconRect.bottom - iconRect.top) - toolbarIconSize) / 2;
-                const HBITMAP bitmap = iconLibrary->GetBitmap(item.iconName, toolbarIconSize, iconColor);
+                const HBITMAP bitmap = iconLibrary->GetBitmap(item.iconName, toolbarIconSize, buttonColors.icon);
                 BITMAP bitmapInfo{};
                 if (bitmap && GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) == sizeof(bitmapInfo))
                 {
@@ -398,7 +440,7 @@ namespace hyperbrowse::ui
             {
                 const int chevronX = item.rect.right - dropdownChevronSize - metrics.ScaleDip(6);
                 const int chevronY = item.rect.top + ((item.rect.bottom - item.rect.top) - dropdownChevronSize) / 2;
-                const auto chevronBrush = createBrush(palette.mutedText);
+                const auto chevronBrush = createBrush(isHot || isPressed ? palette.text : palette.mutedText);
                 if (chevronBrush)
                 {
                     renderTarget->DrawLine(
@@ -599,8 +641,10 @@ namespace hyperbrowse::ui
                         const COLORREF fillColor = isPressed
                             ? BlendColor(palette.actionFieldBackground, palette.accent, 48)
                             : BlendColor(palette.actionFieldBackground, palette.text, 20);
+                        const COLORREF borderColor =
+                            BlendColor(palette.actionStripBorder, palette.accent, 48);
                         const HBRUSH buttonBrush = CreateSolidBrush(fillColor);
-                        const HPEN buttonPen = CreatePen(PS_SOLID, 1, fillColor);
+                        const HPEN buttonPen = CreatePen(PS_SOLID, 1, borderColor);
                         if (buttonBrush && buttonPen)
                         {
                             const HGDIOBJ oldBrush = SelectObject(hdc, buttonBrush);
@@ -658,49 +702,19 @@ namespace hyperbrowse::ui
             const bool isChecked = item.checked;
             const bool isEnabled = item.enabled;
 
-            COLORREF iconColor = palette.mutedText;
-            if (isChecked)
-            {
-                iconColor = palette.accentText;
-            }
-            else if (!isEnabled)
-            {
-                iconColor = BlendColor(palette.mutedText, palette.actionStripBackground, 140);
-            }
+            const ToolbarButtonColors buttonColors =
+                GetToolbarButtonColors(palette, isHot, isPressed, isChecked, isEnabled);
 
-            if (isEnabled && (isHot || isPressed || isChecked))
+            if (buttonColors.showBackground)
             {
                 RECT bgRect = item.rect;
                 InflateRect(&bgRect, -1, -1);
 
-                COLORREF bgColor;
-                if (isChecked)
-                {
-                    bgColor = palette.accentFill;
-                    if (isPressed)
-                    {
-                        bgColor = BlendColor(bgColor, palette.accent, 48);
-                    }
-                    else if (isHot)
-                    {
-                        bgColor = BlendColor(bgColor, palette.accent, 24);
-                    }
-                }
-                else if (isPressed)
-                {
-                    bgColor = BlendColor(palette.actionStripBackground, palette.accent, 48);
-                }
-                else
-                {
-                    bgColor = BlendColor(palette.actionStripBackground, palette.text, 20);
-                }
-
-                const HBRUSH bgBrush = CreateSolidBrush(bgColor);
-                const HPEN bgPen = CreatePen(PS_SOLID, 1, bgColor);
+                const HBRUSH bgBrush = CreateSolidBrush(buttonColors.fill);
+                const HPEN bgPen = CreatePen(PS_SOLID, 1, buttonColors.border);
                 const HGDIOBJ oldb = SelectObject(hdc, bgBrush);
                 const HGDIOBJ oldp = SelectObject(hdc, bgPen);
-                const int backgroundRadius = metrics.ScaleDip(10);
-                RoundRect(hdc, bgRect.left, bgRect.top, bgRect.right, bgRect.bottom, backgroundRadius, backgroundRadius);
+                RoundRect(hdc, bgRect.left, bgRect.top, bgRect.right, bgRect.bottom, buttonRadius, buttonRadius);
                 SelectObject(hdc, oldp);
                 SelectObject(hdc, oldb);
                 DeleteObject(bgPen);
@@ -712,12 +726,12 @@ namespace hyperbrowse::ui
                 RECT iconRect = item.rect;
                 if (item.kind == CommandBarController::ToolbarItemKind::IconDropdown)
                 {
-                    iconRect.right -= dropdownChevronSize + metrics.ScaleDip(2);
+                    iconRect.right -= dropdownChevronSize + metrics.ScaleDip(6);
                 }
 
                 const int iconX = iconRect.left + ((iconRect.right - iconRect.left) - toolbarIconSize) / 2;
                 const int iconY = iconRect.top + ((iconRect.bottom - iconRect.top) - toolbarIconSize) / 2;
-                const HBITMAP iconBitmap = iconLibrary->GetBitmap(item.iconName, toolbarIconSize, iconColor);
+                const HBITMAP iconBitmap = iconLibrary->GetBitmap(item.iconName, toolbarIconSize, buttonColors.icon);
                 AlphaBlendBitmap(hdc, iconDC, iconBitmap, iconX, iconY, toolbarIconSize, toolbarIconSize);
             }
 
@@ -725,9 +739,10 @@ namespace hyperbrowse::ui
             {
                 const int chevronX = item.rect.right - dropdownChevronSize - metrics.ScaleDip(6);
                 const int chevronY = item.rect.top + ((item.rect.bottom - item.rect.top) - dropdownChevronSize) / 2;
+                const COLORREF chevronColor = isHot || isPressed ? palette.text : palette.mutedText;
                 const HBITMAP chevronBitmap = iconLibrary->GetBitmap("chevron-down",
                                                                        dropdownChevronSize,
-                                                                       palette.mutedText);
+                                                                       chevronColor);
                 AlphaBlendBitmap(hdc,
                                  iconDC,
                                  chevronBitmap,
