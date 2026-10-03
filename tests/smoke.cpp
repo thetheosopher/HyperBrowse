@@ -3304,6 +3304,171 @@ namespace
         }
     }
 
+    void RunThumbnailDiskLookupRescheduleScenario(HWND hwnd, TestWindowState* state)
+    {
+        TempFolder root(L"HyperBrowseThumbnailDiskLookupReschedule");
+        const fs::path blockerPath = root.Root() / L"blocker.png";
+        const fs::path lookupPath = root.Root() / L"lookup.png";
+        WriteTestImage(blockerPath, TestImageFormat::Png, 48, 24);
+        WriteTestImage(lookupPath, TestImageFormat::Png, 48, 24);
+        const auto blockerKey = MakeCacheKey(blockerPath, 1);
+        const auto lookupKey = MakeCacheKey(lookupPath, 2);
+
+        std::mutex decodeMutex;
+        std::condition_variable decodeCondition;
+        bool decodeEntered = false;
+        bool releaseDecode = false;
+        std::mutex persistenceMutex;
+        std::condition_variable persistenceCondition;
+        bool persistenceEntered = false;
+        bool releasePersistence = false;
+
+        {
+            hyperbrowse::services::ThumbnailScheduler scheduler(
+                8ULL * 1024ULL * 1024ULL,
+                1,
+                hyperbrowse::util::ResourceProfile::Balanced,
+                [&]()
+                {
+                    std::unique_lock lock(persistenceMutex);
+                    persistenceEntered = true;
+                    persistenceCondition.notify_all();
+                    persistenceCondition.wait(lock, [&]()
+                    {
+                        return releasePersistence;
+                    });
+                },
+                [&]()
+                {
+                    std::unique_lock lock(decodeMutex);
+                    decodeEntered = true;
+                    decodeCondition.notify_all();
+                    decodeCondition.wait(lock, [&]()
+                    {
+                        return releaseDecode;
+                    });
+                },
+                8ULL * 1024ULL * 1024ULL,
+                (root.Root() / L"cache").wstring());
+            scheduler.BindTargetWindow(hwnd);
+            scheduler.SetDiskCacheEnabled(false);
+
+            ResetThumbnailResult(state, 61);
+            scheduler.Schedule(61, 1, {{0, blockerKey, 0, true}});
+            const bool decodeBarrierStarted = PumpMessagesUntil([&]()
+            {
+                std::scoped_lock lock(decodeMutex);
+                return decodeEntered;
+            }, 5000);
+            if (!decodeBarrierStarted)
+            {
+                {
+                    std::scoped_lock lock(decodeMutex);
+                    releaseDecode = true;
+                }
+                decodeCondition.notify_all();
+                Expect(false, "Disk-lookup reschedule scenario never entered its decode barrier");
+            }
+
+            const bool statisticsQueued = scheduler.QueuePersistentCacheStatistics(
+                [](bool, hyperbrowse::cache::DiskThumbnailCache::Statistics)
+                {
+                });
+            bool persistenceBarrierStarted = false;
+            if (statisticsQueued)
+            {
+                std::unique_lock lock(persistenceMutex);
+                persistenceBarrierStarted = persistenceCondition.wait_for(lock, std::chrono::seconds(5), [&]()
+                {
+                    return persistenceEntered;
+                });
+            }
+            if (!statisticsQueued || !persistenceBarrierStarted)
+            {
+                {
+                    std::scoped_lock lock(persistenceMutex);
+                    releasePersistence = true;
+                }
+                persistenceCondition.notify_all();
+                {
+                    std::scoped_lock lock(decodeMutex);
+                    releaseDecode = true;
+                }
+                decodeCondition.notify_all();
+                Expect(false, "Disk-lookup reschedule scenario could not block the persistence worker");
+            }
+
+            scheduler.SetDiskCacheEnabled(true);
+            scheduler.Schedule(61, 2, {{1, lookupKey, 0, true}});
+            const bool lookupReachedPersistence = PumpMessagesUntil([&]()
+            {
+                const auto statistics = scheduler.GetRuntimeStatistics();
+                return statistics.inflightDecodeCount == 2 && statistics.activeWorkerCount == 1;
+            }, 5000);
+            if (!lookupReachedPersistence)
+            {
+                {
+                    std::scoped_lock lock(persistenceMutex);
+                    releasePersistence = true;
+                }
+                persistenceCondition.notify_all();
+                {
+                    std::scoped_lock lock(decodeMutex);
+                    releaseDecode = true;
+                }
+                decodeCondition.notify_all();
+                Expect(false, "Disk-lookup reschedule scenario did not queue its target lookup");
+            }
+
+            scheduler.Schedule(61, 3, {
+                {0, blockerKey, 0, true},
+                {1, lookupKey, 0, true},
+            });
+            scheduler.SetPressureModeEnabled(true);
+            {
+                std::scoped_lock lock(persistenceMutex);
+                releasePersistence = true;
+            }
+            persistenceCondition.notify_all();
+
+            const bool lookupReturnedToPendingQueue = PumpMessagesUntil([&]()
+            {
+                const auto statistics = scheduler.GetRuntimeStatistics();
+                return statistics.pendingJobCount == 1
+                    && statistics.inflightDecodeCount == 2
+                    && statistics.activeWorkerCount == 1
+                    && statistics.activeDecodeLimit == 1;
+            }, 5000);
+            if (!lookupReturnedToPendingQueue)
+            {
+                {
+                    std::scoped_lock lock(decodeMutex);
+                    releaseDecode = true;
+                }
+                decodeCondition.notify_all();
+                Expect(false, "Disk-lookup reschedule scenario did not reach the completed-lookup queue");
+            }
+
+            scheduler.Schedule(61, 4, {
+                {0, blockerKey, 0, true},
+                {1, lookupKey, 0, true},
+            });
+            {
+                std::scoped_lock lock(decodeMutex);
+                releaseDecode = true;
+            }
+            decodeCondition.notify_all();
+
+            const std::wstring lookupPathString = lookupPath.wstring();
+            Expect(PumpMessagesUntil([&]()
+            {
+                return std::find(state->thumbnailResult.readyPaths.begin(),
+                                 state->thumbnailResult.readyPaths.end(),
+                                 lookupPathString) != state->thumbnailResult.readyPaths.end();
+            }, 10000), "A rescheduled thumbnail was stranded after its completed disk lookup was replaced");
+        }
+    }
+
         void RunThumbnailSchedulerFailureScenario(HWND hwnd, TestWindowState* state)
         {
          TempFolder root(L"HyperBrowsePrompt5SchedulerFailure");
@@ -7929,6 +8094,7 @@ int main(int argc, char* argv[])
         else if (thumbnailStaleCompletionOnly)
         {
             RunThumbnailStaleCompletionScenario(hwnd, &state);
+            RunThumbnailDiskLookupRescheduleScenario(hwnd, &state);
         }
         else if (thumbnailFailureOnly)
         {
@@ -8013,6 +8179,7 @@ int main(int argc, char* argv[])
             RunThumbnailSchedulerScenario(hwnd, &state);
             RunThumbnailReadyBeforePersistenceScenario(hwnd, &state);
             RunThumbnailStaleCompletionScenario(hwnd, &state);
+            RunThumbnailDiskLookupRescheduleScenario(hwnd, &state);
             RunThumbnailSchedulerFailureScenario(hwnd, &state);
             RunImageMetadataServiceScenario();
             RunSwarmUiMetadataExtractionScenario();

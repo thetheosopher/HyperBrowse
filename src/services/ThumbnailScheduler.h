@@ -168,6 +168,7 @@ namespace hyperbrowse::services
         bool HasDispatchableWorkLocked(WorkerKind kind, bool foregroundLane) const;
         void WorkerLoop(WorkerKind kind, bool foregroundLane = false);
         void DiskPersistenceLoop();
+        void RemoveInflightForPendingDiskLookupsLocked();
         bool HasVisibleWorkPending() const;
         void EnqueueDiskLookup(PendingJob lookupJob);
         void EnqueueDiskStore(const cache::ThumbnailCacheKey& cacheKey,

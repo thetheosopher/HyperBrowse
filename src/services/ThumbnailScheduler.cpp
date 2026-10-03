@@ -357,6 +357,7 @@ namespace hyperbrowse::services
             foregroundLaneEnabled_ = false;
             requestedKeys_.clear();
             requestedWorkItems_.clear();
+            RemoveInflightForPendingDiskLookupsLocked();
             pendingJobs_.clear();
             queuedKeys_.clear();
 
@@ -418,10 +419,43 @@ namespace hyperbrowse::services
     {
         std::scoped_lock lock(mutex_);
         ++activeRequestEpoch_;
+        RemoveInflightForPendingDiskLookupsLocked();
         pendingJobs_.clear();
         queuedKeys_.clear();
         requestedKeys_.clear();
         requestedWorkItems_.clear();
+    }
+
+    void ThumbnailScheduler::RemoveInflightForPendingDiskLookupsLocked()
+    {
+        for (const PendingJob& job : pendingJobs_)
+        {
+            if (!job.diskLookupCompleted)
+            {
+                continue;
+            }
+
+            const auto inflight = inflightJobs_.find(job.workItem.cacheKey);
+            if (inflight == inflightJobs_.end())
+            {
+                continue;
+            }
+
+            auto& activeDecodes = inflight->second;
+            const auto completedLookup = std::find_if(activeDecodes.begin(), activeDecodes.end(), [&](const InflightDecode& inflightDecode)
+            {
+                return inflightDecode.priority == job.workItem.priority
+                    && inflightDecode.preferCpu == job.workItem.preferCpu;
+            });
+            if (completedLookup != activeDecodes.end())
+            {
+                activeDecodes.erase(completedLookup);
+            }
+            if (activeDecodes.empty())
+            {
+                inflightJobs_.erase(inflight);
+            }
+        }
     }
 
     void ThumbnailScheduler::InvalidateFilePaths(const std::vector<std::wstring>& filePaths)
