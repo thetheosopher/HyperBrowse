@@ -1583,7 +1583,7 @@ namespace hyperbrowse::tests
                        && values[L"SortMode"] == static_cast<DWORD>(BrowserSortMode::Tags)
                        && values[L"SortAscending"] == 0
                        && values[L"DetailsStripVisible"] == 0
-                       && values[L"DetailsPanelWidth"] == 250,
+                       && values[L"DetailsPanelWidth"] == 540,
                    "Browser presentation persistence did not write the expected registry value contract");
         }
 

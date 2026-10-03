@@ -19,7 +19,7 @@ namespace hyperbrowse::ui
         constexpr std::wstring_view kDetailsStripVisibleValue = L"DetailsStripVisible";
         constexpr std::wstring_view kDetailsPanelWidthValue = L"DetailsPanelWidth";
         constexpr int kMinimumLeftPaneWidth = 250;
-        constexpr int kMinimumDetailsPanelWidth = 250;
+        constexpr int kMinimumDetailsPanelWidth = 540;
 
         bool TryParseThumbnailSizePreset(DWORD value, browser::ThumbnailSizePreset* preset)
         {

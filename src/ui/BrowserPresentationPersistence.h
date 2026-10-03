@@ -23,7 +23,7 @@ namespace hyperbrowse::ui
         browser::BrowserSortMode sortMode{browser::BrowserSortMode::FileName};
         bool sortAscending{true};
         bool detailsStripVisible{true};
-        int detailsPanelWidth{340};
+        int detailsPanelWidth{540};
     };
 
     class BrowserPresentationPersistence

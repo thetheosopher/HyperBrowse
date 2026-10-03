@@ -237,8 +237,8 @@ namespace
     constexpr int kStatusStripHorizontalPadding = 12;
     constexpr int kCommandBarMenuButtonGap = 4;
     constexpr int kCommandBarMenuButtonMinWidth = 56;
-    constexpr int kDetailsPanelPreferredWidth = 340;
-    constexpr int kDetailsPanelMinWidth = 250;
+    constexpr int kDetailsPanelPreferredWidth = 540;
+    constexpr int kDetailsPanelMinWidth = 540;
     constexpr int kDetailsPanelMargin = 14;
     constexpr int kDetailsPanelTabHeight = 30;
     constexpr int kDetailsPanelTabGap = 10;

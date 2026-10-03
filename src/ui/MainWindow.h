@@ -143,7 +143,7 @@ namespace hyperbrowse::ui
         static constexpr int kMinRightPaneWidth = 240;
         static constexpr int kSplitterWidth = 6;
         static constexpr int kDefaultLeftPaneWidth = 280;
-        static constexpr int kMinWindowWidth = 960;
+        static constexpr int kMinWindowWidth = 1080;
         static constexpr int kMinWindowHeight = 640;
 
         enum class BrowserMode
