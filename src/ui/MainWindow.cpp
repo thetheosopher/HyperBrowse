@@ -4483,12 +4483,123 @@ namespace
             ReleaseDC(state.dialogWindow, dc);
             return toLogical(size.cx);
         };
+        std::array<int, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> choiceControlWidths{};
+        const HFONT choiceFont = state.choiceFont
+            ? state.choiceFont
+            : state.controlFont
+                ? state.controlFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        HDC choiceDc = GetDC(state.dialogWindow);
+        const HGDIOBJ previousChoiceFont = choiceDc
+            ? SelectObject(choiceDc, choiceFont)
+            : nullptr;
+        const bool canMeasureChoiceText = previousChoiceFont && previousChoiceFont != HGDI_ERROR;
+        for (std::size_t index = 0; index < state.nativeControls.size(); ++index)
+        {
+            const auto control = static_cast<ConsolidatedSettingsControl>(index);
+            if (!ExperimentalSettingsControlIsChoice(control) || !state.nativeControls[index])
+            {
+                continue;
+            }
+
+            const HWND choice = state.nativeControls[index];
+            const LRESULT itemCount = SendMessageW(choice, CB_GETCOUNT, 0, 0);
+            if (itemCount == CB_ERR)
+            {
+                continue;
+            }
+
+            int widestTextPixels = 0;
+            int widestFallbackTextWidth = 0;
+            for (LRESULT itemIndex = 0; itemIndex < itemCount; ++itemIndex)
+            {
+                const LRESULT itemLength = SendMessageW(
+                    choice,
+                    CB_GETLBTEXTLEN,
+                    static_cast<WPARAM>(itemIndex),
+                    0);
+                if (itemLength == CB_ERR)
+                {
+                    continue;
+                }
+
+                std::wstring label(static_cast<std::size_t>(itemLength) + 1, L'\0');
+                const LRESULT copiedLength = SendMessageW(
+                    choice,
+                    CB_GETLBTEXT,
+                    static_cast<WPARAM>(itemIndex),
+                    reinterpret_cast<LPARAM>(label.data()));
+                if (copiedLength == CB_ERR || copiedLength > itemLength)
+                {
+                    continue;
+                }
+                label.resize(static_cast<std::size_t>(copiedLength));
+
+                if (canMeasureChoiceText)
+                {
+                    SIZE textSize{};
+                    if (GetTextExtentPoint32W(choiceDc,
+                                              label.data(),
+                                              static_cast<int>(label.size()),
+                                              &textSize) != FALSE)
+                    {
+                        widestTextPixels = std::max(widestTextPixels, static_cast<int>(textSize.cx));
+                        continue;
+                    }
+                }
+                widestFallbackTextWidth = std::max(
+                    widestFallbackTextWidth,
+                    MulDiv(measureTextWidth(label), 4, 3));
+            }
+
+            const int widestTextWidth = std::max(
+                canMeasureChoiceText ? toLogical(widestTextPixels) : 0,
+                widestFallbackTextWidth);
+            if (widestTextWidth > 0)
+            {
+                choiceControlWidths[index] = widestTextWidth
+                    + hyperbrowse::util::ScaleAppTextDimension(48, state.settings->appTextSize);
+            }
+        }
+        if (canMeasureChoiceText)
+        {
+            SelectObject(choiceDc, previousChoiceFont);
+        }
+        if (choiceDc)
+        {
+            ReleaseDC(state.dialogWindow, choiceDc);
+        }
+        const std::size_t overlayTextSizeIndex = static_cast<std::size_t>(
+            ConsolidatedSettingsControl::OverlayTextSize);
+        const std::size_t escapeKeyBehaviorIndex = static_cast<std::size_t>(
+            ConsolidatedSettingsControl::EscapeKeyBehavior);
+        const int viewerChoiceWidth = std::max(
+            choiceControlWidths[overlayTextSizeIndex],
+            choiceControlWidths[escapeKeyBehaviorIndex]);
+        if (viewerChoiceWidth > 0)
+        {
+            choiceControlWidths[overlayTextSizeIndex] = viewerChoiceWidth;
+            choiceControlWidths[escapeKeyBehaviorIndex] = viewerChoiceWidth;
+        }
+        const std::size_t appTextSizeIndex = static_cast<std::size_t>(
+            ConsolidatedSettingsControl::AppTextSize);
+        const std::size_t thumbnailSizeIndex = static_cast<std::size_t>(
+            ConsolidatedSettingsControl::ThumbnailSize);
+        const int appearanceChoiceWidth = std::max(
+            choiceControlWidths[appTextSizeIndex],
+            choiceControlWidths[thumbnailSizeIndex]);
+        if (appearanceChoiceWidth > 0)
+        {
+            choiceControlWidths[appTextSizeIndex] = appearanceChoiceWidth;
+            choiceControlWidths[thumbnailSizeIndex] = appearanceChoiceWidth;
+        }
         const SettingsLayoutResult layout = MeasureSettingsLayout({
             state.page,
             state.settings->appTextSize,
             toLogical(client.right),
             toLogical(client.bottom),
-            measureTextWidth});
+            measureTextWidth,
+            choiceControlWidths});
 
         state.bodyViewport = layout.metrics.bodyViewport;
         state.requiredContentHeight = layout.requiredContentHeight;
@@ -5461,13 +5572,26 @@ namespace
             ? state.controlFont
             : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         DeleteFontIfOwned(state.numericFont);
-        state.numericFont = CreateDialogUiFont(10, FW_NORMAL, size, state.dpi);
+        state.numericFont = CreateDialogUiFont(16, FW_NORMAL, size, state.dpi);
         const HFONT numericFont = state.numericFont ? state.numericFont : font;
-        for (const HWND control : state.nativeControls)
+        DeleteFontIfOwned(state.choiceFont);
+        state.choiceFont = CreateDialogUiFont(16, FW_NORMAL, size, state.dpi);
+        for (std::size_t index = 0; index < state.nativeControls.size(); ++index)
         {
+            const HWND control = state.nativeControls[index];
             if (control)
             {
-                SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                const auto controlId = static_cast<ConsolidatedSettingsControl>(index);
+                HFONT controlFont = font;
+                if (controlId == ConsolidatedSettingsControl::QuickSendShortcutOrder && numericFont)
+                {
+                    controlFont = numericFont;
+                }
+                else if (ExperimentalSettingsControlIsChoice(controlId) && state.choiceFont)
+                {
+                    controlFont = state.choiceFont;
+                }
+                SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(controlFont), TRUE);
             }
         }
         for (const HWND edit : state.numericEdits)
@@ -5518,6 +5642,9 @@ namespace
         std::uint64_t maximum{};
     };
 
+    constexpr int kPerformanceSliderPositionMinimum = 0;
+    constexpr int kPerformanceSliderPositionMaximum = 100;
+
     PerformanceSliderRange GetPerformanceSliderRange(hyperbrowse::util::ResourceProfile profile,
                                                      std::size_t index)
     {
@@ -5551,16 +5678,22 @@ namespace
     {
         if (range.maximum <= range.minimum)
         {
-            return 0;
+            return kPerformanceSliderPositionMinimum;
         }
         const std::uint64_t clamped = std::clamp(value, range.minimum, range.maximum);
-        return static_cast<int>(((clamped - range.minimum) * 100ULL) / (range.maximum - range.minimum));
+        return static_cast<int>(((clamped - range.minimum)
+            * static_cast<std::uint64_t>(kPerformanceSliderPositionMaximum))
+            / (range.maximum - range.minimum));
     }
 
     std::uint64_t PerformanceSliderValue(PerformanceSliderRange range, int position)
     {
-        const std::uint64_t clampedPosition = static_cast<std::uint64_t>(std::clamp(position, 0, 100));
-        return range.minimum + ((range.maximum - range.minimum) * clampedPosition) / 100ULL;
+        const std::uint64_t clampedPosition = static_cast<std::uint64_t>(std::clamp(
+            position,
+            kPerformanceSliderPositionMinimum,
+            kPerformanceSliderPositionMaximum));
+        return range.minimum + ((range.maximum - range.minimum) * clampedPosition)
+            / static_cast<std::uint64_t>(kPerformanceSliderPositionMaximum);
     }
 
     void UpdateExperimentalSettingsCacheValues(ExperimentalSettingsDialogState& state)
@@ -6055,6 +6188,19 @@ namespace
             DeleteObject(state.editBackgroundBrush);
         }
         state.editBackgroundBrush = CreateSolidBrush(theme.fieldBackground);
+        for (const HWND edit : state.numericEdits)
+        {
+            if (edit)
+            {
+                SetWindowTheme(edit, dark ? L"" : nullptr, dark ? L"" : nullptr);
+            }
+        }
+        const HWND shortcutOrderEdit = state.nativeControls[
+            static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)];
+        if (shortcutOrderEdit)
+        {
+            SetWindowTheme(shortcutOrderEdit, dark ? L"" : nullptr, dark ? L"" : nullptr);
+        }
         InvalidateRect(state.dialogWindow, nullptr, FALSE);
     }
 
@@ -6096,11 +6242,21 @@ namespace
         textRect.right -= ScaleDialogAppTextDimension(8, state.settings->appTextSize, static_cast<UINT>(dpi));
         SetBkMode(drawItem.hDC, TRANSPARENT);
         SetTextColor(drawItem.hDC, text);
+        HFONT itemFont = state.choiceFont
+            ? state.choiceFont
+            : state.controlFont
+                ? state.controlFont
+            : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const HGDIOBJ previousFont = SelectObject(drawItem.hDC, itemFont);
         DrawTextW(drawItem.hDC,
                   itemText,
                   -1,
                   &textRect,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        if (previousFont && previousFont != HGDI_ERROR)
+        {
+            SelectObject(drawItem.hDC, previousFont);
+        }
 
         if (editField && (drawItem.itemState & ODS_FOCUS) != 0)
         {
@@ -6150,7 +6306,8 @@ namespace
             {
                 state->controlFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             }
-            state->numericFont = CreateDialogUiFont(10, FW_NORMAL, size, state->dpi);
+            state->numericFont = CreateDialogUiFont(16, FW_NORMAL, size, state->dpi);
+            state->choiceFont = CreateDialogUiFont(16, FW_NORMAL, size, state->dpi);
             for (IDWriteTextFormat* format : {state->bodyFormat.Get(), state->smallFormat.Get(), state->buttonFormat.Get()})
             {
                 if (format)
@@ -6182,8 +6339,8 @@ namespace
                 std::pair{ES_NUMBER, std::to_wstring(persistentCacheMegabytes)}};
             for (std::size_t index = 0; index < state->numericEdits.size(); ++index)
             {
-                state->numericEdits[index] = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", editValues[index].second.c_str(),
-                    WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL | editValues[index].first, 0, 0, 0, 0, hwnd,
+                state->numericEdits[index] = CreateWindowExW(0, L"EDIT", editValues[index].second.c_str(),
+                    WS_CHILD | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL | editValues[index].first, 0, 0, 0, 0, hwnd,
                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(5700 + index)), state->instance, nullptr);
                 if (state->numericEdits[index])
                 {
@@ -6194,10 +6351,10 @@ namespace
                 }
             }
             state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)] = CreateWindowExW(
-                WS_EX_CLIENTEDGE,
+                0,
                 L"EDIT",
                 state->settings->quickSendShortcutOrder.c_str(),
-                WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
+                WS_CHILD | WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
                 0,
                 0,
                 0,
@@ -6208,7 +6365,10 @@ namespace
                 nullptr);
             if (const HWND shortcutOrderEdit = state->nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)])
             {
-                SendMessageW(shortcutOrderEdit, WM_SETFONT, reinterpret_cast<WPARAM>(state->controlFont), TRUE);
+                const HFONT font = state->numericFont
+                    ? state->numericFont
+                    : state->controlFont;
+                SendMessageW(shortcutOrderEdit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
             }
             const auto createChoice = [&](ConsolidatedSettingsControl control,
                                           const std::vector<std::wstring>& values,
@@ -6233,7 +6393,10 @@ namespace
                     return;
                 }
                 state->nativeControls[static_cast<std::size_t>(control)] = choice;
-                SendMessageW(choice, WM_SETFONT, reinterpret_cast<WPARAM>(state->controlFont), TRUE);
+                const HFONT choiceFont = ExperimentalSettingsControlIsChoice(control) && state->choiceFont
+                    ? state->choiceFont
+                    : state->controlFont;
+                SendMessageW(choice, WM_SETFONT, reinterpret_cast<WPARAM>(choiceFont), TRUE);
                 for (const std::wstring& value : values)
                 {
                     SendMessageW(choice, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
@@ -6286,7 +6449,7 @@ namespace
                     0,
                     UPDOWN_CLASSW,
                     nullptr,
-                    WS_CHILD | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT | UDS_NOTHOUSANDS,
+                    WS_CHILD | WS_BORDER | UDS_ALIGNRIGHT | UDS_ARROWKEYS | UDS_SETBUDDYINT | UDS_NOTHOUSANDS,
                     0,
                     0,
                     0,
@@ -6321,7 +6484,7 @@ namespace
                     0,
                     TRACKBAR_CLASSW,
                     nullptr,
-                    WS_CHILD | TBS_AUTOTICKS,
+                    WS_CHILD,
                     0,
                     0,
                     0,
@@ -6332,7 +6495,11 @@ namespace
                     nullptr);
                 if (state->numericSliders[index])
                 {
-                    SendMessageW(state->numericSliders[index], TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+                    SendMessageW(state->numericSliders[index],
+                                 TBM_SETRANGE,
+                                 TRUE,
+                                 MAKELONG(kPerformanceSliderPositionMinimum,
+                                          kPerformanceSliderPositionMaximum));
                 }
             }
             const bool thumbnailCacheAutomatic = state->settings->thumbnailCacheCapacityOverrideBytes == 0;
@@ -6384,13 +6551,26 @@ namespace
                     ? state->controlFont
                     : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
                 DeleteFontIfOwned(state->numericFont);
-                state->numericFont = CreateDialogUiFont(10, FW_NORMAL, state->settings->appTextSize, state->dpi);
+                state->numericFont = CreateDialogUiFont(16, FW_NORMAL, state->settings->appTextSize, state->dpi);
                 const HFONT numericFont = state->numericFont ? state->numericFont : font;
-                for (const HWND control : state->nativeControls)
+                DeleteFontIfOwned(state->choiceFont);
+                state->choiceFont = CreateDialogUiFont(16, FW_NORMAL, state->settings->appTextSize, state->dpi);
+                for (std::size_t index = 0; index < state->nativeControls.size(); ++index)
                 {
+                    const HWND control = state->nativeControls[index];
                     if (control)
                     {
-                        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                        const auto controlId = static_cast<ConsolidatedSettingsControl>(index);
+                        HFONT controlFont = font;
+                        if (controlId == ConsolidatedSettingsControl::QuickSendShortcutOrder && numericFont)
+                        {
+                            controlFont = numericFont;
+                        }
+                        else if (ExperimentalSettingsControlIsChoice(controlId) && state->choiceFont)
+                        {
+                            controlFont = state->choiceFont;
+                        }
+                        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(controlFont), TRUE);
                     }
                 }
                 for (const HWND edit : state->numericEdits)
@@ -6517,7 +6697,7 @@ namespace
                 {
                     const UINT dpi = std::max<UINT>(96, state->dpi);
                     measureItem->itemHeight = static_cast<UINT>(std::max(
-                        ScaleDialogAppTextDimension(24, state->settings->appTextSize, dpi),
+                        ScaleDialogAppTextDimension(28, state->settings->appTextSize, dpi),
                         GetSystemMetricsForDpi(SM_CYMENU, dpi)));
                     return TRUE;
                 }
@@ -6806,6 +6986,8 @@ namespace
                 state->controlFont = nullptr;
                 DeleteFontIfOwned(state->numericFont);
                 state->numericFont = nullptr;
+                DeleteFontIfOwned(state->choiceFont);
+                state->choiceFont = nullptr;
                 state->done = true;
             }
             return 0;

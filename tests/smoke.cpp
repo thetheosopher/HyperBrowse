@@ -6548,6 +6548,127 @@ namespace
                      }
                  }
 
+                 std::array<int, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> slideshowChoiceWidths{};
+                 slideshowChoiceWidths[static_cast<std::size_t>(ConsolidatedSettingsControl::TransitionStyle)] = 250;
+                 const auto slideshowLayout = MeasureSettingsLayout({
+                     ConsolidatedSettingsPage::Slideshow,
+                     textSize,
+                     logicalWidth,
+                     logicalHeight,
+                     [](std::wstring_view text)
+                     {
+                         return static_cast<int>(text.size()) * 8;
+                     },
+                     slideshowChoiceWidths});
+                 const RECT& transitionStyle = slideshowLayout.controlRects[
+                     static_cast<std::size_t>(ConsolidatedSettingsControl::TransitionStyle)];
+                 const int expectedChoiceHeight = hyperbrowse::util::ScaleAppTextDimension(46, textSize);
+                 Expect(transitionStyle.right > transitionStyle.left
+                            && transitionStyle.right - transitionStyle.left <= 250,
+                        "Transition style selector exceeded its requested compact width");
+                 Expect(transitionStyle.bottom - transitionStyle.top == expectedChoiceHeight,
+                        "Transition style selector did not receive the taller choice-control height");
+                 Expect(transitionStyle.top >= slideshowLayout.metrics.bodyViewport.top,
+                        "Transition style selector escaped the top of its scroll viewport");
+                 std::array<int, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> viewerChoiceWidths{};
+                 viewerChoiceWidths[static_cast<std::size_t>(ConsolidatedSettingsControl::OverlayTextSize)] = 180;
+                 viewerChoiceWidths[static_cast<std::size_t>(ConsolidatedSettingsControl::EscapeKeyBehavior)] = 180;
+                 const auto viewerChoiceLayout = MeasureSettingsLayout({
+                     ConsolidatedSettingsPage::Viewer,
+                     textSize,
+                     logicalWidth,
+                     logicalHeight,
+                     [](std::wstring_view text)
+                     {
+                         return static_cast<int>(text.size()) * 8;
+                     },
+                     viewerChoiceWidths});
+                 const RECT& escapeKeyBehavior = viewerChoiceLayout.controlRects[
+                     static_cast<std::size_t>(ConsolidatedSettingsControl::EscapeKeyBehavior)];
+                 const RECT& overlayTextSize = viewerChoiceLayout.controlRects[
+                     static_cast<std::size_t>(ConsolidatedSettingsControl::OverlayTextSize)];
+                 Expect(overlayTextSize.right - overlayTextSize.left
+                            == escapeKeyBehavior.right - escapeKeyBehavior.left,
+                        "Viewer choice selectors did not use the same width");
+                 Expect(overlayTextSize.bottom - overlayTextSize.top == expectedChoiceHeight
+                            && escapeKeyBehavior.bottom - escapeKeyBehavior.top == expectedChoiceHeight,
+                        "Viewer choice selectors did not use the taller choice-control height");
+                 Expect(escapeKeyBehavior.right > escapeKeyBehavior.left
+                            && escapeKeyBehavior.right - escapeKeyBehavior.left <= 180,
+                        "Settings choice selector exceeded its requested compact width");
+                 std::array<int, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> appearanceChoiceWidths{};
+                 appearanceChoiceWidths[static_cast<std::size_t>(ConsolidatedSettingsControl::AppTextSize)] = 180;
+                 appearanceChoiceWidths[static_cast<std::size_t>(ConsolidatedSettingsControl::ThumbnailSize)] = 180;
+                 const auto appearanceChoiceLayout = MeasureSettingsLayout({
+                     ConsolidatedSettingsPage::Appearance,
+                     textSize,
+                     logicalWidth,
+                     logicalHeight,
+                     [](std::wstring_view text)
+                     {
+                         return static_cast<int>(text.size()) * 8;
+                     },
+                     appearanceChoiceWidths});
+                 const RECT& appTextSize = appearanceChoiceLayout.controlRects[
+                     static_cast<std::size_t>(ConsolidatedSettingsControl::AppTextSize)];
+                 const RECT& thumbnailSize = appearanceChoiceLayout.controlRects[
+                     static_cast<std::size_t>(ConsolidatedSettingsControl::ThumbnailSize)];
+                 Expect(appTextSize.right - appTextSize.left == thumbnailSize.right - thumbnailSize.left,
+                        "Appearance choice selectors did not use the same width");
+                 Expect(appTextSize.bottom - appTextSize.top == expectedChoiceHeight
+                            && thumbnailSize.bottom - thumbnailSize.top == expectedChoiceHeight,
+                        "Appearance choice selectors did not use the taller choice-control height");
+                 const auto behaviorLayout = MeasureSettingsLayout({
+                     ConsolidatedSettingsPage::Behavior,
+                     textSize,
+                     logicalWidth,
+                     logicalHeight,
+                     [](std::wstring_view text)
+                     {
+                         return static_cast<int>(text.size()) * 8;
+                     }});
+                 const RECT& quickSendOrder = behaviorLayout.controlRects[
+                     static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)];
+                 const int quickSendAvailableWidth = quickSendOrder.left == behaviorLayout.metrics.left
+                     ? behaviorLayout.metrics.right - behaviorLayout.metrics.left
+                     : behaviorLayout.metrics.right - quickSendOrder.left;
+                 Expect(quickSendOrder.right - quickSendOrder.left
+                            == std::max(1, quickSendAvailableWidth / 4),
+                        "Quick Actions shortcut order field did not use one quarter of its original width");
+                 constexpr std::array<std::wstring_view, 2> slideshowDurationLabels{
+                     L"Slide duration (milliseconds)",
+                     L"Transition duration (milliseconds)"};
+                 for (std::size_t index = 0; index < slideshowDurationLabels.size(); ++index)
+                 {
+                     const RECT& numeric = slideshowLayout.numericEditRects[index];
+                     Expect(numeric.bottom - numeric.top == transitionStyle.bottom - transitionStyle.top,
+                            "Slideshow numeric field height did not match the transition style selector");
+                     const auto label = std::find_if(
+                         slideshowLayout.labels.begin(),
+                         slideshowLayout.labels.end(),
+                         [expectedText = slideshowDurationLabels[index]](const auto& candidate)
+                         {
+                             return candidate.text == expectedText;
+                         });
+                     Expect(label != slideshowLayout.labels.end(),
+                            "Settings layout omitted a slideshow duration label");
+                     if (label != slideshowLayout.labels.end())
+                     {
+                         if (numeric.left > label->bounds.left)
+                         {
+                             const LONG centerDifference = numeric.top + numeric.bottom
+                                 - label->bounds.top - label->bounds.bottom;
+                             Expect(centerDifference >= -1 && centerDifference <= 1,
+                                    "Slideshow numeric field was not vertically centered with its label");
+                         }
+                         else
+                         {
+                             Expect(numeric.top >= label->bounds.bottom + slideshowLayout.metrics.rowGap,
+                                    "Stacked slideshow numeric field overlapped its label");
+                         }
+                     }
+                 }
+
                  const auto fullLayout = MeasureSettingsLayout({
                      ConsolidatedSettingsPage::Viewer,
                      textSize,
@@ -6844,13 +6965,30 @@ namespace
                 failAndClose("Experimental Settings numeric fields did not create native spin buddies");
                 return;
             }
+            const auto hasNoTickMarks = [](HWND slider)
+            {
+                const LRESULT tickCount = SendMessageW(slider, TBM_GETNUMTICS, 0, 0);
+                const LONG_PTR style = GetWindowLongPtrW(slider, GWL_STYLE);
+                return (style & TBS_AUTOTICKS) == 0 && tickCount >= 0 && tickCount <= 2;
+            };
             if (SendMessageW(thumbnailCacheSlider, TBM_GETRANGEMIN, 0, 0) != 0
                 || SendMessageW(thumbnailCacheSlider, TBM_GETRANGEMAX, 0, 0) != 100
+                || SendMessageW(metadataCacheSlider, TBM_GETRANGEMIN, 0, 0) != 0
                 || SendMessageW(metadataCacheSlider, TBM_GETRANGEMAX, 0, 0) != 100
+                || SendMessageW(prefetchDepthSlider, TBM_GETRANGEMIN, 0, 0) != 0
                 || SendMessageW(prefetchDepthSlider, TBM_GETRANGEMAX, 0, 0) != 100
+                || SendMessageW(persistentCacheSlider, TBM_GETRANGEMIN, 0, 0) != 0
                 || SendMessageW(persistentCacheSlider, TBM_GETRANGEMAX, 0, 0) != 100)
             {
                 failAndClose("Experimental Settings performance sliders did not retain their normalized range");
+                return;
+            }
+            if (!hasNoTickMarks(thumbnailCacheSlider)
+                || !hasNoTickMarks(metadataCacheSlider)
+                || !hasNoTickMarks(prefetchDepthSlider)
+                || !hasNoTickMarks(persistentCacheSlider))
+            {
+                failAndClose("Experimental Settings performance sliders still displayed tick marks");
                 return;
             }
             Sleep(2200);
@@ -7010,18 +7148,22 @@ namespace
             };
             const LONG mediumComboFontHeight = fontHeight(appTextCombo);
             const LONG mediumEditFontHeight = fontHeight(GetDlgItem(dialog, 5700));
-            if (mediumComboFontHeight >= 0 || mediumEditFontHeight >= 0)
+            if (mediumComboFontHeight >= 0
+                || mediumEditFontHeight >= 0
+                || mediumComboFontHeight != mediumEditFontHeight)
             {
-                failAndClose("Experimental Settings native controls did not expose their Medium font");
+                failAndClose("Experimental Settings combo and numeric controls did not share their Medium font size");
                 return;
             }
             SendMessageW(appTextCombo, CB_SETCURSEL, 2, 0);
             SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(5818, CBN_SELCHANGE), reinterpret_cast<LPARAM>(appTextCombo));
             const LONG largeComboFontHeight = fontHeight(appTextCombo);
             const LONG largeEditFontHeight = fontHeight(GetDlgItem(dialog, 5700));
-            if (largeComboFontHeight >= mediumComboFontHeight || largeEditFontHeight >= mediumEditFontHeight)
+            if (largeComboFontHeight >= mediumComboFontHeight
+                || largeEditFontHeight >= mediumEditFontHeight
+                || largeComboFontHeight != largeEditFontHeight)
             {
-                failAndClose("Experimental Settings native controls did not grow their font for Large text");
+                failAndClose("Experimental Settings combo and numeric controls did not share their larger font size");
                 return;
             }
             RECT largeTextFrame{};

@@ -440,6 +440,7 @@ namespace hyperbrowse::ui::dialog_detail
         HBRUSH editBackgroundBrush{};
         HFONT controlFont{};
         HFONT numericFont{};
+        HFONT choiceFont{};
         std::array<HWND, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> nativeControls{};
         std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsPage::Count)> tabRects{};
         std::array<RECT, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> controlRects{};

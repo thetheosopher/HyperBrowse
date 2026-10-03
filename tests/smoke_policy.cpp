@@ -106,6 +106,17 @@ namespace hyperbrowse::tests
             hyperbrowse::util::SetMemorySnapshotOverrideForTests(MemorySnapshot{
                 16ULL * 1024ULL * 1024ULL * 1024ULL,
                 6ULL * 1024ULL * 1024ULL * 1024ULL});
+            for (int profileIndex = 0; profileIndex < 4; ++profileIndex)
+            {
+                const auto profile = static_cast<ResourceProfile>(profileIndex);
+                const auto profileThumbnailRange = hyperbrowse::util::RecommendedThumbnailCacheRange(profile);
+                const auto profileMetadataRange = hyperbrowse::util::RecommendedMetadataCacheRange(profile);
+                const auto profilePersistentRange = hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(profile);
+                Expect(profileThumbnailRange.IsValid()
+                           && profileMetadataRange.IsValid()
+                           && profilePersistentRange.IsValid(),
+                       "A resource profile did not provide valid cache slider endpoints");
+            }
             const auto thumbnailRange = hyperbrowse::util::RecommendedThumbnailCacheRange(ResourceProfile::Performance);
             const auto metadataRange = hyperbrowse::util::RecommendedMetadataCacheRange(ResourceProfile::Performance);
             const auto persistentRange = hyperbrowse::util::RecommendedPersistentThumbnailCacheRange(ResourceProfile::Performance);
@@ -1036,10 +1047,10 @@ namespace hyperbrowse::tests
             DeleteObject(bitmap);
 
             Expect(computed && result.visible && result.peak == 2
-                       && result.red[63] == 2
-                       && result.green[32] == 1
-                       && result.green[63] == 1
-                       && result.blue[63] == 2,
+                       && result.red[255] == 2
+                       && result.green[128] == 1
+                       && result.green[255] == 1
+                       && result.blue[255] == 2,
                    "Details-panel histogram did not preserve RGB bins and peak visibility");
 
             DetailsPanelHistogram::Result emptyResult;

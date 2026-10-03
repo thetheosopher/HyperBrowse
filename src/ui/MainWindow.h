@@ -812,9 +812,9 @@ namespace hyperbrowse::ui
         int quickAccessScrollOffset_{};
         std::vector<HWND> quickAccessShortcutEdits_;
         bool updatingQuickAccessShortcutEdits_{};
-        std::array<std::uint32_t, 64> detailsPanelHistogramRed_{};
-        std::array<std::uint32_t, 64> detailsPanelHistogramGreen_{};
-        std::array<std::uint32_t, 64> detailsPanelHistogramBlue_{};
+        std::array<std::uint32_t, DetailsPanelHistogram::kBinCount> detailsPanelHistogramRed_{};
+        std::array<std::uint32_t, DetailsPanelHistogram::kBinCount> detailsPanelHistogramGreen_{};
+        std::array<std::uint32_t, DetailsPanelHistogram::kBinCount> detailsPanelHistogramBlue_{};
         std::uint32_t detailsPanelHistogramPeak_{};
         std::uint64_t activeBatchConvertRequestId_{};
         std::uint64_t activeImageCommandRequestId_{};

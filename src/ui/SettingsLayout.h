@@ -52,6 +52,7 @@ namespace hyperbrowse::ui::dialog_detail
         int availableWidth{};
         int availableHeight{};
         std::function<int(std::wstring_view)> measureTextWidth;
+        std::array<int, static_cast<std::size_t>(ConsolidatedSettingsControl::Count)> choiceControlWidths{};
     };
 
     struct SettingsLayoutResult

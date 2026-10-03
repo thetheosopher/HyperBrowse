@@ -11,7 +11,7 @@ namespace hyperbrowse::ui
     class DetailsPanelHistogram final
     {
     public:
-        static constexpr std::size_t kBinCount = 64;
+        static constexpr std::size_t kBinCount = 256;
 
         struct Result
         {

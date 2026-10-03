@@ -15,6 +15,17 @@ namespace hyperbrowse::ui
         constexpr COLORREF kRedChannelColor = RGB(224, 98, 92);
         constexpr COLORREF kGreenChannelColor = RGB(112, 188, 102);
         constexpr COLORREF kBlueChannelColor = RGB(92, 150, 232);
+        constexpr BYTE kGridMixAmount = 48;
+        constexpr float kChannelStrokeWidth = 1.5f;
+
+        COLORREF BlendColor(COLORREF baseColor, COLORREF mixColor, BYTE mixAmount)
+        {
+            const BYTE baseAmount = static_cast<BYTE>(255 - mixAmount);
+            return RGB(
+                (GetRValue(baseColor) * baseAmount + GetRValue(mixColor) * mixAmount) / 255,
+                (GetGValue(baseColor) * baseAmount + GetGValue(mixColor) * mixAmount) / 255,
+                (GetBValue(baseColor) * baseAmount + GetBValue(mixColor) * mixAmount) / 255);
+        }
     }
 
     void DetailsPanelHistogramPainter::PaintD2D(ID2D1RenderTarget* renderTarget,
@@ -72,6 +83,20 @@ namespace hyperbrowse::ui
         const int chartBottom = state.rect.bottom - 6;
         const int chartWidth = (std::max)(1, chartRight - chartLeft);
         const int chartHeight = (std::max)(1, chartBottom - chartTop);
+        const auto gridBrush = createBrush(BlendColor(palette.background, palette.border, kGridMixAmount));
+        if (gridBrush)
+        {
+            for (int level = 1; level < 4; ++level)
+            {
+                const float y = static_cast<float>(chartTop)
+                    + (static_cast<float>(chartHeight - 1) * static_cast<float>(level) / 4.0f);
+                renderTarget->DrawLine(
+                    render::ToD2DPoint(static_cast<float>(chartLeft), y),
+                    render::ToD2DPoint(static_cast<float>(chartRight), y),
+                    gridBrush.Get(),
+                    1.0f);
+            }
+        }
         const auto drawChannel = [&](const auto& values, COLORREF color)
         {
             const auto channelBrush = createBrush(color);
@@ -79,27 +104,20 @@ namespace hyperbrowse::ui
             {
                 return;
             }
+            const float xScale = static_cast<float>(chartWidth - 1)
+                / static_cast<float>(DetailsPanelHistogram::kBinCount - 1);
+            const float heightScale = static_cast<float>(chartHeight - 1) / static_cast<float>(state.peak);
             for (std::size_t index = 1; index < DetailsPanelHistogram::kBinCount; ++index)
             {
-                const int previousX = chartLeft + MulDiv(static_cast<int>(index - 1),
-                                                         chartWidth - 1,
-                                                         static_cast<int>(DetailsPanelHistogram::kBinCount - 1));
-                const int currentX = chartLeft + MulDiv(static_cast<int>(index),
-                                                        chartWidth - 1,
-                                                        static_cast<int>(DetailsPanelHistogram::kBinCount - 1));
-                const int previousHeight = MulDiv(
-                    static_cast<int>(values[index - 1]),
-                    chartHeight - 1,
-                    static_cast<int>(state.peak));
-                const int currentHeight = MulDiv(
-                    static_cast<int>(values[index]),
-                    chartHeight - 1,
-                    static_cast<int>(state.peak));
+                const float previousX = static_cast<float>(chartLeft) + static_cast<float>(index - 1) * xScale;
+                const float currentX = static_cast<float>(chartLeft) + static_cast<float>(index) * xScale;
+                const float previousHeight = static_cast<float>(values[index - 1]) * heightScale;
+                const float currentHeight = static_cast<float>(values[index]) * heightScale;
                 renderTarget->DrawLine(
-                    render::ToD2DPoint(static_cast<float>(previousX), static_cast<float>(chartBottom - previousHeight)),
-                    render::ToD2DPoint(static_cast<float>(currentX), static_cast<float>(chartBottom - currentHeight)),
+                    render::ToD2DPoint(previousX, static_cast<float>(chartBottom) - previousHeight),
+                    render::ToD2DPoint(currentX, static_cast<float>(chartBottom) - currentHeight),
                     channelBrush.Get(),
-                    1.0f);
+                    kChannelStrokeWidth);
             }
         };
         drawChannel(state.red, kRedChannelColor);
@@ -167,9 +185,23 @@ namespace hyperbrowse::ui
         const int chartBottom = state.rect.bottom - 6;
         const int chartWidth = (std::max)(1, chartRight - chartLeft);
         const int chartHeight = (std::max)(1, chartBottom - chartTop);
+        const HPEN gridPen = CreatePen(
+            PS_SOLID,
+            1,
+            BlendColor(palette.background, palette.border, kGridMixAmount));
+        const HGDIOBJ oldGridPen = SelectObject(hdc, gridPen);
+        for (int level = 1; level < 4; ++level)
+        {
+            const int y = chartTop + MulDiv(chartHeight - 1, level, 4);
+            MoveToEx(hdc, chartLeft, y, nullptr);
+            LineTo(hdc, chartRight, y);
+        }
+        SelectObject(hdc, oldGridPen);
+        DeleteObject(gridPen);
+
         const auto drawChannel = [&](const auto& values, COLORREF color)
         {
-            const HPEN channelPen = CreatePen(PS_SOLID, 1, color);
+            const HPEN channelPen = CreatePen(PS_SOLID, 2, color);
             const HGDIOBJ oldChannelPen = SelectObject(hdc, channelPen);
             for (std::size_t index = 0; index < DetailsPanelHistogram::kBinCount; ++index)
             {

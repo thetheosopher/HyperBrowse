@@ -55,6 +55,7 @@ namespace hyperbrowse::ui::dialog_detail
         const int tabHeight = scale(46);
         const int contentTop = tabTop + tabHeight + scale(18);
         const int rowHeight = scale(38);
+        const int choiceControlHeight = scale(46);
         const int rowGap = scale(12);
         const int buttonWidth = scale(104);
         const int buttonHeight = scale(38);
@@ -96,7 +97,12 @@ namespace hyperbrowse::ui::dialog_detail
         const int numericSliderHeight = scale(18);
         const int footerTop = std::max(contentTop, height - margin - buttonHeight);
         const int footerBottom = std::max(footerTop, height - margin);
-        const RECT bodyViewport{left, contentTop, right, std::max(contentTop, footerTop - scale(18))};
+        const int choiceControlOverhang = (choiceControlHeight - rowHeight) / 2;
+        const RECT bodyViewport{
+            left,
+            contentTop - choiceControlOverhang,
+            right,
+            std::max(contentTop, footerTop - scale(18))};
 
         result.metrics = {
             width,
@@ -134,16 +140,28 @@ namespace hyperbrowse::ui::dialog_detail
                                        ConsolidatedSettingsControl control,
                                        int& y)
         {
+            const int requestedWidth = input.choiceControlWidths[static_cast<std::size_t>(control)];
+            const int controlHeight = control == ConsolidatedSettingsControl::QuickSendShortcutOrder
+                ? rowHeight
+                : choiceControlHeight;
+            const int controlTop = y + (rowHeight - controlHeight) / 2;
             if (canUseColumns)
             {
                 AddLabel(result, left, y, valueLeft - labelGap, y + rowHeight, label, false, control);
-                SetControlRect(result, control, valueLeft, y, valueRight, y + rowHeight);
+                const int controlRight = requestedWidth > 0
+                    ? std::min(valueRight, valueLeft + requestedWidth)
+                    : valueRight;
+                SetControlRect(result, control, valueLeft, controlTop, controlRight, controlTop + controlHeight);
                 y += rowHeight + rowGap;
                 return;
             }
             AddLabel(result, left, y, right, y + rowHeight, label, false, control);
             y += rowHeight + rowGap;
-            SetControlRect(result, control, left, y, right, y + rowHeight);
+            const int controlRight = requestedWidth > 0
+                ? std::min(right, left + requestedWidth)
+                : right;
+            const int stackedControlTop = y + (rowHeight - controlHeight) / 2;
+            SetControlRect(result, control, left, stackedControlTop, controlRight, stackedControlTop + controlHeight);
             y += rowHeight + rowGap;
         };
         const auto addNumeric = [&](std::wstring_view label,
@@ -166,7 +184,9 @@ namespace hyperbrowse::ui::dialog_detail
                 AddLabel(result, left, y, right, y + rowHeight, label, false, control);
                 y += rowHeight + rowGap;
             }
-            const int editTop = y;
+            const bool matchSelectorHeight = input.page == ConsolidatedSettingsPage::Slideshow;
+            const int editHeight = matchSelectorHeight ? choiceControlHeight : numericEditHeight;
+            const int editTop = y + (matchSelectorHeight ? (numericRowHeight - editHeight) / 2 : 0);
             const int spinWidth = scale(28);
             const int availableControlWidth = useColumns ? valueRight - valueLeft : right - left;
             const int editWidth = automaticControl == ConsolidatedSettingsControl::Count
@@ -175,11 +195,11 @@ namespace hyperbrowse::ui::dialog_detail
                            std::max(spinWidth, availableControlWidth - scale(14) - automaticWidth));
             const int editLeft = useColumns ? valueLeft : left;
             result.numericEditRects[static_cast<std::size_t>(numericIndex)] = {
-                editLeft, editTop, editLeft + editWidth, editTop + numericEditHeight};
+                editLeft, editTop, editLeft + editWidth, editTop + editHeight};
             result.numericSpinRects[static_cast<std::size_t>(numericIndex)] = {
-                editLeft + editWidth - spinWidth, editTop, editLeft + editWidth, editTop + numericEditHeight};
+                editLeft + editWidth - spinWidth, editTop, editLeft + editWidth, editTop + editHeight};
             result.numericSliderRects[static_cast<std::size_t>(numericIndex)] = {
-                editLeft, editTop + numericEditHeight + scale(4), valueRight, editTop + numericEditHeight + scale(4) + numericSliderHeight};
+                editLeft, editTop + editHeight + scale(4), valueRight, editTop + editHeight + scale(4) + numericSliderHeight};
             if (automaticControl != ConsolidatedSettingsControl::Count)
             {
                 const int checkboxLeft = editLeft + editWidth + scale(14);
@@ -301,6 +321,12 @@ namespace hyperbrowse::ui::dialog_detail
                      y,
                      scale(24));
             addLabelValue(L"New Quick Actions shortcut order", ConsolidatedSettingsControl::QuickSendShortcutOrder, y);
+            {
+                RECT& bounds = result.controlRects[
+                    static_cast<std::size_t>(ConsolidatedSettingsControl::QuickSendShortcutOrder)];
+                const int currentWidth = static_cast<int>(bounds.right - bounds.left);
+                bounds.right = bounds.left + std::max(1, currentWidth / 4);
+            }
             break;
         default:
             break;
