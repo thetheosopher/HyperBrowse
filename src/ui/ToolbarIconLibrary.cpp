@@ -163,7 +163,6 @@ namespace hyperbrowse::ui
 
         bool success = true;
         success = LoadIconAsset(L"open-folder", IDR_TOOLBAR_ICON_OPEN_FOLDER, L"open-folder.svg") && success;
-        success = LoadIconAsset(L"recursive", IDR_TOOLBAR_ICON_RECURSIVE, L"recursive.svg") && success;
         success = LoadIconAsset(L"view-grid", IDR_TOOLBAR_ICON_VIEW_GRID, L"view-grid.svg") && success;
         success = LoadIconAsset(L"view-list", IDR_TOOLBAR_ICON_VIEW_LIST, L"view-list.svg") && success;
         success = LoadIconAsset(L"sort", IDR_TOOLBAR_ICON_SORT, L"sort.svg") && success;

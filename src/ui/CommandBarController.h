@@ -57,7 +57,6 @@ namespace hyperbrowse::ui
             bool canNavigateForward{};
             bool folderEnumerationActive{};
             bool pendingNavigation{};
-            bool recursiveChecked{};
             bool thumbnailsChecked{};
             bool detailsChecked{};
             bool thumbnailSizeEnabled{};

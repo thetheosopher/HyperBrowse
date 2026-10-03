@@ -21713,7 +21713,6 @@ namespace hyperbrowse::ui
         state.folderEnumerationActive = folderEnumerationActive;
         state.pendingNavigation = folderLoadCoordinator_
             && folderLoadCoordinator_->HasPendingNavigation();
-        state.recursiveChecked = recursiveBrowsingEnabled_;
         state.thumbnailsChecked = browserMode_ == BrowserMode::Thumbnails;
         state.detailsChecked = browserMode_ == BrowserMode::Details;
         state.thumbnailSizeEnabled = browserMode_ == BrowserMode::Thumbnails;

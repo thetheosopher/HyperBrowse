@@ -25,6 +25,7 @@
 #include "render/D2DRenderer.h"
 #include "render/GdiText.h"
 #include "services/ImageMetadataService.h"
+#include "browser/ThumbnailRatingKeyPolicy.h"
 #include "ui/ItemNumberNavigationPolicy.h"
 #include "ui/MainWindowDialogs.h"
 #include "ui/SystemTheme.h"
@@ -1956,14 +1957,14 @@ namespace hyperbrowse::viewer
                 }
             }
 
-            if (d2dPanelFillBrush_)
+            if (d2dMetadataPanelFillBrush_)
             {
                 const D2D1_RECT_F labelBackground = D2D1::RectF(
                     static_cast<float>(tileRect.left + 8),
                     static_cast<float>(tileRect.top + 8),
                     static_cast<float>(tileRect.right - 8),
-                    static_cast<float>(tileRect.top + 42));
-                renderTarget->FillRectangle(labelBackground, d2dPanelFillBrush_.Get());
+                    static_cast<float>(tileRect.top + 52));
+                renderTarget->FillRectangle(labelBackground, d2dMetadataPanelFillBrush_.Get());
             }
             if (tile.itemIndex >= 0 && tile.itemIndex < static_cast<int>(items_.size())
                 && d2dBottomInfoFormat_ && d2dTextBrush_)
@@ -1988,9 +1989,9 @@ namespace hyperbrowse::viewer
                 }
                 const D2D1_RECT_F labelRect = D2D1::RectF(
                     static_cast<float>(tileRect.left + 16),
-                    static_cast<float>(tileRect.top + 10),
+                    static_cast<float>(tileRect.top + 12),
                     static_cast<float>(tileRect.right - 16),
-                    static_cast<float>(tileRect.top + 38));
+                    static_cast<float>(tileRect.top + 48));
                 d2dBottomInfoFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
                 renderTarget->DrawText(label.c_str(),
                                        static_cast<UINT32>(label.size()),
@@ -2043,6 +2044,37 @@ namespace hyperbrowse::viewer
         const COLORREF borderColor = PanelBorderColor(darkTheme_);
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, textColor);
+
+        HDC labelBackgroundDc = CreateCompatibleDC(dc);
+        HBITMAP labelBackgroundBitmap = labelBackgroundDc ? CreateCompatibleBitmap(dc, 1, 1) : nullptr;
+        HGDIOBJ oldLabelBackgroundBitmap = labelBackgroundBitmap
+            ? SelectObject(labelBackgroundDc, labelBackgroundBitmap)
+            : nullptr;
+        if (!labelBackgroundBitmap
+            || !oldLabelBackgroundBitmap
+            || oldLabelBackgroundBitmap == HGDI_ERROR
+            || SetPixelV(labelBackgroundDc, 0, 0, PanelFillColor(darkTheme_)) == FALSE)
+        {
+            if (labelBackgroundBitmap)
+            {
+                if (oldLabelBackgroundBitmap && oldLabelBackgroundBitmap != HGDI_ERROR)
+                {
+                    SelectObject(labelBackgroundDc, oldLabelBackgroundBitmap);
+                }
+                DeleteObject(labelBackgroundBitmap);
+            }
+            if (labelBackgroundDc)
+            {
+                DeleteDC(labelBackgroundDc);
+            }
+            labelBackgroundDc = nullptr;
+            labelBackgroundBitmap = nullptr;
+            oldLabelBackgroundBitmap = nullptr;
+        }
+        BLENDFUNCTION labelBackgroundBlend{};
+        labelBackgroundBlend.BlendOp = AC_SRC_OVER;
+        labelBackgroundBlend.SourceConstantAlpha =
+            static_cast<BYTE>(std::lround(MetadataPanelFillAlpha(darkTheme_) * 255.0f));
 
         for (std::size_t tileIndex = 0; tileIndex < compareTiles_.size(); ++tileIndex)
         {
@@ -2136,7 +2168,23 @@ namespace hyperbrowse::viewer
                 {
                     label.append(L"   Replacement failed");
                 }
-                RECT labelRect{tileRect.left + 12, tileRect.top + 8, tileRect.right - 12, tileRect.top + 36};
+                const RECT labelBackground{
+                    tileRect.left + 8, tileRect.top + 8, tileRect.right - 8, tileRect.top + 52};
+                if (labelBackgroundDc && labelBackgroundBitmap)
+                {
+                    AlphaBlend(dc,
+                               labelBackground.left,
+                               labelBackground.top,
+                               labelBackground.right - labelBackground.left,
+                               labelBackground.bottom - labelBackground.top,
+                               labelBackgroundDc,
+                               0,
+                               0,
+                               1,
+                               1,
+                               labelBackgroundBlend);
+                }
+                RECT labelRect{tileRect.left + 12, tileRect.top + 12, tileRect.right - 12, tileRect.top + 48};
                 DrawTextW(dc, label.c_str(), static_cast<int>(label.size()), &labelRect,
                           DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
@@ -2155,6 +2203,15 @@ namespace hyperbrowse::viewer
         RECT syncRect{clientRect.left + 12, clientRect.bottom - 34, clientRect.left + 132, clientRect.bottom - 8};
         DrawTextW(dc, syncLabel.c_str(), static_cast<int>(syncLabel.size()), &syncRect,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        if (labelBackgroundBitmap)
+        {
+            SelectObject(labelBackgroundDc, oldLabelBackgroundBitmap);
+            DeleteObject(labelBackgroundBitmap);
+        }
+        if (labelBackgroundDc)
+        {
+            DeleteDC(labelBackgroundDc);
+        }
         SelectObject(dc, oldFont);
     }
 
@@ -3452,6 +3509,12 @@ namespace hyperbrowse::viewer
 
     bool ViewerWindow::SetNavigationCursorForPoint(POINT point)
     {
+        if (compareSessionActive_)
+        {
+            SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            return true;
+        }
+
         const int navigationDelta = NavigationDeltaForPoint(point);
         if (navigationDelta < 0)
         {
@@ -5829,6 +5892,27 @@ namespace hyperbrowse::viewer
             break;
         }
         case WM_KEYDOWN:
+            if (compareSessionActive_)
+            {
+                const auto rating = browser::ThumbnailRatingKeyPolicy::RatingFromVirtualKey(
+                    static_cast<UINT>(wParam),
+                    GetKeyState(VK_CONTROL) < 0,
+                    GetKeyState(VK_SHIFT) < 0,
+                    GetKeyState(VK_MENU) < 0);
+                if (rating)
+                {
+                    const bool keyRepeat = (lParam & (1LL << 30)) != 0;
+                    if (!keyRepeat && owner_ && IsWindow(owner_) != FALSE)
+                    {
+                        PostMessageW(owner_,
+                                     kContextMenuCommandMessage,
+                                     kContextMenuSetCompareRatingBase + static_cast<UINT>(*rating),
+                                     reinterpret_cast<LPARAM>(hwnd_));
+                    }
+                    return 0;
+                }
+            }
+
             if ((wParam == VK_F7 || wParam == VK_F8)
                 && (GetKeyState(VK_CONTROL) & 0x8000) == 0
                 && (GetKeyState(VK_SHIFT) & 0x8000) == 0
@@ -6272,6 +6356,11 @@ namespace hyperbrowse::viewer
             return 0;
         }
         case WM_SETCURSOR:
+            if (LOWORD(lParam) == HTCLIENT && compareSessionActive_)
+            {
+                SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+                return TRUE;
+            }
             if (LOWORD(lParam) == HTCLIENT && !panning_)
             {
                 POINT point{};

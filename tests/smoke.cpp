@@ -231,6 +231,9 @@ namespace
         hyperbrowse::viewer::QuickSendOperation lastViewerQuickSendOperation{
             hyperbrowse::viewer::QuickSendOperation::Move};
         HWND lastViewerQuickSendSource{};
+        int viewerCompareRatingRequests{};
+        int lastViewerCompareRating{-1};
+        HWND lastViewerCompareRatingSource{};
     };
 
     std::vector<HWND> FindOpenViewerWindowHandles()
@@ -1221,7 +1224,6 @@ namespace
 
     LRESULT CALLBACK TestWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
-        (void)wParam;
         if (message == WM_NCCREATE)
         {
             auto* createStruct = reinterpret_cast<CREATESTRUCTW*>(lParam);
@@ -1230,6 +1232,22 @@ namespace
         }
 
         auto* state = reinterpret_cast<TestWindowState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (message == hyperbrowse::viewer::ViewerWindow::kContextMenuCommandMessage
+            && wParam >= hyperbrowse::viewer::ViewerWindow::kContextMenuSetCompareRatingBase
+            && wParam < hyperbrowse::viewer::ViewerWindow::kContextMenuSetCompareRatingBase + 6)
+        {
+            if (!state)
+            {
+                return 0;
+            }
+
+            ++state->viewerCompareRatingRequests;
+            state->lastViewerCompareRating = static_cast<int>(
+                wParam - hyperbrowse::viewer::ViewerWindow::kContextMenuSetCompareRatingBase);
+            state->lastViewerCompareRatingSource = reinterpret_cast<HWND>(lParam);
+            return 0;
+        }
+
         if (message == hyperbrowse::services::FolderEnumerationService::kMessageId)
         {
             std::unique_ptr<hyperbrowse::services::FolderEnumerationUpdate> update(
@@ -4589,6 +4607,27 @@ namespace
                 }
                 Expect(hasSaveInk, "Inline Save icon rasterized as a blank bitmap");
                 Expect(hasAntialiasedSaveInk, "Inline Save icon has no antialiased edge coverage");
+                const HBITMAP thumbnailSizeBitmap = icons.GetBitmap("thumbnail-size", 24, RGB(20, 30, 40));
+                DIBSECTION thumbnailSizeDib{};
+                Expect(thumbnailSizeBitmap
+                    && GetObjectW(thumbnailSizeBitmap, sizeof(thumbnailSizeDib), &thumbnailSizeDib) > 0
+                    && thumbnailSizeDib.dsBm.bmWidth == 24
+                    && thumbnailSizeDib.dsBm.bmHeight == 24
+                    && thumbnailSizeDib.dsBm.bmBits,
+                    "Thumbnail Size icon did not rasterize at its requested dimensions");
+                const auto* thumbnailSizePixels =
+                    static_cast<const unsigned char*>(thumbnailSizeDib.dsBm.bmBits);
+                bool hasThumbnailSizeInk = false;
+                bool hasAntialiasedThumbnailSizeInk = false;
+                for (int pixel = 0; pixel < 24 * 24; ++pixel)
+                {
+                    const unsigned char alpha = thumbnailSizePixels[pixel * 4 + 3];
+                    hasThumbnailSizeInk = hasThumbnailSizeInk || alpha != 0;
+                    hasAntialiasedThumbnailSizeInk =
+                        hasAntialiasedThumbnailSizeInk || (alpha > 0 && alpha < 255);
+                }
+                Expect(hasThumbnailSizeInk, "Thumbnail Size icon rasterized as a blank bitmap");
+                Expect(hasAntialiasedThumbnailSizeInk, "Thumbnail Size icon has no antialiased edge coverage");
                 hyperbrowse::services::SavedSearchStore store;
                 std::wstring error;
                 Expect(store.AddOnWorker({L"RAW UI", L"type:raw"}, &error), "Failed to seed the isolated UI saved search");
@@ -5536,6 +5575,22 @@ namespace
          Expect(!viewer.BeginCompareSession({0, 0}, {}), "Compare session accepted duplicate tile identities");
          Expect(!viewer.BeginCompareSession({0, 1, 2, 3, 4}, {}), "Compare session accepted more than four tiles");
          Expect(viewer.BeginCompareSession({0, 1}, {}), "Viewer did not start a two-tile compare session");
+         RECT compareClientRect{};
+         GetClientRect(viewer.Hwnd(), &compareClientRect);
+         SendMessageW(viewer.Hwnd(),
+                      WM_MOUSEMOVE,
+                      0,
+                      MAKELPARAM(compareClientRect.left + 1,
+                                 (compareClientRect.top + compareClientRect.bottom) / 2));
+         Expect(GetCursor() == LoadCursorW(nullptr, IDC_ARROW),
+             "Compare session showed the previous-image navigation cursor at the left edge");
+         SendMessageW(viewer.Hwnd(),
+                      WM_MOUSEMOVE,
+                      0,
+                      MAKELPARAM(compareClientRect.right - 1,
+                                 (compareClientRect.top + compareClientRect.bottom) / 2));
+         Expect(GetCursor() == LoadCursorW(nullptr, IDC_ARROW),
+             "Compare session showed the next-image navigation cursor at the right edge");
          Expect(viewer.CompareTileCount() == 2 && viewer.FocusedCompareTile() == 0
                  && viewer.CompareTileItemIndex(0) == 0 && viewer.CompareTileItemIndex(1) == 1,
              "Two-tile compare did not preserve selection order and primary focus");
@@ -5548,6 +5603,34 @@ namespace
          BYTE compareModifiedKeyboardState[256]{};
          Expect(GetKeyboardState(compareKeyboardState) != FALSE,
              "Failed to read keyboard state for compare tile focus coverage");
+         std::copy(std::begin(compareKeyboardState), std::end(compareKeyboardState),
+                std::begin(compareModifiedKeyboardState));
+         compareModifiedKeyboardState[VK_CONTROL] = 0;
+         compareModifiedKeyboardState[VK_SHIFT] = 0;
+         compareModifiedKeyboardState[VK_MENU] = 0;
+         Expect(SetKeyboardState(compareModifiedKeyboardState) != FALSE,
+             "Failed to clear modifiers for compare rating shortcut coverage");
+         const int compareZoomPercent = viewer.CurrentZoomPercent();
+         for (int rating = 0; rating <= 5; ++rating)
+         {
+             state->viewerCompareRatingRequests = 0;
+             SendMessageW(viewer.Hwnd(), WM_KEYDOWN, static_cast<WPARAM>('0' + rating), 0);
+             Expect(PumpMessagesUntil([&]() { return state->viewerCompareRatingRequests == 1; }, 2000),
+                 "A compare-mode number key did not dispatch its rating command");
+             Expect(state->lastViewerCompareRating == rating
+                        && state->lastViewerCompareRatingSource == viewer.Hwnd(),
+                 "A compare-mode number key dispatched the wrong focused-image rating");
+         }
+         Expect(viewer.CurrentZoomPercent() == compareZoomPercent,
+             "Compare-mode rating keys invoked the viewer's fit or actual-size shortcuts");
+         state->viewerCompareRatingRequests = 0;
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_NUMPAD5, 0);
+         Expect(PumpMessagesUntil([&]() { return state->viewerCompareRatingRequests == 1; }, 2000)
+                    && state->lastViewerCompareRating == 5
+                    && state->lastViewerCompareRatingSource == viewer.Hwnd(),
+             "A compare-mode numpad rating key did not dispatch its focused-image rating");
+         Expect(SetKeyboardState(compareKeyboardState) != FALSE,
+             "Failed to restore keyboard state after compare rating shortcut coverage");
          std::copy(std::begin(compareKeyboardState), std::end(compareKeyboardState),
                 std::begin(compareModifiedKeyboardState));
          compareModifiedKeyboardState[VK_CONTROL] |= 0x80;

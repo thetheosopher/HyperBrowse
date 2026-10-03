@@ -196,7 +196,8 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `+` / `=` / Numpad `+` | Zoom in |
 | `-` / `_` / Numpad `-` | Zoom out |
 | `Enter` | Toggle between fit and actual-size viewing |
-| `0` / `1` | Fit the image to the window / show it at actual size |
+| `0`-`5` / Numpad `0`-`5` (compare mode) | Set the focused compare image's rating (`0` clears); temporarily overrides `0` / `1` fit and actual-size shortcuts |
+| `0` / `1` (outside compare mode) | Fit the image to the window / show it at actual size |
 | `H` / `W` | Fit the image to the window height / width |
 | `Ctrl+Shift+H` / `Ctrl+Shift+W` | Size the window to the monitor work-area height / width (windowed mode only; no effect in full-screen mode) |
 | `L` / `R` | Rotate the image left / right |

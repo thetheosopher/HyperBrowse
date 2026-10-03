@@ -581,7 +581,7 @@ namespace hyperbrowse::tests
                               });
 
             const auto& menuButtons = controller.MenuButtons();
-            Expect(controller.Items().size() == 19, "Command-bar controller did not initialize toolbar items");
+            Expect(controller.Items().size() == 18, "Command-bar controller did not initialize toolbar items");
                  Expect(menuButtons.size() == 5, "Command-bar controller did not retain all five top-level menus");
             Expect(controller.MenuHitTest(menuButtons[0].rect.left + 1, menuButtons[0].rect.top + 1) == 0,
                    "Command-bar controller did not hit-test the first menu button");
@@ -603,7 +603,6 @@ namespace hyperbrowse::tests
             CommandBarController::ToolbarState state;
             state.canNavigateBack = true;
             state.canNavigateForward = true;
-            state.recursiveChecked = true;
             state.thumbnailsChecked = true;
             state.thumbnailSizeEnabled = false;
             state.compareEnabled = true;
@@ -632,7 +631,8 @@ namespace hyperbrowse::tests
                        && thumbnailSizeItem->rect.right - thumbnailSizeItem->rect.left == expectedDropdownWidth
                        && sortItem->rect.right < thumbnailSizeItem->rect.left,
                    "Sort and thumbnail-size dropdowns did not reserve balanced icon and chevron space");
-            Expect(findItem(ID_VIEW_RECURSIVE)->checked && findItem(ID_VIEW_THUMBNAILS)->checked,
+            Expect(findItem(ID_VIEW_RECURSIVE) == controller.Items().end()
+                       && findItem(ID_VIEW_THUMBNAILS)->checked,
                    "Command-bar controller did not apply toggle state");
             Expect(!findItem(ID_ACTION_THUMBNAIL_SIZE_MENU)->enabled
                        && findItem(ID_FILE_COMPARE_SELECTED)->enabled

@@ -44,7 +44,6 @@ namespace hyperbrowse::ui
         addIcon(ID_VIEW_NAVIGATE_BACK_FOLDER, "back", L"Back to Previous Folder (Backspace / Alt+Left)");
         addIcon(ID_VIEW_NAVIGATE_FORWARD_FOLDER, "forward", L"Forward to Next Folder (Alt+Right)");
         addIcon(ID_FILE_OPEN_FOLDER, "open-folder", L"Open Folder (Ctrl+O)");
-        addIcon(ID_VIEW_RECURSIVE, "recursive", L"Recursive Browsing (Ctrl+R)", ToolbarItemKind::IconToggle);
         addSeparator();
         addIcon(ID_VIEW_THUMBNAILS, "view-grid", L"Thumbnail Mode (Ctrl+1)", ToolbarItemKind::IconToggle);
         addIcon(ID_VIEW_DETAILS, "view-list", L"Details Mode (Ctrl+2)", ToolbarItemKind::IconToggle);
@@ -274,9 +273,6 @@ namespace hyperbrowse::ui
                 break;
             case ID_VIEW_NAVIGATE_FORWARD_FOLDER:
                 item.enabled = state.canNavigateForward && !state.pendingNavigation && !state.folderEnumerationActive;
-                break;
-            case ID_VIEW_RECURSIVE:
-                item.checked = state.recursiveChecked;
                 break;
             case ID_VIEW_THUMBNAILS:
                 item.checked = state.thumbnailsChecked;
