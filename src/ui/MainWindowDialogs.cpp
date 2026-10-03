@@ -57,6 +57,7 @@ namespace hyperbrowse::ui
             HBRUSH fieldBrush{};
             HBRUSH borderBrush{};
             hyperbrowse::util::AppTextSize appTextSize{hyperbrowse::util::kDefaultAppTextSize};
+            int editControlHeight{};
             std::wstring title;
             std::wstring instruction;
             std::wstring contextLine;
@@ -79,6 +80,8 @@ namespace hyperbrowse::ui
             int contextTop{};
             int contextHeight{};
             int editTop{};
+            int editControlTop{};
+            int editControlHeight{};
             int buttonTop{};
             int clientHeight{};
         };
@@ -157,6 +160,45 @@ namespace hyperbrowse::ui
             {
                 DeleteObject(font);
             }
+        }
+
+        int MeasureTextInputEditControlHeight(const TextInputDialogState& state)
+        {
+            const int frameHeight = ScaleDialogAppTextDimension(
+                kTextInputEditHeight, state.appTextSize, state.dpi);
+            const int fallbackHeight = std::max(1, frameHeight - 2);
+            HDC dc = state.ownerWindow ? GetDC(state.ownerWindow) : GetDC(nullptr);
+            if (!dc)
+            {
+                return fallbackHeight;
+            }
+
+            const HFONT font = state.bodyFont
+                ? state.bodyFont
+                : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            const HGDIOBJ oldFont = font ? SelectObject(dc, font) : nullptr;
+            TEXTMETRICW textMetrics{};
+            const BOOL measured = GetTextMetricsW(dc, &textMetrics);
+            if (oldFont)
+            {
+                SelectObject(dc, oldFont);
+            }
+            if (state.ownerWindow)
+            {
+                ReleaseDC(state.ownerWindow, dc);
+            }
+            else
+            {
+                ReleaseDC(nullptr, dc);
+            }
+
+            if (measured == FALSE)
+            {
+                return fallbackHeight;
+            }
+
+            const int padding = ScaleDialogAppTextDimension(2, state.appTextSize, state.dpi);
+            return std::clamp(static_cast<int>(textMetrics.tmHeight) + padding, 1, fallbackHeight);
         }
 
         void CenterWindowOnOwner(HWND window, HWND ownerWindow)
@@ -470,7 +512,12 @@ namespace hyperbrowse::ui
             {
                 metrics.editTop = instructionBottom + scale(kTextInputDialogEditTopGap);
             }
-            metrics.buttonTop = metrics.editTop + scale(kTextInputEditHeight) + scale(kTextInputDialogButtonTopGap);
+            const int editFrameHeight = scale(kTextInputEditHeight);
+            metrics.editControlHeight = std::clamp(state.editControlHeight,
+                                                   1,
+                                                   std::max(1, editFrameHeight - 2));
+            metrics.editControlTop = metrics.editTop + (editFrameHeight - metrics.editControlHeight) / 2;
+            metrics.buttonTop = metrics.editTop + editFrameHeight + scale(kTextInputDialogButtonTopGap);
             metrics.clientHeight = metrics.buttonTop + scale(kTextInputButtonHeight + kTextInputDialogMargin);
             return metrics;
         }
@@ -507,9 +554,9 @@ namespace hyperbrowse::ui
             {
                 MoveWindow(state.editWindow,
                            margin + 1,
-                           metrics.editTop + 1,
+                           metrics.editControlTop,
                            std::max(1, contentWidth - 2),
-                           std::max(1, scale(kTextInputEditHeight) - 2),
+                           metrics.editControlHeight,
                            TRUE);
             }
             if (state.okButton)
@@ -804,10 +851,9 @@ namespace hyperbrowse::ui
                     state->initialText.c_str(),
                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
                     margin + 1,
-                    metrics.editTop + 1,
+                    metrics.editControlTop,
                     std::max(1, contentWidth - 2),
-                    std::max(1,
-                             ScaleDialogAppTextDimension(kTextInputEditHeight, state->appTextSize, state->dpi) - 2),
+                    metrics.editControlHeight,
                     hwnd,
                     reinterpret_cast<HMENU>(static_cast<INT_PTR>(kTextInputEditControlId)),
                     reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)),
@@ -868,6 +914,41 @@ namespace hyperbrowse::ui
                     return FALSE;
                 }
                 break;
+            case WM_LBUTTONDOWN:
+                if (state && state->editWindow)
+                {
+                    const auto scale = [state](int value)
+                    {
+                        return ScaleDialogAppTextDimension(value, state->appTextSize, state->dpi);
+                    };
+                    RECT client{};
+                    GetClientRect(hwnd, &client);
+                    const int margin = scale(kTextInputDialogMargin);
+                    const TextInputDialogLayoutMetrics metrics = BuildTextInputDialogLayoutMetrics(*state);
+                    const RECT editFrame{
+                        margin,
+                        metrics.editTop,
+                        client.right - margin,
+                        metrics.editTop + scale(kTextInputEditHeight)};
+                    const POINT click{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                    if (PtInRect(&editFrame, click) != FALSE)
+                    {
+                        SetFocus(state->editWindow);
+                        const int editWidth = std::max(1, static_cast<int>(client.right) - margin * 2 - 2);
+                        const int editX = std::clamp(static_cast<int>(click.x) - margin - 1, 0, editWidth - 1);
+                        const LRESULT hit = SendMessageW(state->editWindow,
+                                                         EM_CHARFROMPOS,
+                                                         0,
+                                                         MAKELPARAM(editX, 0));
+                        const int characterIndex = LOWORD(hit);
+                        SendMessageW(state->editWindow,
+                                     EM_SETSEL,
+                                     static_cast<WPARAM>(characterIndex),
+                                     static_cast<LPARAM>(characterIndex));
+                        return 0;
+                    }
+                }
+                break;
             case WM_SIZE:
                 if (state)
                 {
@@ -881,6 +962,7 @@ namespace hyperbrowse::ui
                     state->dpi = std::max<UINT>(96, HIWORD(wParam));
                     DeleteFontIfOwned(state->bodyFont);
                     state->bodyFont = CreateDialogUiFont(9, FW_NORMAL, state->appTextSize, state->dpi);
+                    state->editControlHeight = MeasureTextInputEditControlHeight(*state);
                     const HFONT font = state->bodyFont
                         ? state->bodyFont
                         : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -979,6 +1061,7 @@ namespace hyperbrowse::ui
                         metrics.editTop,
                         client.right - margin,
                         metrics.editTop + scale(kTextInputEditHeight)};
+                    FillRect(dc, &editFrame, state->fieldBrush);
                     FrameRect(dc, &editFrame, state->borderBrush);
                 }
                 EndPaint(hwnd, &paint);
@@ -1438,6 +1521,7 @@ namespace hyperbrowse::ui
         {
             state.bodyFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
         }
+        state.editControlHeight = MeasureTextInputEditControlHeight(state);
         state.title = title;
         state.instruction = instruction;
         state.contextLine = std::move(contextLine);

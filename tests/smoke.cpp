@@ -4439,6 +4439,8 @@ namespace
                 bool timedOut{};
                 std::wstring expectedContextLine;
                 bool contextLineMatched{};
+                bool textEntryCentered{};
+                bool textEntryFieldClickFocused{};
             };
 
             void CALLBACK SavedSearchDialogTimer(HWND owner, UINT, UINT_PTR timerId, DWORD)
@@ -4465,6 +4467,62 @@ namespace
                                                   contextText,
                                                   static_cast<int>(std::size(contextText))) > 0
                                 && response->expectedContextLine == contextText;
+
+                            const HWND editWindow = GetDlgItem(dialog, 100);
+                            RECT contextRect{};
+                            RECT editRect{};
+                            if (contextWindow && editWindow
+                                && GetWindowRect(contextWindow, &contextRect)
+                                && GetWindowRect(editWindow, &editRect))
+                            {
+                                POINT contextPoints[2]{{contextRect.left, contextRect.top},
+                                                       {contextRect.right, contextRect.bottom}};
+                                POINT editPoints[2]{{editRect.left, editRect.top},
+                                                    {editRect.right, editRect.bottom}};
+                                MapWindowPoints(nullptr, dialog, contextPoints, 2);
+                                MapWindowPoints(nullptr, dialog, editPoints, 2);
+
+                                const UINT dpi = (std::max)(96u, GetDpiForWindow(dialog));
+                                const auto scaleDip = [dpi](int value)
+                                {
+                                    return MulDiv(value, static_cast<int>(dpi), 96);
+                                };
+                                const HFONT editFont = reinterpret_cast<HFONT>(
+                                    SendMessageW(editWindow, WM_GETFONT, 0, 0));
+                                HDC dc = GetDC(editWindow);
+                                TEXTMETRICW textMetrics{};
+                                bool hasTextMetrics = false;
+                                if (dc)
+                                {
+                                    const HGDIOBJ oldFont = editFont ? SelectObject(dc, editFont) : nullptr;
+                                    hasTextMetrics = GetTextMetricsW(dc, &textMetrics) != FALSE;
+                                    if (oldFont)
+                                    {
+                                        SelectObject(dc, oldFont);
+                                    }
+                                    ReleaseDC(editWindow, dc);
+                                }
+
+                                if (hasTextMetrics)
+                                {
+                                    const int frameTop = contextPoints[1].y + scaleDip(8);
+                                    const int frameHeight = scaleDip(30);
+                                    const int expectedEditHeight = std::min(
+                                        static_cast<int>(textMetrics.tmHeight) + scaleDip(2),
+                                        frameHeight - 2);
+                                    const int expectedEditTop = frameTop + (frameHeight - expectedEditHeight) / 2;
+                                    response->textEntryCentered =
+                                        editPoints[1].y - editPoints[0].y == expectedEditHeight
+                                        && editPoints[0].y == expectedEditTop;
+                                    const int clickX = scaleDip(22);
+                                    const int clickY = frameTop + 1;
+                                    SendMessageW(dialog,
+                                                 WM_LBUTTONDOWN,
+                                                 MK_LBUTTON,
+                                                 MAKELPARAM(clickX, clickY));
+                                    response->textEntryFieldClickFocused = GetFocus() == editWindow;
+                                }
+                            }
                         }
                         if (response->command != IDYES) SetWindowTextW(GetDlgItem(dialog, 100), response->text.c_str());
                         response->answered = true;
@@ -4545,8 +4603,10 @@ namespace
                     KillTimer(window.Hwnd(), contextTimerId);
                     RemovePropW(window.Hwnd(), L"SavedSearchSmokeDialog");
                     Expect(!contextDialogAccepted && contextResponse.answered
-                               && contextResponse.contextLineMatched && !contextResponse.timedOut,
-                           "Single-line text dialog did not display its parent-folder context");
+                               && contextResponse.contextLineMatched && contextResponse.textEntryCentered
+                               && contextResponse.textEntryFieldClickFocused
+                               && !contextResponse.timedOut,
+                           "Single-line text dialog did not display its parent-folder context or correctly center and focus its entry field");
                     ComPtr<IAccessible> accessible;
                     Expect(SUCCEEDED(ObjectFromLresult(SendMessageW(window.Hwnd(), WM_GETOBJECT, 0, OBJID_CLIENT),
                         IID_IAccessible, 0, reinterpret_cast<void**>(accessible.GetAddressOf()))),
