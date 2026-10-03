@@ -3510,10 +3510,15 @@ namespace
              seedCache.Store(key, thumbnail);
          }
 
-         const fs::path orphanPath = cacheRoot / L"orphan.bin";
+         constexpr std::size_t expectedOrphanCount = 300;
+         std::vector<fs::path> orphanPaths;
+         orphanPaths.reserve(expectedOrphanCount);
+         for (std::size_t index = 0; index < expectedOrphanCount; ++index)
          {
+             const fs::path orphanPath = cacheRoot / (L"orphan-" + std::to_wstring(index) + L".bin");
              std::ofstream orphanStream(orphanPath, std::ios::binary);
              orphanStream << "orphan";
+             orphanPaths.push_back(orphanPath);
          }
 
          hyperbrowse::services::ThumbnailScheduler scheduler(
@@ -3555,15 +3560,20 @@ namespace
                         callbackStatistics = std::move(statistics);
                         ++callbackCount;
                         callbackCondition.notify_all();
-                    }),
+                    },
+                    true),
                 "Failed to queue persistent cache statistics");
          waitForCallback(expectedCallbackCount);
          Expect(callbackSucceeded, "Persistent cache statistics query failed");
          Expect(callbackThread != callerThread, "Persistent cache statistics ran on the caller thread");
          Expect(callbackStatistics.indexedEntryCount == 1,
                 "Persistent cache statistics did not report the seeded entry");
-         Expect(callbackStatistics.orphanFileCount >= 1,
-                "Persistent cache statistics did not report the orphan file");
+         Expect(callbackStatistics.orphanFileCount == expectedOrphanCount,
+                "Persistent cache statistics did not report every orphan file");
+         Expect(callbackStatistics.sourceFilePaths.size() == 1
+                    && callbackStatistics.sourceFilePaths.front()
+                        == hyperbrowse::util::NormalizePathForComparison(key.filePath),
+                "Persistent cache statistics did not return source paths for the requested background scan");
           const auto indexedShard = std::find_if(callbackStatistics.shards.begin(),
                                   callbackStatistics.shards.end(),
                                   [](const auto& shard)
@@ -3591,7 +3601,31 @@ namespace
                 "Failed to queue persistent cache compaction");
          waitForCallback(expectedCallbackCount);
          Expect(callbackSucceeded, "Persistent cache compaction failed");
-         Expect(!fs::exists(orphanPath), "Persistent cache compaction did not remove the orphan file");
+         Expect(std::all_of(orphanPaths.begin(), orphanPaths.end(), [](const fs::path& orphanPath)
+                {
+                    return !fs::exists(orphanPath);
+                }),
+                "Persistent cache compaction did not remove every orphan file");
+
+         {
+             std::scoped_lock lock(callbackMutex);
+             expectedCallbackCount = callbackCount + 1;
+         }
+         Expect(scheduler.QueuePersistentCacheStatistics(
+                    [&](bool succeeded, hyperbrowse::cache::DiskThumbnailCache::Statistics statistics)
+                    {
+                        std::scoped_lock lock(callbackMutex);
+                        callbackSucceeded = succeeded;
+                        callbackThread = std::this_thread::get_id();
+                        callbackStatistics = std::move(statistics);
+                        ++callbackCount;
+                        callbackCondition.notify_all();
+                    }),
+                "Failed to queue post-compaction persistent cache statistics");
+         waitForCallback(expectedCallbackCount);
+         Expect(callbackSucceeded, "Post-compaction persistent cache statistics query failed");
+         Expect(callbackStatistics.orphanFileCount == 0,
+                "Persistent cache statistics still reported orphan files after compaction");
 
          {
              std::scoped_lock lock(callbackMutex);
@@ -3630,6 +3664,8 @@ namespace
          Expect(callbackSucceeded, "Post-purge persistent cache statistics query failed");
          Expect(callbackStatistics.indexedEntryCount == 0 && callbackStatistics.cacheFileCount == 0,
                 "Persistent cache purge did not remove indexed entries and cache files");
+         Expect(callbackStatistics.sourceFilePaths.empty(),
+                "Persistent cache statistics returned source paths when no background scan was requested");
           Expect(callbackStatistics.shards.empty(),
               "Persistent cache purge did not clear per-shard statistics");
 

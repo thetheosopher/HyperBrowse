@@ -14,6 +14,7 @@
 #include <uxtheme.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cwchar>
 #include <cwctype>
@@ -24,6 +25,7 @@
 #include <new>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -118,6 +120,14 @@ namespace hyperbrowse::ui
 {
     void InitializeExperimentalSettingsAccessibility(
         dialog_detail::ExperimentalSettingsDialogState& state);
+
+    struct PersistentThumbnailCacheMaintenanceState
+    {
+        std::mutex mutex;
+        cache::DiskThumbnailCache::Statistics statistics;
+        std::vector<std::wstring> sourceFilePaths;
+        std::atomic_uint completionMessage{};
+    };
 }
 
 namespace
@@ -151,6 +161,7 @@ namespace
     using hyperbrowse::ui::DialogDpiForWindow;
     using hyperbrowse::ui::DialogShellMetrics;
     using hyperbrowse::ui::MeasureDialogShellMetrics;
+    using hyperbrowse::ui::PersistentThumbnailCacheMaintenanceState;
     using hyperbrowse::ui::ScaleDialogAppTextDimension;
     using hyperbrowse::ui::ScaleDialogDimension;
 
@@ -191,6 +202,8 @@ namespace
     };
     constexpr unsigned int kPersistentThumbnailCacheMaintenanceSuccessFlag = 4;
     constexpr unsigned int kPersistentThumbnailCacheMaintenanceShowDialogFlag = 8;
+    constexpr unsigned int kPersistentThumbnailCacheSourcePathsIncludedFlag = 16;
+    constexpr UINT_PTR kPersistentThumbnailCacheDialogCursorSubclassId = 1;
     constexpr UINT_PTR kMemoryPressureTimerId = 9101;
     constexpr UINT kMemoryPressureIntervalMs = 1500;
     constexpr GUID kConsoleDisplayStateGuid{
@@ -1996,8 +2009,142 @@ namespace
         return static_cast<UINT>(nextValue);
     }
 
+    struct PersistentThumbnailCacheSourceScanResult
+    {
+        std::size_t checked{};
+        std::size_t missing{};
+        std::size_t inaccessible{};
+        bool failed{};
+    };
+
+    struct PersistentThumbnailCacheSourceScanState
+    {
+        std::mutex mutex;
+        std::atomic_bool cancelRequested{};
+        std::atomic_bool completed{};
+        PersistentThumbnailCacheSourceScanResult result;
+    };
+
+    struct PersistentThumbnailCacheDialogCallbackData
+    {
+        std::shared_ptr<PersistentThumbnailCacheSourceScanState> sourceScan;
+        std::wstring content;
+        std::wstring expandedInformation;
+        bool cursorSubclassInstalled{};
+        bool sourceScanTextUpdated{};
+    };
+
+    struct PersistentThumbnailCacheMaintenanceProgressCallbackData
+    {
+        std::shared_ptr<PersistentThumbnailCacheMaintenanceState> state;
+    };
+
+    void CompletePersistentThumbnailCacheSourceScan(
+        const std::shared_ptr<PersistentThumbnailCacheSourceScanState>& scanState,
+        PersistentThumbnailCacheSourceScanResult result)
+    {
+        {
+            std::scoped_lock lock(scanState->mutex);
+            scanState->result = result;
+        }
+        scanState->completed.store(true, std::memory_order_release);
+    }
+
+    void ScanPersistentThumbnailCacheSourceFiles(
+        std::vector<std::wstring> sourceFilePaths,
+        const std::shared_ptr<PersistentThumbnailCacheSourceScanState>& scanState)
+    {
+        PersistentThumbnailCacheSourceScanResult result;
+        if (!SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN))
+        {
+            hyperbrowse::util::IncrementCounter(L"persistent_cache.source_scan.background_priority_failed");
+        }
+
+        try
+        {
+            for (const std::wstring& sourceFilePath : sourceFilePaths)
+            {
+                if (scanState->cancelRequested.load(std::memory_order_acquire))
+                {
+                    break;
+                }
+
+                std::error_code sourceError;
+                const bool sourceExists = std::filesystem::exists(std::filesystem::path(sourceFilePath), sourceError);
+                ++result.checked;
+                if (!sourceExists
+                    && (!sourceError || sourceError == std::make_error_code(std::errc::no_such_file_or_directory)))
+                {
+                    ++result.missing;
+                }
+                else if (sourceError)
+                {
+                    ++result.inaccessible;
+                }
+            }
+        }
+        catch (const std::exception&)
+        {
+            result.failed = true;
+            hyperbrowse::util::IncrementCounter(L"persistent_cache.source_scan.exception");
+        }
+        catch (...)
+        {
+            result.failed = true;
+            hyperbrowse::util::IncrementCounter(L"persistent_cache.source_scan.unknown_exception");
+        }
+
+        CompletePersistentThumbnailCacheSourceScan(scanState, result);
+    }
+
+    std::wstring BuildPersistentThumbnailCacheSourceScanStatus(
+        const PersistentThumbnailCacheSourceScanResult* result)
+    {
+        if (!result)
+        {
+            return L"Scanning...";
+        }
+        if (result->failed)
+        {
+            return L"Scan failed.";
+        }
+
+        std::wstring status = std::to_wstring(result->checked);
+        status.append(L" checked, ");
+        status.append(std::to_wstring(result->missing));
+        status.append(L" missing, ");
+        status.append(std::to_wstring(result->inaccessible));
+        status.append(L" inaccessible");
+        return status;
+    }
+
+    bool ReplacePersistentThumbnailCacheSourceScanStatus(
+        std::wstring* text,
+        std::wstring_view label,
+        std::wstring_view status)
+    {
+        if (!text)
+        {
+            return false;
+        }
+
+        std::wstring scanningText(label);
+        scanningText.append(L"Scanning...");
+        const std::size_t position = text->find(scanningText);
+        if (position == std::wstring::npos)
+        {
+            return false;
+        }
+
+        std::wstring replacement(label);
+        replacement.append(status);
+        text->replace(position, scanningText.size(), replacement);
+        return true;
+    }
+
     std::wstring BuildPersistentThumbnailCacheSummary(const hyperbrowse::cache::DiskThumbnailCache::Statistics& statistics,
-                                                      bool persistentCacheEnabled)
+                                                      bool persistentCacheEnabled,
+                                                      std::wstring_view sourceScanStatus)
     {
         std::wstring summary = persistentCacheEnabled
             ? L"Persistent thumbnail caching is currently enabled.\r\n"
@@ -2010,10 +2157,14 @@ namespace
         summary.append(hyperbrowse::browser::FormatByteSize(statistics.indexedBytes));
         summary.append(L" tracked in the cache index.\r\nConfigured budget: ");
         summary.append(hyperbrowse::browser::FormatByteSize(statistics.capacityBytes));
+        summary.append(L"\r\nOriginal source files: ");
+        summary.append(sourceScanStatus);
         return summary;
     }
 
-    std::wstring BuildPersistentThumbnailCacheDetails(const hyperbrowse::cache::DiskThumbnailCache::Statistics& statistics)
+    std::wstring BuildPersistentThumbnailCacheDetails(
+        const hyperbrowse::cache::DiskThumbnailCache::Statistics& statistics,
+        std::wstring_view sourceScanStatus)
     {
         std::wstring details;
         AppendLabeledLine(&details, L"Cache Folder: ", statistics.cacheDirectory.empty() ? std::wstring(L"(unavailable)") : statistics.cacheDirectory);
@@ -2024,31 +2175,169 @@ namespace
         AppendLabeledLine(&details, L"Thumbnail File Bytes: ", hyperbrowse::browser::FormatByteSize(statistics.cacheFileBytes));
         AppendLabeledLine(&details, L"Index File Size: ", hyperbrowse::browser::FormatByteSize(statistics.indexFileBytes));
         AppendLabeledLine(&details, L"Missing Indexed Files: ", std::to_wstring(statistics.missingFileCount));
-        AppendLabeledLine(&details, L"Missing Source Files: ", std::to_wstring(statistics.missingSourceCount));
-        AppendLabeledLine(&details, L"Inaccessible Source Files: ", std::to_wstring(statistics.inaccessibleSourceCount));
+        AppendLabeledLine(&details, L"Original Source Files: ", sourceScanStatus);
         AppendLabeledLine(&details, L"Orphaned Files: ", std::to_wstring(statistics.orphanFileCount));
         AppendLabeledLine(&details, L"Orphaned File Bytes: ", hyperbrowse::browser::FormatByteSize(statistics.orphanFileBytes));
-        AppendLabeledLine(&details, L"Per-Shard Details: ", std::to_wstring(statistics.shards.size()));
-        for (const auto& shard : statistics.shards)
-        {
-            std::wstring shardDetails = L"  ";
-            shardDetails.append(shard.name);
-            shardDetails.append(L": ");
-            shardDetails.append(std::to_wstring(shard.indexedEntryCount));
-            shardDetails.append(L" indexed entries, ");
-            shardDetails.append(hyperbrowse::browser::FormatByteSize(shard.indexedBytes));
-            shardDetails.append(L" indexed, ");
-            shardDetails.append(std::to_wstring(shard.fileCount));
-            shardDetails.append(L" files, ");
-            shardDetails.append(hyperbrowse::browser::FormatByteSize(shard.fileBytes));
-            shardDetails.append(L" on disk, ");
-            shardDetails.append(std::to_wstring(shard.orphanFileCount));
-            shardDetails.append(L" orphaned, ");
-            shardDetails.append(std::to_wstring(shard.missingFileCount));
-            shardDetails.append(L" missing");
-            AppendLabeledLine(&details, L"", shardDetails);
-        }
         return details;
+    }
+
+    LRESULT CALLBACK PersistentThumbnailCacheDialogCursorSubclass(
+        HWND hwnd,
+        UINT message,
+        WPARAM wParam,
+        LPARAM lParam,
+        UINT_PTR subclassId,
+        DWORD_PTR referenceData)
+    {
+        auto* scanState = reinterpret_cast<PersistentThumbnailCacheSourceScanState*>(referenceData);
+        if (message == WM_SETCURSOR
+            && scanState
+            && !scanState->completed.load(std::memory_order_acquire)
+            && !scanState->cancelRequested.load(std::memory_order_acquire))
+        {
+            if (HCURSOR cursor = LoadCursorW(nullptr, IDC_APPSTARTING))
+            {
+                SetCursor(cursor);
+                return TRUE;
+            }
+        }
+        if (message == WM_NCDESTROY)
+        {
+            RemoveWindowSubclass(hwnd, PersistentThumbnailCacheDialogCursorSubclass, subclassId);
+        }
+        return DefSubclassProc(hwnd, message, wParam, lParam);
+    }
+
+    HRESULT CALLBACK PersistentThumbnailCacheDialogCallback(
+        HWND hwnd,
+        UINT notification,
+        WPARAM,
+        LPARAM,
+        LONG_PTR callbackDataValue)
+    {
+        auto* callbackData = reinterpret_cast<PersistentThumbnailCacheDialogCallbackData*>(callbackDataValue);
+        if (!callbackData || !callbackData->sourceScan)
+        {
+            return S_OK;
+        }
+
+        if (notification == TDN_CREATED)
+        {
+            callbackData->cursorSubclassInstalled = SetWindowSubclass(
+                hwnd,
+                PersistentThumbnailCacheDialogCursorSubclass,
+                kPersistentThumbnailCacheDialogCursorSubclassId,
+                reinterpret_cast<DWORD_PTR>(callbackData->sourceScan.get())) != FALSE;
+            if (!callbackData->cursorSubclassInstalled)
+            {
+                hyperbrowse::util::IncrementCounter(L"persistent_cache.source_scan.cursor_subclass_failed");
+            }
+            return S_OK;
+        }
+
+        if (notification == TDN_TIMER)
+        {
+            if (callbackData->sourceScan->completed.load(std::memory_order_acquire))
+            {
+                if (!callbackData->sourceScanTextUpdated)
+                {
+                    PersistentThumbnailCacheSourceScanResult result;
+                    {
+                        std::scoped_lock lock(callbackData->sourceScan->mutex);
+                        result = callbackData->sourceScan->result;
+                    }
+                    const std::wstring status = BuildPersistentThumbnailCacheSourceScanStatus(&result);
+                    const bool contentUpdated = ReplacePersistentThumbnailCacheSourceScanStatus(
+                        &callbackData->content,
+                        L"Original source files: ",
+                        status);
+                    const bool detailsUpdated = ReplacePersistentThumbnailCacheSourceScanStatus(
+                        &callbackData->expandedInformation,
+                        L"Original Source Files: ",
+                        status);
+                    if (!contentUpdated || !detailsUpdated)
+                    {
+                        hyperbrowse::util::IncrementCounter(L"persistent_cache.source_scan.text_update_failed");
+                    }
+                    SendMessageW(hwnd,
+                                 TDM_SET_ELEMENT_TEXT,
+                                 TDE_CONTENT,
+                                 reinterpret_cast<LPARAM>(callbackData->content.c_str()));
+                    SendMessageW(hwnd,
+                                 TDM_SET_ELEMENT_TEXT,
+                                 TDE_EXPANDED_INFORMATION,
+                                 reinterpret_cast<LPARAM>(callbackData->expandedInformation.c_str()));
+                    callbackData->sourceScanTextUpdated = true;
+                    if (HCURSOR cursor = LoadCursorW(nullptr, IDC_ARROW))
+                    {
+                        SetCursor(cursor);
+                    }
+                }
+                return S_OK;
+            }
+
+            if (!callbackData->sourceScan->cancelRequested.load(std::memory_order_acquire))
+            {
+                if (HCURSOR cursor = LoadCursorW(nullptr, IDC_APPSTARTING))
+                {
+                    SetCursor(cursor);
+                }
+            }
+            return S_FALSE;
+        }
+
+        if (notification == TDN_DESTROYED)
+        {
+            callbackData->sourceScan->cancelRequested.store(true, std::memory_order_release);
+            if (callbackData->cursorSubclassInstalled)
+            {
+                RemoveWindowSubclass(hwnd,
+                                      PersistentThumbnailCacheDialogCursorSubclass,
+                                      kPersistentThumbnailCacheDialogCursorSubclassId);
+                callbackData->cursorSubclassInstalled = false;
+            }
+        }
+        return S_OK;
+    }
+
+    HRESULT CALLBACK PersistentThumbnailCacheMaintenanceProgressDialogCallback(
+        HWND hwnd,
+        UINT notification,
+        WPARAM,
+        LPARAM,
+        LONG_PTR callbackDataValue)
+    {
+        auto* callbackData = reinterpret_cast<PersistentThumbnailCacheMaintenanceProgressCallbackData*>(callbackDataValue);
+        if (!callbackData || !callbackData->state)
+        {
+            return S_OK;
+        }
+
+        if (notification == TDN_CREATED)
+        {
+            SendMessageW(hwnd, TDM_ENABLE_BUTTON, IDCLOSE, FALSE);
+            return S_OK;
+        }
+
+        const unsigned int completionMessage = callbackData->state->completionMessage.load(std::memory_order_acquire);
+        if (notification == TDN_BUTTON_CLICKED && completionMessage == 0)
+        {
+            return S_FALSE;
+        }
+
+        if (notification == TDN_TIMER && completionMessage != 0)
+        {
+            const wchar_t* completionText = (completionMessage & kPersistentThumbnailCacheMaintenanceSuccessFlag) != 0
+                ? L"Cache maintenance is complete."
+                : L"Cache maintenance did not complete.";
+            SendMessageW(hwnd,
+                         TDM_SET_ELEMENT_TEXT,
+                         TDE_CONTENT,
+                         reinterpret_cast<LPARAM>(completionText));
+            SendMessageW(hwnd, TDM_ENABLE_BUTTON, IDCLOSE, TRUE);
+            SendMessageW(hwnd, TDM_CLICK_BUTTON, IDCLOSE, 0);
+        }
+        return S_OK;
     }
 
     void RefreshPerformanceSettingsDialogControls(const PerformanceSettingsDialogState& state)
@@ -9487,12 +9776,6 @@ namespace
 
 namespace hyperbrowse::ui
 {
-    struct PersistentThumbnailCacheMaintenanceState
-    {
-        std::mutex mutex;
-        cache::DiskThumbnailCache::Statistics statistics;
-    };
-
     MainWindow::MainWindow(HINSTANCE instance)
         : instance_(instance)
         , commandBarMenuButtons_(commandBarController_.MenuButtons())
@@ -22441,12 +22724,59 @@ namespace hyperbrowse::ui
         StartPersistentThumbnailCacheStatistics();
     }
 
-    void MainWindow::ShowPersistentThumbnailCacheDialogContents(std::wstring content,
-                                                                 std::wstring expandedInformation)
+    void MainWindow::ShowPersistentThumbnailCacheDialogContents(
+        std::wstring content,
+        std::wstring expandedInformation,
+        std::vector<std::wstring> sourceFilePaths)
     {
-
         constexpr int kCompactPersistentCacheButtonId = 1001;
         constexpr int kPurgePersistentCacheButtonId = 1002;
+
+        auto sourceScan = std::make_shared<PersistentThumbnailCacheSourceScanState>();
+        if (sourceFilePaths.empty())
+        {
+            CompletePersistentThumbnailCacheSourceScan(sourceScan, {});
+        }
+        else
+        {
+            try
+            {
+                if (!persistentCacheSourceScanExecutor_)
+                {
+                    persistentCacheSourceScanExecutor_ = std::make_unique<util::BackgroundExecutor>(1, 1);
+                }
+                if (!persistentCacheSourceScanExecutor_->Post(
+                        [sourceFilePaths = std::move(sourceFilePaths), sourceScan]() mutable
+                        {
+                            ScanPersistentThumbnailCacheSourceFiles(std::move(sourceFilePaths), sourceScan);
+                        }))
+                {
+                    PersistentThumbnailCacheSourceScanResult result;
+                    result.failed = true;
+                    CompletePersistentThumbnailCacheSourceScan(sourceScan, result);
+                    util::IncrementCounter(L"persistent_cache.source_scan.queue_failed");
+                }
+            }
+            catch (const std::exception&)
+            {
+                PersistentThumbnailCacheSourceScanResult result;
+                result.failed = true;
+                CompletePersistentThumbnailCacheSourceScan(sourceScan, result);
+                util::IncrementCounter(L"persistent_cache.source_scan.queue_exception");
+            }
+            catch (...)
+            {
+                PersistentThumbnailCacheSourceScanResult result;
+                result.failed = true;
+                CompletePersistentThumbnailCacheSourceScan(sourceScan, result);
+                util::IncrementCounter(L"persistent_cache.source_scan.queue_unknown_exception");
+            }
+        }
+
+        PersistentThumbnailCacheDialogCallbackData callbackData;
+        callbackData.sourceScan = sourceScan;
+        callbackData.content = content;
+        callbackData.expandedInformation = expandedInformation;
 
         TASKDIALOG_BUTTON buttons[] = {
             {kCompactPersistentCacheButtonId, L"Compact cache\nRepair the saved index, remove orphaned thumbnails, and trim the cache to its storage budget."},
@@ -22457,7 +22787,7 @@ namespace hyperbrowse::ui
         config.cbSize = sizeof(config);
         config.hwndParent = hwnd_;
         config.hInstance = instance_;
-        config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+        config.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CALLBACK_TIMER;
         config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
         config.pszWindowTitle = L"Persistent Thumbnail Cache";
         config.pszMainIcon = MAKEINTRESOURCEW(IDI_HYPERBROWSE);
@@ -22469,9 +22799,12 @@ namespace hyperbrowse::ui
         config.cButtons = static_cast<UINT>(std::size(buttons));
         config.pButtons = buttons;
         config.nDefaultButton = kCompactPersistentCacheButtonId;
+        config.pfCallback = PersistentThumbnailCacheDialogCallback;
+        config.lpCallbackData = reinterpret_cast<LONG_PTR>(&callbackData);
 
         int clickedButton = 0;
         const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
+        sourceScan->cancelRequested.store(true, std::memory_order_release);
         if (FAILED(dialogResult))
         {
             MessageBoxW(hwnd_,
@@ -22484,6 +22817,10 @@ namespace hyperbrowse::ui
         if (clickedButton == kCompactPersistentCacheButtonId)
         {
             StartPersistentThumbnailCacheMaintenance(false);
+            if (cacheMaintenanceActive_)
+            {
+                ShowPersistentThumbnailCacheMaintenanceProgressDialog(false);
+            }
             return;
         }
 
@@ -22496,7 +22833,60 @@ namespace hyperbrowse::ui
             if (confirmResult == IDYES)
             {
                 StartPersistentThumbnailCacheMaintenance(true);
+                if (cacheMaintenanceActive_)
+                {
+                    ShowPersistentThumbnailCacheMaintenanceProgressDialog(true);
+                }
             }
+        }
+    }
+
+    void MainWindow::ShowPersistentThumbnailCacheMaintenanceProgressDialog(bool purge)
+    {
+        if (!cacheMaintenanceState_ || !hwnd_)
+        {
+            return;
+        }
+
+        PersistentThumbnailCacheMaintenanceProgressCallbackData callbackData;
+        callbackData.state = cacheMaintenanceState_;
+
+        TASKDIALOGCONFIG config{};
+        config.cbSize = sizeof(config);
+        config.hwndParent = hwnd_;
+        config.hInstance = instance_;
+        config.dwFlags = TDF_CALLBACK_TIMER | TDF_SHOW_MARQUEE_PROGRESS_BAR;
+        config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
+        config.pszWindowTitle = L"Persistent Thumbnail Cache";
+        config.pszMainIcon = MAKEINTRESOURCEW(IDI_HYPERBROWSE);
+        config.pszMainInstruction = purge
+            ? L"Purging persistent thumbnail cache..."
+            : L"Compacting persistent thumbnail cache...";
+        config.pszContent = purge
+            ? L"Deleting saved thumbnails and clearing the cache index. Please wait."
+            : L"Removing orphaned thumbnails and enforcing the configured storage budget. Please wait.";
+        config.pfCallback = PersistentThumbnailCacheMaintenanceProgressDialogCallback;
+        config.lpCallbackData = reinterpret_cast<LONG_PTR>(&callbackData);
+
+        cacheMaintenanceProgressDialogActive_ = true;
+        int clickedButton = 0;
+        const HRESULT dialogResult = TaskDialogIndirect(&config, &clickedButton, nullptr, nullptr);
+        cacheMaintenanceProgressDialogActive_ = false;
+        if (FAILED(dialogResult))
+        {
+            util::IncrementCounter(L"persistent_cache.maintenance.progress_dialog_failed");
+            MessageBoxW(hwnd_,
+                        L"Cache maintenance is still running in the background.",
+                        L"Persistent Thumbnail Cache",
+                        MB_OK | MB_ICONWARNING);
+        }
+
+        if (cacheMaintenanceCompletionMessagePending_)
+        {
+            const WPARAM completionMessage = cacheMaintenancePendingCompletionMessage_;
+            cacheMaintenanceCompletionMessagePending_ = false;
+            cacheMaintenancePendingCompletionMessage_ = 0;
+            OnPersistentThumbnailCacheMaintenanceMessage(completionMessage);
         }
     }
 
@@ -22513,23 +22903,35 @@ namespace hyperbrowse::ui
         const bool queued = browserPaneController_->QueuePersistentThumbnailCacheStatistics(
             [targetWindow, state, showDialog](bool succeeded, cache::DiskThumbnailCache::Statistics statistics)
         {
+            std::vector<std::wstring> sourceFilePaths = std::move(statistics.sourceFilePaths);
+            statistics.sourceFilePaths.clear();
             if (succeeded)
             {
                 {
                     std::scoped_lock lock(state->mutex);
                     state->statistics = std::move(statistics);
+                    state->sourceFilePaths = std::move(sourceFilePaths);
                 }
+            }
+            else
+            {
+                std::scoped_lock lock(state->mutex);
+                state->sourceFilePaths.clear();
             }
 
             if (!PostMessageW(targetWindow,
                               kPersistentThumbnailCacheMaintenanceMessage,
                               static_cast<WPARAM>((succeeded ? kPersistentThumbnailCacheMaintenanceSuccessFlag : 0u)
-                                                  | (showDialog ? kPersistentThumbnailCacheMaintenanceShowDialogFlag : 0u)),
+                                                  | (showDialog
+                                                         ? kPersistentThumbnailCacheMaintenanceShowDialogFlag
+                                                             | kPersistentThumbnailCacheSourcePathsIncludedFlag
+                                                         : 0u)),
                               0))
             {
                 return;
             }
-        });
+        },
+            showDialog);
 
         if (!queued)
         {
@@ -22543,28 +22945,32 @@ namespace hyperbrowse::ui
 
     void MainWindow::StartPersistentThumbnailCacheMaintenance(bool purge, bool showDialog)
     {
-        if (cacheMaintenanceActive_ || !browserPaneController_ || !hwnd_)
+        if (cacheMaintenanceActive_ || !cacheMaintenanceState_ || !browserPaneController_ || !hwnd_)
         {
             return;
         }
 
         cacheMaintenanceActive_ = true;
+        cacheMaintenanceState_->completionMessage.store(0, std::memory_order_release);
         const HWND targetWindow = hwnd_;
+        const auto state = cacheMaintenanceState_;
         const bool queued = browserPaneController_->QueuePersistentThumbnailCacheMaintenance(
             purge,
-            [targetWindow, purge, showDialog](bool succeeded)
+            [targetWindow, state, purge, showDialog](bool succeeded)
         {
+            const unsigned int completionMessage = static_cast<unsigned int>(purge
+                                                                                  ? PersistentThumbnailCacheMaintenanceOperation::Purge
+                                                                                  : showDialog
+                                                                                      ? PersistentThumbnailCacheMaintenanceOperation::Compact
+                                                                                      : PersistentThumbnailCacheMaintenanceOperation::Trim)
+                | (succeeded ? kPersistentThumbnailCacheMaintenanceSuccessFlag : 0u);
+            state->completionMessage.store(completionMessage, std::memory_order_release);
             if (!PostMessageW(targetWindow,
                               kPersistentThumbnailCacheMaintenanceMessage,
-                              static_cast<WPARAM>(static_cast<unsigned int>(purge
-                                                                                 ? PersistentThumbnailCacheMaintenanceOperation::Purge
-                                                                                 : showDialog
-                                                                                     ? PersistentThumbnailCacheMaintenanceOperation::Compact
-                                                                                     : PersistentThumbnailCacheMaintenanceOperation::Trim)
-                                                 | (succeeded ? kPersistentThumbnailCacheMaintenanceSuccessFlag : 0u)),
+                              static_cast<WPARAM>(completionMessage),
                               0))
             {
-                return;
+                util::IncrementCounter(L"persistent_cache.maintenance.completion_post_failed");
             }
         });
 
@@ -22580,15 +22986,29 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::OnPersistentThumbnailCacheMaintenanceMessage(WPARAM wParam)
     {
+        if (cacheMaintenanceProgressDialogActive_)
+        {
+            cacheMaintenanceCompletionMessagePending_ = true;
+            cacheMaintenancePendingCompletionMessage_ = wParam;
+            return 0;
+        }
+
         cacheMaintenanceActive_ = false;
         const auto operation = static_cast<PersistentThumbnailCacheMaintenanceOperation>(wParam & 3u);
         const bool succeeded = (wParam & kPersistentThumbnailCacheMaintenanceSuccessFlag) != 0;
+        const bool sourceFilePathsIncluded = (wParam & kPersistentThumbnailCacheSourcePathsIncludedFlag) != 0;
         const bool showDialog = (wParam & kPersistentThumbnailCacheMaintenanceShowDialogFlag) != 0
             || cacheMaintenanceDialogPending_;
 
         if (operation == PersistentThumbnailCacheMaintenanceOperation::Statistics)
         {
             cacheMaintenanceDialogPending_ = false;
+            if (succeeded && showDialog && !sourceFilePathsIncluded)
+            {
+                StartPersistentThumbnailCacheStatistics(true);
+                return 0;
+            }
+
             if (!succeeded || !cacheMaintenanceState_)
             {
                 if (showDialog)
@@ -22602,9 +23022,21 @@ namespace hyperbrowse::ui
             }
 
             cache::DiskThumbnailCache::Statistics statistics;
+            std::vector<std::wstring> sourceFilePaths;
             {
                 std::scoped_lock lock(cacheMaintenanceState_->mutex);
-                statistics = cacheMaintenanceState_->statistics;
+                const auto& cachedStatistics = cacheMaintenanceState_->statistics;
+                statistics.cacheDirectory = cachedStatistics.cacheDirectory;
+                statistics.capacityBytes = cachedStatistics.capacityBytes;
+                statistics.indexedEntryCount = cachedStatistics.indexedEntryCount;
+                statistics.indexedBytes = cachedStatistics.indexedBytes;
+                statistics.indexFileBytes = cachedStatistics.indexFileBytes;
+                statistics.cacheFileCount = cachedStatistics.cacheFileCount;
+                statistics.cacheFileBytes = cachedStatistics.cacheFileBytes;
+                statistics.orphanFileCount = cachedStatistics.orphanFileCount;
+                statistics.orphanFileBytes = cachedStatistics.orphanFileBytes;
+                statistics.missingFileCount = cachedStatistics.missingFileCount;
+                sourceFilePaths = std::move(cacheMaintenanceState_->sourceFilePaths);
             }
             if (statistics.cacheDirectory.empty())
             {
@@ -22620,9 +23052,14 @@ namespace hyperbrowse::ui
 
             if (showDialog)
             {
+                const std::wstring initialSourceScanStatus = BuildPersistentThumbnailCacheSourceScanStatus(nullptr);
                 ShowPersistentThumbnailCacheDialogContents(
-                    BuildPersistentThumbnailCacheSummary(statistics, persistentThumbnailCacheEnabled_),
-                    BuildPersistentThumbnailCacheDetails(statistics));
+                    BuildPersistentThumbnailCacheSummary(
+                        statistics,
+                        persistentThumbnailCacheEnabled_,
+                        initialSourceScanStatus),
+                    BuildPersistentThumbnailCacheDetails(statistics, initialSourceScanStatus),
+                    std::move(sourceFilePaths));
             }
             else if (activeRightPaneTab_ == RightPaneTab::CacheStats && detailsStripVisible_)
             {
@@ -22650,6 +23087,10 @@ namespace hyperbrowse::ui
                                 : L"Failed to compact the persistent thumbnail cache.",
                         L"Persistent Thumbnail Cache",
                         MB_OK | MB_ICONERROR);
+            if (!trim)
+            {
+                ShowPersistentThumbnailCacheDialog();
+            }
             return 0;
         }
 

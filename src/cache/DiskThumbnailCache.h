@@ -43,8 +43,7 @@ namespace hyperbrowse::cache
             std::size_t orphanFileCount{};
             std::size_t orphanFileBytes{};
             std::size_t missingFileCount{};
-            std::size_t missingSourceCount{};
-            std::size_t inaccessibleSourceCount{};
+            std::vector<std::wstring> sourceFilePaths;
             std::vector<ShardStatistics> shards;
         };
 
@@ -61,7 +60,7 @@ namespace hyperbrowse::cache
         void InvalidateFilePaths(const std::vector<std::wstring>& filePaths);
         void Clear();
         bool Compact();
-        Statistics QueryStatistics() const;
+        Statistics QueryStatistics(bool includeSourceFilePaths = false) const;
         std::size_t CurrentBytes() const;
         void SetCapacityBytes(std::size_t capacityBytes);
         bool FlushPendingAccessUpdates();

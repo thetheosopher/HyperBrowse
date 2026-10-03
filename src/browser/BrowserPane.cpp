@@ -1353,9 +1353,11 @@ namespace hyperbrowse::browser
     }
 
     bool BrowserPane::QueuePersistentThumbnailCacheStatistics(
-        hyperbrowse::services::ThumbnailScheduler::PersistentCacheStatisticsCallback callback)
+        hyperbrowse::services::ThumbnailScheduler::PersistentCacheStatisticsCallback callback,
+        bool includeSourceFilePaths)
     {
-        return thumbnailScheduler_ && thumbnailScheduler_->QueuePersistentCacheStatistics(std::move(callback));
+        return thumbnailScheduler_
+            && thumbnailScheduler_->QueuePersistentCacheStatistics(std::move(callback), includeSourceFilePaths);
     }
 
     bool BrowserPane::QueuePersistentThumbnailCacheMaintenance(

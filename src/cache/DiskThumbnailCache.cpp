@@ -48,7 +48,6 @@ namespace
     constexpr std::uint64_t kMaximumThumbnailFileBytes = sizeof(DiskThumbnailHeader)
         + kMaximumThumbnailPixelBytes + 8 + hyperbrowse::cache::kMaximumSourceProfileBytes;
     constexpr std::size_t kAccessPersistenceInterval = 64;
-    constexpr std::size_t kMaximumCompactionRemovals = 256;
     constexpr std::size_t kLegacyMigrationBatchSize = 32;
     constexpr std::size_t kJournalCompactionThresholdBytes = 8ULL * 1024ULL * 1024ULL;
     constexpr std::wstring_view kJournalFileName = L"index.journal.tsv";
@@ -1086,45 +1085,61 @@ namespace hyperbrowse::cache
             util::IncrementCounter(L"persistent_cache.source_missing_removed");
         }
 
+        const fs::path cacheDirectoryPath(cacheDirectory);
         std::unordered_map<std::wstring, std::size_t> existingCacheFiles;
         std::error_code directoryError;
-        for (const fs::directory_entry& directoryEntry : fs::recursive_directory_iterator(fs::path(cacheDirectory), directoryError))
+        fs::recursive_directory_iterator directoryIterator(cacheDirectoryPath, directoryError);
+        const fs::recursive_directory_iterator directoryEnd;
+        bool cacheFileScanSucceeded = !directoryError;
+        while (cacheFileScanSucceeded && directoryIterator != directoryEnd)
         {
-            if (directoryError)
+            const fs::directory_entry& directoryEntry = *directoryIterator;
+            std::error_code fileTypeError;
+            const bool isRegularFile = directoryEntry.is_regular_file(fileTypeError);
+            if (fileTypeError)
             {
+                cacheFileScanSucceeded = false;
                 break;
             }
 
-            std::error_code fileError;
-            if (!directoryEntry.is_regular_file(fileError) || fileError)
+            if (isRegularFile)
             {
-                continue;
+                const fs::path relativePath = directoryEntry.path().lexically_relative(cacheDirectoryPath);
+                if (relativePath.empty())
+                {
+                    cacheFileScanSucceeded = false;
+                    break;
+                }
+
+                const std::wstring fileName = relativePath.generic_wstring();
+                if (fileName != kIndexFileName
+                    && fileName != kJournalFileName
+                    && fileName != kFormatVersionFileName)
+                {
+                    std::error_code fileSizeError;
+                    const std::uintmax_t fileSize = directoryEntry.file_size(fileSizeError);
+                    if (fileSizeError)
+                    {
+                        cacheFileScanSucceeded = false;
+                        break;
+                    }
+
+                    existingCacheFiles[fileName] = static_cast<std::size_t>(fileSize);
+                }
             }
 
-            std::error_code relativePathError;
-            const fs::path relativePath = fs::relative(directoryEntry.path(), fs::path(cacheDirectory), relativePathError);
-            if (relativePathError)
+            directoryIterator.increment(directoryError);
+            if (directoryError)
             {
-                continue;
+                cacheFileScanSucceeded = false;
             }
+        }
 
-            const std::wstring fileName = relativePath.generic_wstring();
-            if (fileName == kIndexFileName || fileName == kJournalFileName)
-            {
-                continue;
-            }
-            if (fileName == kFormatVersionFileName)
-            {
-                continue;
-            }
-
-            const std::uintmax_t fileSize = directoryEntry.file_size(fileError);
-            if (fileError)
-            {
-                continue;
-            }
-
-            existingCacheFiles[fileName] = static_cast<std::size_t>(fileSize);
+        if (!cacheFileScanSucceeded)
+        {
+            util::IncrementCounter(L"persistent_cache.compaction.enumeration_failed");
+            util::RecordTiming(L"persistent_cache.compaction", compactionTimer.ElapsedMilliseconds());
+            return false;
         }
 
         currentBytes_ = 0;
@@ -1146,9 +1161,7 @@ namespace hyperbrowse::cache
             ++iterator;
         }
 
-        const fs::path cacheDirectoryPath(cacheDirectory);
-        std::size_t removedOrphanCount = 0;
-        bool orphanCleanupDeferred = false;
+        bool orphanCleanupSucceeded = true;
         for (const auto& [fileName, _] : existingCacheFiles)
         {
             if (referencedCacheFiles.contains(fileName))
@@ -1156,38 +1169,32 @@ namespace hyperbrowse::cache
                 continue;
             }
 
-            if (removedOrphanCount >= kMaximumCompactionRemovals)
-            {
-                orphanCleanupDeferred = true;
-                continue;
-            }
-
             std::error_code removeError;
             fs::remove(cacheDirectoryPath / fileName, removeError);
-            if (!removeError)
+            if (removeError)
             {
-                ++removedOrphanCount;
+                orphanCleanupSucceeded = false;
+                util::IncrementCounter(L"persistent_cache.compaction.orphan_remove_failed");
             }
         }
 
         EvictIfNeededLocked();
         const bool compacted = CompactIndexLocked();
-        if (compacted && orphanCleanupDeferred)
+        if (!orphanCleanupSucceeded)
         {
-            compactionRequested_ = true;
-            util::IncrementCounter(L"persistent_cache.compaction.deferred");
+            util::IncrementCounter(L"persistent_cache.compaction.orphan_cleanup_failed");
         }
         util::RecordTiming(L"persistent_cache.compaction", compactionTimer.ElapsedMilliseconds());
-        return compacted;
+        return compacted && orphanCleanupSucceeded;
     }
 
-    DiskThumbnailCache::Statistics DiskThumbnailCache::QueryStatistics() const
+    DiskThumbnailCache::Statistics DiskThumbnailCache::QueryStatistics(bool includeSourceFilePaths) const
     {
         Statistics statistics{};
         statistics.capacityBytes = capacityBytes_;
 
-        std::scoped_lock filesystemLock(PersistentCacheFilesystemMutex());
-        std::scoped_lock lock(mutex_);
+        std::unique_lock filesystemLock(PersistentCacheFilesystemMutex());
+        std::unique_lock lock(mutex_);
 
         auto* self = const_cast<DiskThumbnailCache*>(this);
         const std::wstring cacheDirectory = self->EnsureCacheDirectoryLocked();
@@ -1200,6 +1207,20 @@ namespace hyperbrowse::cache
         self->EnsureLoadedLocked();
         statistics.indexedEntryCount = entries_.size();
         statistics.indexedBytes = currentBytes_;
+
+        if (includeSourceFilePaths)
+        {
+            std::unordered_set<std::wstring> uniqueSourcePaths;
+            uniqueSourcePaths.reserve(entries_.size());
+            statistics.sourceFilePaths.reserve(entries_.size());
+            for (const auto& [key, _] : entries_)
+            {
+                if (!key.filePath.empty() && uniqueSourcePaths.insert(key.filePath).second)
+                {
+                    statistics.sourceFilePaths.push_back(key.filePath);
+                }
+            }
+        }
 
         std::unordered_set<std::wstring> referencedCacheFiles;
         referencedCacheFiles.reserve(entries_.size());
@@ -1248,9 +1269,8 @@ namespace hyperbrowse::cache
                 continue;
             }
 
-            std::error_code relativePathError;
-            const fs::path relativePath = fs::relative(directoryEntry.path(), cacheDirectoryPath, relativePathError);
-            if (relativePathError)
+            const fs::path relativePath = directoryEntry.path().lexically_relative(cacheDirectoryPath);
+            if (relativePath.empty())
             {
                 continue;
             }
@@ -1294,21 +1314,8 @@ namespace hyperbrowse::cache
             }
         }
 
-        for (const auto& [key, _] : entries_)
-        {
-            std::error_code sourceError;
-            const bool sourceExists = fs::exists(fs::path(key.filePath), sourceError);
-            const bool sourceMissing = !sourceExists
-                && (!sourceError || sourceError == std::make_error_code(std::errc::no_such_file_or_directory));
-            if (sourceMissing)
-            {
-                ++statistics.missingSourceCount;
-            }
-            else if (sourceError)
-            {
-                ++statistics.inaccessibleSourceCount;
-            }
-        }
+        lock.unlock();
+        filesystemLock.unlock();
 
         statistics.shards.reserve(shardStatistics.size());
         for (auto& [name, shard] : shardStatistics)

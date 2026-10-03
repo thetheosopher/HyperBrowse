@@ -379,7 +379,10 @@ namespace hyperbrowse::ui
         void ShowConsolidatedSettingsDialog();
         void ShowPerformanceSettingsDialog();
         void ShowPersistentThumbnailCacheDialog();
-        void ShowPersistentThumbnailCacheDialogContents(std::wstring content, std::wstring expandedInformation);
+        void ShowPersistentThumbnailCacheDialogContents(std::wstring content,
+                                                         std::wstring expandedInformation,
+                                                         std::vector<std::wstring> sourceFilePaths);
+        void ShowPersistentThumbnailCacheMaintenanceProgressDialog(bool purge);
         void StartPersistentThumbnailCacheStatistics(bool showDialog = true);
         void StartPersistentThumbnailCacheMaintenance(bool purge, bool showDialog = true);
         void ShowDiagnosticsSnapshot();
@@ -762,6 +765,7 @@ namespace hyperbrowse::ui
         std::vector<std::unique_ptr<viewer::ViewerWindow>> additionalViewerWindows_;
         HWND activeViewerWindow_{};
         std::unique_ptr<util::BackgroundExecutor> memoryPressureExecutor_;
+        std::unique_ptr<util::BackgroundExecutor> persistentCacheSourceScanExecutor_;
         std::shared_ptr<struct PersistentThumbnailCacheMaintenanceState> cacheMaintenanceState_;
         mutable HWND shortcutReferenceWindow_{};
         std::wstring pendingTreeMouseSelectionPath_;
@@ -829,6 +833,9 @@ namespace hyperbrowse::ui
         std::wstring quickSendConfirmationText_;
         bool cacheMaintenanceActive_{};
         bool cacheMaintenanceDialogPending_{};
+        bool cacheMaintenanceProgressDialogActive_{};
+        bool cacheMaintenanceCompletionMessagePending_{};
+        WPARAM cacheMaintenancePendingCompletionMessage_{};
         bool closePending_{};
         ULONGLONG closePendingSinceTick_{};
         bool closeWaitNoticeShown_{};

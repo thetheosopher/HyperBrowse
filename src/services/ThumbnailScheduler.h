@@ -83,7 +83,8 @@ namespace hyperbrowse::services
         void SetPressureModeEnabled(bool enabled);
         void TrimCacheToBytes(std::size_t targetBytes);
         bool IsDiskCacheEnabled() const;
-        bool QueuePersistentCacheStatistics(PersistentCacheStatisticsCallback callback);
+        bool QueuePersistentCacheStatistics(PersistentCacheStatisticsCallback callback,
+                                            bool includeSourceFilePaths = false);
         bool QueuePersistentCacheMaintenance(bool purge, PersistentCacheOperationCallback callback);
 
         std::shared_ptr<const cache::CachedThumbnail> FindCachedThumbnail(const cache::ThumbnailCacheKey& key) const;
@@ -158,6 +159,7 @@ namespace hyperbrowse::services
             cache::ThumbnailCacheKey cacheKey;
             std::shared_ptr<const cache::CachedThumbnail> thumbnail;
             std::vector<std::wstring> filePaths;
+            bool includeSourceFilePaths{};
             PersistentCacheStatisticsCallback statisticsCallback;
             PersistentCacheOperationCallback operationCallback;
         };

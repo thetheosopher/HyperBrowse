@@ -164,7 +164,8 @@ namespace hyperbrowse::browser
         hyperbrowse::cache::ThumbnailCache::Statistics ThumbnailCacheStatistics() const;
         hyperbrowse::services::ThumbnailScheduler::RuntimeStatistics ThumbnailRuntimeStatistics() const;
         bool QueuePersistentThumbnailCacheStatistics(
-            hyperbrowse::services::ThumbnailScheduler::PersistentCacheStatisticsCallback callback);
+            hyperbrowse::services::ThumbnailScheduler::PersistentCacheStatisticsCallback callback,
+            bool includeSourceFilePaths = false);
         bool QueuePersistentThumbnailCacheMaintenance(
             bool purge,
             hyperbrowse::services::ThumbnailScheduler::PersistentCacheOperationCallback callback);

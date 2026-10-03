@@ -719,18 +719,52 @@ namespace hyperbrowse::services
                 }
                 else if (job.kind == DiskPersistenceJob::Kind::Statistics)
                 {
-                    cache::DiskThumbnailCache::Statistics statistics = diskCache_.QueryStatistics();
+                    cache::DiskThumbnailCache::Statistics statistics;
+                    bool succeeded = false;
+                    try
+                    {
+                        statistics = diskCache_.QueryStatistics(job.includeSourceFilePaths);
+                        succeeded = true;
+                    }
+                    catch (const std::exception&)
+                    {
+                        util::IncrementCounter(L"persistent_cache.statistics.exception");
+                    }
+                    catch (...)
+                    {
+                        util::IncrementCounter(L"persistent_cache.statistics.unknown_exception");
+                    }
+
                     if (job.statisticsCallback)
                     {
-                        job.statisticsCallback(true, std::move(statistics));
+                        job.statisticsCallback(succeeded, std::move(statistics));
                     }
                 }
                 else if (job.kind == DiskPersistenceJob::Kind::Compact
                          || job.kind == DiskPersistenceJob::Kind::Purge)
                 {
-                    const bool succeeded = job.kind == DiskPersistenceJob::Kind::Purge
-                        ? (diskCache_.Clear(), true)
-                        : diskCache_.Compact();
+                    bool succeeded = false;
+                    try
+                    {
+                        if (job.kind == DiskPersistenceJob::Kind::Purge)
+                        {
+                            diskCache_.Clear();
+                            succeeded = true;
+                        }
+                        else
+                        {
+                            succeeded = diskCache_.Compact();
+                        }
+                    }
+                    catch (const std::exception&)
+                    {
+                        util::IncrementCounter(L"persistent_cache.maintenance.exception");
+                    }
+                    catch (...)
+                    {
+                        util::IncrementCounter(L"persistent_cache.maintenance.unknown_exception");
+                    }
+
                     if (job.operationCallback)
                     {
                         job.operationCallback(succeeded);
@@ -826,7 +860,8 @@ namespace hyperbrowse::services
         diskCacheEnabled_ = enabled;
     }
 
-    bool ThumbnailScheduler::QueuePersistentCacheStatistics(PersistentCacheStatisticsCallback callback)
+    bool ThumbnailScheduler::QueuePersistentCacheStatistics(PersistentCacheStatisticsCallback callback,
+                                                             bool includeSourceFilePaths)
     {
         if (!callback)
         {
@@ -842,6 +877,7 @@ namespace hyperbrowse::services
 
             DiskPersistenceJob job;
             job.kind = DiskPersistenceJob::Kind::Statistics;
+            job.includeSourceFilePaths = includeSourceFilePaths;
             job.statisticsCallback = std::move(callback);
             job.enqueuedTickCount = GetTickCount64();
             pendingDiskPersistence_.push_back(std::move(job));
