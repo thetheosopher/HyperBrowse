@@ -2940,7 +2940,7 @@ namespace
                "Cancelled file operation created a destination after shutdown began");
     }
 
-        void RunFileConflictPlanningScenario()
+        void RunFileConflictPlanningScenario(HWND hwnd, TestWindowState* state)
         {
          TempFolder root(L"HyperBrowseFileConflictPlanning");
          root.WriteFile(L"source-a\\alpha.jpg", 16);
@@ -2980,6 +2980,40 @@ namespace
              "Auto-rename planning chose the wrong suffix for the second alpha conflict");
          Expect(renamePlan.targetLeafNames[2] == L"beta.2.png",
              "Auto-rename planning did not skip the pre-existing beta.1 target");
+
+         root.WriteFile(L"dest\\alpha.1.jpg", 16);
+         const std::wstring sameFolderSource = (destinationFolder / L"alpha.jpg").wstring();
+         const hyperbrowse::services::FileConflictPlan duplicatePlan =
+             hyperbrowse::services::PlanDestinationConflicts(
+                 {sameFolderSource},
+                 destinationFolder.wstring(),
+                 hyperbrowse::services::FileConflictPolicy::AutoRenameNumericSuffix);
+         Expect(duplicatePlan.conflictCount == 1
+                    && duplicatePlan.renamedCount == 1
+                    && duplicatePlan.targetLeafNames == std::vector<std::wstring>{L"alpha.2.jpg"}
+                    && !fs::exists(destinationFolder / duplicatePlan.targetLeafNames.front()),
+                "Same-folder duplicate planning did not select an available name distinct from its source");
+
+         hyperbrowse::services::FileOperationService duplicateService;
+         state->fileOperationResult = {};
+         const std::uint64_t requestId = duplicateService.Start(
+             hwnd,
+             nullptr,
+             hyperbrowse::services::FileOperationType::Copy,
+             {sameFolderSource},
+             destinationFolder.wstring(),
+             hyperbrowse::services::FileConflictPolicy::AutoRenameNumericSuffix,
+             duplicatePlan.targetLeafNames);
+         Expect(requestId != 0, "Same-folder duplicate copy did not start");
+         state->fileOperationResult.expectedRequestId = requestId;
+         Expect(PumpMessagesUntil([&]() { return state->fileOperationResult.completed; }, 5000),
+                "Same-folder duplicate copy timed out");
+         const fs::path duplicatePath = destinationFolder / duplicatePlan.targetLeafNames.front();
+         Expect(state->fileOperationResult.update.failedCount == 0
+                    && fs::exists(duplicatePath)
+                    && fs::file_size(duplicatePath) == fs::file_size(sameFolderSource),
+                "Same-folder duplicate copy did not create the planned file");
+         duplicateService.Shutdown();
         }
 
     void RunThumbnailSchedulerScenario(HWND hwnd, TestWindowState* state)
@@ -8232,7 +8266,7 @@ int main(int argc, char* argv[])
             RunBatchConvertCancellationScenario(hwnd, &state);
             RunFileRenameOperationScenario(hwnd, &state);
             RunFileOperationShutdownScenario();
-            RunFileConflictPlanningScenario();
+            RunFileConflictPlanningScenario(hwnd, &state);
             RunThumbnailSchedulerWorkerAllocationScenario();
             RunPersistentThumbnailCacheCapacityScenario();
             RunThumbnailPersistenceMaintenanceScenario();

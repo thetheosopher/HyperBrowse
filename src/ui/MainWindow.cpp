@@ -20213,20 +20213,33 @@ namespace hyperbrowse::ui
             return;
         }
 
-        const std::vector<std::wstring> selectedPaths = SelectedFileOperationPathsSnapshot();
+        std::vector<std::wstring> selectedPaths = SelectedFileOperationPathsSnapshot();
         if (selectedPaths.empty())
         {
             MessageBoxW(hwnd_, L"Select one or more images first.", L"Duplicate", MB_OK | MB_ICONINFORMATION);
             return;
         }
 
-        // Duplicate = copy into the same folder with an auto numeric suffix ("name (2)").
+        // Duplicate copies each selection to an available numeric-suffix name.
         const std::wstring destinationFolder = browserModel_->FolderPath();
+        services::FileConflictPlan duplicatePlan = services::PlanDestinationConflicts(
+            selectedPaths,
+            destinationFolder,
+            services::FileConflictPolicy::AutoRenameNumericSuffix);
+        if (duplicatePlan.renamedCount != selectedPaths.size())
+        {
+            MessageBoxW(hwnd_,
+                        L"Failed to generate unique names for the selected files.",
+                        L"Duplicate",
+                        MB_OK | MB_ICONERROR);
+            return;
+        }
+
         StartFileOperation(services::FileOperationType::Copy,
                            std::move(selectedPaths),
                            destinationFolder,
                            services::FileConflictPolicy::AutoRenameNumericSuffix,
-                           {});
+                           std::move(duplicatePlan.targetLeafNames));
     }
 
     void MainWindow::ShowImageInformationForPath(const std::wstring& filePath, HWND ownerWindow)
