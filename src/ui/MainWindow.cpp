@@ -11230,11 +11230,10 @@ namespace hyperbrowse::ui
         HMENU sortMenu = CreatePopupMenu();
         HMENU thumbnailSizeMenu = CreatePopupMenu();
         HMENU slideshowMenu = CreatePopupMenu();
-        HMENU advancedViewMenu = CreatePopupMenu();
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !toolsMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !savedSearchMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !advancedViewMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !toolsMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !savedSearchMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -11360,8 +11359,6 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowMenu), L"S&lideshow");
 
-        AppendMenuW(advancedViewMenu, MF_STRING, ID_FILE_ASSOCIATIONS, L"File &Associations...");
-
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_USER_GUIDE, L"&User Guide\tF1");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_KEYBOARD_SHORTCUTS, L"&Keyboard Shortcuts...");
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
@@ -11371,9 +11368,9 @@ namespace hyperbrowse::ui
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
 
         AppendMenuW(toolsMenu_, MF_STRING, ID_VIEW_SETTINGS, L"&Settings...\tCtrl+Shift+T");
+        AppendMenuW(toolsMenu_, MF_STRING, ID_FILE_ASSOCIATIONS, L"File &Associations...");
         AppendMenuW(toolsMenu_, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
-        AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Integration");
 
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu_), L"&File");
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(editMenu), L"&Edit");

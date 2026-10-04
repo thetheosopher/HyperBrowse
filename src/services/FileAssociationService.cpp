@@ -253,6 +253,13 @@ namespace
                                                                   AT_FILEEXTENSION,
                                                                   AL_EFFECTIVE,
                                                                   &association);
+        if (result == HRESULT_FROM_WIN32(ERROR_NO_ASSOCIATION))
+        {
+            *isHyperBrowseDefault = false;
+            CoTaskMemFree(association);
+            return true;
+        }
+
         if (FAILED(result))
         {
             if (errorMessage)
