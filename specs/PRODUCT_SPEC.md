@@ -98,11 +98,6 @@ conversion, and low-friction culling.
   tooltip, push-button accessibility, and default action use the existing
   command bar. Narrow layouts hide the optional icon to preserve filter space;
   the File command remains available.
-- **Tools > Open Log Folder** resolves the actual logger destination, normally
-  `%TEMP%\HyperBrowse-debug.log`, through the logging owner and opens its parent
-  directory through the existing shell helper. Relative fallback logs use the
-  working directory. Errors are visible, no browser navigation or new shortcut
-  is introduced, and directory resolution does not read or create files.
 - Saved-search persistence under `%LOCALAPPDATA%\HyperBrowse\saved-searches.tsv`:
   versioned strict UTF-8, escaped fields, insertion order, 64 entries, trimmed
   single-line names up to 128 UTF-16 code units, expressions up to 260, and a

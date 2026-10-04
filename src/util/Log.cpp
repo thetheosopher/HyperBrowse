@@ -1,7 +1,6 @@
 #include "util/Log.h"
 
 #include <windows.h>
-#include <filesystem>
 #include <mutex>
 #include <string>
 
@@ -86,13 +85,6 @@ namespace hyperbrowse::util
         }
         path.append(L"HyperBrowse-debug.log");
         return path;
-    }
-
-    std::wstring GetLogDirectory(std::wstring_view filePath)
-    {
-        const std::filesystem::path path(filePath.empty() ? GetLogFilePath() : std::wstring(filePath));
-        const auto directory = path.parent_path();
-        return directory.empty() ? L"." : directory.wstring();
     }
 
     void LogInfo(std::wstring_view message)

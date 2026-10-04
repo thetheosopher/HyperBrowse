@@ -10619,11 +10619,6 @@ namespace hyperbrowse::ui
         viewCommandHandlers.onDiagnosticsSnapshot = std::bind_front(&MainWindow::ShowDiagnosticsSnapshot, this);
         viewCommandHandlers.onDiagnosticsExport = std::bind_front(&MainWindow::ExportRedactedDiagnosticsSnapshot, this);
         viewCommandHandlers.onDiagnosticsReset = std::bind_front(&MainWindow::ResetDiagnosticsState, this);
-        viewCommandHandlers.onOpenLogFolder = [this](std::wstring_view directory)
-        {
-            if (!LaunchShellTarget(hwnd_, L"open", directory))
-                MessageBoxW(hwnd_, L"Failed to open the log folder.", L"Open Log Folder", MB_OK | MB_ICONERROR);
-        };
         viewCommandController_.Configure(std::move(viewCommandHandlers));
     }
 
@@ -11236,11 +11231,10 @@ namespace hyperbrowse::ui
         HMENU thumbnailSizeMenu = CreatePopupMenu();
         HMENU slideshowMenu = CreatePopupMenu();
         HMENU advancedViewMenu = CreatePopupMenu();
-        HMENU performanceMenu = CreatePopupMenu();
         HMENU diagnosticsMenu = CreatePopupMenu();
         HMENU helpMenu = helpMenu_;
 
-        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !toolsMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !savedSearchMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !advancedViewMenu || !performanceMenu || !diagnosticsMenu)
+        if (!menu_ || !fileMenu_ || !editMenu_ || !viewMenu_ || !toolsMenu_ || !helpMenu_ || !openRecentFolderMenu_ || !savedSearchMenu_ || !copySelectionToMenu_ || !moveSelectionToMenu_ || !fileMetadataMenu || !fileOrganizeMenu || !fileConvertMenu || !batchConvertSelectionMenu || !batchConvertFolderMenu || !ratingMenu || !sortMenu || !thumbnailSizeMenu || !slideshowMenu || !advancedViewMenu || !diagnosticsMenu)
         {
             return false;
         }
@@ -11366,8 +11360,6 @@ namespace hyperbrowse::ui
         AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(viewMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(slideshowMenu), L"S&lideshow");
 
-        AppendMenuW(performanceMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
-
         AppendMenuW(advancedViewMenu, MF_STRING, ID_FILE_ASSOCIATIONS, L"File &Associations...");
 
         AppendMenuW(helpMenu, MF_STRING, ID_HELP_USER_GUIDE, L"&User Guide\tF1");
@@ -11376,12 +11368,11 @@ namespace hyperbrowse::ui
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_SNAPSHOT, L"&Snapshot\tCtrl+Shift+D");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_EXPORT, L"Export &Redacted Snapshot...");
         AppendMenuW(diagnosticsMenu, MF_STRING, ID_HELP_DIAGNOSTICS_RESET, L"&Reset\tCtrl+Shift+X");
+        AppendMenuW(diagnosticsMenu, MF_STRING, ID_VIEW_PERSISTENT_THUMBNAIL_CACHE_MANAGER, L"Persistent Cache S&tats and Cleanup...");
 
         AppendMenuW(toolsMenu_, MF_STRING, ID_VIEW_SETTINGS, L"&Settings...\tCtrl+Shift+T");
         AppendMenuW(toolsMenu_, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(performanceMenu), L"&Performance");
         AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(diagnosticsMenu), L"&Diagnostics");
-        AppendMenuW(toolsMenu_, MF_STRING, ID_HELP_OPEN_LOG_FOLDER, L"Open &Log Folder");
         AppendMenuW(toolsMenu_, MF_POPUP, reinterpret_cast<UINT_PTR>(advancedViewMenu), L"&Integration");
 
         AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu_), L"&File");
@@ -22162,6 +22153,23 @@ namespace hyperbrowse::ui
 
     void MainWindow::LayoutBreadcrumbBar(int left, int top, int width, int height)
     {
+        const RECT currentBarRect{left, top, left + width, top + height};
+        if (EqualRect(&breadcrumbBarRect_, &currentBarRect) == FALSE)
+        {
+            if (dragMode_ != DragMode::LeftSplitter)
+            {
+                if (IsRectEmpty(&breadcrumbBarRect_) == FALSE)
+                {
+                    InvalidateRect(hwnd_, &breadcrumbBarRect_, FALSE);
+                }
+                if (IsRectEmpty(&currentBarRect) == FALSE)
+                {
+                    InvalidateRect(hwnd_, &currentBarRect, FALSE);
+                }
+            }
+            breadcrumbBarRect_ = currentBarRect;
+        }
+
         const HWND focusedWindow = GetFocus();
         bool moveFocus = false;
         const auto hideControl = [&](HWND control)
@@ -26154,8 +26162,19 @@ namespace hyperbrowse::ui
 
         if (dragMode_ != DragMode::None)
         {
+            const bool splitterResizeCompleted = dragMode_ == DragMode::LeftSplitter;
             dragMode_ = DragMode::None;
             ReleaseCapture();
+            if (splitterResizeCompleted && IsRectEmpty(&breadcrumbBarRect_) == FALSE)
+            {
+                RECT client{};
+                GetClientRect(hwnd_, &client);
+                const RECT breadcrumbRow{0, breadcrumbBarRect_.top, client.right, breadcrumbBarRect_.bottom};
+                RedrawWindow(hwnd_,
+                             &breadcrumbRow,
+                             nullptr,
+                             RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            }
         }
     }
 

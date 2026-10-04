@@ -44,6 +44,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 This maintenance release fixes a hang that could occur after changing performance settings in the Settings dialog.
 
 - Performance-setting changes now retire thumbnail and metadata worker services in the background, so applying settings does not wait for in-flight work to finish.
+- Removed the Open Log Folder command because it did not identify which files were logs.
 
 ## What's New In 2.5.0
 
@@ -100,7 +101,7 @@ This release expands HyperBrowse's image-review and desktop file-management work
 | Browser | Explorer-style folder tree, resizable splitter, root-aware clickable breadcrumb with long-path overflow, thumbnail mode, details mode, recursive browsing, live filename/rating/tag/type filter, named saved searches, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
 | Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, 2-4 image N-up compare with synchronized zoom and pan, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, image-information overlays with size presets, muted idle-state watermark, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; HEIC and JPEG XL via compatible installed WIC codecs with readiness/outcome diagnostics; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
-| File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, batch convert to JPEG/PNG/TIFF, and Tools > Open Log Folder |
+| File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, worker-owned persistent disk thumbnail cache with stats/compact/purge and benchmark gates, metadata cache, folder watch refresh, optional GPU-assisted JPEG decode, and an off-by-default performance HUD (`Ctrl+Shift+P`) |
 | Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
 
@@ -119,8 +120,6 @@ Choose **File > Save Current Filter...** to name a nonempty query, then choose i
 The Save icon beside the filter opens the same naming dialog. It is disabled for empty filters or while saved-search storage is unavailable/busy, and yields its space to the filter in narrow windows; the File command remains available.
 
 Searches persist in `%LOCALAPPDATA%\HyperBrowse\saved-searches.tsv`, with up to 64 entries, names up to 128 UTF-16 code units, and expressions up to 260. Names are trimmed, single-line, and unique case-insensitively; duplicates are rejected rather than overwritten. Persistence runs on a worker, uses a versioned UTF-8 file and atomic replacement, and reloads under an exclusive lock before each mutation to preserve other windows' entries. Failed writes retain the previous file and list; errors appear in the status bar. Malformed or unsupported-version files are not silently overwritten. Saved searches use existing metadata and do not create a background search index.
-
-**Tools > Open Log Folder** opens the actual directory containing `HyperBrowse-debug.log`, normally `%TEMP%`. If temp-path resolution falls back to a relative log file, it opens the working directory. Launch failures are reported without navigating the browser or adding a shortcut.
 
 ### HEIC and JPEG XL readiness
 

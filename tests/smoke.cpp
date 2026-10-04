@@ -8152,6 +8152,93 @@ namespace
              Expect(moreFoldersButton && IsWindowVisible(moreFoldersButton) != FALSE,
                     "Long-path breadcrumb overflow was not exposed as a visible button");
 
+             const auto captureBreadcrumbTextPixels = [&]()
+             {
+                 std::vector<POINT> textPixels;
+                 RECT buttonRect{};
+                 Expect(GetWindowRect(currentFolderButton, &buttonRect) != FALSE,
+                        "Failed to read the active breadcrumb button bounds");
+                 POINT buttonOrigin{buttonRect.left, buttonRect.top};
+                 MapWindowPoints(nullptr, mainWindow.Hwnd(), &buttonOrigin, 1);
+                 const int buttonWidth = buttonRect.right - buttonRect.left;
+                 const int buttonHeight = buttonRect.bottom - buttonRect.top;
+                 HDC buttonDc = GetDC(currentFolderButton);
+                 Expect(buttonDc != nullptr, "Failed to sample the active breadcrumb button");
+                 const COLORREF background = GetPixel(buttonDc, buttonWidth - 2, buttonHeight / 2);
+                 for (int y = 4; y < buttonHeight - 4; ++y)
+                 {
+                     for (int x = 6; x < buttonWidth - 6; ++x)
+                     {
+                         const COLORREF pixel = GetPixel(buttonDc, x, y);
+                         if (pixel != CLR_INVALID && pixel != background)
+                         {
+                             textPixels.push_back(POINT{buttonOrigin.x + x, buttonOrigin.y + y});
+                         }
+                     }
+                 }
+                 ReleaseDC(currentFolderButton, buttonDc);
+                 return std::pair{std::move(textPixels), background};
+             };
+
+             HWND treeView = FindWindowExW(mainWindow.Hwnd(), nullptr, WC_TREEVIEWW, nullptr);
+             Expect(treeView != nullptr, "Could not find the folder tree for breadcrumb splitter coverage");
+             RECT treeRect{};
+             Expect(GetWindowRect(treeView, &treeRect) != FALSE,
+                    "Could not read the folder tree bounds for breadcrumb splitter coverage");
+             POINT treeCorners[2]{{treeRect.left, treeRect.top}, {treeRect.right, treeRect.bottom}};
+             MapWindowPoints(nullptr, mainWindow.Hwnd(), treeCorners, 2);
+             RECT mainClient{};
+             GetClientRect(mainWindow.Hwnd(), &mainClient);
+             const int splitterX = treeCorners[1].x + 2;
+             const int splitterY = treeCorners[0].y + 4;
+             SendMessageW(mainWindow.Hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(splitterX, splitterY));
+             SendMessageW(mainWindow.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(mainClient.right - 1, splitterY));
+             const auto [breadcrumbTextPixels, breadcrumbBackground] = captureBreadcrumbTextPixels();
+             Expect(!breadcrumbTextPixels.empty(), "Could not find rendered text in the active breadcrumb button");
+             SendMessageW(mainWindow.Hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(0, splitterY));
+             SendMessageW(mainWindow.Hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(0, splitterY));
+             PumpMessagesFor(50);
+
+             POINT exposedTextPixel{};
+             bool foundExposedTextPixel = false;
+             for (const POINT candidate : breadcrumbTextPixels)
+             {
+                 bool coveredByBreadcrumb = false;
+                 for (const HWND button : breadcrumbControls)
+                 {
+                     if (!button || IsWindowVisible(button) == FALSE)
+                     {
+                         continue;
+                     }
+                     RECT buttonRect{};
+                     if (GetWindowRect(button, &buttonRect) == FALSE)
+                     {
+                         continue;
+                     }
+                     POINT corners[2]{{buttonRect.left, buttonRect.top}, {buttonRect.right, buttonRect.bottom}};
+                     MapWindowPoints(nullptr, mainWindow.Hwnd(), corners, 2);
+                     const RECT clientButtonRect{corners[0].x, corners[0].y, corners[1].x, corners[1].y};
+                     if (PtInRect(&clientButtonRect, candidate) != FALSE)
+                     {
+                         coveredByBreadcrumb = true;
+                         break;
+                     }
+                 }
+                 if (!coveredByBreadcrumb)
+                 {
+                     exposedTextPixel = candidate;
+                     foundExposedTextPixel = true;
+                     break;
+                 }
+             }
+             Expect(foundExposedTextPixel,
+                    "Splitter movement did not expose any pixels from the breadcrumb's previous position");
+             COLORREF exposedPixelColor{};
+             Expect(ReadClientPixel(mainWindow.Hwnd(), exposedTextPixel, &exposedPixelColor),
+                    "Failed to sample the exposed breadcrumb area after splitter movement");
+             Expect(exposedPixelColor == breadcrumbBackground,
+                    "Breadcrumb text remained visible at its previous position after splitter movement");
+
              IAccessible* breadcrumbAccessible = nullptr;
              const HRESULT breadcrumbAccessibleStatus = AccessibleObjectFromWindow(
                  currentFolderButton,

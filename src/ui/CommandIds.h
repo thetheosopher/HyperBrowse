@@ -171,7 +171,6 @@ namespace hyperbrowse::ui::command_ids
     inline constexpr UINT ID_HELP_USER_GUIDE = 9009;
     inline constexpr UINT ID_HELP_KEYBOARD_SHORTCUTS = 9010;
     inline constexpr UINT ID_HELP_DIAGNOSTICS_EXPORT = 9011;
-    inline constexpr UINT ID_HELP_OPEN_LOG_FOLDER = 9012;
     inline constexpr UINT ID_ABOUT_OPEN_GITHUB = 9101;
     inline constexpr UINT ID_ABOUT_OPEN_SUPPORT = 9102;
 }

@@ -474,8 +474,6 @@ namespace hyperbrowse::tests
             int colorManagementCallCount = 0;
             int detailsCallCount = 0;
             int itemNumberCallCount = 0;
-            int openLogCallCount = 0;
-            std::wstring launchedLogDirectory;
 
             ViewCommandController::Handlers handlers;
             handlers.onAppTextSize = [&appTextSizeCommand](UINT commandId)
@@ -510,27 +508,7 @@ namespace hyperbrowse::tests
             {
                 ++itemNumberCallCount;
             };
-            handlers.onOpenLogFolder = [&](std::wstring_view directory)
-            {
-                ++openLogCallCount;
-                launchedLogDirectory = directory;
-            };
             controller.Configure(std::move(handlers));
-
-            Expect(controller.Handle(ID_HELP_OPEN_LOG_FOLDER) && openLogCallCount == 1
-                && launchedLogDirectory == hyperbrowse::util::GetLogDirectory(hyperbrowse::util::GetLogFilePath()),
-                "Open Log Folder did not route the logger's actual directory to the shell callback");
-            Expect(hyperbrowse::util::GetLogDirectory(L"C:\\Log Profiles\\\u65e5\u672c\\session.log") == L"C:\\Log Profiles\\\u65e5\u672c",
-                "Log directory resolution changed a Unicode destination");
-            Expect(hyperbrowse::util::GetLogDirectory(L"relative.log") == L"."
-                && hyperbrowse::util::GetLogDirectory(L"relative\\session.log") == L"relative",
-                "Log directory resolution changed a relative destination");
-            Expect(hyperbrowse::util::GetLogDirectory(L"\\\\server\\share\\session.log") == L"\\\\server\\share",
-                "Log directory resolution changed a UNC share destination");
-            const auto logShortcuts = hyperbrowse::ui::MainWindowShortcuts();
-            Expect(std::none_of(logShortcuts.begin(), logShortcuts.end(), [](const auto& shortcut)
-                { return shortcut.commandId == ID_HELP_OPEN_LOG_FOLDER; }),
-                "Open Log Folder added an undocumented shortcut");
 
                  Expect(controller.Handle(ID_VIEW_COLOR_MANAGEMENT) && colorManagementCallCount == 1,
                      "View command controller did not route the color-management toggle");

@@ -655,6 +655,7 @@ namespace hyperbrowse::ui
         HWND breadcrumbMoreButton_{};
         std::vector<FolderBreadcrumbSegment> breadcrumbSegments_;
         std::wstring breadcrumbFolderPath_;
+        RECT breadcrumbBarRect_{};
         HWND detailsPanelText_{};
         HWND quickAccessScrollBar_{};
         HWND tooltipControl_{};
