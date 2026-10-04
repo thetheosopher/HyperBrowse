@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.5.1-2EA043)
+![Version](https://img.shields.io/badge/Version-2.5.2-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -38,6 +38,15 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 - A Windows CI workflow defines Debug/Release, CTest, benchmark, and release-package validation; it is currently manually disabled. Local release checks are documented in [docs/testing.md](docs/testing.md).
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
+
+## What's New In 2.5.2
+
+This release improves image review and file-management workflows while hardening JPEG metadata, thumbnail-cache scheduling, and several dialogs.
+
+- Added `0-5` rating shortcuts for selected thumbnails and the focused compare tile; `0` clears a rating, and the filter's clear action is available for nonempty queries.
+- Added `Ctrl+Shift+R` for batch rename with a preview of generated names, and improved conflict planning for duplicate targets.
+- Hardened JPEG orientation metadata handling and persistent thumbnail lookup scheduling; refined Settings, histogram, and text-entry dialog layouts.
+- Updated the File Associations command location and removed the ambiguous Open Log Folder command.
 
 ## What's New In 2.5.1
 
@@ -101,7 +110,7 @@ This release expands HyperBrowse's image-review and desktop file-management work
 | Browser | Explorer-style folder tree, resizable splitter, root-aware clickable breadcrumb with long-path overflow, thumbnail mode, details mode, recursive browsing, live filename/rating/tag/type filter, named saved searches, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
 | Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, 2-4 image N-up compare with synchronized zoom and pan, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, image-information overlays with size presets, muted idle-state watermark, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; HEIC and JPEG XL via compatible installed WIC codecs with readiness/outcome diagnostics; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
-| File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
+| File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, batch rename, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, worker-owned persistent disk thumbnail cache with stats/compact/purge and benchmark gates, metadata cache, folder watch refresh, optional GPU-assisted JPEG decode, and an off-by-default performance HUD (`Ctrl+Shift+P`) |
 | Distribution | Debug and Release presets, smoke tests, startup-budget checks, portable layout, installer layout, zipped portable release, Inno Setup 6 installer with per-user or per-machine install mode, and Windows CI artifact validation |
 
@@ -308,13 +317,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.5.1-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.5.2-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.5.1-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.5.2-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -384,11 +393,17 @@ For the current backlog in detail, start with [specs/FUTURE-ROADMAP.md](specs/FU
 
 ## Version
 
-Current release: **2.5.1**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.5.1-portable-win64.zip` and `HyperBrowse-2.5.1-installer.exe`).
+Current release: **2.5.2**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.5.2-portable-win64.zip` and `HyperBrowse-2.5.2-installer.exe`).
 
 Release **2.0.0** expanded HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It added richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.5.2
+
+- Added selected-thumbnail and focused-compare rating shortcuts, filter clearing, and a batch-rename shortcut with generated-name preview.
+- Improved duplicate conflict planning, JPEG orientation metadata handling, persistent thumbnail lookup scheduling, and several dialog/layout details.
+- Updated File Associations command placement and removed the ambiguous Open Log Folder command.
 
 ### 2.5.1
 

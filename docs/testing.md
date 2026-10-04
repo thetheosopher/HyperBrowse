@@ -40,6 +40,7 @@ The current test target registers:
 - `HyperBrowseSmoke`
 - `HyperBrowseSingleInstanceSmoke`
 - `HyperBrowsePerformanceBenchmark`
+- `HyperBrowseJpegOrientationSmoke`
 - `HyperBrowseFolderHistorySmoke`
 - `HyperBrowseFileOperationMediaCacheSmoke`
 - `HyperBrowseViewerFitSmoke`
@@ -68,7 +69,7 @@ The current test target registers:
 - `HyperBrowseMenuMetricsSmoke`
 - `HyperBrowseResponsivePanelSmoke`
 
-All 30 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+All 31 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
 
 Smoke processes isolate registry settings, the default persistent cache, and
 saved searches.

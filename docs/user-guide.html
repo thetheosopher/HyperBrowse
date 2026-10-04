@@ -307,6 +307,7 @@
                         <li><strong>Copy</strong> and <strong>Move</strong> use Windows shell operations and can target the current folder, a recent destination, or a favorite destination.</li>
                         <li><strong>Delete</strong> sends files to the Recycle Bin. Use <kbd>Shift</kbd> + <kbd>Delete</kbd> for permanent deletion.</li>
                         <li><strong>Rename</strong> supports a selected image or inline folder renaming. <kbd>F2</kbd> starts the common rename action.</li>
+                        <li>For two or more selected images, use <strong>File &gt; Batch Rename...</strong> or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd>. Enter a pattern and review every generated name in the preview; extensions are preserved unless the pattern includes <code>{ext}</code>.</li>
                         <li><strong>Duplicate</strong> copies selected files into the same folder with an automatic numeric suffix.</li>
                         <li>Use <kbd>Ctrl</kbd> + <kbd>C</kbd> and <kbd>Ctrl</kbd> + <kbd>V</kbd> to copy and paste files through the Windows clipboard.</li>
                     </ul>
@@ -321,7 +322,7 @@
                     </ul>
                 </div>
             </div>
-            <div class="callout"><strong>Conflict handling.</strong> When a copy or move encounters an existing filename, choose overwrite or automatic numeric renaming in the conflict prompt. Long operations report progress in the taskbar when supported.</div>
+            <div class="callout"><strong>Conflict handling.</strong> When a copy or move encounters an existing filename, choose overwrite or automatic numeric renaming in the conflict prompt. Automatic names account for existing destination files and other targets in the same operation; same-folder Duplicate picks the next available numeric suffix. Long operations report progress in the taskbar when supported.</div>
         </section>
 
         <section id="quick-actions">

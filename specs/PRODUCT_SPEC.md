@@ -1,6 +1,6 @@
 # HyperBrowse Product Specification (Authoritative)
 
-**Current release:** 2.5.1
+**Current release:** 2.5.2
 **Status:** Current product contract
 **Authority:** Source code, smoke tests, and this document define shipped
 behavior. Proposed work belongs in [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) and
@@ -85,6 +85,9 @@ conversion, and low-friction culling.
 - Two-to-four-image N-up compare with synchronized zoom and pan, ratings, tags,
   structured in-folder filtering, date-taken sorting, and ascending/descending
   sort direction
+- Context-aware `0-5` rating shortcuts for selected thumbnails and the focused
+  compare tile; `0` clears the rating, and compare-mode ratings temporarily
+  take precedence over the viewer's fit/actual-size shortcuts
 - Named saved searches through **File > Save Current Filter** and **File > Open
   Saved Search**, with asynchronous load/save and update/rename/delete/reload
   commands. Expressions evaluate the current folder or recursive scope through
@@ -92,7 +95,8 @@ conversion, and low-friction culling.
   classifier and `type:extension` matches an exact recognized extension.
   Predicates are conjunctive and case-insensitive; unknown/empty type tokens
   remain literal filename terms. Manual edits clear active search identity;
-  deleting a saved entry does not clear the displayed filter.
+  deleting a saved entry does not clear the displayed filter. A trailing clear
+  action is available while the filter is nonempty.
 - Inline Save Current Filter icon beside the filter edit, sharing the File
   command and its ready/not-busy/nonempty enablement. Fixed scaled button bounds,
   tooltip, push-button accessibility, and default action use the existing
@@ -106,9 +110,16 @@ conversion, and low-friction culling.
   windows' entries; failures retain the prior file/list and appear in the status
   bar. Malformed storage is not silently replaced. Explicit reload refreshes
   another window's changes; no new indexer or metadata extraction is added.
-- Copy, move, rename, batch rename, delete, permanent delete, duplicate,
-  clipboard transfer, shell drag/drop, Quick Actions, paired RAW/JPEG
+- Copy, move, rename, batch rename (`Ctrl+Shift+R`), delete, permanent delete,
+  duplicate, clipboard transfer, shell drag/drop, Quick Actions, paired RAW/JPEG
   operations, taskbar progress, and supported file-operation undo/redo
+- Copy/move conflict handling supports overwrite or automatic numeric suffixes;
+  planned target names account for existing destination files and collisions
+  within the same operation. Same-folder Duplicate selects the next available
+  numeric suffix.
+- **Tools > File Associations** selects supported image types HyperBrowse
+  should open by default; installer Open With registration follows the selected
+  current-user or all-users installation scope.
 - Multiple viewer windows, viewer display recovery, slideshow transitions, and
   configurable viewer input behavior
 - Per-monitor DPI awareness, asynchronous folder-tree child-presence probing,
