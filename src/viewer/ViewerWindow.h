@@ -191,6 +191,8 @@ namespace hyperbrowse::viewer
         bool GetDeleteCurrentPaths(std::wstring* sourcePath, std::wstring* preferredFocusPath) const;
         std::wstring FilingResumeTargetPathForMove() const;
         bool AdvanceAfterDeleteCurrent();
+        void ToggleFitActualSize();
+        void ApplyGamepadMotion(double zoomFactor, double panDeltaX, double panDeltaY);
         void RecoverDisplaySurface();
         void ShowQuickSendConfirmation(std::wstring message);
 

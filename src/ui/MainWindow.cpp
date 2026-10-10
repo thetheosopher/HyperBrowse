@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include <commctrl.h>
+#include <Xinput.h>
 #include <d2d1.h>
 #include <dwmapi.h>
 #include <dwrite.h>
@@ -207,6 +208,8 @@ namespace
     constexpr UINT_PTR kPersistentThumbnailCacheDialogCursorSubclassId = 1;
     constexpr UINT_PTR kMemoryPressureTimerId = 9101;
     constexpr UINT kMemoryPressureIntervalMs = 1500;
+    constexpr UINT_PTR kGamepadTimerId = 9109;
+    constexpr UINT kGamepadPollIntervalMs = 16;
     constexpr GUID kConsoleDisplayStateGuid{
         0x6fe69556, 0x704a, 0x47a0, {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
     constexpr GUID kMonitorPowerOnGuid{
@@ -3963,6 +3966,41 @@ namespace
         appendCatalog(hyperbrowse::ui::MainWindowShortcuts());
         appendCatalog(hyperbrowse::ui::BrowserShortcuts());
         appendCatalog(hyperbrowse::ui::ViewerShortcuts());
+        const auto appendGamepadRow = [listWindow](std::wstring_view controls,
+                                                   std::wstring_view action,
+                                                   std::wstring_view context)
+        {
+            const std::wstring category = L"Gamepad controls";
+            const std::wstring controlText(controls);
+            const std::wstring actionText(action);
+            const std::wstring contextText(context);
+            LVITEMW item{};
+            item.mask = LVIF_TEXT;
+            item.iItem = ListView_GetItemCount(listWindow);
+            item.pszText = const_cast<LPWSTR>(category.c_str());
+            const int row = ListView_InsertItem(listWindow, &item);
+            if (row >= 0)
+            {
+                ListView_SetItemText(listWindow, row, 1, const_cast<LPWSTR>(controlText.c_str()));
+                ListView_SetItemText(listWindow, row, 2, const_cast<LPWSTR>(actionText.c_str()));
+                ListView_SetItemText(listWindow, row, 3, const_cast<LPWSTR>(contextText.c_str()));
+            }
+        };
+        appendGamepadRow(L"D-pad / left stick", L"Move the selected image", L"Browser");
+        appendGamepadRow(L"A", L"Open the selected image", L"Browser");
+        appendGamepadRow(L"B", L"Use the Escape key behavior", L"Browser");
+        appendGamepadRow(L"X", L"Move selected images to the Recycle Bin", L"Browser");
+        appendGamepadRow(L"D-pad / left stick; LB / RB",
+                         L"Previous / next image (up/left or LB: previous)",
+                         L"Viewer");
+        appendGamepadRow(L"LT / RT", L"Zoom out / in", L"Viewer");
+        appendGamepadRow(L"Right stick",
+                         L"Pan the image faster the longer it is held",
+                         L"Viewer");
+        appendGamepadRow(L"A", L"Toggle between fit and actual size", L"Viewer");
+        appendGamepadRow(L"Y", L"Toggle overlays (Tab)", L"Viewer");
+        appendGamepadRow(L"B", L"Use the configured Escape action", L"Viewer");
+        appendGamepadRow(L"X", L"Move the displayed image to the Recycle Bin", L"Viewer");
         AutoSizeShortcutReferenceColumns(listWindow);
     }
 
@@ -10862,6 +10900,11 @@ namespace hyperbrowse::ui
         {
             memoryPressureTimerId_ = SetTimer(hwnd_, kMemoryPressureTimerId, kMemoryPressureIntervalMs, nullptr);
             QueueMemoryPressureSample();
+        }
+        gamepadTimerId_ = SetTimer(hwnd_, kGamepadTimerId, kGamepadPollIntervalMs, nullptr);
+        if (gamepadTimerId_ == 0)
+        {
+            util::LogLastError(L"SetTimer(XInput polling)");
         }
         cacheMaintenanceState_ = std::make_shared<PersistentThumbnailCacheMaintenanceState>();
 
@@ -27383,6 +27426,11 @@ namespace hyperbrowse::ui
         case WM_MENUCHAR:
             return HandleMenuCharMessage(wParam, lParam);
         case WM_TIMER:
+            if (gamepadTimerId_ != 0 && static_cast<UINT_PTR>(wParam) == gamepadTimerId_)
+            {
+                ProcessGamepadInput();
+                return 0;
+            }
             if (performanceHudTimerId_ != 0
                 && static_cast<UINT_PTR>(wParam) == performanceHudTimerId_)
             {
@@ -27443,6 +27491,11 @@ namespace hyperbrowse::ui
             }
             return 0;
         case WM_DESTROY:
+            if (gamepadTimerId_ != 0)
+            {
+                KillTimer(hwnd_, gamepadTimerId_);
+                gamepadTimerId_ = 0;
+            }
             if (folderTreeDragController_.IsActive())
             {
                 FinishFolderTreeDrag(false);
@@ -27518,6 +27571,128 @@ namespace hyperbrowse::ui
         }
 
         return DefWindowProcW(hwnd_, message, wParam, lParam);
+    }
+
+    void MainWindow::ProcessGamepadInput()
+    {
+        XINPUT_STATE xinputState{};
+        const DWORD result = XInputGetState(0, &xinputState);
+        GamepadState state;
+        if (result == ERROR_SUCCESS)
+        {
+            lastXInputError_ = ERROR_SUCCESS;
+            const XINPUT_GAMEPAD& gamepad = xinputState.Gamepad;
+            state.buttons = gamepad.wButtons;
+            state.leftStickX = std::clamp(static_cast<float>(gamepad.sThumbLX) / 32767.0F, -1.0F, 1.0F);
+            state.leftStickY = std::clamp(static_cast<float>(gamepad.sThumbLY) / 32767.0F, -1.0F, 1.0F);
+            state.rightStickX = std::clamp(static_cast<float>(gamepad.sThumbRX) / 32767.0F, -1.0F, 1.0F);
+            state.rightStickY = std::clamp(static_cast<float>(gamepad.sThumbRY) / 32767.0F, -1.0F, 1.0F);
+            state.leftTrigger = static_cast<float>(gamepad.bLeftTrigger) / 255.0F;
+            state.rightTrigger = static_cast<float>(gamepad.bRightTrigger) / 255.0F;
+        }
+        else if (result == ERROR_DEVICE_NOT_CONNECTED)
+        {
+            lastXInputError_ = ERROR_SUCCESS;
+        }
+        else if (lastXInputError_ != result)
+        {
+            lastXInputError_ = result;
+            util::LogError(L"XInputGetState failed with error " + std::to_wstring(result));
+        }
+
+        const HWND foregroundWindow = GetForegroundWindow();
+        viewer::ViewerWindow* activeViewer = FindViewerByHwnd(foregroundWindow);
+        const bool browserActive = foregroundWindow == hwnd_;
+        const GamepadContext context = activeViewer ? GamepadContext::Viewer : GamepadContext::Browser;
+        const HWND focus = GetFocus();
+        const bool inputAllowed = (browserActive || activeViewer != nullptr)
+            && !menuLoopActive_
+            && !folderTreeDragController_.IsActive()
+            && GetCapture() == nullptr
+            && !IsTextInputControlWindow(focus)
+            && !fileOperationActive_
+            && !batchConvertActive_
+            && !imageCommandActive_;
+        const ULONGLONG now = GetTickCount64();
+        const float elapsedSeconds = lastGamepadPollTick_ == 0
+            ? static_cast<float>(kGamepadPollIntervalMs) / 1000.0F
+            : std::clamp(static_cast<float>(now - lastGamepadPollTick_) / 1000.0F, 0.0F, 0.1F);
+        lastGamepadPollTick_ = now;
+        const GamepadActions actions = gamepadInputPolicy_.Update(
+            state, context, inputAllowed, elapsedSeconds);
+
+        if (actions.navigationKey != 0)
+        {
+            if (activeViewer)
+            {
+                SendMessageW(activeViewer->Hwnd(), WM_KEYDOWN,
+                             static_cast<WPARAM>(actions.navigationKey), 0);
+            }
+            else if (browserPaneController_)
+            {
+                browserPaneController_->HandleNavigationKey(
+                    WM_KEYDOWN, static_cast<WPARAM>(actions.navigationKey), 0);
+            }
+        }
+
+        if (activeViewer)
+        {
+            if (actions.toggleViewerZoom)
+            {
+                activeViewer->ToggleFitActualSize();
+            }
+            if (actions.toggleViewerOverlays)
+            {
+                SendMessageW(activeViewer->Hwnd(), WM_KEYDOWN, VK_TAB, 0);
+            }
+            if (actions.escape)
+            {
+                SendMessageW(activeViewer->Hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+            }
+            if (actions.recycle)
+            {
+                OnViewerDeleteRequested(0, reinterpret_cast<LPARAM>(activeViewer->Hwnd()));
+            }
+
+            const double zoomFactor = std::pow(
+                1.8,
+                static_cast<double>(actions.zoomRate) * elapsedSeconds);
+            constexpr double kGamepadPanSpeed = 900.0;
+            activeViewer->ApplyGamepadMotion(
+                zoomFactor,
+                static_cast<double>(actions.panX) * kGamepadPanSpeed
+                    * static_cast<double>(actions.panSpeedMultiplier) * elapsedSeconds,
+                static_cast<double>(actions.panY) * kGamepadPanSpeed
+                    * static_cast<double>(actions.panSpeedMultiplier) * elapsedSeconds);
+            return;
+        }
+
+        if (actions.escape)
+        {
+            const HWND browserPaneHwnd = browserPaneController_ ? browserPaneController_->Hwnd() : nullptr;
+            if (browserPaneController_
+                && browserPaneHwnd
+                && GetFocus() == browserPaneHwnd
+                && browserPaneController_->GetViewMode() == browser::BrowserViewMode::Thumbnails
+                && browserPaneController_->SelectedCount() > 0)
+            {
+                browserPaneController_->ClearSelection();
+            }
+            else
+            {
+                HandleCommand(command_ids::ID_FILE_ESCAPE);
+            }
+        }
+        if (actions.open)
+        {
+            HandleCommand(command_ids::ID_FILE_OPEN_SELECTED);
+        }
+        if (actions.recycle
+            && browserPaneController_
+            && !browserPaneController_->SelectedFilePathsSnapshot().empty())
+        {
+            HandleCommand(command_ids::ID_FILE_DELETE_SELECTION);
+        }
     }
 
     LRESULT CALLBACK MainWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)

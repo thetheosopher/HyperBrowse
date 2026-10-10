@@ -186,6 +186,7 @@ add_library(HyperBrowseCore STATIC
     src/ui/RightPaneHitTester.cpp
     src/ui/ExternalDropTarget.cpp
     src/ui/FileCommandController.cpp
+    src/ui/GamepadInputPolicy.cpp
     src/ui/FileOperationJournal.cpp
     src/ui/FileOperationReconciler.cpp
     src/ui/FilingResumePersistence.cpp
@@ -247,6 +248,7 @@ target_link_libraries(HyperBrowseCore PUBLIC
     shell32
     shlwapi
     wtsapi32
+    Xinput9_1_0
 )
 
 if(HYPERBROWSE_ENABLE_LIBRAW)

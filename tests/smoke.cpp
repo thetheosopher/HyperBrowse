@@ -5883,6 +5883,14 @@ namespace
         Expect(viewer.PanOffset().x == initialHorizontalPan,
             "Viewer inverted keyboard panning option did not restore the legacy left-arrow direction");
         viewer.SetKeyboardPanningInverted(false);
+        const int zoomBeforeGamepadMotion = viewer.CurrentZoomPercent();
+        viewer.ApplyGamepadMotion(1.1, 0.0, 0.0);
+        PumpMessagesFor(250);
+        Expect(viewer.CurrentZoomPercent() > zoomBeforeGamepadMotion,
+            "Gamepad zoom did not increase the viewer zoom");
+        viewer.ApplyGamepadMotion(1.0, 10.0, 0.0);
+        Expect(viewer.PanOffset().x > initialHorizontalPan,
+            "Gamepad pan did not move the zoomed viewer image");
         SetWindowPos(viewer.Hwnd(), nullptr,
                      originalViewerRect.left,
                      originalViewerRect.top,

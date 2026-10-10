@@ -32,6 +32,7 @@
 #include "ui/FileCommandController.h"
 #include "ui/FileOperationJournal.h"
 #include "ui/FileOperationReconciler.h"
+#include "ui/GamepadInputPolicy.h"
 #include "ui/FilingResumePersistence.h"
 #include "ui/FolderTreeDropPolicy.h"
 #include "ui/FolderHistory.h"
@@ -73,6 +74,172 @@ namespace hyperbrowse::tests
             {
                 throw std::runtime_error(message);
             }
+        }
+
+        void RunGamepadInputPolicyScenario()
+        {
+            using namespace hyperbrowse::ui;
+
+            GamepadInputPolicy policy;
+            GamepadState state;
+            state.buttons = GamepadA | GamepadX;
+            GamepadActions actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.open && actions.recycle,
+                   "Gamepad A/X press edges did not map to browser open/recycle actions");
+
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(!actions.open && !actions.recycle,
+                   "Held gamepad buttons repeated a one-shot browser command");
+
+            actions = policy.Update(state, GamepadContext::Browser, false, 0.033F);
+            Expect(!actions.open && !actions.recycle,
+                   "Inactive gamepad context dispatched a command");
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(!actions.open && !actions.recycle,
+                   "A button held through an inactive context fired when focus returned");
+
+            state = {};
+            state.buttons = GamepadB;
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.escape,
+                   "Gamepad B did not map to Escape behavior in the browser");
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(!actions.escape,
+                   "Held gamepad B repeated the browser Escape action");
+
+            state = {};
+            policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            state.buttons = GamepadA;
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.open,
+                   "A newly connected controller button press was not recognized after disconnection");
+
+            state = {};
+            state.buttons = GamepadY;
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(!actions.toggleViewerOverlays,
+                   "Gamepad Y triggered a viewer overlay action in the browser");
+            state = {};
+            policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            state.buttons = GamepadY;
+            actions = policy.Update(state, GamepadContext::Viewer, true, 0.033F);
+            Expect(actions.toggleViewerOverlays,
+                   "Gamepad Y did not map to the viewer overlay toggle");
+            actions = policy.Update(state, GamepadContext::Viewer, true, 0.033F);
+            Expect(!actions.toggleViewerOverlays,
+                   "Held gamepad Y repeated the viewer overlay toggle");
+
+            state = {};
+            state.leftStickX = 0.8F;
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.navigationKey == VK_RIGHT,
+                   "Browser left stick did not navigate right");
+            state.leftStickX = 0.0F;
+            state.leftStickY = 0.8F;
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.navigationKey == VK_UP,
+                   "Browser left stick vertical navigation was inverted");
+            state.leftStickY = -0.8F;
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.navigationKey == VK_DOWN,
+                   "Browser left stick down did not navigate down");
+            state.leftStickX = 0.1F;
+            state.leftStickY = 0.0F;
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.navigationKey == 0,
+                   "Browser left stick dead zone allowed drift navigation");
+
+            state = {};
+            state.leftStickY = 0.8F;
+            actions = policy.Update(state, GamepadContext::Viewer, true, 0.033F);
+            Expect(actions.navigationKey == VK_PRIOR,
+                   "Viewer left stick up did not navigate to the previous image");
+            state = {};
+            state.buttons = GamepadDpadDown;
+            actions = policy.Update(state, GamepadContext::Viewer, true, 0.033F);
+            Expect(actions.navigationKey == VK_NEXT,
+                   "Viewer D-pad down did not navigate to the next image");
+
+            state = {};
+            state.buttons = GamepadDpadUp;
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.navigationKey == VK_UP,
+                   "Browser D-pad did not navigate immediately");
+            for (int repeat = 0; repeat < 10; ++repeat)
+            {
+                actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+                Expect(actions.navigationKey == 0,
+                       "Browser D-pad repeat delay elapsed too early");
+            }
+            actions = policy.Update(state, GamepadContext::Browser, true, 0.033F);
+            Expect(actions.navigationKey == VK_UP,
+                   "Browser D-pad did not repeat after its initial delay");
+
+            state = {};
+            state.buttons = GamepadRightShoulder | GamepadA | GamepadX | GamepadB | GamepadY;
+            state.leftTrigger = 0.8F;
+            state.rightTrigger = 0.9F;
+            state.rightStickX = 0.8F;
+            state.rightStickY = -0.8F;
+            actions = policy.Update(state, GamepadContext::Viewer, true, 0.033F);
+            Expect(actions.navigationKey == VK_NEXT
+                       && actions.toggleViewerZoom
+                       && actions.toggleViewerOverlays
+                       && actions.escape
+                       && actions.recycle,
+                   "Viewer gamepad buttons did not map to navigation/viewer/recycle actions");
+            Expect(actions.zoomRate > 0.0F
+                       && actions.panX < 0.0F
+                       && actions.panY < 0.0F,
+                   "Viewer triggers or right stick did not map to zoom/pan");
+            Expect(actions.panSpeedMultiplier > 1.0F
+                       && actions.panSpeedMultiplier < 4.0F,
+                   "Viewer pan acceleration did not begin at the base speed");
+
+            GamepadInputPolicy panPolicy;
+            GamepadState panState;
+            panState.rightStickX = -1.0F;
+            GamepadActions panActions = panPolicy.Update(
+                panState, GamepadContext::Viewer, true, 0.016F);
+            Expect(panActions.panX > 0.0F && panActions.panX < 1.0F,
+                   "Viewer right-stick pan was not smoothed at its start");
+            const float initialPanMultiplier = panActions.panSpeedMultiplier;
+            for (int sample = 0; sample < 40; ++sample)
+            {
+                panActions = panPolicy.Update(panState, GamepadContext::Viewer, true, 0.016F);
+            }
+            Expect(panActions.panSpeedMultiplier > initialPanMultiplier
+                       && panActions.panSpeedMultiplier <= 4.0F,
+                   "Viewer pan speed did not accelerate while the stick was held");
+            for (int sample = 0; sample < 60; ++sample)
+            {
+                panActions = panPolicy.Update(panState, GamepadContext::Viewer, true, 0.016F);
+            }
+            Expect(panActions.panSpeedMultiplier == 4.0F,
+                   "Viewer pan acceleration did not reach its maximum speed cap");
+
+            state = {};
+            state.rightStickX = 0.1F;
+            state.rightStickY = 0.1F;
+            panState = state;
+            panActions = panPolicy.Update(panState, GamepadContext::Viewer, true, 0.016F);
+            Expect(panActions.panSpeedMultiplier == 1.0F
+                       && panActions.panX > 0.0F
+                       && panActions.panX < 1.0F,
+                   "Viewer pan did not ease smoothly when the stick returned to its dead zone");
+            for (int sample = 0; sample < 40; ++sample)
+            {
+                panActions = panPolicy.Update(panState, GamepadContext::Viewer, true, 0.016F);
+            }
+            Expect(panActions.panX == 0.0F && panActions.panY == 0.0F,
+                   "Viewer pan did not settle to a stop after the stick was released");
+            panState.rightStickX = -1.0F;
+            panActions = panPolicy.Update(panState, GamepadContext::Viewer, true, 0.016F);
+            Expect(panActions.panSpeedMultiplier < 1.2F,
+                   "Viewer pan acceleration did not restart at its base speed");
+            actions = policy.Update(state, GamepadContext::Viewer, true, 0.033F);
+            Expect(actions.panSpeedMultiplier == 1.0F,
+                   "Viewer pan dead zone did not reset the acceleration");
         }
 
         void RunPrefetchSizingScenario()
@@ -2460,6 +2627,7 @@ namespace hyperbrowse::tests
     void RunPolicyScenarios()
     {
         RunPrefetchSizingScenario();
+        RunGamepadInputPolicyScenario();
         RunResourceSizingRangeScenario();
         RunViewerTransitionPolicyScenario();
         RunCompareSessionPolicyScenario();
@@ -2508,6 +2676,10 @@ namespace hyperbrowse::tests
         if (scenario == "--folder-history")
         {
             RunFolderHistoryScenario();
+        }
+        else if (scenario == "--gamepad-policy")
+        {
+            RunGamepadInputPolicyScenario();
         }
         else if (scenario == "--file-operation-media-cache")
         {

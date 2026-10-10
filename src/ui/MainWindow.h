@@ -29,6 +29,7 @@
 #include "ui/FolderLoadCoordinator.h"
 #include "ui/FolderTreeController.h"
 #include "ui/FileCommandController.h"
+#include "ui/GamepadInputPolicy.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandBarPainter.h"
 #include "ui/CacheStatsPainter.h"
@@ -306,6 +307,7 @@ namespace hyperbrowse::ui
         void RebuildThemeBrushes();
         void ApplyTheme();
         void QueueMemoryPressureSample();
+        void ProcessGamepadInput();
         void LoadWindowState();
         void ApplyStartupLaunchPathOverride();
         void SaveWindowState() const;
@@ -647,6 +649,10 @@ namespace hyperbrowse::ui
 
         HINSTANCE instance_{};
         HWND hwnd_{};
+        UINT_PTR gamepadTimerId_{};
+        DWORD lastXInputError_{};
+        ULONGLONG lastGamepadPollTick_{};
+        GamepadInputPolicy gamepadInputPolicy_;
         HWND filterEdit_{};
         HWND treePane_{};
         HWND browserPane_{};

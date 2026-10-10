@@ -3896,6 +3896,56 @@ namespace hyperbrowse::viewer
         RequestRepaint();
     }
 
+    void ViewerWindow::ApplyGamepadMotion(double zoomFactor, double panDeltaX, double panDeltaY)
+    {
+        if (!hwnd_)
+        {
+            return;
+        }
+
+        if (zoomFactor > 0.0 && std::abs(zoomFactor - 1.0) > 0.0001)
+        {
+            ZoomBy(zoomFactor);
+        }
+
+        if (std::abs(panDeltaX) < 0.01 && std::abs(panDeltaY) < 0.01)
+        {
+            return;
+        }
+
+        panOffsetX_ += panDeltaX;
+        panOffsetY_ += panDeltaY;
+        if (smoothZoomTimerId_)
+        {
+            smoothZoomTargetPanX_ += panDeltaX;
+            smoothZoomTargetPanY_ += panDeltaY;
+        }
+        ClampPanOffsets();
+        if (compareSessionActive_)
+        {
+            CaptureFocusedCompareView();
+            if (compareViewsSynchronized_)
+            {
+                ApplyCompareViewToTiles();
+            }
+        }
+        RequestRepaint();
+    }
+
+    void ViewerWindow::ToggleFitActualSize()
+    {
+        if (zoomMode_ == ZoomMode::Fit
+            || zoomMode_ == ZoomMode::FitHeight
+            || zoomMode_ == ZoomMode::FitWidth)
+        {
+            SetActualSize();
+        }
+        else
+        {
+            FitToWindow();
+        }
+    }
+
     void ViewerWindow::ShowQuickSendConfirmation(std::wstring message)
     {
         ShowNavigationMessage(std::move(message));
@@ -6191,16 +6241,7 @@ namespace hyperbrowse::viewer
                     ToggleFullScreen();
                     return 0;
                 }
-                if (zoomMode_ == ZoomMode::Fit
-                    || zoomMode_ == ZoomMode::FitHeight
-                    || zoomMode_ == ZoomMode::FitWidth)
-                {
-                    SetActualSize();
-                }
-                else
-                {
-                    FitToWindow();
-                }
+                ToggleFitActualSize();
                 return 0;
             case '0':
                 FitToWindow();
