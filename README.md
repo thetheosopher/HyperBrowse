@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.5.2-2EA043)
+![Version](https://img.shields.io/badge/Version-2.6.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -33,12 +33,21 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Folder tree workflow upgrades with validated folder moves, inline folder creation, Quick Actions destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
 - Selected thumbnails and details rows can be dragged to File Explorer, mail clients, and other shell-aware applications using native Windows file-drop data.
 - Keyboard navigation now covers browser and viewer workflows with consistent focus, selection, and folder-history behavior.
-- XInput gamepads can navigate and open browser selections, navigate/zoom/pan in the viewer, and send selected images to the Recycle Bin. Browser: D-pad/left stick selects, A opens, B uses the Escape behavior, and X recycles. Viewer: D-pad/left stick (up/left previous, down/right next) or LB/RB navigates, LT/RT zooms, right stick pans faster the longer it is held, A toggles fit/actual size, Y toggles overlays (Tab), B follows the configured Escape behavior, and X recycles. Gamepad commands act only while HyperBrowse is active; deletion follows the existing confirmation policy.
+- XInput gamepads can navigate and open browser selections, navigate/zoom/pan in the viewer, and send selected images to the Recycle Bin. Browser: D-pad/left stick selects, A opens, B uses the Escape behavior, and X recycles. Viewer: D-pad/left stick (up/left previous, down/right next) or LB/RB navigates, LT/RT zooms, right stick pans with smoothed motion that accelerates while held, A toggles fit/actual size, Y toggles overlays (Tab), B follows the configured Escape behavior, and X recycles. Gamepad commands act only while HyperBrowse is active; deletion follows the existing confirmation policy.
 - Display changes and graphics-surface loss trigger redraw and resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
 - Files dropped onto the application can open directly in the viewer or be copied into the current folder through the existing shell-aware workflows.
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 - A Windows CI workflow defines Debug/Release, CTest, benchmark, and release-package validation; it is currently manually disabled. Local release checks are documented in [docs/testing.md](docs/testing.md).
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
+
+## What's New In 2.6.0
+
+This feature release adds native XInput gamepad control for browser and viewer workflows.
+
+- In the browser, the D-pad or left stick navigates the selection, A opens, B invokes Escape behavior, and X sends selected images to the Recycle Bin.
+- In the viewer, the D-pad, left stick, or LB/RB navigate; LT/RT zoom; and the right stick pans with smoothed motion and increasing speed while held.
+- Viewer A toggles fit/actual size, Y toggles overlays like Tab, B follows the configured Escape behavior, and X sends the displayed image to the Recycle Bin.
+- Gamepad deletion uses the existing confirmation policy and does not permanently delete files.
 
 ## What's New In 2.5.2
 
@@ -318,13 +327,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.5.2-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.6.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.5.2-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.6.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -394,11 +403,16 @@ For the current backlog in detail, start with [specs/FUTURE-ROADMAP.md](specs/FU
 
 ## Version
 
-Current release: **2.5.2**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.5.2-portable-win64.zip` and `HyperBrowse-2.5.2-installer.exe`).
+Current release: **2.6.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.6.0-portable-win64.zip` and `HyperBrowse-2.6.0-installer.exe`).
 
 Release **2.0.0** expanded HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It added richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.6.0
+
+- Added XInput gamepad controls for browser selection/open/delete and viewer navigation, zoom, pan, overlay toggling, and Escape behavior.
+- Added accelerated, smoothed viewer panning and kept gamepad deletion within the existing Recycle Bin confirmation workflow.
 
 ### 2.5.2
 

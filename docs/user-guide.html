@@ -262,7 +262,7 @@
             <p>Use Ctrl-click to add or remove individual items, Shift-click for a range, and <kbd>Ctrl</kbd> + <kbd>A</kbd> to select all visible items. Selected files can be dragged to a folder in the tree or to another shell-aware application such as File Explorer. Dropping files onto HyperBrowse can open an image in the viewer or copy files into the current folder, depending on where they are dropped. Holding <kbd>Ctrl</kbd> requests copy and holding <kbd>Shift</kbd> requests move where the destination supports both effects.</p>
             <p>Right-click a selection for copy, move, delete, rename, duplicate, properties, ratings, tags, image information, and other actions. Shift-right-click opens the Windows shell context menu.</p>
             <h3>XInput gamepad</h3>
-            <p>When HyperBrowse is active, an XInput gamepad can move the browser selection with the D-pad or left stick, open the selected image with A, invoke the normal Escape behavior with B, and send selected images to the Recycle Bin with X. Gamepad delete follows the existing confirmation policy and does not permanently delete files.</p>
+            <p>When HyperBrowse is active, an XInput gamepad can move the browser selection with the D-pad or left stick, open the selected image with A, invoke the normal Escape behavior with B, and send selected images to the Recycle Bin with X. When the focused thumbnail pane has a selection, B clears it; otherwise B follows the main-window Escape setting. Gamepad delete follows the existing confirmation policy and does not permanently delete files.</p>
         </section>
 
         <section id="viewer">
@@ -293,7 +293,7 @@
                 </div>
             </div>
             <h3>XInput gamepad</h3>
-            <p>In the viewer, use the D-pad or left stick to navigate (up / left goes to the previous image; down / right goes to the next), or use LB / RB for previous / next. LT / RT zoom out / in, and the right stick pans the image faster the longer it is held off-center. A toggles between Fit to Window and actual size. Y toggles overlays, like the Tab key. B uses the configured Escape behavior. X sends the displayed image to the Recycle Bin using the existing confirmation policy. Controls are active only while a HyperBrowse window is in the foreground.</p>
+            <p>In the viewer, use the D-pad or left stick to navigate (up / left goes to the previous image; down / right goes to the next), or use LB / RB for previous / next. LT / RT zoom out / in, and the right stick pans the image with smoothed motion that accelerates the longer it is held off-center. A toggles between Fit to Window and actual size. Y toggles overlays, like the Tab key. B uses the configured Escape behavior. X sends the displayed image to the Recycle Bin using the existing confirmation policy. Controls are active only while a HyperBrowse window is in the foreground.</p>
         </section>
 
         <section id="slideshow">
@@ -368,6 +368,11 @@
                 <li><strong>View &gt; Thumbnail Size</strong> still provides fixed presets and keyboard stepping.</li>
             </ul>
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
+        </section>
+
+        <section id="release-2-6">
+            <h2>What changed in 2.6</h2>
+            <p>Version 2.6 adds XInput gamepad support across browser and viewer workflows, including browser selection, viewer navigation, zoom and pan, overlay toggling, Escape behavior, and Recycle Bin deletion under the existing confirmation policy.</p>
         </section>
 
         <section id="release-2-5">
