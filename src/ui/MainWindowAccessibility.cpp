@@ -5,6 +5,8 @@
 #include <new>
 #include <utility>
 
+#include "util/Diagnostics.h"
+
 namespace hyperbrowse::ui
 {
     struct MainWindowAccessibility::Data
@@ -533,6 +535,7 @@ namespace hyperbrowse::ui
             }
             catch (...)
             {
+                hyperbrowse::util::IncrementCounter(L"accessibility.provider.snapshot_exception");
                 return {};
             }
         }
@@ -549,6 +552,7 @@ namespace hyperbrowse::ui
             }
             catch (...)
             {
+                hyperbrowse::util::IncrementCounter(L"accessibility.provider.focused_child_exception");
                 return 0;
             }
         }
@@ -648,6 +652,7 @@ namespace hyperbrowse::ui
             }
             catch (...)
             {
+                hyperbrowse::util::IncrementCounter(L"accessibility.provider.focused_child_exception");
                 childId = CHILDID_SELF;
             }
         }

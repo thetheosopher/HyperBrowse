@@ -13,6 +13,7 @@
 #include "ui/CommandIds.h"
 #include "ui/ShortcutCatalog.h"
 #include "util/BackgroundExecutor.h"
+#include "util/NamedMutexLock.h"
 
 #include "smoke_runtime.h"
 
@@ -322,6 +323,63 @@ namespace hyperbrowse::tests
             Expect(destructionCompleted, "Background executor destruction did not complete");
             Expect(!queuedRan, "Background executor ran queued work after destruction began");
         }
+        void RunNamedMutexLockScenario()
+        {
+            using hyperbrowse::util::NamedMutexLock;
+            using hyperbrowse::util::NamedMutexLockResult;
+
+            const std::wstring name =
+                L"Local\\TheTheosopher.HyperBrowse.Test.NamedMutexLock." + std::to_wstring(GetCurrentProcessId());
+            const auto contend = [&](DWORD timeoutMs, DWORD* elapsedMs)
+            {
+                NamedMutexLockResult result = NamedMutexLockResult::Unavailable;
+                std::thread contender([&]()
+                {
+                    const ULONGLONG start = GetTickCount64();
+                    const NamedMutexLock lock(name.c_str(), timeoutMs);
+                    result = lock.Result();
+                    *elapsedMs = static_cast<DWORD>(GetTickCount64() - start);
+                });
+                contender.join();
+                return result;
+            };
+
+            {
+                const NamedMutexLock held(name.c_str(), 1000);
+                Expect(held.Held() && held.Result() == NamedMutexLockResult::Acquired,
+                       "Named mutex lock did not acquire an uncontended mutex");
+
+                DWORD elapsedMs = 0;
+                Expect(contend(50, &elapsedMs) == NamedMutexLockResult::TimedOut,
+                       "Named mutex lock did not time out while another thread held the mutex");
+                Expect(elapsedMs < 2000, "Named mutex lock timeout was not bounded");
+            }
+
+            DWORD elapsedMs = 0;
+            Expect(contend(1000, &elapsedMs) == NamedMutexLockResult::Acquired,
+                   "Named mutex lock did not release on destruction");
+
+            const std::wstring abandonedName = name + L".Abandoned";
+            HANDLE abandonedMutex = nullptr;
+            std::thread abandoner([&]()
+            {
+                abandonedMutex = CreateMutexW(nullptr, FALSE, abandonedName.c_str());
+                WaitForSingleObject(abandonedMutex, 1000);
+            });
+            abandoner.join();
+            {
+                const NamedMutexLock recovered(abandonedName.c_str(), 1000);
+                Expect(recovered.Held() && recovered.Result() == NamedMutexLockResult::AbandonedAcquired,
+                       "Named mutex lock did not recover an abandoned mutex");
+            }
+            if (abandonedMutex)
+            {
+                CloseHandle(abandonedMutex);
+            }
+            const NamedMutexLock invalid(L"Local\\HyperBrowse\\Invalid\\Name", 50);
+            Expect(!invalid.Held() && invalid.Result() == NamedMutexLockResult::Unavailable,
+                   "Named mutex lock did not report an unavailable mutex");
+        }
     }
 
     void RunRuntimeScenarios()
@@ -329,5 +387,6 @@ namespace hyperbrowse::tests
         RunShortcutCatalogScenario();
         RunBackgroundExecutorExceptionScenario();
         RunBackgroundExecutorCapacityScenario();
+        RunNamedMutexLockScenario();
     }
 }

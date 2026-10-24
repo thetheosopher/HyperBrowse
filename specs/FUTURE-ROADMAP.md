@@ -454,7 +454,8 @@ XL fixture decode and out-of-box compatibility remain unverified.
 - Formal decoder polymorphic interface (`CanDecode` / `ReadHeader` / …):
   current free-function chain (nvJPEG → WIC → LibRaw) is adequate.
 - `MainWindow.cpp` decomposition into per-controller files: tracked
-  separately as ongoing hygiene; not a product feature.
+  separately as ongoing hygiene; not a product feature. See the
+  [code-quality hygiene plan](FUTURE-ROADMAP-PROMPT-09-CODE-QUALITY-HYGIENE.md).
 - doctest migration: catch2 stays for now.
 
 These remain deferred unless product direction changes.

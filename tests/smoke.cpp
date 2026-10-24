@@ -4765,7 +4765,12 @@ namespace
                 hyperbrowse::services::SavedSearchStore store;
                 std::wstring error;
                 Expect(store.AddOnWorker({L"RAW UI", L"type:raw"}, &error), "Failed to seed the isolated UI saved search");
-                TempFolder images(L"HyperBrowseSavedSearchUi");
+                // The folder tree lists every sibling on the path to the browsed folder. %TEMP% can hold thousands
+                // of entries, which starves the modal dialog's WM_TIMER responder, so use a quiet parent instead.
+                std::wstring modulePath(MAX_PATH, L'\0');
+                modulePath.resize(GetModuleFileNameW(nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size())));
+                TempFolder imagesParent(fs::path(modulePath).parent_path(), L"HyperBrowseSavedSearchUiParent");
+                TempFolder images(imagesParent.Root(), L"HyperBrowseSavedSearchUi");
                 WriteTestImage(images.Root() / L"image.jpg", TestImageFormat::Jpeg, 32, 24, 1);
                 WriteTestImage(images.Root() / L"image.png", TestImageFormat::Png, 32, 24, 2);
                 {
@@ -4821,7 +4826,13 @@ namespace
                                && contextResponse.contextLineMatched && contextResponse.textEntryCentered
                                && contextResponse.textEntryFieldClickFocused
                                && !contextResponse.timedOut,
-                           "Single-line text dialog did not display its parent-folder context or correctly center and focus its entry field");
+                           std::string("Single-line text dialog did not display its parent-folder context or correctly center and focus its entry field")
+                               + " (accepted=" + std::to_string(contextDialogAccepted)
+                               + " answered=" + std::to_string(contextResponse.answered)
+                               + " contextMatched=" + std::to_string(contextResponse.contextLineMatched)
+                               + " centered=" + std::to_string(contextResponse.textEntryCentered)
+                               + " clickFocused=" + std::to_string(contextResponse.textEntryFieldClickFocused)
+                               + " timedOut=" + std::to_string(contextResponse.timedOut) + ")");
                     ComPtr<IAccessible> accessible;
                     Expect(SUCCEEDED(ObjectFromLresult(SendMessageW(window.Hwnd(), WM_GETOBJECT, 0, OBJID_CLIENT),
                         IID_IAccessible, 0, reinterpret_cast<void**>(accessible.GetAddressOf()))),
@@ -8521,7 +8532,9 @@ namespace
          Expect(viewerHandle && GetWindowRect(viewerHandle, &escapeRect) != FALSE,
              "MainWindow Escape routing left no readable viewer window");
          Expect(escapeRect.top == monitorInfo.rcWork.top && escapeRect.bottom == monitorInfo.rcWork.bottom,
-             "MainWindow Escape routing did not apply the viewer's Fit Height behavior");
+             "MainWindow Escape routing did not apply the viewer's Fit Height behavior"
+             " viewer=" + std::to_string(escapeRect.left) + "," + std::to_string(escapeRect.top) + "," + std::to_string(escapeRect.right) + "," + std::to_string(escapeRect.bottom)
+             + " work=" + std::to_string(monitorInfo.rcWork.left) + "," + std::to_string(monitorInfo.rcWork.top) + "," + std::to_string(monitorInfo.rcWork.right) + "," + std::to_string(monitorInfo.rcWork.bottom));
 
         if (viewerHandle && IsWindow(viewerHandle) != FALSE)
         {

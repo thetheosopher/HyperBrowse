@@ -219,6 +219,7 @@ namespace hyperbrowse::decode::wic_support
             }
             catch (...)
             {
+                // Decode telemetry is best-effort and must never affect the decode result.
             }
         }
 
@@ -231,6 +232,7 @@ namespace hyperbrowse::decode::wic_support
             }
             catch (...)
             {
+                // Decode telemetry is best-effort and must never affect the decode result.
             }
         }
 

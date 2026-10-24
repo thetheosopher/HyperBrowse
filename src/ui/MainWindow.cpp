@@ -101,6 +101,7 @@
 #include "util/BackgroundExecutor.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
+#include "util/NamedMutexLock.h"
 #include "util/ResourcePng.h"
 #include "util/ResourceSizing.h"
 #include "util/SettingsRegistry.h"
@@ -173,6 +174,7 @@ namespace
     constexpr wchar_t kRegistryValueRecentFolders[] = L"RecentFolders";
     constexpr wchar_t kRegistryValueRecentDestinationFolders[] = L"RecentDestinationFolders";
     constexpr wchar_t kQuickSendStateMutexName[] = L"Local\\TheTheosopher.HyperBrowse.QuickSendState";
+    constexpr DWORD kQuickSendStateLockTimeoutMs = 250;
 
     constexpr DWORD kDwmUseImmersiveDarkModeAttribute = 20;
     constexpr DWORD kDwmUseImmersiveDarkModeLegacyAttribute = 19;
@@ -14402,28 +14404,18 @@ namespace hyperbrowse::ui
 
     void MainWindow::MutateQuickSendState(const std::function<void()>& mutation)
     {
-        HANDLE mutex = CreateMutexW(nullptr, FALSE, kQuickSendStateMutexName);
-        if (!mutex)
-        {
-            mutation();
-            SaveQuickSendStateToRegistry();
-            return;
-        }
-
-        const DWORD waitResult = WaitForSingleObject(mutex, INFINITE);
-        if (waitResult == WAIT_OBJECT_0 || waitResult == WAIT_ABANDONED)
+        const hyperbrowse::util::NamedMutexLock lock(kQuickSendStateMutexName, kQuickSendStateLockTimeoutMs);
+        if (lock.Held())
         {
             LoadQuickSendStateFromRegistry();
-            mutation();
-            SaveQuickSendStateToRegistry();
-            ReleaseMutex(mutex);
         }
-        else
+        else if (lock.Result() == hyperbrowse::util::NamedMutexLockResult::TimedOut)
         {
-            mutation();
-            SaveQuickSendStateToRegistry();
+            hyperbrowse::util::IncrementCounter(L"quick_send.state_lock.timeout");
         }
-        CloseHandle(mutex);
+
+        mutation();
+        SaveQuickSendStateToRegistry();
     }
 
     void MainWindow::LoadQuickSendStateFromRegistry()
