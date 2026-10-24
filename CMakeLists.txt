@@ -132,6 +132,11 @@ endif()
 add_library(HyperBrowseCore STATIC
     src/browser/BrowserModel.cpp
     src/browser/BrowserPane.cpp
+    src/browser/BrowserPaneD2D.cpp
+    src/browser/BrowserPaneDetailsList.cpp
+    src/browser/BrowserPaneGdi.cpp
+    src/browser/BrowserPaneLayout.cpp
+    src/browser/BrowserPaneMessages.cpp
     src/cache/DiskThumbnailCache.cpp
     src/cache/ThumbnailCache.cpp
     src/decode/ImageDecoder.cpp
@@ -239,6 +244,13 @@ add_library(HyperBrowseCore STATIC
     src/util/Diagnostics.cpp
     src/util/Log.cpp
     src/viewer/ViewerWindow.cpp
+    src/viewer/ViewerWindowCompare.cpp
+    src/viewer/ViewerWindowContextMenu.cpp
+    src/viewer/ViewerWindowMessages.cpp
+    src/viewer/ViewerWindowNavigation.cpp
+    src/viewer/ViewerWindowRendering.cpp
+    src/viewer/ViewerWindowSettings.cpp
+    src/viewer/ViewerWindowView.cpp
 )
 
 target_include_directories(HyperBrowseCore

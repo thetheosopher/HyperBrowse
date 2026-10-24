@@ -464,8 +464,8 @@ Persistent thumbnail entries include file identity information such as normalize
 
 - Folder loading, tree actions, menu commands, focus, and application state: `src/ui/MainWindow.*`.
 - Browser item storage and path-based mutation: `src/browser/BrowserModel.*`.
-- Thumbnail painting, selection, visible-range scheduling, and details rows: `src/browser/BrowserPane.*`.
-- Viewer navigation, image lifetime, transitions, and viewer input: `src/viewer/ViewerWindow.*`.
+- Thumbnail painting, selection, visible-range scheduling, and details rows: `src/browser/BrowserPane*.cpp` (`BrowserPane.cpp` core and scheduling, `BrowserPaneLayout`, `BrowserPaneDetailsList`, `BrowserPaneMessages`, `BrowserPaneD2D`, `BrowserPaneGdi`; `BrowserPaneInternal.h` is the private shared header).
+- Viewer navigation, image lifetime, transitions, and viewer input: `src/viewer/ViewerWindow*.cpp` (`ViewerWindow.cpp` core, `ViewerWindowNavigation`, `ViewerWindowCompare`, `ViewerWindowView`, `ViewerWindowRendering`, `ViewerWindowSettings`, `ViewerWindowContextMenu`, `ViewerWindowMessages`; `ViewerWindowInternal.h` is the private shared header).
 - Decode selection and format behavior: `src/decode/`.
 - Scheduling, worker counts, cancellation, and cache invalidation: `src/services/ThumbnailScheduler.*` and related services.
 - Persistent thumbnail files/index: `src/cache/DiskThumbnailCache.*`.
