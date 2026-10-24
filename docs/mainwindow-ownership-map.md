@@ -6,9 +6,11 @@ boundaries. Source code and `docs/architecture.md` remain authoritative.
 ## Source Layout
 
 `MainWindow` is one class implemented across several translation units in
-`src/ui/`. `MainWindow.cpp` keeps construction, `Create`, `CreateChildWindows`,
-the message dispatch (`HandleMessage`, `WindowProc`, the `Handle*Message`
-helpers) and startup/shutdown. Each other file holds one cohesive group of
+`src/ui/`. `MainWindow.cpp` keeps construction (the constructor delegates to
+`Configure*` helpers), `Create`, `CreateChildWindows` (delegating to named
+creation and configuration helpers), the message dispatch (`HandleMessage`,
+`WindowProc`, the `Handle*Message` helpers) and startup/shutdown. Each other
+file holds one cohesive group of
 `MainWindow::` members plus the file-local helpers only that group uses:
 
 - `MainWindowFolderTree.cpp`: folder-tree notifications, tooltips, drag.

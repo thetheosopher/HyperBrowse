@@ -432,6 +432,14 @@ namespace hyperbrowse::ui
         , viewerWindow_(std::make_unique<viewer::ViewerWindow>(instance))
         , slideshowTransitionStyle_(viewer::TransitionStyle::Crossfade)
     {
+        ConfigureAsyncMessageRouter();
+        ConfigureTimerRouter();
+        ConfigureFileCommandController();
+        ConfigureViewCommandController();
+    }
+
+    void MainWindow::ConfigureAsyncMessageRouter()
+    {
         WindowAsyncMessageRouter::Handlers messageHandlers;
         messageHandlers.onFolderEnumeration = [this](LPARAM lParam)
         {
@@ -511,7 +519,10 @@ namespace hyperbrowse::ui
                 kPersistentThumbnailCacheMaintenanceMessage,
                 kDeferredMenuStateMessage},
             std::move(messageHandlers));
+    }
 
+    void MainWindow::ConfigureTimerRouter()
+    {
         WindowTimerRouter::Handlers timerHandlers;
         timerHandlers.onFileOperationShutdown = [this]() -> std::optional<LRESULT>
         {
@@ -632,7 +643,10 @@ namespace hyperbrowse::ui
                 kCommandBarMenuTrackingTimerId,
                 kDetailsPanelPerformanceTimerId},
             std::move(timerHandlers));
+    }
 
+    void MainWindow::ConfigureFileCommandController()
+    {
         FileCommandController::Handlers fileCommandHandlers;
         fileCommandHandlers.onOpenRecentFolder = [this](std::size_t index)
         {
@@ -822,7 +836,10 @@ namespace hyperbrowse::ui
             }
         };
         fileCommandController_.Configure(std::move(fileCommandHandlers));
+    }
 
+    void MainWindow::ConfigureViewCommandController()
+    {
         ViewCommandController::Handlers viewCommandHandlers;
         viewCommandHandlers.onColorManagement = [this]
         {
@@ -1837,6 +1854,79 @@ namespace hyperbrowse::ui
             ? appTextUiFont_
             : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
 
+        CreateShellControls(defaultGuiFont);
+
+        CreateDetailsPanelControls();
+
+            if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsPanelText_ || !quickAccessScrollBar_)
+        {
+            util::LogLastError(L"CreateChildWindows");
+            return false;
+        }
+
+        SendMessageW(statusBar_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
+
+        SendMessageW(detailsPanelText_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
+        RefreshDetailsPanelBodyPresentation();
+
+        detailsPanelThumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(
+            thumbnailCacheCapacityOverrideBytes_,
+            0,
+            resourceProfile_);
+        if (detailsPanelThumbnailScheduler_)
+        {
+            detailsPanelThumbnailScheduler_->BindTargetWindow(hwnd_);
+        }
+
+        if (!browserPaneController_ || !browserPaneController_->Create(hwnd_))
+        {
+            util::LogError(L"Failed to create the browser pane control");
+            return false;
+        }
+
+        browserPaneController_->SetUserMetadataStore(userMetadataStore_.get());
+
+        browserPane_ = browserPaneController_->Hwnd();
+
+        SendMessageW(treePane_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
+
+        SHFILEINFOW shellInfo{};
+        treeImageList_ = reinterpret_cast<HIMAGELIST>(SHGetFileInfoW(
+            L"C:\\",
+            FILE_ATTRIBUTE_DIRECTORY,
+            &shellInfo,
+            sizeof(shellInfo),
+            SHGFI_SYSICONINDEX | SHGFI_SMALLICON));
+        if (treeImageList_)
+        {
+            ImageList_SetBkColor(treeImageList_, CLR_NONE);
+            TreeView_SetImageList(treePane_, treeImageList_, TVSIL_NORMAL);
+        }
+        ApplyFolderTreeMetrics();
+
+        browserPaneController_->SetModel(browserModel_.get());
+        browserPaneController_->SetViewMode(browserMode_ == BrowserMode::Thumbnails
+            ? browser::BrowserViewMode::Thumbnails
+            : browser::BrowserViewMode::Details);
+        browserPaneController_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
+        ApplyRawJpegPairingSettings();
+        ApplyThumbnailDisplaySettings();
+        decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);
+        decode::SetLibRawOutOfProcessEnabled(libRawOutOfProcessEnabled_);
+
+        ConfigureFolderLoadCoordinator();
+        ConfigureFolderWatchChangeCoordinator();
+        ConfigureFolderTreeController();
+        QueueStartupFolderLoad();
+        UpdateStatusText();
+        UpdateToolbarItemStates();
+        UpdateDetailsPanel();
+        LayoutChildren();
+        return true;
+    }
+
+    void MainWindow::CreateShellControls(HFONT defaultGuiFont)
+    {
         toolbarIconLibrary_ = std::make_unique<ToolbarIconLibrary>();
         if (toolbarIconLibrary_ && !toolbarIconLibrary_->Initialize())
         {
@@ -1955,7 +2045,10 @@ namespace hyperbrowse::ui
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(kStatusStripControlId)),
             instance_,
             nullptr);
+    }
 
+    void MainWindow::CreateDetailsPanelControls()
+    {
         if (!detailsPanelRichEditModule_)
         {
             detailsPanelRichEditModule_ = LoadLibraryW(L"Msftedit.dll");
@@ -2008,63 +2101,10 @@ namespace hyperbrowse::ui
                 nullptr,
                 instance_,
                 nullptr);
+    }
 
-            if (!filterEdit_ || !treePane_ || !statusBar_ || !detailsPanelText_ || !quickAccessScrollBar_)
-        {
-            util::LogLastError(L"CreateChildWindows");
-            return false;
-        }
-
-        SendMessageW(statusBar_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
-
-        SendMessageW(detailsPanelText_, WM_SETFONT, reinterpret_cast<WPARAM>(detailsPanelBodyFont_), TRUE);
-        RefreshDetailsPanelBodyPresentation();
-
-        detailsPanelThumbnailScheduler_ = std::make_unique<services::ThumbnailScheduler>(
-            thumbnailCacheCapacityOverrideBytes_,
-            0,
-            resourceProfile_);
-        if (detailsPanelThumbnailScheduler_)
-        {
-            detailsPanelThumbnailScheduler_->BindTargetWindow(hwnd_);
-        }
-
-        if (!browserPaneController_ || !browserPaneController_->Create(hwnd_))
-        {
-            util::LogError(L"Failed to create the browser pane control");
-            return false;
-        }
-
-        browserPaneController_->SetUserMetadataStore(userMetadataStore_.get());
-
-        browserPane_ = browserPaneController_->Hwnd();
-
-        SendMessageW(treePane_, WM_SETFONT, reinterpret_cast<WPARAM>(defaultGuiFont), TRUE);
-
-        SHFILEINFOW shellInfo{};
-        treeImageList_ = reinterpret_cast<HIMAGELIST>(SHGetFileInfoW(
-            L"C:\\",
-            FILE_ATTRIBUTE_DIRECTORY,
-            &shellInfo,
-            sizeof(shellInfo),
-            SHGFI_SYSICONINDEX | SHGFI_SMALLICON));
-        if (treeImageList_)
-        {
-            ImageList_SetBkColor(treeImageList_, CLR_NONE);
-            TreeView_SetImageList(treePane_, treeImageList_, TVSIL_NORMAL);
-        }
-        ApplyFolderTreeMetrics();
-
-        browserPaneController_->SetModel(browserModel_.get());
-        browserPaneController_->SetViewMode(browserMode_ == BrowserMode::Thumbnails
-            ? browser::BrowserViewMode::Thumbnails
-            : browser::BrowserViewMode::Details);
-        browserPaneController_->SetDarkTheme(themeMode_ == ThemeMode::Dark);
-        ApplyRawJpegPairingSettings();
-        ApplyThumbnailDisplaySettings();
-        decode::SetNvJpegAccelerationEnabled(nvJpegEnabled_);
-        decode::SetLibRawOutOfProcessEnabled(libRawOutOfProcessEnabled_);
-
+    void MainWindow::ConfigureFolderLoadCoordinator()
+    {
         if (folderLoadCoordinator_)
         {
             FolderLoadCoordinator::Handlers handlers;
@@ -2205,7 +2245,10 @@ namespace hyperbrowse::ui
             };
             folderLoadCoordinator_->Configure(hwnd_, std::move(handlers));
         }
+    }
 
+    void MainWindow::ConfigureFolderWatchChangeCoordinator()
+    {
         if (folderWatchChangeCoordinator_)
         {
             FolderWatchChangeCoordinator::Handlers handlers;
@@ -2282,7 +2325,10 @@ namespace hyperbrowse::ui
             };
             folderWatchChangeCoordinator_->Configure(std::move(handlers));
         }
+    }
 
+    void MainWindow::ConfigureFolderTreeController()
+    {
         if (folderTreeController_)
         {
             FolderTreeController::Handlers handlers;
@@ -2324,7 +2370,10 @@ namespace hyperbrowse::ui
             StartFolderTreeMoveToDestination(std::move(sourcePath), std::move(destinationPath));
         };
         folderTreeDragController_.Configure(hwnd_, treePane_, std::move(treeDragHandlers));
+    }
 
+    void MainWindow::QueueStartupFolderLoad()
+    {
         bool startupFolderLoadQueued = false;
         if (!startupFolderPath_.empty())
         {
@@ -2354,11 +2403,6 @@ namespace hyperbrowse::ui
         {
             RefreshBrowserPane();
         }
-        UpdateStatusText();
-        UpdateToolbarItemStates();
-        UpdateDetailsPanel();
-        LayoutChildren();
-        return true;
     }
 
     void MainWindow::ApplyThumbnailDisplaySettings()
@@ -2857,51 +2901,7 @@ namespace hyperbrowse::ui
             }
             break;
         case WM_CLOSE:
-            if (fileOperationActive_ || batchConvertActive_ || imageCommandActive_)
-            {
-                if (!closePending_)
-                {
-                    closePending_ = true;
-                    closePendingSinceTick_ = GetTickCount64();
-                    closeWaitNoticeShown_ = false;
-                    SetTimer(hwnd_,
-                             kFileOperationShutdownTimerId,
-                             kFileOperationShutdownIntervalMs,
-                             nullptr);
-                }
-                if (fileOperationActive_ && fileOperationService_)
-                {
-                    fileOperationService_->Cancel();
-                }
-                if (batchConvertActive_ && batchConvertService_)
-                {
-                    batchConvertService_->Cancel();
-                    batchConvertCancelling_ = true;
-                }
-                if (imageCommandActive_ && imageCommandService_)
-                {
-                    imageCommandService_->Cancel();
-                    imageCommandCancelling_ = true;
-                    imageCommandActivityLabel_ = L"Cancelling image command";
-                }
-                activeFileOperationLabel_ = fileOperationActive_
-                    ? (closeWaitNoticeShown_ ? L"Waiting for Windows to finish file operation"
-                                             : L"Cancelling file operation")
-                    : (batchConvertActive_ ? L"Cancelling batch conversion" : std::wstring{});
-                UpdateStatusText();
-                UpdateMenuState();
-                return 0;
-            }
-            if (!exitRequested_ && ShouldKeepInNotificationArea())
-            {
-                closePending_ = false;
-                closePendingSinceTick_ = 0;
-                closeWaitNoticeShown_ = false;
-                KillTimer(hwnd_, kFileOperationShutdownTimerId);
-                HideToTray();
-                return 0;
-            }
-            return DefWindowProcW(hwnd_, message, wParam, lParam);
+            return HandleCloseMessage(message, wParam, lParam);
         case WM_GETOBJECT:
             if (accessibility_)
             {
@@ -2926,27 +2926,176 @@ namespace hyperbrowse::ui
             LayoutChildren();
             return 0;
         case WM_DPICHANGED:
+            return HandleDpiChangedMessage(lParam);
+        case WM_DISPLAYCHANGE:
+        case WM_SETTINGCHANGE:
+        case WM_SYSCOLORCHANGE:
+        case WM_THEMECHANGED:
+        case WM_WTSSESSION_CHANGE:
+        case WM_POWERBROADCAST:
+        case WM_SYSCOMMAND:
+            if (const std::optional<LRESULT> result = HandleSystemStateMessage(message, wParam, lParam))
+            {
+                return *result;
+            }
+            break;
+        case WM_WINDOWPOSCHANGED:
+            if (browserPaneController_) browserPaneController_->RefreshColorProfile();
+            break;
+        case WM_ACTIVATE:
+        case WM_SETFOCUS:
+        case WM_KILLFOCUS:
+        case WM_ENTERMENULOOP:
+        case WM_EXITMENULOOP:
+        case WM_INITMENUPOPUP:
+            HandleActivationAndMenuLoopMessage(message, wParam, lParam);
+            break;
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN:
+        case WM_SYSCHAR:
+            if (const std::optional<LRESULT> result = HandleKeyMessage(message, wParam, lParam))
+            {
+                return *result;
+            }
+            break;
+        case WM_MEASUREITEM:
+        case WM_DRAWITEM:
+            if (const std::optional<LRESULT> result = HandleOwnerDrawMessage(message, lParam))
+            {
+                return *result;
+            }
+            break;
+        case WM_MENUCHAR:
+            return HandleMenuCharMessage(wParam, lParam);
+        case WM_TIMER:
+            if (const std::optional<LRESULT> result = HandleTimerMessage(wParam))
+            {
+                return *result;
+            }
+            break;
+        case WM_NOTIFY:
+            return HandleNotifyMessage(lParam);
+        case WM_CTLCOLOREDIT:
+            if (const std::optional<LRESULT> result = HandleControlColorMessage(message, wParam, lParam))
+            {
+                return *result;
+            }
+            break;
+        case WM_CTLCOLORSTATIC:
+            if (const std::optional<LRESULT> result = HandleControlColorMessage(message, wParam, lParam))
+            {
+                return *result;
+            }
+            break;
+        case WM_COMMAND:
+            if (const std::optional<LRESULT> result = HandleCommandMessage(wParam, lParam))
+            {
+                return *result;
+            }
+            break;
+        case WM_ERASEBKGND:
+            return HandleEraseBackgroundMessage(wParam);
+        case WM_PAINT:
+            return HandlePaintMessage();
+        case WM_QUERYENDSESSION:
+            // Persist state before the session ends. WM_DESTROY is not guaranteed during
+            // a forced shutdown / Windows Update / sign-out.
+            SaveWindowState();
+            return TRUE;
+        case WM_ENDSESSION:
+            // Save again on a confirmed end-session in case any state changed between the
+            // query and the actual termination. Cheap and idempotent.
+            if (wParam)
+            {
+                SaveWindowState();
+            }
+            return 0;
+        case WM_DESTROY:
+            return HandleDestroyMessage();
+        default:
+            if (const std::optional<LRESULT> result = asyncMessageRouter_.Handle(message, wParam, lParam))
+            {
+                return *result;
+            }
+            break;
+        }
+
+        return DefWindowProcW(hwnd_, message, wParam, lParam);
+    }
+
+    LRESULT MainWindow::HandleCloseMessage(UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if (fileOperationActive_ || batchConvertActive_ || imageCommandActive_)
         {
-            const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
-            SetWindowPos(hwnd_, nullptr,
-                         suggested->left, suggested->top,
-                         suggested->right - suggested->left,
-                         suggested->bottom - suggested->top,
-                         SWP_NOZORDER | SWP_NOACTIVATE);
-            RebuildAppTextFonts();
-            LayoutChildren();
-            RefreshPersistentMenuOwnerDraw();
-            ResetD2DResources();
-            ApplyTheme();
+            if (!closePending_)
+            {
+                closePending_ = true;
+                closePendingSinceTick_ = GetTickCount64();
+                closeWaitNoticeShown_ = false;
+                SetTimer(hwnd_,
+                         kFileOperationShutdownTimerId,
+                         kFileOperationShutdownIntervalMs,
+                         nullptr);
+            }
+            if (fileOperationActive_ && fileOperationService_)
+            {
+                fileOperationService_->Cancel();
+            }
+            if (batchConvertActive_ && batchConvertService_)
+            {
+                batchConvertService_->Cancel();
+                batchConvertCancelling_ = true;
+            }
+            if (imageCommandActive_ && imageCommandService_)
+            {
+                imageCommandService_->Cancel();
+                imageCommandCancelling_ = true;
+                imageCommandActivityLabel_ = L"Cancelling image command";
+            }
+            activeFileOperationLabel_ = fileOperationActive_
+                ? (closeWaitNoticeShown_ ? L"Waiting for Windows to finish file operation"
+                                         : L"Cancelling file operation")
+                : (batchConvertActive_ ? L"Cancelling batch conversion" : std::wstring{});
+            UpdateStatusText();
+            UpdateMenuState();
             return 0;
         }
+        if (!exitRequested_ && ShouldKeepInNotificationArea())
+        {
+            closePending_ = false;
+            closePendingSinceTick_ = 0;
+            closeWaitNoticeShown_ = false;
+            KillTimer(hwnd_, kFileOperationShutdownTimerId);
+            HideToTray();
+            return 0;
+        }
+        return DefWindowProcW(hwnd_, message, wParam, lParam);
+    }
+
+    LRESULT MainWindow::HandleDpiChangedMessage(LPARAM lParam)
+    {
+        const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+        SetWindowPos(hwnd_, nullptr,
+                     suggested->left, suggested->top,
+                     suggested->right - suggested->left,
+                     suggested->bottom - suggested->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        RebuildAppTextFonts();
+        LayoutChildren();
+        RefreshPersistentMenuOwnerDraw();
+        ResetD2DResources();
+        ApplyTheme();
+        return 0;
+    }
+
+    std::optional<LRESULT> MainWindow::HandleSystemStateMessage(UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        switch (message)
+        {
         case WM_DISPLAYCHANGE:
             HandleDisplaySurfaceChange();
             RefreshColorProfiles(true);
             return 0;
-        case WM_WINDOWPOSCHANGED:
-            if (browserPaneController_) browserPaneController_->RefreshColorProfile();
-            break;
         case WM_SETTINGCHANGE:
             RefreshColorProfiles(true);
             ApplyTheme();
@@ -2992,6 +3141,23 @@ namespace hyperbrowse::ui
                 return TRUE;
             }
             break;
+        case WM_SYSCOMMAND:
+            if ((wParam & 0xFFF0) == SC_MONITORPOWER && lParam == static_cast<LPARAM>(-1))
+            {
+                HandleDisplaySurfaceChange();
+            }
+            break;
+        default:
+            break;
+        }
+
+        return std::nullopt;
+    }
+
+    void MainWindow::HandleActivationAndMenuLoopMessage(UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        switch (message)
+        {
         case WM_ACTIVATE:
             if (LOWORD(wParam) == WA_INACTIVE && commandBarKeyboardActive_)
             {
@@ -3009,12 +3175,6 @@ namespace hyperbrowse::ui
             if (accessibility_)
             {
                 accessibility_->NotifyFocusChanged();
-            }
-            break;
-        case WM_SYSCOMMAND:
-            if ((wParam & 0xFFF0) == SC_MONITORPOWER && lParam == static_cast<LPARAM>(-1))
-            {
-                HandleDisplaySurfaceChange();
             }
             break;
         case WM_ENTERMENULOOP:
@@ -3038,32 +3198,42 @@ namespace hyperbrowse::ui
                 }
             }
             break;
-        case WM_KEYDOWN:
-        case WM_SYSKEYDOWN:
-        case WM_SYSCHAR:
-            if (folderTreeDragController_.IsActive()
-                && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
-                && wParam == VK_ESCAPE)
-            {
-                FinishFolderTreeDrag(false);
-                return 0;
-            }
-            if (dragMode_ == DragMode::QuickAccessInternal
-                && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
-                && wParam == VK_ESCAPE)
-            {
-                FinishInternalSelectionDrag(false);
-                return 0;
-            }
-            if (HandleKeyboardFocusInput(message, wParam, lParam))
-            {
-                return 0;
-            }
-            if (HandleCommandBarKeyboardInput(message, wParam, lParam))
-            {
-                return 0;
-            }
+        default:
             break;
+        }
+    }
+
+    std::optional<LRESULT> MainWindow::HandleKeyMessage(UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if (folderTreeDragController_.IsActive()
+            && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+            && wParam == VK_ESCAPE)
+        {
+            FinishFolderTreeDrag(false);
+            return 0;
+        }
+        if (dragMode_ == DragMode::QuickAccessInternal
+            && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+            && wParam == VK_ESCAPE)
+        {
+            FinishInternalSelectionDrag(false);
+            return 0;
+        }
+        if (HandleKeyboardFocusInput(message, wParam, lParam))
+        {
+            return 0;
+        }
+        if (HandleCommandBarKeyboardInput(message, wParam, lParam))
+        {
+            return 0;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<LRESULT> MainWindow::HandleOwnerDrawMessage(UINT message, LPARAM lParam)
+    {
+        switch (message)
+        {
         case WM_MEASUREITEM:
         {
             auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
@@ -3097,154 +3267,120 @@ namespace hyperbrowse::ui
             }
             break;
         }
-        case WM_MENUCHAR:
-            return HandleMenuCharMessage(wParam, lParam);
-        case WM_TIMER:
-            if (gamepadTimerId_ != 0 && static_cast<UINT_PTR>(wParam) == gamepadTimerId_)
-            {
-                ProcessGamepadInput();
-                return 0;
-            }
-            if (performanceHudTimerId_ != 0
-                && static_cast<UINT_PTR>(wParam) == performanceHudTimerId_)
-            {
-                UpdatePerformanceHud();
-                return 0;
-            }
-            if (const std::optional<LRESULT> result = timerRouter_.Handle(static_cast<UINT_PTR>(wParam)))
-            {
-                return *result;
-            }
-            break;
-        case WM_NOTIFY:
-            return HandleNotifyMessage(lParam);
-        case WM_CTLCOLOREDIT:
-            if (const std::optional<LRESULT> result = HandleControlColorMessage(message, wParam, lParam))
-            {
-                return *result;
-            }
-            break;
-        case WM_CTLCOLORSTATIC:
-            if (const std::optional<LRESULT> result = HandleControlColorMessage(message, wParam, lParam))
-            {
-                return *result;
-            }
-            break;
-        case WM_COMMAND:
-            if (const std::optional<LRESULT> result = HandleCommandMessage(wParam, lParam))
-            {
-                return *result;
-            }
-            break;
-        case WM_ERASEBKGND:
-        {
-            RECT client{};
-            GetClientRect(hwnd_, &client);
-            HDC eraseDC = reinterpret_cast<HDC>(wParam);
-            // Exclude the action strip — PaintToolbar handles it
-            RECT below{0, actionStripHeight_, client.right, client.bottom};
-            FillRect(
-                eraseDC,
-                &below,
-                backgroundBrush_ ? backgroundBrush_ : reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
-            return 1;
-        }
-        case WM_PAINT:
-            return HandlePaintMessage();
-        case WM_QUERYENDSESSION:
-            // Persist state before the session ends. WM_DESTROY is not guaranteed during
-            // a forced shutdown / Windows Update / sign-out.
-            SaveWindowState();
-            return TRUE;
-        case WM_ENDSESSION:
-            // Save again on a confirmed end-session in case any state changed between the
-            // query and the actual termination. Cheap and idempotent.
-            if (wParam)
-            {
-                SaveWindowState();
-            }
-            return 0;
-        case WM_DESTROY:
-            if (gamepadTimerId_ != 0)
-            {
-                KillTimer(hwnd_, gamepadTimerId_);
-                gamepadTimerId_ = 0;
-            }
-            if (folderTreeDragController_.IsActive())
-            {
-                FinishFolderTreeDrag(false);
-            }
-            savedSearchController_.reset();
-            StopDisplaySurfaceRecoveryRetries();
-            if (sessionNotificationRegistered_)
-            {
-                WTSUnRegisterSessionNotification(hwnd_);
-                sessionNotificationRegistered_ = false;
-            }
-            if (consoleDisplayNotify_)
-            {
-                UnregisterPowerSettingNotification(consoleDisplayNotify_);
-                consoleDisplayNotify_ = nullptr;
-            }
-            if (monitorPowerNotify_)
-            {
-                UnregisterPowerSettingNotification(monitorPowerNotify_);
-                monitorPowerNotify_ = nullptr;
-            }
-            KillTimer(hwnd_, kFileOperationShutdownTimerId);
-            if (quickSendConfirmationTimerId_ != 0)
-            {
-                KillTimer(hwnd_, quickSendConfirmationTimerId_);
-                quickSendConfirmationTimerId_ = 0;
-            }
-            if (quickSendConfirmationToastWindow_)
-            {
-                DestroyWindow(quickSendConfirmationToastWindow_);
-                quickSendConfirmationToastWindow_ = nullptr;
-            }
-            if (memoryPressureTimerId_ != 0)
-            {
-                KillTimer(hwnd_, kMemoryPressureTimerId);
-                memoryPressureTimerId_ = 0;
-            }
-            memoryPressureExecutor_.reset();
-            if (folderLoadCoordinator_)
-            {
-                folderLoadCoordinator_->Cancel();
-            }
-            if (folderTreeController_)
-            {
-                folderTreeController_->Cancel();
-            }
-            if (batchConvertService_)
-            {
-                batchConvertService_->Shutdown();
-            }
-            if (imageCommandService_)
-            {
-                imageCommandService_->Shutdown();
-            }
-            if (fileOperationService_)
-            {
-                fileOperationService_->Shutdown();
-            }
-            if (userMetadataStore_)
-            {
-                userMetadataStore_->SetNotificationWindow(nullptr);
-                userMetadataStore_->Shutdown();
-            }
-            SaveWindowState();
-            PostQuitMessage(0);
-            return 0;
         default:
-            if (const std::optional<LRESULT> result = asyncMessageRouter_.Handle(message, wParam, lParam))
-            {
-                return *result;
-            }
             break;
         }
 
-        return DefWindowProcW(hwnd_, message, wParam, lParam);
+        return std::nullopt;
+    }
+
+    std::optional<LRESULT> MainWindow::HandleTimerMessage(WPARAM wParam)
+    {
+        if (gamepadTimerId_ != 0 && static_cast<UINT_PTR>(wParam) == gamepadTimerId_)
+        {
+            ProcessGamepadInput();
+            return 0;
+        }
+        if (performanceHudTimerId_ != 0
+            && static_cast<UINT_PTR>(wParam) == performanceHudTimerId_)
+        {
+            UpdatePerformanceHud();
+            return 0;
+        }
+        if (const std::optional<LRESULT> result = timerRouter_.Handle(static_cast<UINT_PTR>(wParam)))
+        {
+            return *result;
+        }
+        return std::nullopt;
+    }
+
+    LRESULT MainWindow::HandleEraseBackgroundMessage(WPARAM wParam)
+    {
+        RECT client{};
+        GetClientRect(hwnd_, &client);
+        HDC eraseDC = reinterpret_cast<HDC>(wParam);
+        // Exclude the action strip — PaintToolbar handles it
+        RECT below{0, actionStripHeight_, client.right, client.bottom};
+        FillRect(
+            eraseDC,
+            &below,
+            backgroundBrush_ ? backgroundBrush_ : reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
+        return 1;
+    }
+
+    LRESULT MainWindow::HandleDestroyMessage()
+    {
+        if (gamepadTimerId_ != 0)
+        {
+            KillTimer(hwnd_, gamepadTimerId_);
+            gamepadTimerId_ = 0;
+        }
+        if (folderTreeDragController_.IsActive())
+        {
+            FinishFolderTreeDrag(false);
+        }
+        savedSearchController_.reset();
+        StopDisplaySurfaceRecoveryRetries();
+        if (sessionNotificationRegistered_)
+        {
+            WTSUnRegisterSessionNotification(hwnd_);
+            sessionNotificationRegistered_ = false;
+        }
+        if (consoleDisplayNotify_)
+        {
+            UnregisterPowerSettingNotification(consoleDisplayNotify_);
+            consoleDisplayNotify_ = nullptr;
+        }
+        if (monitorPowerNotify_)
+        {
+            UnregisterPowerSettingNotification(monitorPowerNotify_);
+            monitorPowerNotify_ = nullptr;
+        }
+        KillTimer(hwnd_, kFileOperationShutdownTimerId);
+        if (quickSendConfirmationTimerId_ != 0)
+        {
+            KillTimer(hwnd_, quickSendConfirmationTimerId_);
+            quickSendConfirmationTimerId_ = 0;
+        }
+        if (quickSendConfirmationToastWindow_)
+        {
+            DestroyWindow(quickSendConfirmationToastWindow_);
+            quickSendConfirmationToastWindow_ = nullptr;
+        }
+        if (memoryPressureTimerId_ != 0)
+        {
+            KillTimer(hwnd_, kMemoryPressureTimerId);
+            memoryPressureTimerId_ = 0;
+        }
+        memoryPressureExecutor_.reset();
+        if (folderLoadCoordinator_)
+        {
+            folderLoadCoordinator_->Cancel();
+        }
+        if (folderTreeController_)
+        {
+            folderTreeController_->Cancel();
+        }
+        if (batchConvertService_)
+        {
+            batchConvertService_->Shutdown();
+        }
+        if (imageCommandService_)
+        {
+            imageCommandService_->Shutdown();
+        }
+        if (fileOperationService_)
+        {
+            fileOperationService_->Shutdown();
+        }
+        if (userMetadataStore_)
+        {
+            userMetadataStore_->SetNotificationWindow(nullptr);
+            userMetadataStore_->Shutdown();
+        }
+        SaveWindowState();
+        PostQuitMessage(0);
+        return 0;
     }
 
     LRESULT CALLBACK MainWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)

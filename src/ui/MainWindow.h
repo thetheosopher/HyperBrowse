@@ -267,6 +267,16 @@ namespace hyperbrowse::ui
         bool CreateAccelerators();
         bool CreateMenuBar();
         bool CreateChildWindows();
+        void CreateShellControls(HFONT defaultGuiFont);
+        void CreateDetailsPanelControls();
+        void ConfigureFolderLoadCoordinator();
+        void ConfigureFolderWatchChangeCoordinator();
+        void ConfigureFolderTreeController();
+        void QueueStartupFolderLoad();
+        void ConfigureAsyncMessageRouter();
+        void ConfigureTimerRouter();
+        void ConfigureFileCommandController();
+        void ConfigureViewCommandController();
         void RefreshFolderTree();
         void EnsureActiveFolderVisible();
         void InvalidateFolderTreeChildPresence(std::wstring_view folderPath);
@@ -630,6 +640,15 @@ namespace hyperbrowse::ui
         LRESULT HandleNotifyMessage(LPARAM lParam);
         std::optional<LRESULT> HandleMouseInputMessage(UINT message, WPARAM wParam, LPARAM lParam);
         std::optional<LRESULT> HandleCommandMessage(WPARAM wParam, LPARAM lParam);
+        LRESULT HandleCloseMessage(UINT message, WPARAM wParam, LPARAM lParam);
+        LRESULT HandleDpiChangedMessage(LPARAM lParam);
+        std::optional<LRESULT> HandleSystemStateMessage(UINT message, WPARAM wParam, LPARAM lParam);
+        void HandleActivationAndMenuLoopMessage(UINT message, WPARAM wParam, LPARAM lParam);
+        std::optional<LRESULT> HandleKeyMessage(UINT message, WPARAM wParam, LPARAM lParam);
+        std::optional<LRESULT> HandleOwnerDrawMessage(UINT message, LPARAM lParam);
+        std::optional<LRESULT> HandleTimerMessage(WPARAM wParam);
+        LRESULT HandleEraseBackgroundMessage(WPARAM wParam);
+        LRESULT HandleDestroyMessage();
 
         LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
