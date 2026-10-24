@@ -29,6 +29,7 @@
 #include "ui/ItemNumberNavigationPolicy.h"
 #include "ui/MainWindowDialogs.h"
 #include "ui/SystemTheme.h"
+#include "ui/ThemeTokens.h"
 #include "ui/ViewerTransitionPolicy.h"
 #include "util/ResourcePng.h"
 #include "util/Diagnostics.h"
@@ -209,11 +210,7 @@ namespace
 
     COLORREF TextColor(bool darkTheme)
     {
-        if (hyperbrowse::ui::IsHighContrastEnabled())
-        {
-            return GetSysColor(COLOR_WINDOWTEXT);
-        }
-        return darkTheme ? RGB(236, 240, 244) : RGB(28, 33, 40);
+        return hyperbrowse::ui::MakeThemeTokens(hyperbrowse::ui::ResolveThemeVariant(darkTheme)).text;
     }
 
     COLORREF MutedTextColor(bool darkTheme)
@@ -227,20 +224,12 @@ namespace
 
     COLORREF PanelFillColor(bool darkTheme)
     {
-        if (hyperbrowse::ui::IsHighContrastEnabled())
-        {
-            return GetSysColor(COLOR_WINDOW);
-        }
-        return darkTheme ? RGB(28, 33, 39) : RGB(255, 255, 255);
+        return hyperbrowse::ui::MakeThemeTokens(hyperbrowse::ui::ResolveThemeVariant(darkTheme)).surfaceBackground;
     }
 
     COLORREF PanelBorderColor(bool darkTheme)
     {
-        if (hyperbrowse::ui::IsHighContrastEnabled())
-        {
-            return GetSysColor(COLOR_WINDOWTEXT);
-        }
-        return darkTheme ? RGB(70, 80, 94) : RGB(206, 215, 225);
+        return hyperbrowse::ui::MakeThemeTokens(hyperbrowse::ui::ResolveThemeVariant(darkTheme)).border;
     }
 
     HFONT CreateViewerMenuFont(hyperbrowse::util::AppTextSize size)

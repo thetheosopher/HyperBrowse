@@ -24,6 +24,8 @@
 #include "ui/BrowserPresentationPersistence.h"
 #include "ui/CommandBarController.h"
 #include "ui/CommandIds.h"
+#include "ui/DialogTheme.h"
+#include "ui/ThemeTokens.h"
 #include "util/Log.h"
 #include "ui/ClipboardFileTransfer.h"
 #include "ui/DetailsPanelHistogram.h"
@@ -919,6 +921,70 @@ namespace hyperbrowse::tests
             Expect(escapeResult.handled
                        && escapeResult.action == CommandBarController::KeyboardAction::Deactivate,
                    "Command-bar controller did not deactivate keyboard mode with Escape");
+        }
+
+        void RunThemeTokensScenario()
+        {
+            using hyperbrowse::ui::ThemeTokens;
+            using hyperbrowse::ui::ThemeVariant;
+            using hyperbrowse::ui::MakeThemeTokens;
+
+            const auto fields = [](const ThemeTokens& tokens)
+            {
+                return std::array<COLORREF, 9>{
+                    tokens.windowBackground,
+                    tokens.surfaceBackground,
+                    tokens.fieldBackground,
+                    tokens.text,
+                    tokens.mutedText,
+                    tokens.border,
+                    tokens.accent,
+                    tokens.accentFill,
+                    tokens.accentText};
+            };
+
+            // These values are the shipped palette; change them only as a deliberate visual change.
+            const auto dark = fields(MakeThemeTokens(ThemeVariant::Dark));
+            const std::array<COLORREF, 9> expectedDark{
+                RGB(24, 28, 32), RGB(34, 38, 43), RGB(21, 25, 30), RGB(234, 238, 242), RGB(140, 148, 158),
+                RGB(74, 82, 92), RGB(112, 169, 227), RGB(47, 68, 92), RGB(244, 248, 252)};
+            Expect(dark == expectedDark, "Dark theme tokens changed from the shipped palette");
+
+            const auto light = fields(MakeThemeTokens(ThemeVariant::Light));
+            const std::array<COLORREF, 9> expectedLight{
+                RGB(243, 245, 248), RGB(255, 255, 255), RGB(255, 255, 255), RGB(32, 36, 40), RGB(128, 136, 148),
+                RGB(210, 215, 223), RGB(54, 114, 186), RGB(220, 233, 247), RGB(25, 35, 50)};
+            Expect(light == expectedLight, "Light theme tokens changed from the shipped palette");
+
+            const auto highContrast = fields(MakeThemeTokens(ThemeVariant::HighContrast));
+            const std::array<COLORREF, 9> expectedHighContrast{
+                GetSysColor(COLOR_WINDOW), GetSysColor(COLOR_WINDOW), GetSysColor(COLOR_WINDOW),
+                GetSysColor(COLOR_WINDOWTEXT), GetSysColor(COLOR_GRAYTEXT), GetSysColor(COLOR_WINDOWTEXT),
+                GetSysColor(COLOR_HIGHLIGHT), GetSysColor(COLOR_HIGHLIGHT), GetSysColor(COLOR_HIGHLIGHTTEXT)};
+            Expect(highContrast == expectedHighContrast, "High-contrast theme tokens did not map to system colors");
+
+            Expect(MakeThemeTokens(ThemeVariant::Dark).text != MakeThemeTokens(ThemeVariant::Dark).windowBackground
+                       && MakeThemeTokens(ThemeVariant::Light).text != MakeThemeTokens(ThemeVariant::Light).windowBackground
+                       && MakeThemeTokens(ThemeVariant::Dark).accentText != MakeThemeTokens(ThemeVariant::Dark).accentFill
+                       && MakeThemeTokens(ThemeVariant::Light).accentText != MakeThemeTokens(ThemeVariant::Light).accentFill,
+                   "Theme tokens lost text/background or accent contrast separation");
+
+            const ThemeVariant resolvedLight = hyperbrowse::ui::ResolveThemeVariant(false);
+            const ThemeVariant resolvedDark = hyperbrowse::ui::ResolveThemeVariant(true);
+            if (hyperbrowse::ui::IsHighContrastEnabled())
+            {
+                Expect(resolvedLight == ThemeVariant::HighContrast && resolvedDark == ThemeVariant::HighContrast,
+                       "High contrast did not override the selected theme variant");
+            }
+            else
+            {
+                Expect(resolvedLight == ThemeVariant::Light && resolvedDark == ThemeVariant::Dark,
+                       "Theme variant did not follow the selected light/dark theme");
+            }
+
+            const hyperbrowse::ui::DialogTheme dialogTheme = hyperbrowse::ui::MakeDialogTheme(true);
+            Expect(fields(dialogTheme) == fields(MakeThemeTokens(resolvedDark)),
+                   "Dialog theme diverged from the shared theme tokens");
         }
 
         void RunMenuMetricsScenario()
@@ -2639,6 +2705,7 @@ namespace hyperbrowse::tests
         RunViewCommandControllerScenario();
         RunCommandBarControllerScenario();
         RunMenuMetricsScenario();
+        RunThemeTokensScenario();
         RunResponsivePanelSizingScenario();
         RunQuickAccessMenuBuilderScenario();
         RunDetailsPanelHistogramScenario();
@@ -2814,6 +2881,10 @@ namespace hyperbrowse::tests
         else if (scenario == "--menu-metrics")
         {
             RunMenuMetricsScenario();
+        }
+        else if (scenario == "--theme-tokens")
+        {
+            RunThemeTokensScenario();
         }
         else if (scenario == "--responsive-panel")
         {

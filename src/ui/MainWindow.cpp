@@ -1411,6 +1411,11 @@ namespace
         return darkMode ? RGB(255, 214, 126) : RGB(145, 78, 16);
     }
 
+    COLORREF GetCacheStatsHighlightColor(bool darkMode)
+    {
+        return darkMode ? RGB(236, 174, 76) : RGB(170, 92, 22);
+    }
+
     AboutDialogLinkPalette BuildAboutDialogLinkPalette(UINT controlId, const AboutDialogState& state, UINT itemState)
     {
         const bool supportButton = controlId == ID_ABOUT_OPEN_SUPPORT;
@@ -15680,7 +15685,7 @@ namespace hyperbrowse::ui
                 BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 42 : 18),
                 BlendColor(palette.actionStripBorder, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 96 : 150),
                 palette.accent,
-                themeMode_ == ThemeMode::Dark ? RGB(236, 174, 76) : RGB(170, 92, 22)};
+                GetCacheStatsHighlightColor(themeMode_ == ThemeMode::Dark)};
             CacheStatsPainter::VisualState visualState = BuildCacheStatsPainterVisualState();
             visualState.rect = visualRect;
             CacheStatsPainter::PaintD2D(renderTarget.Get(),
@@ -15869,7 +15874,7 @@ namespace hyperbrowse::ui
                 BlendColor(palette.actionFieldBackground, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 42 : 18),
                 BlendColor(palette.actionStripBorder, palette.paneBackground, themeMode_ == ThemeMode::Dark ? 96 : 150),
                 palette.accent,
-                themeMode_ == ThemeMode::Dark ? RGB(236, 174, 76) : RGB(170, 92, 22)};
+                GetCacheStatsHighlightColor(themeMode_ == ThemeMode::Dark)};
             CacheStatsPainter::VisualState visualState = BuildCacheStatsPainterVisualState();
             visualState.rect = visualRect;
             CacheStatsPainter::PaintGdi(hdc,
@@ -25471,58 +25476,43 @@ namespace hyperbrowse::ui
 
     MainWindow::ThemePalette MainWindow::GetThemePalette() const
     {
-        if (IsHighContrastEnabled())
+        const ThemeVariant variant = ResolveThemeVariant(themeMode_ == ThemeMode::Dark);
+        const ThemeTokens tokens = MakeThemeTokens(variant);
+
+        COLORREF treeLine = RGB(198, 204, 212);
+        COLORREF splitter = RGB(210, 215, 223);
+        COLORREF actionStripBackground = RGB(249, 250, 252);
+        switch (variant)
         {
-            return ThemePalette{
-                GetSysColor(COLOR_WINDOW),
-                GetSysColor(COLOR_WINDOW),
-                GetSysColor(COLOR_WINDOWTEXT),
-                GetSysColor(COLOR_GRAYTEXT),
-                GetSysColor(COLOR_WINDOWTEXT),
-                GetSysColor(COLOR_WINDOWTEXT),
-                GetSysColor(COLOR_BTNFACE),
-                GetSysColor(COLOR_WINDOWTEXT),
-                GetSysColor(COLOR_WINDOW),
-                GetSysColor(COLOR_HIGHLIGHT),
-                GetSysColor(COLOR_HIGHLIGHT),
-                GetSysColor(COLOR_HIGHLIGHTTEXT),
-            };
+        case ThemeVariant::HighContrast:
+            treeLine = GetSysColor(COLOR_WINDOWTEXT);
+            splitter = GetSysColor(COLOR_WINDOWTEXT);
+            actionStripBackground = GetSysColor(COLOR_BTNFACE);
+            break;
+        case ThemeVariant::Dark:
+            treeLine = RGB(96, 102, 110);
+            splitter = RGB(78, 84, 92);
+            actionStripBackground = RGB(29, 33, 38);
+            break;
+        case ThemeVariant::Light:
+        default:
+            break;
         }
 
-        switch (themeMode_)
-        {
-        case ThemeMode::Dark:
-            return ThemePalette{
-                RGB(24, 28, 32),
-                RGB(34, 38, 43),
-                RGB(234, 238, 242),
-                RGB(140, 148, 158),
-                RGB(96, 102, 110),
-                RGB(78, 84, 92),
-                RGB(29, 33, 38),
-                RGB(74, 82, 92),
-                RGB(21, 25, 30),
-                RGB(112, 169, 227),
-                RGB(47, 68, 92),
-                RGB(244, 248, 252),
-            };
-        case ThemeMode::Light:
-        default:
-            return ThemePalette{
-                RGB(243, 245, 248),
-                RGB(255, 255, 255),
-                RGB(32, 36, 40),
-                RGB(128, 136, 148),
-                RGB(198, 204, 212),
-                RGB(210, 215, 223),
-                RGB(249, 250, 252),
-                RGB(210, 215, 223),
-                RGB(255, 255, 255),
-                RGB(54, 114, 186),
-                RGB(220, 233, 247),
-                RGB(25, 35, 50),
-            };
-        }
+        return ThemePalette{
+            tokens.windowBackground,
+            tokens.surfaceBackground,
+            tokens.text,
+            tokens.mutedText,
+            treeLine,
+            splitter,
+            actionStripBackground,
+            tokens.border,
+            tokens.fieldBackground,
+            tokens.accent,
+            tokens.accentFill,
+            tokens.accentText,
+        };
     }
 
     void MainWindow::InitToolbarItems()

@@ -11,6 +11,7 @@
 #include "ui/DialogDpi.h"
 #include "ui/DialogShell.h"
 #include "ui/SystemTheme.h"
+#include "ui/ThemeTokens.h"
 
 namespace
 {
@@ -684,34 +685,26 @@ namespace hyperbrowse::ui
 
     DiagnosticsWindow::ThemeColors DiagnosticsWindow::GetThemeColors() const
     {
-        if (IsHighContrastEnabled())
-        {
-            return ThemeColors{
-                GetSysColor(COLOR_WINDOW),
-                GetSysColor(COLOR_WINDOW),
-                GetSysColor(COLOR_WINDOWTEXT),
-                GetSysColor(COLOR_GRAYTEXT),
-                GetSysColor(COLOR_WINDOWTEXT),
-            };
-        }
+        const ThemeVariant variant = ResolveThemeVariant(darkTheme_);
+        const ThemeTokens tokens = MakeThemeTokens(variant);
 
-        if (darkTheme_)
+        // Muted text stays window-specific: its contrast target differs from the shared token.
+        COLORREF mutedText = RGB(96, 105, 115);
+        if (variant == ThemeVariant::HighContrast)
         {
-            return ThemeColors{
-                RGB(24, 28, 32),
-                RGB(31, 36, 42),
-                RGB(236, 240, 245),
-                RGB(168, 176, 186),
-                RGB(78, 84, 92),
-            };
+            mutedText = GetSysColor(COLOR_GRAYTEXT);
+        }
+        else if (variant == ThemeVariant::Dark)
+        {
+            mutedText = RGB(168, 176, 186);
         }
 
         return ThemeColors{
-            RGB(243, 245, 248),
-            RGB(255, 255, 255),
-            RGB(32, 36, 40),
-            RGB(96, 105, 115),
-            RGB(210, 215, 223),
+            tokens.windowBackground,
+            tokens.surfaceBackground,
+            tokens.text,
+            mutedText,
+            tokens.border,
         };
     }
 

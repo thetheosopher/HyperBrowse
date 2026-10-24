@@ -97,11 +97,11 @@ On a machine with a supported NVIDIA GPU, prove that the configured runtime perf
 
 Run this command from a CUDA-bundled build tree so `cudart64_12.dll` and `nvjpeg64_12.dll` are beside the test executable. A successful exit means an nvJPEG decode completed on the available CUDA device; the normal CTest matrix continues to allow WIC fallback on hosts without suitable hardware.
 
-The tests cover model/service behavior and selected application/viewer state without requiring every workflow to be driven through a live desktop session. The full smoke also exercises persistent-cache sharding, atomic entry replacement, bounded legacy flat-layout migration, restart loading, malformed index paths, corruption cleanup, source-missing maintenance, asynchronous statistics/compact/purge callbacks, per-shard statistics, adjacent invalidation coalescing, and pressure-mode store suppression. Add focused coverage to `tests/smoke.cpp` when a change can be exercised deterministically there.
+The tests cover model/service behavior and selected application/viewer state without requiring every workflow to be driven through a live desktop session. The full smoke also exercises persistent-cache sharding, atomic entry replacement, bounded legacy flat-layout migration, restart loading, malformed index paths, corruption cleanup, source-missing maintenance, asynchronous statistics/compact/purge callbacks, per-shard statistics, adjacent invalidation coalescing, and pressure-mode store suppression. Add focused coverage to the matching `tests/smoke_*.cpp` area file (shared helpers live in `tests/smoke_support.h`, exported scenarios are declared in `tests/smoke_scenarios.h`, and `tests/smoke.cpp` holds the command-line dispatcher) when a change can be exercised deterministically there.
 
 ### Saved-search checks
 
-`HyperBrowseSavedSearchSmoke` reuses `smoke.cpp` through `--saved-searches`,
+`HyperBrowseSavedSearchSmoke` runs `smoke_saved_search.cpp` through `--saved-searches`,
 with a 120-second timeout. It covers RAW-family and exact-extension predicates,
 mixed rating/tag/name terms, case/dot normalization, conjunction, literal
 unsupported tokens, filter clearing, and thumbnail/details presentation.
@@ -191,7 +191,7 @@ packaging, commit, or dependency installation ran.
 
 ### SDR display-color checks
 
-`HyperBrowseColorManagementSmoke` reuses `smoke_decode.cpp` and `smoke.cpp`.
+`HyperBrowseColorManagementSmoke` reuses `smoke_decode.cpp` and `smoke_settings.cpp`.
 It generates original RGB matrix/TRC ICC profiles and WIC PNG/TIFF fixtures;
 no downloaded assets, installed monitor association, GPU, optional codec, or
 network is required. Expected 8-bit RGB tolerances are 3 levels (4 for the

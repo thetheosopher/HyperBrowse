@@ -30,6 +30,7 @@
 #include "util/Log.h"
 #include "util/ResourcePng.h"
 #include "ui/SystemTheme.h"
+#include "ui/ThemeTokens.h"
 
 namespace
 {
@@ -119,38 +120,41 @@ namespace
 
     hyperbrowse::browser::BrowserPane::ThemeColors MakeThemeColors(bool darkTheme)
     {
-        if (hyperbrowse::ui::IsHighContrastEnabled())
+        const hyperbrowse::ui::ThemeVariant variant = hyperbrowse::ui::ResolveThemeVariant(darkTheme);
+        const hyperbrowse::ui::ThemeTokens tokens = hyperbrowse::ui::MakeThemeTokens(variant);
+
+        if (variant == hyperbrowse::ui::ThemeVariant::HighContrast)
         {
             return hyperbrowse::browser::BrowserPane::ThemeColors{
-                GetSysColor(COLOR_WINDOW),
-                GetSysColor(COLOR_WINDOW),
+                tokens.windowBackground,
+                tokens.surfaceBackground,
                 GetSysColor(COLOR_WINDOW),
                 GetSysColor(COLOR_HIGHLIGHT),
-                GetSysColor(COLOR_WINDOWTEXT),
-                GetSysColor(COLOR_GRAYTEXT),
-                GetSysColor(COLOR_WINDOWTEXT),
-                GetSysColor(COLOR_HIGHLIGHT),
-                GetSysColor(COLOR_HIGHLIGHT),
-                GetSysColor(COLOR_HIGHLIGHTTEXT),
+                tokens.text,
+                tokens.mutedText,
+                tokens.border,
+                tokens.accent,
+                tokens.accentFill,
+                tokens.accentText,
                 GetSysColor(COLOR_HIGHLIGHT),
                 GetSysColor(COLOR_WINDOW),
                 GetSysColor(COLOR_WINDOW),
             };
         }
 
-        if (darkTheme)
+        if (variant == hyperbrowse::ui::ThemeVariant::Dark)
         {
             return hyperbrowse::browser::BrowserPane::ThemeColors{
                 RGB(18, 22, 27),
-                RGB(31, 36, 42),
+                tokens.surfaceBackground,
                 RGB(23, 27, 33),
                 RGB(34, 50, 68),
-                RGB(236, 240, 245),
+                tokens.text,
                 RGB(152, 161, 171),
-                RGB(74, 82, 92),
-                RGB(112, 169, 227),
-                RGB(47, 68, 92),
-                RGB(244, 248, 252),
+                tokens.border,
+                tokens.accent,
+                tokens.accentFill,
+                tokens.accentText,
                 RGB(138, 189, 239),
                 RGB(26, 31, 37),
                 RGB(27, 32, 38),
@@ -159,15 +163,15 @@ namespace
 
         return hyperbrowse::browser::BrowserPane::ThemeColors{
             RGB(236, 240, 245),
-            RGB(252, 253, 255),
+            tokens.surfaceBackground,
             RGB(228, 234, 242),
             RGB(236, 243, 251),
-            RGB(27, 34, 43),
+            tokens.text,
             RGB(96, 105, 115),
             RGB(201, 210, 220),
-            RGB(54, 114, 186),
-            RGB(220, 233, 247),
-            RGB(25, 35, 50),
+            tokens.accent,
+            tokens.accentFill,
+            tokens.accentText,
             RGB(90, 144, 214),
             RGB(245, 248, 252),
             RGB(241, 245, 250),

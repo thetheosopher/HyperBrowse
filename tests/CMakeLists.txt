@@ -1,10 +1,20 @@
 add_executable(HyperBrowseTests
     smoke.cpp
+    smoke_cache.cpp
+    smoke_codec_metadata.cpp
     smoke_decode.cpp
+    smoke_enumeration.cpp
+    smoke_fileops.cpp
+    smoke_main_window.cpp
     smoke_model.cpp
     smoke_metadata.cpp
     smoke_policy.cpp
     smoke_runtime.cpp
+    smoke_saved_search.cpp
+    smoke_settings.cpp
+    smoke_shell.cpp
+    smoke_thumbnails.cpp
+    smoke_viewer.cpp
     smoke_watch.cpp
     ../src/app/Application.cpp
 )
@@ -89,6 +99,7 @@ add_test(NAME HyperBrowseUserMetadataSmoke COMMAND HyperBrowseTests --user-metad
 add_test(NAME HyperBrowseExternalDropTargetSmoke COMMAND HyperBrowseTests --external-drop-target)
 add_test(NAME HyperBrowseMenuMetricsSmoke COMMAND HyperBrowseTests --menu-metrics)
 add_test(NAME HyperBrowseResponsivePanelSmoke COMMAND HyperBrowseTests --responsive-panel)
+add_test(NAME HyperBrowseThemeTokensSmoke COMMAND HyperBrowseTests --theme-tokens)
 
 if(HYPERBROWSE_BUILD_FUZZ_TESTS)
     add_executable(HyperBrowseBoundaryFuzz

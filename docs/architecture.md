@@ -8,16 +8,21 @@ This document describes the current implementation. The planning documents in `s
 `HyperBrowse.exe` owns application startup, the Win32 message loop, and the main user-facing windows.
 `HyperBrowseRawHelper.exe` is the optional out-of-process RAW decode helper.
 `HyperBrowseTests.exe` runs the smoke and integration checks registered by
-`tests/CMakeLists.txt`. Its shared Win32/service harness remains in
-`tests/smoke.cpp`, while deterministic controller, layout, presentation-policy,
+`tests/CMakeLists.txt`. `tests/smoke.cpp` holds only the `main` dispatcher; its
+shared Win32/service harness lives in `tests/smoke_support.h`, the Win32/service
+scenarios are split by area into `tests/smoke_cache.cpp`,
+`smoke_codec_metadata.cpp`, `smoke_enumeration.cpp`, `smoke_fileops.cpp`,
+`smoke_main_window.cpp`, `smoke_saved_search.cpp`, `smoke_settings.cpp`,
+`smoke_shell.cpp`, `smoke_thumbnails.cpp` and `smoke_viewer.cpp` (declared in
+`tests/smoke_scenarios.h`), while deterministic controller, layout, presentation-policy,
 and router scenarios live in `tests/smoke_policy.cpp` and shortcut/executor
 runtime scenarios live in `tests/smoke_runtime.cpp`, and deterministic browser
 model/Quick Send scenarios live in `tests/smoke_model.cpp`, behind the same
 executable and command-line selectors. Folder-watch notification parser
 coverage lives in `tests/smoke_watch.cpp`; the service lifecycle coverage
-remains in `tests/smoke.cpp`. Deterministic RAW allowlist and helper-protocol
+remains in the area files above. Deterministic RAW allowlist and helper-protocol
 coverage lives in `tests/smoke_decode.cpp`; fixture-backed LibRaw decoding
-remains in `tests/smoke.cpp`.
+remains in `tests/smoke_codec_metadata.cpp`.
 
 The core library is organized by responsibility:
 
