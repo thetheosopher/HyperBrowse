@@ -199,6 +199,23 @@ add_library(HyperBrowseCore STATIC
     src/ui/FolderHistory.cpp
     src/ui/PerformanceHud.cpp
     src/ui/MainWindow.cpp
+    src/ui/MainWindowAppDialogs.cpp
+    src/ui/MainWindowContextMenus.cpp
+    src/ui/MainWindowDetailsPanel.cpp
+    src/ui/MainWindowFileOps.cpp
+    src/ui/MainWindowExperimentalSettings.cpp
+    src/ui/MainWindowFocus.cpp
+    src/ui/MainWindowFolderTree.cpp
+    src/ui/MainWindowInput.cpp
+    src/ui/MainWindowLayout.cpp
+    src/ui/MainWindowMenuState.cpp
+    src/ui/MainWindowMessages.cpp
+    src/ui/MainWindowPerformanceSettings.cpp
+    src/ui/MainWindowPersistence.cpp
+    src/ui/MainWindowQuickAccess.cpp
+    src/ui/MainWindowSlideshowAssociations.cpp
+    src/ui/MainWindowShell.cpp
+    src/ui/MainWindowViewers.cpp
     src/ui/MainWindowDialogs.cpp
     src/ui/MenuMessageHandling.cpp
     src/ui/MainWindowAccessibility.cpp

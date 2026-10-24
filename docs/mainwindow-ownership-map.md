@@ -3,6 +3,49 @@
 This map records the current owners of MainWindow-adjacent state and lifetime
 boundaries. Source code and `docs/architecture.md` remain authoritative.
 
+## Source Layout
+
+`MainWindow` is one class implemented across several translation units in
+`src/ui/`. `MainWindow.cpp` keeps construction, `Create`, `CreateChildWindows`,
+the message dispatch (`HandleMessage`, `WindowProc`, the `Handle*Message`
+helpers) and startup/shutdown. Each other file holds one cohesive group of
+`MainWindow::` members plus the file-local helpers only that group uses:
+
+- `MainWindowFolderTree.cpp`: folder-tree notifications, tooltips, drag.
+- `MainWindowLayout.cpp`: child layout, status strip, Quick Send toast,
+  breadcrumb bar, fonts, text size, theme application, toolbar painting.
+- `MainWindowFocus.cpp`: command-bar keyboard mode, keyboard focus sequence,
+  accessibility targets and items, menu tracking.
+- `MainWindowQuickAccess.cpp`: recent/favorite destinations, Quick Send state
+  and operations, Quick Access panel rows and hit tests, right-pane tab
+  selection and details-panel visibility, filing resume.
+- `MainWindowDetailsPanel.cpp`: details panel text, histogram, performance HUD,
+  painting.
+- `MainWindowViewers.cpp`: opening and synchronizing viewer windows.
+- `MainWindowContextMenus.cpp`: browser, folder-tree, shell and details menus,
+  favorites, compare, folder open.
+- `MainWindowAppDialogs.cpp`: About, shortcut reference, user guide,
+  diagnostics snapshot and Image Information dialogs.
+- `MainWindowExperimentalSettings.cpp`, `MainWindowPerformanceSettings.cpp`,
+  `MainWindowSlideshowAssociations.cpp`: the settings dialogs and the
+  persistent-cache dialogs with their layout, paint and accessibility helpers.
+- `MainWindowFileOps.cpp`: start/complete file operations, undo/redo, image
+  commands, ratings, tags, slideshow and batch convert entry points.
+- `MainWindowShell.cpp`: tray icon, taskbar progress, clipboard, wallpaper,
+  Explorer integration.
+- `MainWindowMenuState.cpp`: menu/toolbar state, display-surface recovery,
+  command routing, saved-search commands.
+- `MainWindowPersistence.cpp`: window-state load/save and filing resume state.
+- `MainWindowMessages.cpp`: `On*Message` handlers for worker and child-window
+  messages.
+- `MainWindowInput.cpp`: mouse, drag/drop, splitters, gamepad input.
+
+`MainWindowInternal.h` is private to these files. It holds the shared
+includes, the constants, `using` declarations and small stateless helpers used
+by more than one of them (inline, in `main_window_shared`). Mutable state must
+not be placed there. A helper used by a single file stays in that file's
+anonymous namespace.
+
 ## State Machines
 
 - `FolderLoadCoordinator`: folder-load requests, history navigation, watcher

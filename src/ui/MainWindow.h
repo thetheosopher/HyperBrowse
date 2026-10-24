@@ -119,6 +119,8 @@ namespace hyperbrowse::ui
         HWND Hwnd() const noexcept { return hwnd_; }
         hyperbrowse::util::AppTextSize AppTextSize() const noexcept { return appTextSize_; }
         hyperbrowse::viewer::EscapeKeyBehavior ViewerEscapeKeyBehavior() const noexcept { return viewerEscapeKeyBehavior_; }
+        // Zero until the active viewer has decoded and displayed its image.
+        int ActiveViewerZoomPercent() const;
 
         static constexpr UINT kExternalLaunchMessage = WM_APP + 71;
 

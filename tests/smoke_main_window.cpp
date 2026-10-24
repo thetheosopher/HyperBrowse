@@ -935,6 +935,9 @@ namespace hyperbrowse::tests::smoke
 
          Expect(mainWindow.ViewerEscapeKeyBehavior() == hyperbrowse::viewer::EscapeKeyBehavior::FitHeight,
              "Startup viewer did not receive the persisted Escape behavior");
+         // Escape only fits the window once the viewer has an image; before that it just leaves full screen.
+         Expect(PumpMessagesUntil([&]() { return mainWindow.ActiveViewerZoomPercent() > 0; }, 10000),
+             "Startup viewer did not finish loading its image before the Escape routing check");
          MONITORINFO monitorInfo{sizeof(MONITORINFO)};
          const HMONITOR monitor = MonitorFromWindow(mainWindow.Hwnd(), MONITOR_DEFAULTTONEAREST);
          Expect(monitor != nullptr && GetMonitorInfoW(monitor, &monitorInfo) != FALSE,

@@ -190,6 +190,12 @@ controller:
   screen-to-client conversion. It calls synchronous callbacks supplied by
   `MainWindow` for drag feedback, drop handling, and visual cleanup; it does
   not retain the window as a raw host pointer.
+- `ui/MainWindow*.cpp` implements the single `MainWindow` class across area
+  files (folder tree, layout, focus, quick access, details panel, viewers,
+  context menus, app and settings dialogs, file operations, shell, menu state,
+  persistence, messages, input). `MainWindow.cpp` keeps construction and
+  message dispatch; `MainWindowInternal.h` is the private shared header. See
+  `docs/mainwindow-ownership-map.md` for the file-by-file layout.
 - `ui/MainWindowDialogs.*` owns synchronous text-entry, rename-validation, and
   batch-rename preview dialogs. `MainWindow` supplies the owner HWND, theme,
   text-size, and operation-specific inputs, then consumes only the returned
