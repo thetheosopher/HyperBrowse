@@ -278,6 +278,10 @@ available first-frame WIC presentation.
 
 The brand is "fast". The product should look the part.
 
+Execution sequence for the owner-selected 2026-10-25 UI observations (folder
+tree stall, theme leftovers, dialog accessibility, in-place rename, title bar,
+Quick Send polish): [UI and design polish prompt](FUTURE-ROADMAP-PROMPT-10-UI-DESIGN-POLISH.md).
+
 ### `C5` Tools Menu (P1)
 
 The core Tools menu and Settings organization are shipped and summarized in

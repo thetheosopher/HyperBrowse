@@ -52,6 +52,7 @@ namespace hyperbrowse::tests::smoke
     void RunColorManagementSettingsScenario(HINSTANCE instance);
     void RunMultiViewerSettingsScenario(HINSTANCE instance);
     void RunMainWindowFolderTreeScenario(HINSTANCE instance);
+    void RunMainWindowFolderTreeLargeScenario(HINSTANCE instance);
     void RunMainWindowKeyboardFocusScenario(HINSTANCE instance);
     void RunMainWindowAccessibilityScenario(HINSTANCE instance);
     void RunMainWindowTextInputAcceleratorScenario(HINSTANCE instance);

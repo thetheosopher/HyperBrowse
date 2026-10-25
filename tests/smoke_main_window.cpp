@@ -349,6 +349,110 @@ namespace hyperbrowse::tests::smoke
          }
     }
 
+    void RunMainWindowFolderTreeLargeScenario(HINSTANCE instance)
+    {
+        constexpr int kSubfolderCount = 5000;
+        constexpr double kMaxDispatchMs = 250.0;
+
+        std::wstring visibleParent = TryGetKnownFolderPathForTest(FOLDERID_Documents);
+        std::error_code error;
+        if (visibleParent.empty() || !fs::is_directory(fs::path(visibleParent), error) || error)
+        {
+            visibleParent = fs::current_path().wstring();
+        }
+
+        TempFolder root(fs::path(visibleParent),
+                        L"HyperBrowseFolderTreeLarge-" + std::to_wstring(GetCurrentProcessId()));
+        const fs::path largeFolder = root.Root() / L"large-parent";
+        wchar_t nameBuffer[16]{};
+        for (int index = 0; index < kSubfolderCount; ++index)
+        {
+            swprintf_s(nameBuffer, L"d%04d", index);
+            Expect(fs::create_directories(largeFolder / nameBuffer, error) && !error,
+                "Failed to create a subfolder for large folder-tree coverage");
+        }
+        Expect(fs::create_directories(largeFolder / L"d0000" / L"inner", error) && !error,
+            "Failed to create the nested folder for large folder-tree presence coverage");
+        const fs::path targetFolder = largeFolder / L"d4999";
+
+        hyperbrowse::ui::MainWindow mainWindow(instance);
+        mainWindow.SetStartupLaunchPath(targetFolder.wstring());
+        Expect(mainWindow.Create(), "Failed to create MainWindow for large folder-tree coverage");
+
+        HWND mainWindowHandle = FindWindowW(L"HyperBrowseMainWindow", nullptr);
+        Expect(mainWindowHandle != nullptr, "Failed to find the large folder-tree MainWindow");
+        HWND treeView = FindWindowExW(mainWindowHandle, nullptr, WC_TREEVIEWW, nullptr);
+        Expect(treeView != nullptr, "Large folder-tree MainWindow did not create the tree control");
+
+        // The longest single message dispatch is the longest time the UI thread was blocked.
+        double longestDispatchMs = 0.0;
+        const auto pumpUntil = [&](const std::function<bool()>& predicate, DWORD timeoutMs)
+        {
+            const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+            MSG message{};
+            while (GetTickCount64() < deadline)
+            {
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+                {
+                    const auto start = std::chrono::steady_clock::now();
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                    longestDispatchMs = std::max(
+                        longestDispatchMs,
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+                }
+
+                if (predicate())
+                {
+                    return true;
+                }
+                MsgWaitForMultipleObjectsEx(0, nullptr, 10, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            }
+            return predicate();
+        };
+
+        HTREEITEM selectedItem = nullptr;
+        Expect(pumpUntil([&]()
+        {
+            selectedItem = TreeView_GetSelection(treeView);
+            return selectedItem != nullptr && ReadTreeItemText(treeView, selectedItem) == L"d4999";
+        }, 60000), "Folder tree did not select the last folder of a very large parent");
+
+        const HTREEITEM parentItem = TreeView_GetParent(treeView, selectedItem);
+        Expect(parentItem != nullptr, "The selected large-folder child had no parent item");
+        Expect(ReadTreeItemText(treeView, TreeView_GetChild(treeView, parentItem)) != L"Loading...",
+            "The loading placeholder was not removed after the large folder finished filling");
+
+        int childCount = 0;
+        HTREEITEM firstItem = nullptr;
+        for (HTREEITEM child = TreeView_GetChild(treeView, parentItem); child;
+             child = TreeView_GetNextSibling(treeView, child))
+        {
+            ++childCount;
+            if (!firstItem && ReadTreeItemText(treeView, child) == L"d0000")
+            {
+                firstItem = child;
+            }
+        }
+        Expect(childCount == kSubfolderCount, "Folder tree did not contain every subfolder of the large parent");
+        Expect(firstItem != nullptr, "Folder tree did not contain the first subfolder of the large parent");
+
+        Expect(pumpUntil([&]()
+        {
+            TVITEMW treeItem{};
+            treeItem.mask = TVIF_CHILDREN;
+            treeItem.hItem = firstItem;
+            return TreeView_GetItem(treeView, &treeItem) != FALSE && treeItem.cChildren == 1;
+        }, 60000), "Child presence results did not reach the large folder tree");
+
+        std::wcout << L"Large folder-tree longest UI dispatch: " << longestDispatchMs << L" ms\n";
+        Expect(longestDispatchMs < kMaxDispatchMs,
+            "Applying a 5,000-folder child list blocked the UI thread for too long");
+
+        DestroyWindow(mainWindowHandle);
+        PumpMessagesFor(100);
+    }
+
     void RunMainWindowKeyboardFocusScenario(HINSTANCE instance)
     {
         using hyperbrowse::ui::command_ids::ID_ACTION_FILTER_EDIT;

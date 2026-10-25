@@ -61,6 +61,7 @@ int main(int argc, char* argv[])
         const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool folderTreeRestoreOnly = argc > 1 && std::string_view(argv[1]) == "--folder-tree-restore";
+        const bool folderTreeLargeOnly = argc > 1 && std::string_view(argv[1]) == "--folder-tree-large";
         const bool accessibilityOnly = argc > 1 && std::string_view(argv[1]) == "--accessibility";
         const bool dialogGeometryOnly = argc > 1 && std::string_view(argv[1]) == "--dialog-geometry";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
@@ -151,6 +152,10 @@ int main(int argc, char* argv[])
         else if (folderTreeRestoreOnly)
         {
             RunMainWindowFolderTreeScenario(instance);
+        }
+        else if (folderTreeLargeOnly)
+        {
+            RunMainWindowFolderTreeLargeScenario(instance);
         }
         else if (accessibilityOnly)
         {

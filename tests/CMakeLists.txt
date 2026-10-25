@@ -90,6 +90,8 @@ add_test(NAME HyperBrowseThumbnailFailureSmoke COMMAND HyperBrowseTests --thumbn
 add_test(NAME HyperBrowseFileRenameSmoke COMMAND HyperBrowseTests --file-rename)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)
 add_test(NAME HyperBrowseFolderTreeRestoreSmoke COMMAND HyperBrowseTests --folder-tree-restore)
+add_test(NAME HyperBrowseFolderTreeLargeSmoke COMMAND HyperBrowseTests --folder-tree-large)
+set_tests_properties(HyperBrowseFolderTreeLargeSmoke PROPERTIES TIMEOUT 180)
 add_test(NAME HyperBrowseAccessibilitySmoke COMMAND HyperBrowseTests --accessibility)
 add_test(NAME HyperBrowseDialogGeometrySmoke COMMAND HyperBrowseTests --dialog-geometry)
 add_test(NAME HyperBrowseSettingsSmoke COMMAND HyperBrowseTests --settings)

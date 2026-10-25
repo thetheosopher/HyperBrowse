@@ -155,8 +155,55 @@ namespace hyperbrowse::ui
 
             return info;
         }
+
+        struct GenericFolderIcons
+        {
+            int iconIndex{};
+            int openIconIndex{};
+        };
+
+        // The generic folder icons never change within a session, so cache them.
+        const GenericFolderIcons& GetGenericFolderIcons()
+        {
+            static const GenericFolderIcons icons = []
+            {
+                GenericFolderIcons result;
+                SHFILEINFOW shellInfo{};
+                constexpr UINT baseFlags = SHGFI_USEFILEATTRIBUTES | SHGFI_SYSICONINDEX | SHGFI_SMALLICON;
+                if (SHGetFileInfoW(L"folder", FILE_ATTRIBUTE_DIRECTORY, &shellInfo, sizeof(shellInfo), baseFlags) != 0)
+                {
+                    result.iconIndex = shellInfo.iIcon;
+                }
+                result.openIconIndex = result.iconIndex;
+                if (SHGetFileInfoW(
+                        L"folder",
+                        FILE_ATTRIBUTE_DIRECTORY,
+                        &shellInfo,
+                        sizeof(shellInfo),
+                        baseFlags | SHGFI_OPENICON) != 0)
+                {
+                    result.openIconIndex = shellInfo.iIcon;
+                }
+                return result;
+            }();
+            return icons;
+        }
+
+        std::wstring PathKey(std::wstring_view path)
+        {
+            std::wstring key = NormalizeFolderPath(std::wstring(path));
+            if (!key.empty())
+            {
+                CharLowerBuffW(key.data(), static_cast<DWORD>(key.size()));
+            }
+            return key;
+        }
     }
 
+    FolderTreeController::~FolderTreeController()
+    {
+        StopSliceTimer();
+    }
     void FolderTreeController::Configure(HWND ownerWindow, HWND treeWindow, Handlers handlers)
     {
         ownerWindow_ = ownerWindow;
@@ -167,6 +214,9 @@ namespace hyperbrowse::ui
     void FolderTreeController::Cancel()
     {
         service_.CancelAll();
+        StopSliceTimer();
+        fills_.clear();
+        shellInfoQueue_.clear();
         pendingEnumerationItems_.clear();
         pendingChildPresenceItems_.clear();
         pendingSelectionPath_.clear();
@@ -175,7 +225,7 @@ namespace hyperbrowse::ui
 
     bool FolderTreeController::IsBusy() const noexcept
     {
-        return !pendingEnumerationItems_.empty() || !pendingChildPresenceItems_.empty();
+        return !pendingEnumerationItems_.empty() || !pendingChildPresenceItems_.empty() || !fills_.empty();
     }
 
     void FolderTreeController::Initialize(std::wstring selectedFolderPath)
@@ -272,7 +322,8 @@ namespace hyperbrowse::ui
                                                 const std::wstring& folderPath,
                                                 bool childrenKnown,
                                                 bool hasChildren,
-                                                bool requestPresence)
+                                                bool requestPresence,
+                                                bool deferShellInfo)
     {
         const std::wstring normalizedPath = NormalizeFolderPath(folderPath);
         if (!ShouldShowFolder(normalizedPath))
@@ -290,11 +341,25 @@ namespace hyperbrowse::ui
             }
         }
 
-        const ShellItemInfo shellInfo = QueryShellItemInfo(normalizedPath);
+        // Deferred rows start with the generic folder look and are refined later in time slices.
+        ShellItemInfo shellInfo;
+        if (deferShellInfo)
+        {
+            const GenericFolderIcons& genericIcons = GetGenericFolderIcons();
+            shellInfo.displayName = GetFolderDisplayName(normalizedPath);
+            shellInfo.iconIndex = genericIcons.iconIndex;
+            shellInfo.openIconIndex = genericIcons.openIconIndex;
+        }
+        else
+        {
+            shellInfo = QueryShellItemInfo(normalizedPath);
+        }
+
         auto nodeData = std::make_unique<NodeData>();
         nodeData->path = normalizedPath;
         nodeData->childrenKnown = childrenKnown;
         nodeData->hasChildren = hasChildren;
+        nodeData->shellInfoPending = deferShellInfo;
         NodeData* rawNodeData = nodeData.get();
         nodes_.push_back(std::move(nodeData));
 
@@ -309,6 +374,15 @@ namespace hyperbrowse::ui
         item.item.cChildren = childrenKnown && hasChildren ? 1 : 0;
 
         const HTREEITEM insertedItem = treeWindow_ ? TreeView_InsertItem(treeWindow_, &item) : nullptr;
+        if (!insertedItem)
+        {
+            rawNodeData->shellInfoPending = false;
+        }
+        else if (deferShellInfo)
+        {
+            shellInfoQueue_.push_back(insertedItem);
+        }
+
         if (insertedItem && childrenKnown && hasChildren)
         {
             AddPlaceholder(insertedItem);
@@ -490,6 +564,7 @@ namespace hyperbrowse::ui
         nodeData->childEnumerationRequestId = 0;
         UpdateChildrenIndicator(item);
 
+        SendMessageW(treeWindow_, WM_SETREDRAW, FALSE, 0);
         HTREEITEM childItem = TreeView_GetChild(treeWindow_, item);
         while (childItem)
         {
@@ -497,18 +572,224 @@ namespace hyperbrowse::ui
             TreeView_DeleteItem(treeWindow_, childItem);
             childItem = nextSibling;
         }
+        SendMessageW(treeWindow_, WM_SETREDRAW, TRUE, 0);
+        InvalidateRect(treeWindow_, nullptr, FALSE);
 
-        std::vector<HTREEITEM> childItems;
-        childItems.reserve(childFolders.size());
-        for (const services::FolderTreeChild& childFolder : childFolders)
+        if (childFolders.empty())
         {
-            const HTREEITEM insertedChildItem = InsertItem(item, childFolder.path, false, false, false);
-            if (insertedChildItem)
+            ContinueSelectingFolder();
+            return;
+        }
+
+        FillState fill;
+        fill.parent = item;
+        fill.parentData = nodeData;
+        fill.children = std::move(childFolders);
+        fill.inserted.reserve(fill.children.size());
+        nodeData->childrenFilling = true;
+        const bool runsNow = fills_.empty();
+        fills_.push_back(std::move(fill));
+        NotifyStatusChanged();
+
+        if (runsNow)
+        {
+            RunSlice(Clock::now() + kSliceBudget);
+        }
+        else
+        {
+            EnsureLoadingItem(fills_.back());
+        }
+
+        if (HasPendingSliceWork())
+        {
+            ScheduleSlices();
+        }
+    }
+
+    bool FolderTreeController::HasPendingSliceWork() const noexcept
+    {
+        return !fills_.empty() || !shellInfoQueue_.empty();
+    }
+
+    void CALLBACK FolderTreeController::SliceTimerProc(HWND, UINT, UINT_PTR timerId, DWORD)
+    {
+        auto* controller = reinterpret_cast<FolderTreeController*>(timerId);
+        controller->RunSlice(Clock::now() + kSliceBudget);
+        if (!controller->HasPendingSliceWork())
+        {
+            controller->StopSliceTimer();
+        }
+    }
+
+    void FolderTreeController::ScheduleSlices()
+    {
+        if (sliceTimerActive_ || !ownerWindow_)
+        {
+            return;
+        }
+
+        if (SetTimer(ownerWindow_, reinterpret_cast<UINT_PTR>(this), kSliceIntervalMs, &FolderTreeController::SliceTimerProc) != 0)
+        {
+            sliceTimerActive_ = true;
+            return;
+        }
+
+        // Without a timer the work would never finish, so drain it synchronously.
+        while (HasPendingSliceWork())
+        {
+            RunSlice(Clock::time_point::max());
+        }
+    }
+
+    void FolderTreeController::StopSliceTimer()
+    {
+        if (sliceTimerActive_)
+        {
+            KillTimer(ownerWindow_, reinterpret_cast<UINT_PTR>(this));
+            sliceTimerActive_ = false;
+        }
+    }
+
+    void FolderTreeController::RunSlice(Clock::time_point deadline)
+    {
+        while (!fills_.empty() && Clock::now() < deadline)
+        {
+            FillState& fill = fills_.front();
+            const Clock::time_point sliceStart = Clock::now();
+            const bool finished = RunFillSlice(fill, deadline);
+            fill.uiTime += Clock::now() - sliceStart;
+            if (!finished)
             {
-                childItems.push_back(insertedChildItem);
+                EnsureLoadingItem(fill);
+                break;
+            }
+
+            FillState completed = std::move(fill);
+            fills_.pop_front();
+            FinishFill(completed);
+        }
+
+        if (fills_.empty() && !shellInfoQueue_.empty())
+        {
+            RunShellInfoSlice(deadline);
+        }
+    }
+
+    bool FolderTreeController::RunFillSlice(FillState& fill, Clock::time_point deadline)
+    {
+        if (!treeWindow_ || GetNodeData(fill.parent) != fill.parentData)
+        {
+            fill.stale = true;
+            return true;
+        }
+
+        SendMessageW(treeWindow_, WM_SETREDRAW, FALSE, 0);
+        do
+        {
+            const services::FolderTreeChild& child = fill.children[fill.next++];
+            if (const HTREEITEM inserted = InsertItem(fill.parent, child.path, false, false, false, true))
+            {
+                fill.inserted.push_back(inserted);
+            }
+        } while (fill.next < fill.children.size() && Clock::now() < deadline);
+        SendMessageW(treeWindow_, WM_SETREDRAW, TRUE, 0);
+        InvalidateRect(treeWindow_, nullptr, FALSE);
+
+        return fill.next >= fill.children.size();
+    }
+
+    void FolderTreeController::EnsureLoadingItem(FillState& fill)
+    {
+        if (fill.loadingItem || !treeWindow_ || GetNodeData(fill.parent) != fill.parentData)
+        {
+            return;
+        }
+
+        TVINSERTSTRUCTW loading{};
+        loading.hParent = fill.parent;
+        loading.hInsertAfter = TVI_FIRST;
+        loading.item.mask = TVIF_TEXT;
+        loading.item.pszText = const_cast<LPWSTR>(L"Loading...");
+        fill.loadingItem = TreeView_InsertItem(treeWindow_, &loading);
+    }
+
+    void FolderTreeController::FinishFill(FillState& fill)
+    {
+        if (!fill.stale)
+        {
+            if (fill.loadingItem)
+            {
+                TreeView_DeleteItem(treeWindow_, fill.loadingItem);
+            }
+
+            fill.parentData->childrenFilling = false;
+            RequestChildPresence(fill.inserted);
+
+            if (fill.children.size() >= kLargeFillLogThreshold)
+            {
+                const auto uiMs = std::chrono::duration_cast<std::chrono::milliseconds>(fill.uiTime).count();
+                util::LogInfo(L"Folder tree filled " + std::to_wstring(fill.children.size())
+                    + L" children in " + std::to_wstring(uiMs) + L" ms of UI time.");
             }
         }
-        RequestChildPresence(childItems);
+
+        NotifyStatusChanged();
+        if (!fill.stale)
+        {
+            ContinueSelectingFolder();
+        }
+    }
+
+    void FolderTreeController::RunShellInfoSlice(Clock::time_point deadline)
+    {
+        if (!treeWindow_)
+        {
+            shellInfoQueue_.clear();
+            return;
+        }
+
+        // Rows the user can see are refined first; the rest follow in insertion order.
+        HTREEITEM visibleItem = TreeView_GetFirstVisible(treeWindow_);
+        int visibleRemaining = static_cast<int>(TreeView_GetVisibleCount(treeWindow_)) + 1;
+        while (visibleItem && visibleRemaining-- > 0 && Clock::now() < deadline)
+        {
+            RefineShellInfo(visibleItem);
+            visibleItem = TreeView_GetNextVisible(treeWindow_, visibleItem);
+        }
+
+        while (!shellInfoQueue_.empty() && Clock::now() < deadline)
+        {
+            const HTREEITEM item = shellInfoQueue_.front();
+            shellInfoQueue_.pop_front();
+            RefineShellInfo(item);
+        }
+    }
+
+    void FolderTreeController::RefineShellInfo(HTREEITEM item)
+    {
+        NodeData* nodeData = GetNodeData(item);
+        if (!nodeData || !nodeData->shellInfoPending)
+        {
+            return;
+        }
+
+        nodeData->shellInfoPending = false;
+        const ShellItemInfo shellInfo = QueryShellItemInfo(nodeData->path);
+        const GenericFolderIcons& genericIcons = GetGenericFolderIcons();
+        if (shellInfo.iconIndex == genericIcons.iconIndex
+            && shellInfo.openIconIndex == genericIcons.openIconIndex
+            && shellInfo.displayName == GetFolderDisplayName(nodeData->path))
+        {
+            return;
+        }
+
+        TVITEMW treeItem{};
+        treeItem.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+        treeItem.hItem = item;
+        treeItem.pszText = const_cast<LPWSTR>(shellInfo.displayName.c_str());
+        treeItem.iImage = shellInfo.iconIndex;
+        treeItem.iSelectedImage = shellInfo.openIconIndex;
+        TreeView_SetItem(treeWindow_, &treeItem);
     }
 
     void FolderTreeController::SelectFolder(std::wstring folderPath)
@@ -579,6 +860,11 @@ namespace hyperbrowse::ui
                     return;
                 }
 
+                // The slice that finishes this fill resumes the selection.
+                if (nodeData->childrenFilling)
+                {
+                    return;
+                }
                 currentItem = FindChildItem(currentItem, currentPath.wstring());
                 if (!currentItem)
                 {
@@ -716,7 +1002,7 @@ namespace hyperbrowse::ui
 
         const HTREEITEM parentItem = FindItemByPath(parentPath);
         NodeData* parentNodeData = GetNodeData(parentItem);
-        if (!parentNodeData || !parentNodeData->childrenLoaded)
+        if (!parentNodeData || !parentNodeData->childrenLoaded || parentNodeData->childrenFilling)
         {
             return;
         }
@@ -789,7 +1075,6 @@ namespace hyperbrowse::ui
                     return 0;
                 }
                 ApplyChildren(item, std::move(update->childFolders));
-                ContinueSelectingFolder();
                 return 0;
             case services::FolderTreeEnumerationUpdateKind::Failed:
                 if (nodeData->childEnumerationRequestId != update->requestId)
@@ -825,9 +1110,26 @@ namespace hyperbrowse::ui
         switch (update->kind)
         {
         case services::FolderTreeEnumerationUpdateKind::ChildPresenceCompleted:
+        {
+            std::unordered_map<std::wstring, HTREEITEM> itemsByPath;
+            itemsByPath.reserve(items.size());
+            for (HTREEITEM item : items)
+            {
+                if (const NodeData* requestedData = GetNodeData(item))
+                {
+                    itemsByPath.emplace(PathKey(requestedData->path), item);
+                }
+            }
+
             for (const services::FolderTreeChild& childPresence : update->childPresenceResults)
             {
-                const HTREEITEM item = FindItemByPath(childPresence.path);
+                const auto requestedItem = itemsByPath.find(PathKey(childPresence.path));
+                if (requestedItem == itemsByPath.end())
+                {
+                    continue;
+                }
+
+                const HTREEITEM item = requestedItem->second;
                 NodeData* nodeData = GetNodeData(item);
                 if (!nodeData || nodeData->childPresenceRequestId != update->requestId)
                 {
@@ -846,6 +1148,7 @@ namespace hyperbrowse::ui
                 UpdateChildrenIndicator(item);
             }
             return 0;
+        }
         case services::FolderTreeEnumerationUpdateKind::Failed:
             for (HTREEITEM item : items)
             {
