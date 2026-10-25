@@ -61,13 +61,51 @@ if ($null -eq ('HyperBrowse.Benchmark.NativeMethods' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace HyperBrowse.Benchmark
 {
     public static class NativeMethods
     {
+        private delegate bool EnumWindowsProc(IntPtr window, IntPtr lParam);
+
         [DllImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
         public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll", EntryPoint = "GetClassNameW", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr window, StringBuilder className, int maxCount);
+
+        // Process.MainWindowHandle can resolve to a tooltip or shadow window that is
+        // visible while the cursor hovers over the app, so look the window up by class.
+        public static IntPtr FindWindowByClass(uint processId, string className)
+        {
+            IntPtr found = IntPtr.Zero;
+            EnumWindows((window, lParam) =>
+            {
+                uint windowProcessId;
+                GetWindowThreadProcessId(window, out windowProcessId);
+                if (windowProcessId != processId)
+                {
+                    return true;
+                }
+
+                StringBuilder name = new StringBuilder(256);
+                GetClassName(window, name, name.Capacity);
+                if (string.Equals(name.ToString(), className, StringComparison.Ordinal))
+                {
+                    found = window;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
     }
 }
 '@
@@ -215,7 +253,9 @@ try {
     }
 
     if (-not $process.WaitForExit($StartupTimeoutSeconds * 1000)) {
-        if (-not $process.CloseMainWindow()) {
+        $mainWindow = [HyperBrowse.Benchmark.NativeMethods]::FindWindowByClass([uint32]$process.Id, 'HyperBrowseMainWindow')
+        if ($mainWindow -eq [IntPtr]::Zero -or
+            -not [HyperBrowse.Benchmark.NativeMethods]::PostMessage($mainWindow, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) {
             Stop-Process -Id $process.Id -Force
             $process.WaitForExit()
             throw "Startup benchmark could not request a normal application shutdown after $StartupTimeoutSeconds seconds."
@@ -225,8 +265,9 @@ try {
     $shutdownTimeoutMs = $ShutdownTimeoutSeconds * 1000
     $closeGracePeriodMs = [Math]::Min(2000, $shutdownTimeoutMs)
     if (-not $process.WaitForExit($closeGracePeriodMs)) {
+        $exitWindow = [HyperBrowse.Benchmark.NativeMethods]::FindWindowByClass([uint32]$process.Id, 'HyperBrowseMainWindow')
         $exitCommandPosted = [HyperBrowse.Benchmark.NativeMethods]::PostMessage(
-            $process.MainWindowHandle,
+            $exitWindow,
             0x0111,
             [IntPtr]::new(1002),
             [IntPtr]::Zero)

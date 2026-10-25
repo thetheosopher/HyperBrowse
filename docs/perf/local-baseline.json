@@ -1,0 +1,60 @@
+{
+    "schemaVersion":  1,
+    "note":  "Advisory, machine-specific medians recorded by tools/CheckPerf.ps1 -UpdateBaseline. Do not compare across computers.",
+    "machines":  {
+                     "MIKE1":  {
+                                   "recordedUtc":  "2026-10-25T00:06:07Z",
+                                   "revision":  "b59da5515b036760799fc263ff638cc0d9ba4a96",
+                                   "configuration":  "Release",
+                                   "datasetId":  "A",
+                                   "runs":  5,
+                                   "metrics":  {
+                                                   "cache.cacheHitAverageMs":  {
+                                                                                   "median":  0.55,
+                                                                                   "unit":  "ms",
+                                                                                   "direction":  "lower"
+                                                                               },
+                                                   "cache.cacheWorkerQueueDelayAverageMs":  {
+                                                                                                "median":  60.12,
+                                                                                                "unit":  "ms",
+                                                                                                "direction":  "lower"
+                                                                                            },
+                                                   "cache.cacheWorkerQueueDelayMaxMs":  {
+                                                                                            "median":  62,
+                                                                                            "unit":  "ms",
+                                                                                            "direction":  "lower"
+                                                                                        },
+                                                   "cache.compactionMs":  {
+                                                                              "median":  8.68,
+                                                                              "unit":  "ms",
+                                                                              "direction":  "lower"
+                                                                          },
+                                                   "cache.scrollMessagesPerSecond":  {
+                                                                                         "median":  2975.02,
+                                                                                         "unit":  "messages/s",
+                                                                                         "direction":  "higher"
+                                                                                     },
+                                                   "cache.storeEntriesPerSecond":  {
+                                                                                       "median":  458.09,
+                                                                                       "unit":  "entries/s",
+                                                                                       "direction":  "higher"
+                                                                                   },
+                                                   "startup.firstWindowVisibleToFirstThumbnailPaintedMs":  {
+                                                                                                               "median":  328.75,
+                                                                                                               "unit":  "ms",
+                                                                                                               "direction":  "lower"
+                                                                                                           },
+                                                   "startup.processToFirstThumbnailPaintedMs":  {
+                                                                                                    "median":  636.82,
+                                                                                                    "unit":  "ms",
+                                                                                                    "direction":  "lower"
+                                                                                                },
+                                                   "startup.processToFirstWindowVisibleMs":  {
+                                                                                                 "median":  282.75,
+                                                                                                 "unit":  "ms",
+                                                                                                 "direction":  "lower"
+                                                                                             }
+                                               }
+                               }
+                 }
+}

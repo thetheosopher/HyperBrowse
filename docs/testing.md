@@ -26,6 +26,63 @@ Debug/Release and optional-nvJPEG fallback coverage, not evidence of a current
 cloud run. Validate locally. The VS Code build task configures with `--fresh`;
 keep CUDA bundling off for normal development and avoid the packaging target.
 
+### Local quality gate (`tools\Check.ps1`)
+
+`tools\Check.ps1` is the supported no-cloud gate. It never calls a hosted
+service, streams each step's output, prints a PASS/FAIL summary, and exits 1 on
+any failure. It runs under Windows PowerShell 5.1 or PowerShell 7.
+
+| Command | What it runs |
+|---|---|
+| `.\tools\Check.ps1` | Configure, build Debug (`HyperBrowse`, `HyperBrowseTests`), full Debug CTest |
+| `.\tools\Check.ps1 -Quick` | Debug build plus the focused subset `Policy\|ThemeTokens\|Thumbnail\|JpegOrientation\|ItemNumberNavigation` (seconds, no desktop needed) |
+| `.\tools\Check.ps1 -Release` | Release build and full Release CTest |
+| `.\tools\Check.ps1 -Asan` | AddressSanitizer boundary-fuzz build in `build-asan` and the two fuzz tests (see "Sanitizer and fuzz policy") |
+| `.\tools\Check.ps1 -Tidy` | clang-tidy over `.cpp` files changed since `-Since HEAD`; add `-All` for every source |
+| `.\tools\Check.ps1 -Perf` | Advisory local benchmark comparison (`tools\CheckPerf.ps1`) |
+
+`-Filter <regex>` replaces the CTest `-R` pattern; a pattern that matches no
+test fails the gate. `-Asan`, `-Tidy` and `-Perf` run on their own; combine
+them with `-Quick` or `-Release` to also run a build gate.
+
+The full and Release gates drive the UI smokes, so they preflight the desktop
+and stop when `LogonUI` is running (locked session) or the primary display is
+below 1920x1080 (for example a KVM fallback). `-Quick` skips the check, and
+`-SkipDesktopCheck` bypasses it deliberately. Run the full gates on an unlocked
+session with the large display attached.
+
+`-Tidy` configures a separate Ninja build in `build-tidy` (the Visual Studio
+generator cannot export a compile database), imports the Visual Studio x64
+environment, and runs clang-tidy in parallel (`-TidyJobs`) with the repository
+`.clang-tidy`. Per-file logs and `tidy-summary.txt` are written to
+`build-tidy`. Header-only changes are not seen in the changed-files mode; use
+`-All` after editing headers.
+
+**Tidy baseline (2026-10-24, `-Tidy -All`): 199 findings in 142 files.** The
+noisy `bugprone-easily-swappable-parameters` and `performance-no-int-to-ptr`
+(Win32 handle and `MAKEINTRESOURCE` idioms) checks are disabled in
+`.clang-tidy`. The largest remaining groups are `narrowing-conversions` (33),
+`unnecessary-value-param` (22), `suspicious-stringview-data-usage` (21),
+`exception-escape` (17), `unused-return-value` (15), `implicit-widening` (13)
+and `integer-division` (13). Triage so far:
+
+- All 15 `unused-return-value` findings are intentional `unique_ptr::release()`
+  ownership hand-offs to Win32 message parameters.
+- The `not-null-terminated-result` in `ClipboardFileTransfer.cpp` is a false
+  positive (the length is carried explicitly).
+- All 7 `unchecked-optional-access` findings are in `tests/smoke_policy.cpp` and
+  follow explicit presence checks.
+- The `empty-catch` in `WicCodecReadinessService.cpp` is a classified
+  `catch (...)` (see the code-quality plan, Phase 1).
+- `MainWindowFileOps.cpp` has one genuinely unused local (`undoDestination`).
+
+Treat the baseline as the bar: new work should not add findings in the files it
+touches. Fix the rest opportunistically rather than in a sweep.
+
+An opt-in pre-push hook that runs `Check.ps1 -Quick` is provided at
+`tools\hooks\pre-push.sample`. It is not installed automatically; the file
+header explains how to copy it into `.git\hooks`.
+
 ### Smoke and integration tests
 
 Run the CTest presets:
@@ -288,6 +345,35 @@ runner does not claim a cold-disk result. `-CacheState repeat-process` performs
 one unmeasured launch before measured launches, while each sample still uses a
 new process.
 
+#### Local perf gate (`tools\CheckPerf.ps1`)
+
+`tools\CheckPerf.ps1` (also `Check.ps1 -Perf`) builds Release, ensures dataset
+A, runs `RunBenchmarks.ps1`, and compares each metric median against
+`docs/perf/local-baseline.json`. It needs the interactive desktop because the
+startup scenario launches the application.
+
+- The baseline is keyed by computer name. Relative thresholds are
+  machine-specific, so a machine without an entry only reports its numbers.
+- Nothing is recorded implicitly. Record or refresh the entry for this machine
+  with `.\tools\CheckPerf.ps1 -UpdateBaseline` (or `Check.ps1 -Perf
+  -UpdatePerfBaseline`) after a run you trust, and commit the JSON deliberately.
+- A metric regresses when it is worse than baseline by more than
+  `-TolerancePercent` (default 30) and by more than `-MillisecondNoiseFloor`
+  (default 2 ms) for time metrics. Direction (lower or higher is better) comes
+  from the report.
+- The result is advisory: regressions are listed and the script exits 0 unless
+  `-Strict` is given. The Markdown summary goes to `build\bench\local-latest.md`
+  so `docs/perf/latest.md` and the CI calibration file `docs/perf/baseline.json`
+  are left alone.
+- `-ReportPath <report.json>` compares an existing report without running
+  anything; `-NoBuild` skips the Release build; `-Runs` defaults to 5.
+- If dataset generation fails with "Generated directory marker does not match
+  this generator", `build\benchmark-datasets` was produced by an older manifest.
+  It is git-ignored generated output; delete it and rerun.
+- The startup scenario closes the app through its `HyperBrowseMainWindow`
+  window (found by class), not `Process.MainWindowHandle`, which can resolve to
+  a tooltip while the mouse is over the window.
+
 ### A6 GPU scaling evidence
 
 `RunBenchmarks.ps1` does not currently measure WIC-versus-GPU thumbnail scaling.
@@ -382,8 +468,12 @@ When investigating a failure:
 
 ### Sanitizer and fuzz policy
 
-CI now runs a dedicated AddressSanitizer boundary-fuzz job with the dynamic
-MSVC runtime. The opt-in `HYPERBROWSE_BUILD_FUZZ_TESTS` target uses fixed seeds
+Run the sanitizer gate locally with `.\tools\Check.ps1 -Asan`. It builds
+`HyperBrowseBoundaryFuzz` in `build-asan` (about two to three minutes on a clean
+tree), puts the MSVC ASan runtime on `PATH`, and runs the two fuzz tests below.
+The hosted workflow in `.github/workflows/ci.yml` still carries the original
+job, but hosted CI is currently held, so the local script is the supported
+path. The sanitizer configuration uses the dynamic MSVC runtime. The opt-in `HYPERBROWSE_BUILD_FUZZ_TESTS` target uses fixed seeds
 and bounded mutations, so it is deterministic and does not require a separate
 fuzzing engine. `HyperBrowsePersistentCacheFuzz` mutates persistent-cache headers, version and
 journal records, legacy and sharded index rows, orphan files, and
@@ -392,9 +482,8 @@ helper payload sizes, headers, and bytes. The job disables optional LibRaw and
 nvJPEG dependencies because these tests exercise the protocol and cache
 boundaries, not codec implementations.
 
-The sanitizer job is intentionally separate from the shipping matrix: it uses
-`HYPERBROWSE_STATIC_MSVC_RUNTIME=OFF` and `/fsanitize=address`, uploads the
-CTest log and any Windows dump files, and does not replace the normal Debug,
+The sanitizer build is intentionally separate from the shipping matrix: it uses
+`HYPERBROWSE_STATIC_MSVC_RUNTIME=OFF` and `/fsanitize=address`, and does not replace the normal Debug,
 Release, startup, or package gates. New binary input boundaries should add a
 bounded seed mutation to this target as well as a focused deterministic smoke
 assertion when a user-visible failure mode is involved.

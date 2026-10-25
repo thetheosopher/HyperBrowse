@@ -1,0 +1,15 @@
+#!/bin/sh
+# Opt-in pre-push hook for HyperBrowse. It is never installed automatically.
+#
+# Install (from the repository root):
+#   Copy-Item tools\hooks\pre-push.sample .git\hooks\pre-push
+#
+# Bypass for one push with: git push --no-verify
+#
+# Runs the quick local gate: Debug build plus the focused tests that do not
+# drive the interactive desktop. Nothing here calls a hosted service.
+root="$(git rev-parse --show-toplevel)" || exit 1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root/tools/Check.ps1" -Quick || {
+    echo "pre-push: tools/Check.ps1 -Quick failed; push aborted." >&2
+    exit 1
+}
