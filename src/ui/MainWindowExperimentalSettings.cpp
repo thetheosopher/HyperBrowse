@@ -2179,7 +2179,8 @@ namespace
                     format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
                 }
             }
-            state->editBackgroundBrush = CreateSolidBrush(state->settings->darkTheme ? RGB(45, 51, 59) : RGB(247, 249, 252));
+            state->editBackgroundBrush = CreateSolidBrush(
+                hyperbrowse::ui::MakeDialogTheme(state->settings->darkTheme).fieldBackground);
             const auto profile = state->settings->resourceProfile;
             const auto thumbnailCacheMegabytes = state->settings->thumbnailCacheCapacityOverrideBytes == 0
                 ? hyperbrowse::services::ThumbnailScheduler::ResolveCacheCapacityBytes(0, profile) / (1024ULL * 1024ULL)

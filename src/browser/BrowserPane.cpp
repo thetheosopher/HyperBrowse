@@ -75,6 +75,8 @@ namespace
             };
         }
 
+        // The dark pane colors are layered against the pane's own (18,22,27) anchor, so merging
+        // them into the shared window token would flatten the row stripes. They stay local.
         if (variant == hyperbrowse::ui::ThemeVariant::Dark)
         {
             return hyperbrowse::browser::BrowserPane::ThemeColors{
@@ -106,8 +108,8 @@ namespace
             tokens.accentFill,
             tokens.accentText,
             RGB(90, 144, 214),
-            RGB(245, 248, 252),
-            RGB(241, 245, 250),
+            tokens.windowBackground,
+            tokens.windowBackground,
         };
     }
 

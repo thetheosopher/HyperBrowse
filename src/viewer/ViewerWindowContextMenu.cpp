@@ -305,12 +305,15 @@ namespace hyperbrowse::viewer
             return util::ScaleAppTextDimension(dimension, appTextSize_);
         };
         const COLORREF menuBackground = PanelFillColor(darkTheme_);
-        const COLORREF selectedBackground = darkTheme_
-            ? RGB(54, 68, 84)
-            : RGB(222, 235, 250);
+        const hyperbrowse::ui::ThemeVariant themeVariant = hyperbrowse::ui::ResolveThemeVariant(darkTheme_);
+        const COLORREF selectedBackground = hyperbrowse::ui::MakeMenuSelectionFill(themeVariant);
         const bool selected = (drawItem.itemState & ODS_SELECTED) != 0;
         const bool disabled = (drawItem.itemState & ODS_DISABLED) != 0;
         const COLORREF backgroundColor = selected ? selectedBackground : menuBackground;
+        // The system highlight needs its paired text color to stay readable in high contrast.
+        const bool highlightText = selected && themeVariant == hyperbrowse::ui::ThemeVariant::HighContrast;
+        const COLORREF menuTextColor = highlightText ? GetSysColor(COLOR_HIGHLIGHTTEXT) : TextColor(darkTheme_);
+        const COLORREF menuMutedTextColor = highlightText ? GetSysColor(COLOR_HIGHLIGHTTEXT) : MutedTextColor(darkTheme_);
         const HBRUSH backgroundBrush = CreateSolidBrush(backgroundColor);
         FillRect(drawItem.hDC, &drawItem.rcItem, backgroundBrush);
         DeleteObject(backgroundBrush);
@@ -353,8 +356,8 @@ namespace hyperbrowse::viewer
                             labelRect,
                             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
                             disabled
-                                ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
-                                : TextColor(darkTheme_),
+                                ? BlendMenuColor(menuMutedTextColor, backgroundColor, 128)
+                                : menuTextColor,
                             backgroundColor);
 
         if ((drawItem.itemState & ODS_CHECKED) != 0)
@@ -365,8 +368,8 @@ namespace hyperbrowse::viewer
             const int checkMarkTop = drawItem.rcItem.top
                 + ((drawItem.rcItem.bottom - drawItem.rcItem.top) - checkMarkHeight) / 2;
             const COLORREF checkColor = disabled
-                ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
-                : TextColor(darkTheme_);
+                ? BlendMenuColor(menuMutedTextColor, backgroundColor, 128)
+                : menuTextColor;
             const HPEN checkPen = CreatePen(PS_SOLID, std::max(1, scaleMenuDimension(2)), checkColor);
             const HGDIOBJ oldPen = SelectObject(drawItem.hDC, checkPen);
             MoveToEx(drawItem.hDC, checkMarkLeft, checkMarkTop + checkMarkHeight / 2, nullptr);
@@ -389,8 +392,8 @@ namespace hyperbrowse::viewer
                                 shortcutRect,
                                 DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
                                 disabled
-                                    ? BlendMenuColor(MutedTextColor(darkTheme_), backgroundColor, 128)
-                                    : MutedTextColor(darkTheme_),
+                                    ? BlendMenuColor(menuMutedTextColor, backgroundColor, 128)
+                                    : menuMutedTextColor,
                                 backgroundColor);
         }
     }

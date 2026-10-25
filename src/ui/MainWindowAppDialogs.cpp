@@ -313,6 +313,18 @@ namespace
         const bool hot = (itemState & ODS_HOTLIGHT) != 0;
         const bool disabled = (itemState & ODS_DISABLED) != 0;
 
+        // High contrast uses system colors only; blended brand colors would break the user's palette.
+        if (hyperbrowse::ui::IsHighContrastEnabled())
+        {
+            AboutDialogLinkPalette highContrastPalette;
+            const bool highlighted = pressed || hot;
+            highContrastPalette.fill = GetSysColor(highlighted ? COLOR_HIGHLIGHT : COLOR_WINDOW);
+            highContrastPalette.text = GetSysColor(
+                disabled ? COLOR_GRAYTEXT : (highlighted ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
+            highContrastPalette.border = GetSysColor(disabled ? COLOR_GRAYTEXT : COLOR_WINDOWTEXT);
+            return highContrastPalette;
+        }
+
         const COLORREF accent = supportButton ? GetAboutDialogSupportAccent(state.darkMode) : state.accent;
         int fillMixAmount = supportButton
             ? (state.darkMode ? 34 : 18)

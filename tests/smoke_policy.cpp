@@ -985,6 +985,33 @@ namespace hyperbrowse::tests
             const hyperbrowse::ui::DialogTheme dialogTheme = hyperbrowse::ui::MakeDialogTheme(true);
             Expect(fields(dialogTheme) == fields(MakeThemeTokens(resolvedDark)),
                    "Dialog theme diverged from the shared theme tokens");
+
+            // Force each mode so the checks do not depend on the machine's accessibility settings.
+            struct HighContrastOverrideGuard
+            {
+                ~HighContrastOverrideGuard()
+                {
+                    hyperbrowse::ui::HighContrastOverrideForTesting().reset();
+                }
+            } overrideGuard;
+
+            hyperbrowse::ui::HighContrastOverrideForTesting() = true;
+            Expect(hyperbrowse::ui::ResolveThemeVariant(false) == ThemeVariant::HighContrast
+                       && hyperbrowse::ui::ResolveThemeVariant(true) == ThemeVariant::HighContrast,
+                   "Forced high contrast did not override the selected theme variant");
+            Expect(fields(hyperbrowse::ui::MakeDialogTheme(true)) == expectedHighContrast,
+                   "Forced high contrast dialog theme did not map to system colors");
+            Expect(hyperbrowse::ui::MakeMenuSelectionFill(ThemeVariant::HighContrast) == GetSysColor(COLOR_HIGHLIGHT),
+                   "High-contrast menu selection did not use the system highlight");
+
+            hyperbrowse::ui::HighContrastOverrideForTesting() = false;
+            Expect(hyperbrowse::ui::ResolveThemeVariant(false) == ThemeVariant::Light
+                       && hyperbrowse::ui::ResolveThemeVariant(true) == ThemeVariant::Dark,
+                   "Forced non-high-contrast mode did not follow the selected theme variant");
+            Expect(hyperbrowse::ui::MakeMenuSelectionFill(ThemeVariant::Light) == light[7],
+                   "Light menu selection did not use the shared accent fill token");
+            Expect(hyperbrowse::ui::MakeMenuSelectionFill(ThemeVariant::Dark) == RGB(54, 68, 84),
+                   "Dark menu selection changed from the shipped value");
         }
 
         void RunMenuMetricsScenario()

@@ -81,4 +81,19 @@ namespace hyperbrowse::ui
             };
         }
     }
+
+    // Highlight fill for owner-drawn menu rows. The dark value is menu-specific.
+    inline COLORREF MakeMenuSelectionFill(ThemeVariant variant) noexcept
+    {
+        switch (variant)
+        {
+        case ThemeVariant::HighContrast:
+            return GetSysColor(COLOR_HIGHLIGHT);
+        case ThemeVariant::Dark:
+            return RGB(54, 68, 84);
+        case ThemeVariant::Light:
+        default:
+            return MakeThemeTokens(variant).accentFill;
+        }
+    }
 }
