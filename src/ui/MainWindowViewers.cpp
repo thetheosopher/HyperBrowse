@@ -1,4 +1,5 @@
 #include "ui/MainWindowInternal.h"
+#include "viewer/ViewerOverlayDialog.h"
 
 namespace
 {
@@ -21,6 +22,36 @@ namespace
 
 namespace hyperbrowse::ui
 {
+    bool MainWindow::ConfigureViewerOverlays(HWND ownerWindow, const viewer::ViewerOverlaySettings* initialSettings)
+    {
+        auto settings = viewer::ViewerWindow::DefaultOverlaySettings();
+        SIZE viewport{1280, 800};
+        UINT dpi = 96;
+        auto* active = FindViewerByHwnd(ownerWindow);
+        if (!active)
+        {
+            const auto openViewers = OpenViewerWindows();
+            if (!openViewers.empty()) active = openViewers.front();
+        }
+        if (active)
+        {
+            settings = active->OverlaySettings();
+            RECT client{};
+            GetClientRect(active->Hwnd(), &client);
+            viewport = {client.right, client.bottom};
+            dpi = GetDpiForWindow(active->Hwnd());
+        }
+        if (initialSettings) settings = *initialSettings;
+        return viewer::ShowViewerOverlayDialog(ownerWindow ? ownerWindow : hwnd_, instance_,
+            themeMode_ == ThemeMode::Dark, appTextSize_, settings, viewport, dpi,
+            [this](const viewer::ViewerOverlaySettings& applied)
+        {
+            if (!viewer::ViewerWindow::SetDefaultOverlaySettings(applied)) return false;
+            for (auto* openViewer : OpenViewerWindows()) openViewer->SetOverlaySettings(applied);
+            UpdateMenuState();
+            return true;
+        });
+    }
 
     void MainWindow::RefreshBrowserPane()
     {

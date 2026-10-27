@@ -42,6 +42,8 @@ namespace hyperbrowse::tests::smoke
     void RunBrowserPaneScenario(HINSTANCE instance);
     void RunViewerWindowFitModeScenario(HINSTANCE instance, HWND ownerWindow);
     void RunViewerWindowScenario(HINSTANCE instance, HWND ownerWindow);
+    void RunViewerDeleteFocusScenario(HINSTANCE instance);
+    void RunViewerOverlayScenario(HINSTANCE instance, HWND ownerWindow);
     void RunAppTextSizeScenario(HINSTANCE instance);
     void RunMainWindowCascadeScenario(HINSTANCE instance);
     void RunDialogDpiHelperScenario();

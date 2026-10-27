@@ -44,7 +44,9 @@ int main(int argc, char* argv[])
         Expect(hwnd != nullptr, "Failed to create the hidden test window");
 
         const bool viewerFitOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-fit";
+        const bool viewerOverlaysOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-overlays";
         const bool viewerInteractionOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-interaction";
+        const bool viewerDeleteFocusOnly = argc > 1 && std::string_view(argv[1]) == "--viewer-delete-focus";
         const bool jpegOrientationOnly = argc > 1 && std::string_view(argv[1]) == "--jpeg-orientation";
         const bool codecReadinessOnly = argc > 1 && std::string_view(argv[1]) == "--codec-readiness";
         const bool codecReadinessWindowOnly = argc > 1 && std::string_view(argv[1]) == "--codec-readiness-window";
@@ -59,6 +61,7 @@ int main(int argc, char* argv[])
         const bool thumbnailStaleCompletionOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-stale-completion";
         const bool thumbnailFailureOnly = argc > 1 && std::string_view(argv[1]) == "--thumbnail-failure";
         const bool fileRenameOnly = argc > 1 && std::string_view(argv[1]) == "--file-rename";
+        const bool fileOperationsOnly = argc > 1 && std::string_view(argv[1]) == "--file-operations";
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool folderTreeRestoreOnly = argc > 1 && std::string_view(argv[1]) == "--folder-tree-restore";
         const bool folderTreeLargeOnly = argc > 1 && std::string_view(argv[1]) == "--folder-tree-large";
@@ -108,9 +111,17 @@ int main(int argc, char* argv[])
             hyperbrowse::tests::RunColorManagementWindowScenarios(instance, hwnd);
             RunColorManagementSettingsScenario(instance);
         }
+        else if (viewerOverlaysOnly)
+        {
+            RunViewerOverlayScenario(instance, hwnd);
+        }
         else if (viewerFitOnly)
         {
             RunViewerWindowFitModeScenario(instance, hwnd);
+        }
+        else if (viewerDeleteFocusOnly)
+        {
+            RunViewerDeleteFocusScenario(instance);
         }
         else if (viewerInteractionOnly)
         {
@@ -144,6 +155,12 @@ int main(int argc, char* argv[])
         else if (fileRenameOnly)
         {
             RunFileRenameOperationScenario(hwnd, &state);
+        }
+        else if (fileOperationsOnly)
+        {
+            RunFileRenameOperationScenario(hwnd, &state);
+            RunFileOperationShutdownScenario();
+            RunFileConflictPlanningScenario(hwnd, &state);
         }
         else if (appTextSizeOnly)
         {
@@ -240,6 +257,7 @@ int main(int argc, char* argv[])
             RunAppTextSizeScenario(instance);
             RunMainWindowCascadeScenario(instance);
             RunStartupViewerEnumerationScenario(instance);
+            RunViewerDeleteFocusScenario(instance);
             RunMainWindowFolderTreeScenario(instance);
             RunMainWindowKeyboardFocusScenario(instance);
             RunMainWindowAccessibilityScenario(instance);

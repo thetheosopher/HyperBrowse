@@ -97,7 +97,9 @@ namespace hyperbrowse::viewer
         }
 
         infoOverlaysVisible_ = visible;
+        overlaySettings_.masterVisible = visible;
         SaveViewerInfoOverlaysVisibleSetting(infoOverlaysVisible_);
+        RefreshOverlayContent();
         if (hwnd_)
         {
             RequestRepaint();
@@ -111,7 +113,11 @@ namespace hyperbrowse::viewer
             return;
         }
 
+        auto normalized = overlaySettings_;
+        normalized.textSize = size;
+        size = NormalizeOverlaySettings(normalized).textSize;
         infoOverlayTextSize_ = size;
+        overlaySettings_.textSize = size;
         SaveViewerInfoOverlayTextSizeSetting(infoOverlayTextSize_);
         if (d2dRenderTarget_)
         {
@@ -141,28 +147,18 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::SetFullMetadataVisible(bool visible)
     {
-        if (fullMetadataVisible_ != visible)
-        {
-            fullMetadataVisible_ = visible;
-            SaveViewerFullMetadataVisibleSetting(
-                fullScreen_ ? kRegistryValueViewerFullScreenFullMetadataVisible : kRegistryValueViewerWindowedFullMetadataVisible,
-                fullMetadataVisible_);
-        }
-
-        ApplyFullMetadataVisible(fullMetadataVisible_);
+        auto settings = DefaultOverlaySettings();
+        auto& pane = settings.panes[static_cast<std::size_t>(OverlayPane::FullMetadata)];
+        (fullScreen_ ? pane.fullScreenEnabled : pane.windowedEnabled) = visible;
+        SetDefaultOverlaySettings(settings);
+        overlaySettings_.panes[static_cast<std::size_t>(OverlayPane::FullMetadata)] = pane;
+        ApplyFullMetadataVisible(visible);
     }
 
     void ViewerWindow::ApplyFullMetadataVisible(bool visible)
     {
         fullMetadataVisible_ = visible;
-        if (fullMetadataVisible_)
-        {
-            LoadMetadataAsyncForIndex(currentIndex_);
-        }
-        else
-        {
-            ClearCurrentMetadata();
-        }
+        RefreshOverlayContent();
 
         if (hwnd_ && IsWindow(hwnd_) != FALSE)
         {

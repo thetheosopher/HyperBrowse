@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 
-project(HyperBrowse VERSION 2.6.0 LANGUAGES CXX)
+project(HyperBrowse VERSION 2.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -244,6 +244,9 @@ add_library(HyperBrowseCore STATIC
     src/util/Diagnostics.cpp
     src/util/Log.cpp
     src/viewer/ViewerWindow.cpp
+    src/viewer/ViewerOverlay.cpp
+    src/viewer/ViewerOverlayDialog.cpp
+    src/viewer/ViewerWindowOverlays.cpp
     src/viewer/ViewerWindowCompare.cpp
     src/viewer/ViewerWindowContextMenu.cpp
     src/viewer/ViewerWindowMessages.cpp

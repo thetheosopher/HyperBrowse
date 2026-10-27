@@ -127,11 +127,13 @@ namespace
     }
 
     DWORD BuildOperationFlags(hyperbrowse::services::FileOperationType type,
-                              hyperbrowse::services::FileConflictPolicy conflictPolicy)
+                              hyperbrowse::services::FileConflictPolicy conflictPolicy,
+                              bool showShellProgress)
     {
         DWORD flags = FOFX_SHOWELEVATIONPROMPT | FOF_NOCONFIRMMKDIR | FOFX_NOCOPYHOOKS;
         if (type == hyperbrowse::services::FileOperationType::Copy
-            || type == hyperbrowse::services::FileOperationType::Move)
+            || type == hyperbrowse::services::FileOperationType::Move
+            || !showShellProgress)
         {
             flags |= FOF_SILENT;
         }
@@ -594,7 +596,8 @@ namespace hyperbrowse::services
                                               std::vector<std::wstring> sourcePaths,
                                               std::wstring destinationFolder,
                                               FileConflictPolicy conflictPolicy,
-                                              std::vector<std::wstring> targetLeafNames)
+                                              std::vector<std::wstring> targetLeafNames,
+                                              bool showShellProgress)
     {
         Cancel();
 
@@ -616,6 +619,7 @@ namespace hyperbrowse::services
              sourcePaths = std::move(sourcePaths),
              destinationFolder = std::move(destinationFolder),
              conflictPolicy,
+             showShellProgress,
              targetLeafNames = std::move(targetLeafNames),
              performOperationsCallback = performOperationsCallback_,
              requestId]() mutable
@@ -628,7 +632,7 @@ namespace hyperbrowse::services
             update->destinationFolder = destinationFolder;
             update->finished = true;
 
-            try
+            const auto performOperation = [&]()
             {
                 const auto isCancelled = [&]()
                 {
@@ -639,7 +643,6 @@ namespace hyperbrowse::services
                 if (sourcePaths.empty())
                 {
                     update->message = L"No files were selected for the requested file operation.";
-                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                     return;
                 }
 
@@ -647,7 +650,6 @@ namespace hyperbrowse::services
                 {
                     update->aborted = true;
                     update->message = L"The file operation was cancelled.";
-                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                     return;
                 }
 
@@ -662,12 +664,11 @@ namespace hyperbrowse::services
                 {
                     update->failedCount = sourcePaths.size();
                     update->message = L"Failed to initialize the Windows file operation service.";
-                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                     return;
                 }
 
                 operation->SetOwnerWindow(ownerWindow);
-                operation->SetOperationFlags(BuildOperationFlags(type, conflictPolicy));
+                operation->SetOperationFlags(BuildOperationFlags(type, conflictPolicy, showShellProgress));
 
                 ComPtr<IShellItem> destinationItem;
                 if (type == FileOperationType::Copy || type == FileOperationType::Move)
@@ -677,7 +678,6 @@ namespace hyperbrowse::services
                     {
                         update->failedCount = sourcePaths.size();
                         update->message = L"Failed to open the destination folder for the requested file operation.";
-                        PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                         return;
                     }
                 }
@@ -692,7 +692,6 @@ namespace hyperbrowse::services
                     sink->Release();
                     update->failedCount = sourcePaths.size();
                     update->message = L"Failed to register the Windows file operation progress sink.";
-                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                     return;
                 }
 
@@ -754,7 +753,6 @@ namespace hyperbrowse::services
                     sink->Release();
                     update->aborted = true;
                     update->message = L"The file operation was cancelled.";
-                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                     return;
                 }
 
@@ -764,7 +762,6 @@ namespace hyperbrowse::services
                     sink->Release();
                     update->failedCount = queueFailures;
                     update->message = L"No files could be queued for the requested file operation.";
-                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                     return;
                 }
 
@@ -785,7 +782,6 @@ namespace hyperbrowse::services
                 {
                     update->failedCount = (std::max)(update->failedCount, sourcePaths.size());
                     update->message = L"The Windows file operation did not complete successfully.";
-                    PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
                     return;
                 }
 
@@ -794,20 +790,25 @@ namespace hyperbrowse::services
                                                          update->succeededSourcePaths.size(),
                                                          update->failedCount,
                                                          update->aborted);
-                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
+            };
+
+            try
+            {
+                // Shell windows and the COM apartment must finish tearing down before
+                // the UI restores activation or starts the next queued operation.
+                performOperation();
             }
             catch (const std::exception&)
             {
                 update->failedCount = update->requestedCount;
                 update->message = L"The file operation failed unexpectedly.";
-                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
             }
             catch (...)
             {
                 update->failedCount = update->requestedCount;
                 update->message = L"The file operation failed unexpectedly.";
-                PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
             }
+            PostUpdate(targetWindow, std::move(update), &sharedState->shutdown);
         });
 
         if (!accepted)

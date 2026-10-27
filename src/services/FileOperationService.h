@@ -90,7 +90,8 @@ namespace hyperbrowse::services
                             std::vector<std::wstring> sourcePaths,
                             std::wstring destinationFolder = {},
                             FileConflictPolicy conflictPolicy = FileConflictPolicy::PromptShell,
-                            std::vector<std::wstring> targetLeafNames = {});
+                            std::vector<std::wstring> targetLeafNames = {},
+                            bool showShellProgress = true);
         std::size_t ActiveTaskCount() const noexcept
         {
             return executor_.ActiveTaskCount();

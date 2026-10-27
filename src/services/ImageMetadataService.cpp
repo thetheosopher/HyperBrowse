@@ -1880,10 +1880,15 @@ namespace hyperbrowse::services
 
     std::wstring FormatImageInfoContent(const browser::BrowserItem& item)
     {
+        return FormatImageInfoContent(item, item.filePath);
+    }
+
+    std::wstring FormatImageInfoContent(const browser::BrowserItem& item, std::wstring_view displayPath)
+    {
         std::wstring content;
         content.reserve(512);
         content.append(L"Path: ");
-        content.append(item.filePath);
+        content.append(displayPath);
         content.append(L"\r\nType: ");
         content.append(item.fileType);
         content.append(L"\r\nSize: ");

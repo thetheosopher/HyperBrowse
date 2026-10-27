@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.6.0-2EA043)
+![Version](https://img.shields.io/badge/Version-2.7.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -24,7 +24,7 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
 - WIC decode for JPEG, PNG, GIF, TIFF, WebP, HEIC, and JPEG XL, with HEIC/JPEG XL dependent on compatible Windows codecs; LibRaw-based RAW support and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, filename/rating/tag/type filtering, named saved searches, thumbnail ratings, and multi-selection workflows.
-- Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, 2-4 image N-up comparison with synchronized zoom and pan, scalable info overlays, current-folder slideshow launch, full metadata pane, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
+- Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, 2-4 image N-up comparison with synchronized zoom and pan, configurable file-information, image-status, full-metadata, and RGB-histogram overlays, current-folder slideshow launch, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
 - Quick Actions with saved destinations, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy for the currently displayed image or selected browser files.
 - Persistent thumbnail cache statistics, deterministic per-shard inspection, asynchronous compact/purge maintenance, bounded migration, one low-priority worker for persistent I/O, and safer remembered window/folder restore on startup.
@@ -39,6 +39,15 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 - A Windows CI workflow defines Debug/Release, CTest, benchmark, and release-package validation; it is currently manually disabled. Local release checks are documented in [docs/testing.md](docs/testing.md).
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
+
+## What's New In 2.7.0
+
+This release adds configurable viewer overlays and improves large-folder responsiveness, file-operation focus handling, and high-contrast presentation.
+
+- Configure File information, Image status, Full metadata, and RGB histogram panes independently for windowed and full-screen viewing. Choose corners, stack order, importance, and text size; panes that do not fit return automatically when space is available. The RGB histogram is computed asynchronously and follows the focused image in compare mode.
+- The folder tree follows Windows Explorer's hidden-folder and protected-system-folder settings. Expanding folders with many children now fills the tree incrementally and refines shell labels and icons after insertion.
+- Viewer-originated file operations retain the correct viewer focus, suppress shell progress windows that could steal activation, and report completion after shell/COM teardown. Quick Actions cross-process lock waits are bounded to avoid indefinite UI stalls.
+- Improved Windows high-contrast colors for viewer menus and About-dialog links.
 
 ## What's New In 2.6.0
 
@@ -118,7 +127,7 @@ This release expands HyperBrowse's image-review and desktop file-management work
 | Area | Included today |
 | --- | --- |
 | Browser | Explorer-style folder tree, resizable splitter, root-aware clickable breadcrumb with long-path overflow, thumbnail mode, details mode, recursive browsing, live filename/rating/tag/type filter, named saved searches, thumbnail detail toggle with inline star ratings, selected-item info strip, remembered window/folder restore, back-folder history, and folder context workflows for create/rename/delete plus favorite-aware move destinations, in-tree folder drag-drop move, image drag-drop into tree folders, and drag-out to shell-aware apps |
-| Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, 2-4 image N-up compare with synchronized zoom and pan, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, image-information overlays with size presets, muted idle-state watermark, full metadata pane, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
+| Viewer | Separate viewer windows within one HyperBrowse instance, normal Open reuse, explicit Open in New Viewer Window, full-screen open, 2-4 image N-up compare with synchronized zoom and pan, zoom, pan, fit-to-window, 100% view, rotate, edge-hover/click previous-next navigation, configurable file-information, image-status, full-metadata, and RGB-histogram overlays, muted idle-state watermark, slideshow with current-folder launch from the active image, transition styles, and multi-monitor open |
 | Formats | JPEG, PNG, GIF, TIFF, and WebP via WIC; HEIC and JPEG XL via compatible installed WIC codecs with readiness/outcome diagnostics; RAW support for ARW, CR2, CR3, DNG, NEF, NRW, RAF, and RW2 via LibRaw |
 | File workflows | Open, reveal in Explorer, open containing folder, copy path, copy/move/delete, batch rename, multi-file Properties, tags and ratings, EXIF-only JPEG orientation adjustment, and batch convert to JPEG/PNG/TIFF |
 | Performance pipeline | Prioritized thumbnail scheduling, profile-scaled browser/viewer lookahead, memory-bounded thumbnail cache, worker-owned persistent disk thumbnail cache with stats/compact/purge and benchmark gates, metadata cache, folder watch refresh, optional GPU-assisted JPEG decode, and an off-by-default performance HUD (`Ctrl+Shift+P`) |
@@ -225,6 +234,29 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `F11` / `Ctrl+Enter` | Toggle full-screen mode |
 | `Del` / `Shift+Del` | Move the displayed file to the Recycle Bin / delete it permanently |
 
+### Configurable viewer overlays
+
+Choose **Configure overlays...** in the viewer context menu or under **Settings > Viewer** to configure four independent panes:
+
+| Pane | Contents | Default position | Default importance |
+| --- | --- | --- | --- |
+| File information | Filename, folder position, format, file size | Top left | High |
+| Image status | Dimensions, zoom percentage, fit mode | Bottom right | High |
+| Full metadata | Separate Name and folder-only Path fields, followed by available image metadata | Top right | Low |
+| Histogram | 256-bin decoded-image RGB distribution | Bottom left | Normal |
+
+Each pane has separate visibility for windowed and full-screen modes. Position, stack order, and importance are shared between modes. Histogram starts disabled; existing overlay, metadata, and text-size preferences are preserved.
+
+Visible panes in each corner stack share the widest pane's width while keeping their individual heights. Other corners are sized independently. The histogram has no caption or reserved title row; loading and error messages are still shown when needed.
+
+**OK** saves pending changes and closes the dialog. **Apply** saves without closing and is disabled when there are no pending changes. **Cancel**, Esc, or the window close button discard only changes made since the last Apply; settings already applied remain saved.
+
+Panes assigned to the same corner stack inward: downward from a top corner and upward from a bottom corner. Move a pane toward or away from its corner to change its stack order. Importance is separate from order: Low panes yield space before Normal panes, and High panes yield last. At equal importance, File information is retained first, then Image status, Histogram, and Full metadata. When a window is too small, panes can be temporarily hidden to fit; enlarging the window restores them without changing their saved visibility or position. The configuration preview highlights the selected pane and uses numbered markers matching its status legend, including panes hidden to fit.
+
+`Tab` and gamepad Y remain the master overlay switch. Hiding overlays does not change individual pane preferences. Long single-line labels use ellipses rather than cutting off text. Long metadata is bounded to the available space; use `Ctrl+I` for the complete image information.
+
+The histogram is computed in the background from the decoded image, before monitor-specific display conversion, rather than from the visible crop or a small browser thumbnail. Zooming, panning, and rotation do not change its counts. For RAW files it describes the decoded/rendered image or preview, not raw sensor exposure. In comparison mode, the configurable panes follow the focused image.
+
 ## Architecture Overview
 
 HyperBrowse is organized as a native desktop app with a shared core library and a small helper toolchain around it:
@@ -327,13 +359,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.6.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.7.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.6.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.7.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -403,11 +435,17 @@ For the current backlog in detail, start with [specs/FUTURE-ROADMAP.md](specs/FU
 
 ## Version
 
-Current release: **2.6.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.6.0-portable-win64.zip` and `HyperBrowse-2.6.0-installer.exe`).
+Current release: **2.7.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.7.0-portable-win64.zip` and `HyperBrowse-2.7.0-installer.exe`).
 
 Release **2.0.0** expanded HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It added richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.7.0
+
+- Added configurable viewer overlays for file information, image status, full metadata, and an asynchronously computed RGB histogram.
+- Added Explorer-aligned hidden-folder filtering and progressive population for large folder-tree branches.
+- Fixed viewer file-operation focus and shell-progress behavior, bounded Quick Actions lock waits, and improved high-contrast menu/About colors.
 
 ### 2.6.0
 

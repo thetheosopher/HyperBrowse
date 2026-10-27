@@ -33,7 +33,8 @@ namespace
                                           const hyperbrowse::services::ImageMetadata* metadata,
                                           const std::wstring& errorMessage)
     {
-        std::wstring text = hyperbrowse::services::FormatImageInfoContent(item);
+        std::wstring text = hyperbrowse::services::FormatImageInfoContent(
+            item, std::filesystem::path(item.filePath).parent_path().wstring());
         text.append(L"\r\n\r\n");
 
         if (metadata)
@@ -247,6 +248,9 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::PrepareForImageChange(bool keepDisplayedImage)
     {
+        DrainHistogramResults(hwnd_);
+        histogram_ = {};
+        histogramLoading_ = true;
         errorMessage_.clear();
         loading_ = true;
         preserveDisplayedImageWhileLoading_ = keepDisplayedImage && currentImage_;
@@ -310,10 +314,7 @@ namespace hyperbrowse::viewer
         currentImage_ = currentSlot_.image;
         ClearCurrentMetadata();
         RefreshWindowFitForCurrentImage();
-        if (fullMetadataVisible_)
-        {
-            LoadMetadataAsyncForIndex(index);
-        }
+        RefreshOverlayContent();
     }
 
     void ViewerWindow::ClearCurrentMetadata(bool invalidateRequest)
@@ -511,6 +512,7 @@ namespace hyperbrowse::viewer
                 loading_ = false;
                 pendingLoadActive_ = false;
                 errorMessage_ = L"Image loading is unavailable.";
+                RefreshOverlayContent();
                 if (hwnd_)
                 {
                     RequestRepaint();
@@ -622,6 +624,7 @@ namespace hyperbrowse::viewer
                 loading_ = false;
                 errorMessage_.clear();
                 currentImage_ = currentSlot_.image;
+                RefreshOverlayContent();
                 BeginTransitionFromPending();
                 const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
                 ScheduleAdjacentPrefetch(navigationGeneration);
@@ -651,6 +654,7 @@ namespace hyperbrowse::viewer
                 loading_ = false;
                 errorMessage_.clear();
                 currentImage_ = currentSlot_.image;
+                RefreshOverlayContent();
                 BeginTransitionFromPending();
                 const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
                 ScheduleAdjacentPrefetch(navigationGeneration);
@@ -981,6 +985,7 @@ namespace hyperbrowse::viewer
             loading_ = false;
             errorMessage_.clear();
             currentImage_ = currentSlot_.image;
+            RefreshOverlayContent();
             slideshowAdvancePending_ = false;
             const std::uint64_t navigationGeneration = asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
             BeginTransitionFromPending();
@@ -1116,6 +1121,15 @@ namespace hyperbrowse::viewer
 
         const bool deferredSwap = preserveDisplayedImageWhileLoading_;
         preserveDisplayedImageWhileLoading_ = false;
+        if (deferredSwap && !update->image && currentImage_)
+        {
+            loading_ = false;
+            errorMessage_ = update->errorMessage.empty() ? L"Unable to load the requested image." : std::move(update->errorMessage);
+            RefreshOverlayContent();
+            ShowNavigationMessage(errorMessage_);
+            if (hwnd_) RequestRepaint();
+            return 0;
+        }
         if (deferredSwap)
         {
             ResetViewState(zoomMode_ == ZoomMode::FitHeight || zoomMode_ == ZoomMode::FitWidth);
@@ -1126,6 +1140,7 @@ namespace hyperbrowse::viewer
         SetCurrentImageSlot(update->index, std::move(update->image), false);
         errorMessage_ = std::move(update->errorMessage);
         loading_ = false;
+        RefreshOverlayContent();
         if (currentImage_)
         {
             ViewerFullImageCache().Insert(

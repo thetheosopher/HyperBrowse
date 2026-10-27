@@ -156,12 +156,14 @@ namespace hyperbrowse::viewer
                 MF_STRING,
                 kContextMenuToggleInfoOverlays,
             infoOverlaysVisible_ ? L"Hide &Overlays\tTab" : L"Show &Overlays\tTab");
-        AppendMenuW(menu,
-            MF_STRING
-                | (fullMetadataVisible_ ? MF_CHECKED : MF_UNCHECKED)
-                | (infoOverlaysVisible_ ? MF_ENABLED : MF_DISABLED),
-                kContextMenuToggleFullMetadata,
-                L"Show &Full Metadata");
+        for (std::size_t i = 0; i < kOverlayPaneCount; ++i)
+        {
+            const auto& pane = overlaySettings_.panes[i];
+            const bool enabled = fullScreen_ ? pane.fullScreenEnabled : pane.windowedEnabled;
+            AppendMenuW(menu, MF_STRING | (enabled ? MF_CHECKED : MF_UNCHECKED),
+                kContextMenuTogglePaneBase + i, OverlayPaneName(static_cast<OverlayPane>(i)));
+        }
+        AppendMenuW(menu, MF_STRING, kContextMenuConfigureOverlays, L"Configure overlays...");
         if (HasCompareSession())
         {
             AppendMenuW(menu,
@@ -453,6 +455,19 @@ namespace hyperbrowse::viewer
         {
             return;
         }
+        if (commandId >= kContextMenuTogglePaneBase && commandId < kContextMenuTogglePaneBase + kOverlayPaneCount)
+        {
+            auto settings = overlaySettings_;
+            auto& pane = settings.panes[commandId - kContextMenuTogglePaneBase];
+            auto& enabled = fullScreen_ ? pane.fullScreenEnabled : pane.windowedEnabled;
+            enabled = !enabled;
+            auto persisted = DefaultOverlaySettings();
+            auto& savedPane = persisted.panes[commandId - kContextMenuTogglePaneBase];
+            (fullScreen_ ? savedPane.fullScreenEnabled : savedPane.windowedEnabled) = enabled;
+            if (SetDefaultOverlaySettings(persisted)) SetOverlaySettings(settings);
+            else MessageBoxW(hwnd_, L"Unable to save overlay settings.", L"Viewer overlays", MB_OK | MB_ICONERROR);
+            return;
+        }
 
         switch (commandId)
         {
@@ -493,6 +508,7 @@ namespace hyperbrowse::viewer
             return;
         }
         case kContextMenuCopyImage:
+        case kContextMenuConfigureOverlays:
         case kContextMenuImageInformation:
         case kContextMenuProperties:
         case kContextMenuSetWallpaper:

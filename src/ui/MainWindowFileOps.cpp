@@ -676,7 +676,8 @@ namespace hyperbrowse::ui
             std::move(sourcePaths),
             std::move(destinationFolder),
             conflictPolicy,
-            std::move(targetLeafNames));
+            std::move(targetLeafNames),
+            !viewerOperationOrigin);
         UpdateTaskbarProgress(0, 1); // show the bar immediately (0%) until ticks arrive
         UpdateStatusText();
         UpdateMenuState();
@@ -1902,9 +1903,7 @@ namespace hyperbrowse::ui
             && activationRestoreWindow != hwnd_
             && IsWindow(activationRestoreWindow) != FALSE
             && IsWindowVisible(activationRestoreWindow) != FALSE
-            && viewerWindow_
-            && viewerWindow_->IsOpen()
-            && viewerWindow_->Hwnd() == activationRestoreWindow
+            && FindViewerByHwnd(activationRestoreWindow)
             && GetForegroundWindow() != activationRestoreWindow)
         {
             util::LogInfo(L"ApplyCompletedFileOperation restoring viewer activation");
@@ -1958,7 +1957,8 @@ namespace hyperbrowse::ui
                 std::move(sourcePaths),
                 {},
                 services::FileConflictPolicy::PromptShell,
-                {});
+                {},
+                nextViewer ? nextViewer->Hwnd() : nullptr);
         }
     }
 }

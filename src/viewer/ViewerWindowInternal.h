@@ -80,6 +80,26 @@ namespace viewer_window_shared
         float metadataGap;
     };
 
+    inline D2D1_RECT_F ViewerOverlayTextRect(const RECT& panel,
+                                           const ViewerOverlayMetrics& metrics,
+                                           hyperbrowse::viewer::OverlayPane pane)
+    {
+        float paddingX = metrics.metadataPanelPadding;
+        float paddingY = metrics.metadataPanelPadding;
+        if (pane == hyperbrowse::viewer::OverlayPane::FileInformation)
+        {
+            paddingX = metrics.topPanelPaddingX;
+            paddingY = metrics.topPanelPaddingY;
+        }
+        else if (pane == hyperbrowse::viewer::OverlayPane::ImageStatus)
+        {
+            paddingX = metrics.bottomPanelPaddingX;
+            paddingY = metrics.bottomPanelPaddingY;
+        }
+        return D2D1::RectF(panel.left + paddingX, panel.top + paddingY,
+                          panel.right - paddingX, panel.bottom - paddingY);
+    }
+
     inline std::wstring FormatWindowHandle(HWND hwnd)
     {
         return std::to_wstring(reinterpret_cast<std::uintptr_t>(hwnd));
@@ -300,7 +320,7 @@ namespace viewer_window_shared
             16.0f,
             34.0f,
             32.0f,
-            30.0f,
+            32.0f,
             28.0f,
             48.0f,
             46.0f,
@@ -321,10 +341,9 @@ namespace viewer_window_shared
         }
     }
 
-    inline ViewerOverlayMetrics ViewerOverlayMetricsForWindow(HWND hwnd, InfoOverlayTextSize size)
+    inline ViewerOverlayMetrics ViewerOverlayMetricsForDpi(UINT dpi, InfoOverlayTextSize size)
     {
         ViewerOverlayMetrics metrics = ViewerOverlayMetricsForTextSize(size);
-        const UINT dpi = hwnd ? GetDpiForWindow(hwnd) : 96;
         const float scale = (static_cast<float>(dpi == 0 ? 96 : dpi) / 96.0f) * kViewerOverlayScale;
         metrics.nameFontSize *= scale;
         metrics.infoFontSize *= scale;
@@ -343,8 +362,12 @@ namespace viewer_window_shared
         metrics.loadingGap *= scale;
         metrics.metadataPanelPadding *= scale;
         metrics.metadataGap *= scale;
-        metrics.overlayWidthScale *= kViewerOverlayScale;
+        metrics.overlayWidthScale *= scale;
         return metrics;
+    }
+    inline ViewerOverlayMetrics ViewerOverlayMetricsForWindow(HWND hwnd, InfoOverlayTextSize size)
+    {
+        return ViewerOverlayMetricsForDpi(hwnd ? GetDpiForWindow(hwnd) : 96, size);
     }
 }
 

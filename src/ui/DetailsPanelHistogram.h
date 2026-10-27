@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 
 namespace hyperbrowse::ui
 {
@@ -22,6 +23,9 @@ namespace hyperbrowse::ui
             bool visible{};
         };
 
-        static bool Compute(HBITMAP bitmap, Result* result);
+        using Cancelled = std::function<bool()>;
+        static bool Compute(HBITMAP bitmap, Result* result, const Cancelled& cancelled = {});
+        static bool ComputePixels(const unsigned char* bgra, int width, int height,
+                                  std::size_t stride, Result* result, const Cancelled& cancelled = {});
     };
 }

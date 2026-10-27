@@ -601,7 +601,9 @@ namespace hyperbrowse::viewer
                          monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top,
                          SWP_FRAMECHANGED | SWP_SHOWWINDOW);
             fullScreen_ = true;
-            ApplyFullMetadataVisible(LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerFullScreenFullMetadataVisible));
+            auto settings = overlaySettings_;
+            settings.panes[static_cast<std::size_t>(OverlayPane::FullMetadata)].fullScreenEnabled = DefaultFullScreenFullMetadataVisible();
+            SetOverlaySettings(settings);
             FitToWindow();
             return;
         }
@@ -617,7 +619,9 @@ namespace hyperbrowse::viewer
         SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         fullScreen_ = false;
-        ApplyFullMetadataVisible(LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible));
+        auto settings = overlaySettings_;
+        settings.panes[static_cast<std::size_t>(OverlayPane::FullMetadata)].windowedEnabled = DefaultWindowedFullMetadataVisible();
+        SetOverlaySettings(settings);
         hasWindowedStateToRestore_ = true;
         windowFitMode_ = WindowFitMode::Regular;
         hasRegularPlacementBeforeFit_ = false;

@@ -1,4 +1,5 @@
 #include "viewer/ViewerWindowInternal.h"
+#include "ui/DetailsPanelHistogramPainter.h"
 
 namespace
 {
@@ -81,22 +82,19 @@ namespace hyperbrowse::viewer
         const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
         d2dNameFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.nameFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         d2dInfoFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.infoFontSize, DWRITE_FONT_WEIGHT_NORMAL);
-    d2dBottomInfoFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.bottomInfoFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    d2dMetadataFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.metadataFontSize, DWRITE_FONT_WEIGHT_NORMAL);
+        d2dBottomInfoFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.bottomInfoFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        d2dMetadataFormat_ = renderer.CreateTextFormat(L"Segoe UI", overlayMetrics.metadataFontSize, DWRITE_FONT_WEIGHT_NORMAL);
 
-        const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
         if (d2dNameFormat_)
         {
             d2dNameFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             d2dNameFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            d2dNameFormat_->SetTrimming(&trimming, nullptr);
         }
 
         if (d2dInfoFormat_)
         {
             d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             d2dInfoFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            d2dInfoFormat_->SetTrimming(&trimming, nullptr);
             d2dInfoFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         }
 
@@ -104,7 +102,6 @@ namespace hyperbrowse::viewer
         {
             d2dBottomInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             d2dBottomInfoFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            d2dBottomInfoFormat_->SetTrimming(&trimming, nullptr);
             d2dBottomInfoFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         }
 
@@ -112,8 +109,19 @@ namespace hyperbrowse::viewer
         {
             d2dMetadataFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             d2dMetadataFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-            d2dMetadataFormat_->SetTrimming(&trimming, nullptr);
             d2dMetadataFormat_->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+        }
+
+        const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+        for (auto* format : {d2dNameFormat_.Get(), d2dInfoFormat_.Get(),
+                             d2dBottomInfoFormat_.Get(), d2dMetadataFormat_.Get()})
+        {
+            if (!format) continue;
+            Microsoft::WRL::ComPtr<IDWriteInlineObject> ellipsis;
+            HRESULT result = renderer.DWriteFactory()->CreateEllipsisTrimmingSign(format, ellipsis.GetAddressOf());
+            if (SUCCEEDED(result)) result = format->SetTrimming(&trimming, ellipsis.Get());
+            if (FAILED(result))
+                util::LogError(L"Unable to initialize viewer overlay text trimming: " + std::to_wstring(result));
         }
     }
 
@@ -183,41 +191,19 @@ namespace hyperbrowse::viewer
 
     RECT ViewerWindow::InfoOverlayTopPanelRect() const noexcept
     {
-        RECT clientRect{};
-        if (!hwnd_ || GetClientRect(hwnd_, &clientRect) == FALSE)
-        {
-            return {};
-        }
-
-        const float clientWidth = static_cast<float>(clientRect.right - clientRect.left);
-        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
-        const bool fullMetadataShown = fullMetadataVisible_ && infoOverlaysVisible_;
-        const bool compareLayout = compareMode_ && ActiveCompareIndex() >= 0;
-        const float availablePanelWidth = fullMetadataShown
-            ? std::max(120.0f, (clientWidth * (2.0f / 3.0f)) - 32.0f)
-            : std::max(120.0f, clientWidth - 32.0f);
-        const float topPanelWidth = std::min((compareLayout ? 760.0f : 560.0f) * overlayMetrics.overlayWidthScale,
-                                             availablePanelWidth);
-        const float topPanelHeight = (overlayMetrics.topPanelPaddingY * 2.0f)
-            + overlayMetrics.topNameHeight
-            + overlayMetrics.topInfoHeight;
-
-        return RECT{
-            16,
-            16,
-            16 + static_cast<LONG>(std::lround(topPanelWidth)),
-            16 + static_cast<LONG>(std::lround(topPanelHeight)),
-        };
+        const auto layout = CurrentOverlayLayout();
+        const auto& placement = layout[static_cast<std::size_t>(OverlayPane::FileInformation)];
+        return placement.visibility == OverlayVisibility::Shown ? placement.rect : RECT{};
     }
 
     void ViewerWindow::DrawInfoOverlays(ID2D1RenderTarget* renderTarget,
-                                        float clientWidth,
-                                        float clientHeight,
+                                        float,
+                                        float,
                                         int rotatedWidth,
                                         int rotatedHeight,
                                         int zoomPercent,
-                                        const cache::CachedThumbnail* compareImage,
-                                        CompareDirection activeCompareDirection,
+                                        const cache::CachedThumbnail*,
+                                        CompareDirection,
                                         bool topOnly) const
     {
         if (!renderTarget || !infoOverlaysVisible_)
@@ -225,122 +211,53 @@ namespace hyperbrowse::viewer
             return;
         }
 
-        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
-        const int compareIndex = compareMode_ ? CompareIndexForDirection(activeCompareDirection) : -1;
-        const browser::BrowserItem* currentItem =
-            (currentIndex_ >= 0 && currentIndex_ < static_cast<int>(items_.size()))
-            ? &items_[static_cast<std::size_t>(currentIndex_)]
-            : nullptr;
-        const browser::BrowserItem* compareItem =
-            (compareIndex >= 0 && compareIndex < static_cast<int>(items_.size()))
-            ? &items_[static_cast<std::size_t>(compareIndex)]
-            : nullptr;
-        const bool compareLayout = compareMode_ && compareItem != nullptr;
-
-        std::wstring fileName = currentItem ? currentItem->fileName : std::wstring(L"Image");
-        if (compareLayout)
+        const auto layout = CurrentOverlayLayout();
+        const auto metrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
+        for (std::size_t i = 0; i < kOverlayPaneCount; ++i)
         {
-            fileName.append(L"  <->  ");
-            fileName.append(compareItem->fileName);
-        }
-
-        std::wstring topLine = std::to_wstring(currentIndex_ + 1) + L" / "
-            + std::to_wstring(static_cast<int>(items_.size()));
-        if (currentItem)
-        {
-            topLine.append(L"  |  ");
-            topLine.append(currentItem->fileType);
-            topLine.append(L"  |  ");
-            topLine.append(browser::FormatByteSize(currentItem->fileSizeBytes));
-        }
-        if (compareLayout)
-        {
-            topLine.append(L"  |  Compare ");
-            topLine.append(activeCompareDirection == CompareDirection::Next ? L"next" : L"previous");
-        }
-
-        const RECT topPanelRect = InfoOverlayTopPanelRect();
-        const bool fullMetadataShown = fullMetadataVisible_ && infoOverlaysVisible_;
-        const float availablePanelWidth = fullMetadataShown
-            ? std::max(120.0f, (clientWidth * (2.0f / 3.0f)) - 32.0f)
-            : std::max(120.0f, clientWidth - 32.0f);
-        const float bottomPanelWidth = std::min((compareLayout ? 640.0f : 380.0f) * overlayMetrics.overlayWidthScale,
-                                                availablePanelWidth);
-        const float bottomPanelHeight = (overlayMetrics.bottomPanelPaddingY * 2.0f)
-            + overlayMetrics.bottomInfoHeight;
-        const float bottomPanelLeft = clientWidth - 16.0f - bottomPanelWidth;
-        const float bottomPanelTop = clientHeight - 16.0f - bottomPanelHeight;
-        const D2D1_RECT_F topPanel = D2D1::RectF(
-            static_cast<float>(topPanelRect.left),
-            static_cast<float>(topPanelRect.top),
-            static_cast<float>(topPanelRect.right),
-            static_cast<float>(topPanelRect.bottom));
-        const D2D1_RECT_F bottomPanel = D2D1::RectF(bottomPanelLeft,
-                                                   bottomPanelTop,
-                                                   bottomPanelLeft + bottomPanelWidth,
-                                                   bottomPanelTop + bottomPanelHeight);
-
-        const D2D1_ROUNDED_RECT roundedTop = D2D1::RoundedRect(topPanel, 8.0f, 8.0f);
-        if (d2dPanelFillBrush_) renderTarget->FillRoundedRectangle(roundedTop, d2dPanelFillBrush_.Get());
-        if (d2dPanelBorderBrush_) renderTarget->DrawRoundedRectangle(roundedTop, d2dPanelBorderBrush_.Get(), 1.0f);
-
-        const D2D1_RECT_F nameRect = D2D1::RectF(topPanel.left + overlayMetrics.topPanelPaddingX,
-                                                topPanel.top + overlayMetrics.topPanelPaddingY,
-                                                topPanel.right - overlayMetrics.topPanelPaddingX,
-                                                topPanel.top + overlayMetrics.topPanelPaddingY + overlayMetrics.topNameHeight);
-        const D2D1_RECT_F topInfoRect = D2D1::RectF(topPanel.left + overlayMetrics.topPanelPaddingX,
-                                                   nameRect.bottom,
-                                                   topPanel.right - overlayMetrics.topPanelPaddingX,
-                                                   nameRect.bottom + overlayMetrics.topInfoHeight);
-
-        if (d2dNameFormat_ && d2dTextBrush_)
-        {
-            d2dNameFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            renderTarget->DrawText(fileName.c_str(), static_cast<UINT32>(fileName.size()),
-                                   d2dNameFormat_.Get(), nameRect, d2dTextBrush_.Get());
-        }
-        if (d2dInfoFormat_ && d2dMutedTextBrush_)
-        {
-            d2dInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            renderTarget->DrawText(topLine.c_str(), static_cast<UINT32>(topLine.size()),
-                                   d2dInfoFormat_.Get(), topInfoRect, d2dMutedTextBrush_.Get());
-        }
-
-        if (topOnly)
-        {
-            return;
-        }
-
-        const D2D1_ROUNDED_RECT roundedBottom = D2D1::RoundedRect(bottomPanel, 8.0f, 8.0f);
-        if (d2dPanelFillBrush_) renderTarget->FillRoundedRectangle(roundedBottom, d2dPanelFillBrush_.Get());
-        if (d2dPanelBorderBrush_) renderTarget->DrawRoundedRectangle(roundedBottom, d2dPanelBorderBrush_.Get(), 1.0f);
-
-        std::wstring bottomLine = std::to_wstring(rotatedWidth) + L" x " + std::to_wstring(rotatedHeight);
-        bottomLine.append(L"  |  ");
-        bottomLine.append(std::to_wstring(zoomPercent));
-        bottomLine.append(L"%");
-        bottomLine.append(L"  |  ");
-        bottomLine.append(zoomMode_ == ZoomMode::Fit
-            ? L"Fit"
-            : (zoomMode_ == ZoomMode::FitHeight
-                ? L"Fit Height"
-                : (zoomMode_ == ZoomMode::FitWidth ? L"Fit Width" : L"Custom")));
-        if (compareLayout)
-        {
-            bottomLine.append(compareImage
-                ? L"  |  Shift+Left/Right change pair  |  C toggle  |  X swap"
-                : L"  |  Loading compare image...");
-        }
-
-        const D2D1_RECT_F bottomInfoRect = D2D1::RectF(bottomPanel.left + overlayMetrics.bottomPanelPaddingX,
-                                                       bottomPanel.top + overlayMetrics.bottomPanelPaddingY,
-                                                       bottomPanel.right - overlayMetrics.bottomPanelPaddingX,
-                                                       bottomPanel.top + overlayMetrics.bottomPanelPaddingY + overlayMetrics.bottomInfoHeight);
-        if (d2dBottomInfoFormat_ && d2dTextBrush_)
-        {
-            d2dBottomInfoFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            renderTarget->DrawText(bottomLine.c_str(), static_cast<UINT32>(bottomLine.size()),
-                                   d2dBottomInfoFormat_.Get(), bottomInfoRect, d2dTextBrush_.Get());
+            const auto pane = static_cast<OverlayPane>(i);
+            if (layout[i].visibility != OverlayVisibility::Shown
+                || (topOnly && pane != OverlayPane::FileInformation)) continue;
+            const auto panel = render::ToD2DRect(layout[i].rect);
+            const auto rounded = D2D1::RoundedRect(panel, 8, 8);
+            if (d2dPanelFillBrush_) renderTarget->FillRoundedRectangle(rounded, d2dPanelFillBrush_.Get());
+            if (d2dPanelBorderBrush_) renderTarget->DrawRoundedRectangle(rounded, d2dPanelBorderBrush_.Get());
+            const auto textRect = ViewerOverlayTextRect(layout[i].rect, metrics, pane);
+            auto text = OverlayPaneText(pane, rotatedWidth, rotatedHeight, zoomPercent);
+            const auto drawText = [&](std::wstring_view value, IDWriteTextFormat* format, const D2D1_RECT_F& bounds)
+            {
+                if (!format || !d2dTextBrush_) return;
+                format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+                renderTarget->DrawText(value.data(), static_cast<UINT32>(value.size()), format, bounds,
+                    d2dTextBrush_.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            };
+            if (pane == OverlayPane::FileInformation || pane == OverlayPane::FullMetadata)
+            {
+                const auto split = text.find(L'\n');
+                auto titleRect = textRect;
+                titleRect.bottom = (std::min)(titleRect.bottom, titleRect.top + metrics.topNameHeight);
+                drawText(std::wstring_view(text).substr(0, split), d2dNameFormat_.Get(), titleRect);
+                if (split != std::wstring::npos)
+                {
+                    auto bodyRect = textRect;
+                    bodyRect.top = titleRect.bottom;
+                    drawText(std::wstring_view(text).substr(split + 1),
+                        pane == OverlayPane::FullMetadata ? d2dMetadataFormat_.Get() : d2dInfoFormat_.Get(), bodyRect);
+                }
+            }
+            else drawText(text, pane == OverlayPane::Histogram ? d2dInfoFormat_.Get() : d2dBottomInfoFormat_.Get(), textRect);
+            if (pane == OverlayPane::Histogram && histogram_.visible)
+            {
+                ui::DetailsPanelHistogramPainter::State state;
+                state.rect = {static_cast<LONG>(textRect.left), static_cast<LONG>(textRect.top),
+                    static_cast<LONG>(textRect.right), static_cast<LONG>(textRect.bottom)};
+                state.red = histogram_.red; state.green = histogram_.green; state.blue = histogram_.blue;
+                state.peak = histogram_.peak; state.visible = true;
+                ui::DetailsPanelHistogramPainter::PaintD2D(renderTarget, state,
+                    {PanelFillColor(darkTheme_), PanelBorderColor(darkTheme_), MutedTextColor(darkTheme_)},
+                    d2dPanelBorderBrush_.Get(), d2dMutedTextBrush_.Get(), d2dInfoFormat_.Get());
+            }
         }
     }
 

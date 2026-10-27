@@ -943,11 +943,14 @@ namespace
         RECT metadataClientRect{};
         Expect(GetClientRect(viewer.Hwnd(), &metadataClientRect) != FALSE,
             "Failed to read the viewer client area for the metadata pane test");
+        const auto metadataPlacement = viewer.CurrentOverlayLayout()[
+            static_cast<std::size_t>(hyperbrowse::viewer::OverlayPane::FullMetadata)];
         const POINT metadataSamplePoint{
-            metadataClientRect.right - 32,
-            metadataClientRect.top + 32};
+            metadataPlacement.rect.right - 16,
+            metadataPlacement.rect.top + 16};
         COLORREF metadataPixelWithOverlays{};
-        Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithOverlays),
+        Expect(metadataPlacement.visibility != hyperbrowse::viewer::OverlayVisibility::Shown
+            || ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithOverlays),
             "Failed to sample the visible metadata pane");
 
         viewer.SetInfoOverlaysVisible(true);
@@ -956,10 +959,14 @@ namespace
         Expect(viewer.AreInfoOverlaysVisible() && !viewer.IsFullMetadataVisible(),
             "Viewer did not apply the overlays-on and full-metadata-off state");
         COLORREF metadataPixelWithoutFullMetadata{};
-        Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithoutFullMetadata),
+        Expect(metadataPlacement.visibility != hyperbrowse::viewer::OverlayVisibility::Shown
+            || ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithoutFullMetadata),
             "Failed to sample the viewer with full metadata hidden");
-        Expect(metadataPixelWithoutFullMetadata != metadataPixelWithOverlays,
+        Expect(metadataPlacement.visibility != hyperbrowse::viewer::OverlayVisibility::Shown
+            || metadataPixelWithoutFullMetadata != metadataPixelWithOverlays,
             "Viewer full metadata pane remained visible when full metadata was disabled");
+        Expect(viewer.CurrentOverlayLayout()[static_cast<std::size_t>(hyperbrowse::viewer::OverlayPane::FullMetadata)].visibility
+            == hyperbrowse::viewer::OverlayVisibility::Disabled, "Disabled metadata pane retained its layout bounds");
 
         viewer.SetFullMetadataVisible(true);
         PumpMessagesFor(100);
@@ -1041,9 +1048,11 @@ namespace
         PumpMessagesFor(100);
         Expect(!viewer.AreInfoOverlaysVisible(), "Viewer Tab key did not hide the info overlays");
         COLORREF metadataPixelWithoutOverlays{};
-        Expect(ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithoutOverlays),
+        Expect(metadataPlacement.visibility != hyperbrowse::viewer::OverlayVisibility::Shown
+            || ReadClientPixel(viewer.Hwnd(), metadataSamplePoint, &metadataPixelWithoutOverlays),
             "Failed to sample the metadata pane with info overlays hidden");
-        Expect(metadataPixelWithoutOverlays != metadataPixelWithOverlays,
+        Expect(metadataPlacement.visibility != hyperbrowse::viewer::OverlayVisibility::Shown
+            || metadataPixelWithoutOverlays != metadataPixelWithOverlays,
             "Viewer full metadata pane remained visible when info overlays were hidden");
 
         RECT secondImageClientRect{};

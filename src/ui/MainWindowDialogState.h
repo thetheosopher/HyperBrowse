@@ -90,6 +90,7 @@ namespace hyperbrowse::ui::dialog_detail
         PersistentCacheCapacity,
         PersistentCacheCapacityAutomatic,
         TrimPersistentCache,
+        ConfigureOverlays,
         Count,
     };
 
@@ -379,6 +380,7 @@ namespace hyperbrowse::ui::dialog_detail
         std::wstring quickSendShortcutOrder;
         std::function<void(const ConsolidatedSettingsDialogState&)> apply;
         std::function<void()> trimPersistentCache;
+        std::function<void(ConsolidatedSettingsDialogState&)> configureOverlays;
         bool accepted{};
         bool done{};
     };

@@ -206,6 +206,7 @@ namespace
         case ConsolidatedSettingsControl::PersistentCacheCapacity: return L'P';
         case ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic: return L'F';
         case ConsolidatedSettingsControl::TrimPersistentCache: return L'T';
+        case ConsolidatedSettingsControl::ConfigureOverlays: return L'C';
         default: return 0;
         }
     }
@@ -246,7 +247,8 @@ namespace
 
     bool ExperimentalSettingsControlIsAction(ConsolidatedSettingsControl control)
     {
-        return control == ConsolidatedSettingsControl::TrimPersistentCache;
+        return control == ConsolidatedSettingsControl::TrimPersistentCache
+            || control == ConsolidatedSettingsControl::ConfigureOverlays;
     }
 
     std::wstring ExperimentalSettingsChoiceValue(const ConsolidatedSettingsDialogState& settings,
@@ -676,6 +678,14 @@ namespace
         auto& settings = *state.settings;
         if (ExperimentalSettingsControlIsAction(control))
         {
+            if (control == ConsolidatedSettingsControl::ConfigureOverlays)
+            {
+                settings.dialogWindow = state.dialogWindow;
+                if (settings.configureOverlays) settings.configureOverlays(settings);
+                if (const HWND choice = state.nativeControls[static_cast<std::size_t>(ConsolidatedSettingsControl::OverlayTextSize)])
+                    SendMessageW(choice, CB_SETCURSEL, static_cast<int>(settings.overlayTextSize), 0);
+                return;
+            }
             if (settings.trimPersistentCache)
             {
                 settings.trimPersistentCache();
@@ -890,6 +900,7 @@ namespace
                 ConsolidatedSettingsControl::WindowedFullMetadata,
                 ConsolidatedSettingsControl::FullScreenFullMetadata,
                 ConsolidatedSettingsControl::OverlayTextSize,
+                ConsolidatedSettingsControl::ConfigureOverlays,
                 ConsolidatedSettingsControl::EscapeKeyBehavior};
         case ConsolidatedSettingsPage::Appearance:
             return {
@@ -1827,10 +1838,11 @@ namespace
                 textBounds.right -= scale(10);
                 DrawExperimentalSettingsText(state.renderTarget.Get(),
                                              state.bodyFormat.Get(),
-                                             L"Trim persistent cache now",
+                                             control == ConsolidatedSettingsControl::ConfigureOverlays
+                                                ? L"Configure overlays..." : L"Trim persistent cache now",
                                              textBounds,
                                              enabled ? state.textBrush.Get() : state.mutedTextBrush.Get(),
-                                             L'T');
+                                             ExperimentalSettingsControlMnemonic(control));
                 if (customTargetFocused(ExperimentalSettingsFocusTargetKind::CustomControl, static_cast<int>(index)))
                 {
                     RECT focusBounds = bounds;
@@ -3050,6 +3062,7 @@ namespace hyperbrowse::ui
         case ConsolidatedSettingsControl::PersistentCacheCapacity: return L"Persistent thumbnail cache cap in megabytes";
         case ConsolidatedSettingsControl::PersistentCacheCapacityAutomatic: return L"Follow profile for persistent thumbnail cache";
         case ConsolidatedSettingsControl::TrimPersistentCache: return L"Trim persistent thumbnail cache now";
+        case ConsolidatedSettingsControl::ConfigureOverlays: return L"Configure overlays...";
         case ConsolidatedSettingsControl::QuickSendShortcutOrder: return L"Quick Actions shortcut order";
         default: return L"Setting";
         }
@@ -3340,6 +3353,22 @@ namespace hyperbrowse::ui
         state.trimPersistentCache = [this]()
         {
             StartPersistentThumbnailCacheMaintenance(false, false);
+        };
+        state.configureOverlays = [this](ConsolidatedSettingsDialogState& draft)
+        {
+            auto initial = viewer::ViewerWindow::DefaultOverlaySettings();
+            initial.masterVisible = draft.infoOverlaysVisible;
+            initial.textSize = draft.overlayTextSize;
+            auto& metadataDraft = initial.panes[static_cast<std::size_t>(viewer::OverlayPane::FullMetadata)];
+            metadataDraft.windowedEnabled = draft.windowedFullMetadataVisible;
+            metadataDraft.fullScreenEnabled = draft.fullScreenFullMetadataVisible;
+            if (!ConfigureViewerOverlays(draft.dialogWindow, &initial)) return;
+            const auto applied = viewer::ViewerWindow::DefaultOverlaySettings();
+            draft.infoOverlaysVisible = applied.masterVisible;
+            draft.overlayTextSize = applied.textSize;
+            const auto& metadata = applied.panes[static_cast<std::size_t>(viewer::OverlayPane::FullMetadata)];
+            draft.windowedFullMetadataVisible = metadata.windowedEnabled;
+            draft.fullScreenFullMetadataVisible = metadata.fullScreenEnabled;
         };
 
         state.bodyFont = CreateDialogUiFont(9, FW_NORMAL, state.appTextSize, 96);

@@ -104,6 +104,8 @@ normalized source key, while new entry and index replacements use temporary
 5. Coalesced UI updates keep large-folder enumeration from sorting, painting, or scheduling once per worker batch.
 6. `FolderTreeController` probes child-directory presence asynchronously so tree expansion indicators do not block folder navigation.
 7. `FolderWatchService` applies external changes incrementally when safe and requests a full reload for large or ambiguous event bursts.
+8. Folder-tree child lists and expandability checks share `HiddenFolderPolicy`, which reads Windows Explorer's hidden-item and protected-system settings.
+9. `FolderTreeController` inserts large child lists in bounded UI slices, then refines visible shell labels and icons without blocking the message loop.
 
 ### Viewer navigation
 
@@ -125,6 +127,17 @@ navigation state remains per window.
 ### File operations
 
 `FileOperationService` performs native shell operations asynchronously and reports completion/progress to `MainWindow`. Browser and viewer workflows share operation types, so operation origin must be tracked separately from the operation type. Completion logic must also account for folder-watch echoes, optimistic viewer state, selection/focus restoration, and shell-dialog foreground activation.
+
+Viewer delete confirmations and shell operations, including queued deletes, use
+the originating viewer as their dialog owner. Completion restores activation
+to any still-open originating viewer, not only the primary viewer; deleting the
+last image retains the existing viewer-close behavior.
+
+Viewer-originated operations suppress the native shell progress window and use
+the application's taskbar/status progress instead, so progress-window activation
+cannot displace the viewer. Shell errors and elevation prompts remain enabled.
+The worker releases shell objects and closes its COM apartment before posting
+completion, so UI activation restoration does not race shell teardown.
 
 During close, `MainWindow` first enters a close-pending state and requests
 cooperative cancellation. It keeps the HWND and shell owner alive until the
@@ -369,6 +382,14 @@ The current rendering split is intentional:
 - `D2DRenderer` centralizes factory/resource setup and fallback behavior, including WARP when hardware rendering is unavailable.
 
 When changing rendering code, preserve resource recovery on device/display loss, DPI-aware dimensions, and the distinction between content identity and list position. A numeric index alone is not a safe render-cache key across insertions, removals, or reordering.
+
+### Viewer overlays
+
+`ViewerOverlay.*` owns pane settings, persistence, layout, and fit-priority
+decisions. `ViewerOverlayDialog.*` owns configuration and its layout preview.
+`ViewerWindowOverlays.*` prepares content for the displayed or focused compare
+image and schedules RGB histogram work asynchronously; cancellation and source
+identity checks reject stale results.
 
 ### B4 display-color contract
 

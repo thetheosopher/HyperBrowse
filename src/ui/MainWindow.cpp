@@ -2013,13 +2013,19 @@ namespace hyperbrowse::ui
             WS_EX_CLIENTEDGE,
             WC_TREEVIEWW,
             L"",
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS | TVS_EDITLABELS,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP |             TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS | TVS_EDITLABELS,
             0, 0, 100, 100,
             hwnd_,
             nullptr,
             instance_,
             nullptr);
 
+                    if (treePane_)
+                    {
+                        TreeView_SetExtendedStyle(treePane_,
+                                                  TVS_EX_DOUBLEBUFFER | TVS_EX_FADEINOUTEXPANDOS,
+                                                  TVS_EX_DOUBLEBUFFER | TVS_EX_FADEINOUTEXPANDOS);
+                    }
         if (tooltipControl_ && treePane_)
         {
             TTTOOLINFOW toolInfo{};

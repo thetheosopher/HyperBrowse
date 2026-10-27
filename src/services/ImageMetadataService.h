@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -69,6 +70,7 @@ namespace hyperbrowse::services
     std::wstring ExtractImagePrompt(const ImageMetadata& metadata);
     std::wstring FormatImageMetadataReport(const browser::BrowserItem& item, const ImageMetadata& metadata);
     std::wstring FormatImageInfoContent(const browser::BrowserItem& item);
+    std::wstring FormatImageInfoContent(const browser::BrowserItem& item, std::wstring_view displayPath);
     std::wstring FormatImageInfoExpanded(const ImageMetadata& metadata);
 
     class ImageMetadataService

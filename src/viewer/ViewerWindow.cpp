@@ -65,22 +65,26 @@ namespace hyperbrowse::viewer
 
     bool ViewerWindow::DefaultWindowedFullMetadataVisible()
     {
-        return LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible);
+        return DefaultOverlaySettings().panes[static_cast<std::size_t>(OverlayPane::FullMetadata)].windowedEnabled;
     }
 
     bool ViewerWindow::DefaultFullScreenFullMetadataVisible()
     {
-        return LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerFullScreenFullMetadataVisible);
+        return DefaultOverlaySettings().panes[static_cast<std::size_t>(OverlayPane::FullMetadata)].fullScreenEnabled;
     }
 
     void ViewerWindow::SetDefaultInfoOverlaysVisible(bool visible)
     {
-        SaveViewerInfoOverlaysVisibleSetting(visible);
+        auto settings = DefaultOverlaySettings();
+        settings.masterVisible = visible;
+        SetDefaultOverlaySettings(settings);
     }
 
     void ViewerWindow::SetDefaultOverlayTextSize(InfoOverlayTextSize size)
     {
-        SaveViewerInfoOverlayTextSizeSetting(size);
+        auto settings = DefaultOverlaySettings();
+        settings.textSize = size;
+        SetDefaultOverlaySettings(settings);
     }
 
     void ViewerWindow::SetDefaultFullMetadataVisible(bool visible)
@@ -91,12 +95,16 @@ namespace hyperbrowse::viewer
 
     void ViewerWindow::SetDefaultWindowedFullMetadataVisible(bool visible)
     {
-        SaveViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible, visible);
+        auto settings = DefaultOverlaySettings();
+        settings.panes[static_cast<std::size_t>(OverlayPane::FullMetadata)].windowedEnabled = visible;
+        SetDefaultOverlaySettings(settings);
     }
 
     void ViewerWindow::SetDefaultFullScreenFullMetadataVisible(bool visible)
     {
-        SaveViewerFullMetadataVisibleSetting(kRegistryValueViewerFullScreenFullMetadataVisible, visible);
+        auto settings = DefaultOverlaySettings();
+        settings.panes[static_cast<std::size_t>(OverlayPane::FullMetadata)].fullScreenEnabled = visible;
+        SetDefaultOverlaySettings(settings);
     }
 
     ViewerWindow::ViewerWindow(HINSTANCE instance)
@@ -107,6 +115,7 @@ namespace hyperbrowse::viewer
         , infoOverlayTextSize_(LoadViewerInfoOverlayTextSizeSetting())
         , fullMetadataVisible_(LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible))
     {
+        SetOverlaySettings(DefaultOverlaySettings());
         menuFont_ = CreateViewerMenuFont(appTextSize_);
         backgroundBrush_ = CreateSolidBrush(BackgroundColor(false));
         statusArt_ = util::LoadPngResourceBitmap(instance_,
@@ -130,6 +139,7 @@ namespace hyperbrowse::viewer
         asyncState_->shutdown.store(true, std::memory_order_release);
         asyncState_->activeRequestId.fetch_add(1, std::memory_order_acq_rel);
         asyncState_->targetWindow.store(nullptr, std::memory_order_release);
+        DrainHistogramResults(hwnd_);
         compareAsyncState_->sessionGeneration.fetch_add(1, std::memory_order_acq_rel);
         WaitForBackgroundTasks();
 
@@ -212,9 +222,7 @@ namespace hyperbrowse::viewer
         const bool reusedExistingWindow = hwnd_ != nullptr;
         if (!hwnd_)
         {
-            infoOverlaysVisible_ = LoadViewerInfoOverlaysVisibleSetting();
-            infoOverlayTextSize_ = LoadViewerInfoOverlayTextSizeSetting();
-            fullMetadataVisible_ = LoadViewerFullMetadataVisibleSetting(kRegistryValueViewerWindowedFullMetadataVisible);
+            SetOverlaySettings(DefaultOverlaySettings());
             if (!RegisterWindowClass())
             {
                 return false;
@@ -712,6 +720,7 @@ namespace hyperbrowse::viewer
             loading_ = false;
             errorMessage_.clear();
             currentImage_ = currentSlot_.image;
+            RefreshOverlayContent();
             BeginTransitionFromPending();
             const std::uint64_t navigationGeneration =
                 asyncState_->navigationGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;

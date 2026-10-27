@@ -4,6 +4,280 @@
 namespace hyperbrowse::tests::smoke
 {
 
+    void RunViewerDeleteFocusScenario(HINSTANCE instance)
+    {
+        using hyperbrowse::services::FileOperationService;
+        using hyperbrowse::services::FileOperationUpdate;
+        using hyperbrowse::viewer::ViewerWindow;
+
+        ScopedRegistryDwordBackup browserModeBackup(kRegistryPath, L"BrowserMode");
+        ScopedRegistryDwordBackup sortModeBackup(kRegistryPath, L"SortMode");
+        ScopedRegistryDwordBackup sortAscendingBackup(kRegistryPath, L"SortAscending");
+        ScopedRegistryDwordBackup detailsStripBackup(kRegistryPath, L"DetailsStripVisible");
+        ScopedRegistryDwordBackup pairedOperationsBackup(kRegistryPath, L"RawJpegPairedOperationsEnabled");
+        ScopedRegistryDwordBackup subfoldersBackup(kRegistryPath, L"ShowSubfoldersInBrowser");
+        ScopedRegistryDwordBackup thumbnailSizeBackup(kRegistryPath, L"ThumbnailSizePreset");
+        SetRegistryDwordValue(kRegistryPath, L"BrowserMode", 0);
+        SetRegistryDwordValue(kRegistryPath, L"SortMode",
+                              static_cast<DWORD>(hyperbrowse::browser::BrowserSortMode::FileName));
+        SetRegistryDwordValue(kRegistryPath, L"SortAscending", 1);
+        SetRegistryDwordValue(kRegistryPath, L"DetailsStripVisible", 0);
+        SetRegistryDwordValue(kRegistryPath, L"RawJpegPairedOperationsEnabled", 1);
+        SetRegistryDwordValue(kRegistryPath, L"ShowSubfoldersInBrowser", 1);
+        SetRegistryDwordValue(kRegistryPath, L"ThumbnailSizePreset", 360);
+
+        const auto activateWindow = [](HWND window)
+        {
+            if (!SetForegroundWindow(window))
+            {
+                const DWORD foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+                const DWORD currentThread = GetCurrentThreadId();
+                // Background test runners may need the foreground input queue for setup.
+                if (foregroundThread != 0 && foregroundThread != currentThread
+                    && AttachThreadInput(currentThread, foregroundThread, TRUE))
+                {
+                    SetForegroundWindow(window);
+                    AttachThreadInput(currentThread, foregroundThread, FALSE);
+                }
+            }
+            SetFocus(window);
+        };
+
+        struct DeleteProbe
+        {
+            HWND mainWindow{};
+            HWND confirmationOwner{};
+            std::unique_ptr<FileOperationUpdate> completion;
+            bool replaying{};
+            bool holdCompletions{};
+            bool watchActivation{};
+            bool browserActivated{};
+            HWND expectedViewer{};
+            bool shellStoleForeground{};
+            int completionCount{};
+            static constexpr UINT_PTR TimerId() { return 0x48424446; }
+
+            static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam,
+                                               UINT_PTR, DWORD_PTR data)
+            {
+                auto& probe = *reinterpret_cast<DeleteProbe*>(data);
+                if (message == WM_ACTIVATE && LOWORD(wParam) != WA_INACTIVE && probe.watchActivation)
+                {
+                    probe.browserActivated = true;
+                }
+                if (message == FileOperationService::kMessageId && !probe.replaying)
+                {
+                    ++probe.completionCount;
+                    if (probe.watchActivation && GetForegroundWindow() != probe.expectedViewer)
+                    {
+                        probe.shellStoleForeground = true;
+                    }
+                    if (probe.holdCompletions)
+                    {
+                        probe.completion.reset(reinterpret_cast<FileOperationUpdate*>(lParam));
+                        return 0;
+                    }
+                }
+                if (message == WM_TIMER && wParam == TimerId())
+                {
+                    EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM parameter) -> BOOL
+                    {
+                        wchar_t className[32]{};
+                        GetClassNameW(window, className, static_cast<int>(std::size(className)));
+                        if (std::wstring_view(className) != L"#32770" || !GetDlgItem(window, IDCANCEL))
+                        {
+                            return TRUE;
+                        }
+                        auto& state = *reinterpret_cast<DeleteProbe*>(parameter);
+                        state.confirmationOwner = GetWindow(window, GW_OWNER);
+                        PostMessageW(window, WM_COMMAND, IDCANCEL, 0);
+                        return FALSE;
+                    }, reinterpret_cast<LPARAM>(&probe));
+                    return 0;
+                }
+                return DefSubclassProc(hwnd, message, wParam, lParam);
+            }
+
+            ~DeleteProbe()
+            {
+                KillTimer(mainWindow, TimerId());
+                RemoveWindowSubclass(mainWindow, WindowProc, TimerId());
+            }
+
+            void Replay()
+            {
+                replaying = true;
+                SendMessageW(mainWindow, FileOperationService::kMessageId, 0,
+                             reinterpret_cast<LPARAM>(completion.release()));
+                replaying = false;
+            }
+        };
+
+        for (const bool additionalViewer : {false, true})
+        {
+            TempFolder root(L"HyperBrowseViewerDeleteFocus");
+            std::vector<hyperbrowse::browser::BrowserItem> items;
+            for (int index = 0; index < 80; ++index)
+            {
+                const std::wstring number = std::to_wstring(index);
+                const fs::path path = root.Root() / (std::wstring(4 - number.size(), L'0') + number + L".png");
+                WriteTestImage(path, TestImageFormat::Png, 64, 32);
+                items.push_back(hyperbrowse::browser::BuildBrowserItemFromPath(path));
+            }
+
+            hyperbrowse::ui::MainWindow mainWindow(instance);
+            mainWindow.SetStartupLaunchPath(root.Root().wstring());
+            Expect(mainWindow.Create(), "Failed to create MainWindow for viewer delete focus coverage");
+            mainWindow.Show(SW_SHOW);
+            const HWND browserHwnd = FindWindowExW(mainWindow.Hwnd(), nullptr, L"HyperBrowseBrowserPane", nullptr);
+            auto* browser = reinterpret_cast<hyperbrowse::browser::BrowserPane*>(
+                GetWindowLongPtrW(browserHwnd, GWLP_USERDATA));
+            Expect(browser != nullptr, "Could not find browser for viewer delete focus coverage");
+            Expect(PumpMessagesUntil([&]() { return browser->DisplayedItemCount() == items.size(); }, 10000),
+                   "Browser did not finish loading viewer delete focus items");
+            activateWindow(mainWindow.Hwnd());
+            Expect(browser->GoToItemNumber(1), "Could not select the first image for viewer delete focus coverage");
+            if (additionalViewer)
+            {
+                SendMessageW(mainWindow.Hwnd(), WM_COMMAND,
+                             MAKEWPARAM(hyperbrowse::ui::command_ids::ID_FILE_OPEN_SELECTED, 0), 0);
+            }
+            else
+            {
+                SendMessageW(browserHwnd, WM_LBUTTONDBLCLK, MK_LBUTTON, MAKELPARAM(50, 50));
+            }
+            Expect(PumpMessagesUntil([]()
+            {
+                return FindOpenViewerWindowHandles().size() == 1;
+            }, 10000), "Primary viewer did not open for delete focus coverage");
+            HWND viewerHwnd = FindOpenViewerWindowHandles().front();
+            if (additionalViewer)
+            {
+                SendMessageW(mainWindow.Hwnd(), WM_COMMAND,
+                             MAKEWPARAM(hyperbrowse::ui::command_ids::ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW, 0), 0);
+                Expect(PumpMessagesUntil([]()
+                {
+                    return FindOpenViewerWindowHandles().size() == 2;
+                }, 10000), "Additional viewer did not open for delete focus coverage");
+                for (HWND candidate : FindOpenViewerWindowHandles())
+                {
+                    if (candidate != viewerHwnd)
+                    {
+                        viewerHwnd = candidate;
+                        break;
+                    }
+                }
+            }
+            auto* viewer = reinterpret_cast<ViewerWindow*>(GetWindowLongPtrW(viewerHwnd, GWLP_USERDATA));
+            Expect(viewer && viewer->IsFullScreen() && viewer->CurrentFilePath() == items[0].filePath,
+                   "Browser did not open the first image in the fullscreen viewer");
+            Expect(GetForegroundWindow() == viewerHwnd && GetFocus() == viewerHwnd,
+                   "Could not activate the viewer before delete focus coverage: foreground="
+                       + std::to_string(reinterpret_cast<std::uintptr_t>(GetForegroundWindow()))
+                       + " focus=" + std::to_string(reinterpret_cast<std::uintptr_t>(GetFocus()))
+                       + " viewer=" + std::to_string(reinterpret_cast<std::uintptr_t>(viewerHwnd)));
+
+            DeleteProbe probe;
+            probe.mainWindow = mainWindow.Hwnd();
+            probe.expectedViewer = viewerHwnd;
+            Expect(SetWindowSubclass(mainWindow.Hwnd(), DeleteProbe::WindowProc, DeleteProbe::TimerId(),
+                                     reinterpret_cast<DWORD_PTR>(&probe)) != FALSE,
+                   "Could not install viewer delete completion probe");
+            PumpMessagesFor(500);
+            Expect(GetForegroundWindow() == viewerHwnd && GetFocus() == viewerHwnd,
+                   "Viewer lost activation while settling before the first delete");
+            probe.watchActivation = true;
+            SendMessageW(viewerHwnd, WM_KEYDOWN, VK_DELETE, 0);
+            Expect(viewer->CurrentFilePath() == items[1].filePath,
+                   "Viewer delete did not immediately advance to the next image");
+            Expect(PumpMessagesUntil([&]() { return probe.completionCount == 1; }, 15000),
+                   "Normal viewer delete did not complete");
+            PumpMessagesFor(1500);
+            Expect(!probe.browserActivated && GetForegroundWindow() == viewerHwnd && GetFocus() == viewerHwnd,
+                   "Normal viewer delete activated the browser during asynchronous updates");
+            Expect(!probe.shellStoleForeground,
+                   "Viewer delete opened an activating shell progress window before completion");
+            Expect(!fs::exists(items[0].filePath), "Normal viewer delete did not remove the requested file");
+            probe.watchActivation = false;
+            Expect(SetTimer(mainWindow.Hwnd(), DeleteProbe::TimerId(), 20, nullptr) != 0,
+                   "Could not start viewer delete confirmation probe");
+            SendMessageW(mainWindow.Hwnd(), ViewerWindow::kDeleteRequestedMessage,
+                         ViewerWindow::kDeleteRequestPermanent, reinterpret_cast<LPARAM>(viewerHwnd));
+            KillTimer(mainWindow.Hwnd(), DeleteProbe::TimerId());
+            Expect(probe.confirmationOwner == viewerHwnd, "Viewer delete confirmation was owned by the browser");
+            Expect(viewer->CurrentFilePath() == items[1].filePath && fs::exists(items[1].filePath),
+                   "Cancelling viewer delete changed the current image or deleted its file");
+            Expect(GetForegroundWindow() == viewerHwnd, "Cancelling viewer delete activated the browser");
+
+            // Hold completion so both keypresses deterministically use the queued-delete path.
+            probe.holdCompletions = true;
+            SendMessageW(viewerHwnd, WM_KEYDOWN, VK_DELETE, 0);
+            SendMessageW(viewerHwnd, WM_KEYDOWN, VK_DELETE, 0);
+            Expect(viewer->CurrentFilePath() == items[3].filePath,
+                   "Queued viewer deletes did not immediately advance to the next image");
+            for (int operation = 0; operation < 2; ++operation)
+            {
+                Expect(PumpMessagesUntil([&]() { return probe.completion != nullptr; }, 15000),
+                       "Viewer delete did not report completion");
+                Expect(probe.completion->finished && !probe.completion->aborted
+                           && probe.completion->failedCount == 0,
+                       "Viewer delete failed during focus coverage");
+                activateWindow(mainWindow.Hwnd());
+                Expect(GetForegroundWindow() == mainWindow.Hwnd(), "Could not stage shell-dialog focus handoff");
+                probe.Replay();
+                Expect(GetForegroundWindow() == viewerHwnd && GetFocus() == viewerHwnd,
+                       "Viewer delete completion did not restore the originating viewer");
+            }
+            Expect(!fs::exists(items[1].filePath) && !fs::exists(items[2].filePath),
+                   "Queued viewer deletes did not remove both requested files");
+            SendMessageW(GetFocus(), WM_KEYDOWN, VK_RIGHT, 0);
+            Expect(viewer->CurrentFilePath() == items[4].filePath,
+                   "Keyboard navigation did not work after viewer delete completion");
+
+            SendMessageW(viewerHwnd, WM_CLOSE, 0, 0);
+            PumpMessagesFor(100);
+            const std::vector<HWND> remainingViewers = FindOpenViewerWindowHandles();
+            activateWindow(mainWindow.Hwnd());
+            browser->RestoreSelectionByFilePaths({items[4].filePath}, items[4].filePath);
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND,
+                         MAKEWPARAM(additionalViewer
+                             ? hyperbrowse::ui::command_ids::ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW
+                             : hyperbrowse::ui::command_ids::ID_FILE_OPEN_SELECTED, 0), 0);
+            viewerHwnd = nullptr;
+            for (HWND candidate : FindOpenViewerWindowHandles())
+            {
+                if (std::find(remainingViewers.begin(), remainingViewers.end(), candidate) == remainingViewers.end())
+                {
+                    viewerHwnd = candidate;
+                    break;
+                }
+            }
+            Expect(viewerHwnd != nullptr, "Could not reopen the viewer after deleting an image");
+            viewer = reinterpret_cast<ViewerWindow*>(GetWindowLongPtrW(viewerHwnd, GWLP_USERDATA));
+            probe.expectedViewer = viewerHwnd;
+            probe.holdCompletions = false;
+            probe.watchActivation = true;
+            SendMessageW(mainWindow.Hwnd(), ViewerWindow::kDeleteRequestedMessage, 0,
+                         reinterpret_cast<LPARAM>(viewerHwnd));
+            Expect(viewer->CurrentFilePath() == items[5].filePath,
+                   "Reopened viewer did not advance after controller-style deletion");
+            Expect(PumpMessagesUntil([&]() { return probe.completionCount == 4; }, 15000),
+                   "Reopened viewer delete did not complete");
+            PumpMessagesFor(1500);
+            Expect(!probe.browserActivated && !probe.shellStoleForeground
+                       && GetForegroundWindow() == viewerHwnd && GetFocus() == viewerHwnd,
+                   "Reopened viewer delete lost foreground during asynchronous updates");
+            probe.watchActivation = false;
+
+            for (HWND openViewer : FindOpenViewerWindowHandles())
+            {
+                SendMessageW(openViewer, WM_CLOSE, 0, 0);
+            }
+            DestroyWindow(mainWindow.Hwnd());
+            PumpMessagesFor(100);
+        }
+    }
+
     void RunMultiViewerSettingsScenario(HINSTANCE instance)
     {
         using hyperbrowse::ui::command_ids::ID_FILE_OPEN_IN_NEW_VIEWER_WINDOW;

@@ -36,6 +36,7 @@ namespace hyperbrowse::viewer
             {
                 FocusCompareTileInternal(focusedCompareTile_);
             }
+            RefreshOverlayContent();
             UpdateWindowTitle();
             if (hwnd_ && IsWindow(hwnd_) != FALSE)
             {
@@ -521,6 +522,13 @@ namespace hyperbrowse::viewer
             panOffsetX_ = pan.x;
             panOffsetY_ = pan.y;
         }
+        if (tile.image)
+        {
+            const RECT tileRect = CompareTileClientRect(tileIndex);
+            currentZoomPercent_ = (std::max)(1, static_cast<int>(std::lround(
+                FitScaleForImage(*tile.image, tileRect) * tile.zoomRatio * 100)));
+        }
+        RefreshOverlayContent();
         if (changed && hwnd_ && IsWindow(hwnd_) != FALSE)
         {
             NotifyCurrentItemChanged();

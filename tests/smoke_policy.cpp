@@ -18,6 +18,7 @@
 
 #include "services/BatchConvertService.h"
 #include "services/FileOperationService.h"
+#include "services/HiddenFolderPolicy.h"
 #include "browser/ThumbnailRatingKeyPolicy.h"
 #include "ui/BrowserItemScopeCollector.h"
 #include "viewer/CompareSessionPolicy.h"
@@ -2375,6 +2376,27 @@ namespace hyperbrowse::tests
                    "Folder tree drop policy accepted self, child, or parent destinations");
         }
 
+        void RunHiddenFolderPolicyScenario()
+        {
+            using hyperbrowse::services::HiddenFolderPolicy;
+
+            const DWORD hiddenDirectory = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_HIDDEN;
+            const DWORD protectedDirectory = hiddenDirectory | FILE_ATTRIBUTE_SYSTEM;
+            const HiddenFolderPolicy defaultPolicy{};
+            const HiddenFolderPolicy showHiddenPolicy{true, false};
+            const HiddenFolderPolicy showProtectedPolicy{true, true};
+
+            Expect(!defaultPolicy.IsVisible(hiddenDirectory),
+                   "Hidden folders were visible while Explorer's hidden-item setting was disabled");
+            Expect(showHiddenPolicy.IsVisible(hiddenDirectory),
+                   "A hidden folder remained invisible when hidden items were enabled");
+            Expect(!showHiddenPolicy.IsVisible(protectedDirectory)
+                       && showProtectedPolicy.IsVisible(protectedDirectory),
+                   "Protected system folders did not follow the protected-system setting");
+            Expect(showHiddenPolicy.IsVisible(FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_SYSTEM),
+                   "A system folder without the hidden attribute was incorrectly filtered");
+        }
+
         void RunSelectionRatingPolicyScenario()
         {
             using hyperbrowse::ui::SelectionRatingPolicy;
@@ -2741,6 +2763,7 @@ namespace hyperbrowse::tests
         RunQuickAccessDestinationBuilderScenario();
         RunBrowserItemScopeCollectorScenario();
         RunFolderTreeDropPolicyScenario();
+        RunHiddenFolderPolicyScenario();
         RunSelectionRatingPolicyScenario();
         RunThumbnailRatingKeyPolicyScenario();
         RunViewerItemSelectionPolicyScenario();

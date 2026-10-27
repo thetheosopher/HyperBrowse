@@ -9,6 +9,7 @@
 #include <system_error>
 #include <utility>
 
+#include "services/HiddenFolderPolicy.h"
 #include "util/Log.h"
 
 namespace fs = std::filesystem;
@@ -53,9 +54,7 @@ namespace hyperbrowse::ui
                 return true;
             }
 
-            SHELLFLAGSTATE shellState{};
-            SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
-            return shellState.fShowAllObjects != FALSE;
+            return services::HiddenFolderPolicy::FromShellSettings().IsVisible(attributes);
         }
 
         std::wstring GetFolderDisplayName(std::wstring_view folderPath)

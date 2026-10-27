@@ -34,33 +34,6 @@ namespace
             lerp(start._51, end._51), lerp(start._52, end._52), lerp(start._53, end._53), lerp(start._54, end._54));
     }
 
-    float MeasureWrappedTextHeight(IDWriteFactory* dwriteFactory,
-                                   IDWriteTextFormat* textFormat,
-                                   const std::wstring& text,
-                                   float maxWidth,
-                                   float maxHeight)
-    {
-        if (!dwriteFactory || !textFormat || text.empty() || maxWidth <= 0.0f || maxHeight <= 0.0f)
-        {
-            return 0.0f;
-        }
-
-        Microsoft::WRL::ComPtr<IDWriteTextLayout> textLayout;
-        if (FAILED(dwriteFactory->CreateTextLayout(text.c_str(),
-                                                   static_cast<UINT32>(text.size()),
-                                                   textFormat,
-                                                   maxWidth,
-                                                   maxHeight,
-                                                   textLayout.GetAddressOf()))
-            || !textLayout)
-        {
-            return 0.0f;
-        }
-
-        DWRITE_TEXT_METRICS metrics{};
-        return SUCCEEDED(textLayout->GetMetrics(&metrics)) ? metrics.height : 0.0f;
-    }
-
     bool ExceedsPanDragThreshold(POINT origin, POINT current)
     {
         const int dragThresholdX = std::max(4, GetSystemMetrics(SM_CXDRAG));
@@ -831,6 +804,8 @@ namespace hyperbrowse::viewer
             return HandlePrefetchImageMessage(lParam);
         case kMetadataReadyMessage:
             return HandleMetadataReadyMessage(lParam);
+        case kHistogramReadyMessage:
+            return HandleHistogramReadyMessage(lParam);
         case WM_PAINT:
         {
             EnsureD2DRenderTarget();
@@ -912,6 +887,14 @@ namespace hyperbrowse::viewer
                 if (compareSessionActive_)
                 {
                     DrawCompareSession(d2dRenderTarget_.Get(), clientWidth, clientHeight);
+                    if (const auto image = OverlayImage())
+                    {
+                        const bool rotated = rotationQuarterTurns_ % 2 != 0;
+                        DrawInfoOverlays(d2dRenderTarget_.Get(), clientWidth, clientHeight,
+                            rotated ? image->SourceHeight() : image->SourceWidth(),
+                            rotated ? image->SourceWidth() : image->SourceHeight(), currentZoomPercent_,
+                            nullptr, compareDirection_, false);
+                    }
                 }
                 else if (!currentImage_)
                 {
@@ -2117,7 +2100,6 @@ namespace hyperbrowse::viewer
                         }
                     }
 
-                    const bool fullMetadataShown = fullMetadataVisible_ && infoOverlaysVisible_;
                     if (infoOverlaysVisible_)
                     {
                         DrawInfoOverlays(d2dRenderTarget_.Get(),
@@ -2129,70 +2111,6 @@ namespace hyperbrowse::viewer
                                          compareImage,
                                          activeCompareDirection,
                                          false);
-                    }
-
-                    if (fullMetadataShown)
-                    {
-                        const ViewerOverlayMetrics overlayMetrics = ViewerOverlayMetricsForWindow(hwnd_, infoOverlayTextSize_);
-                        const float metadataLeft = std::max(16.0f, (clientWidth * (2.0f / 3.0f)) + 8.0f);
-                        const std::wstring metadataBody = metadataLoading_
-                            ? std::wstring(L"Loading metadata...")
-                            : (currentMetadataText_.empty() ? std::wstring(L"No metadata is available for the current image.") : currentMetadataText_);
-                        const float metadataPadding = overlayMetrics.metadataPanelPadding;
-                        const float metadataPanelWidth = std::max(160.0f, clientWidth - metadataLeft - 16.0f);
-                        const float metadataTextWidth = std::max(64.0f, metadataPanelWidth - (metadataPadding * 2.0f));
-                        const float metadataMaxPanelHeight = std::max(96.0f, clientHeight - 32.0f);
-                        const float metadataMaxBodyHeight = std::max(
-                            overlayMetrics.metadataFontSize + overlayMetrics.metadataGap,
-                            metadataMaxPanelHeight - ((metadataPadding * 2.0f) + overlayMetrics.topNameHeight + overlayMetrics.metadataGap));
-                        const float measuredBodyHeight = (d2dMetadataFormat_ && render::D2DRenderer::Instance().DWriteFactory())
-                            ? MeasureWrappedTextHeight(render::D2DRenderer::Instance().DWriteFactory(),
-                                                       d2dMetadataFormat_.Get(),
-                                                       metadataBody,
-                                                       metadataTextWidth,
-                                                       metadataMaxBodyHeight)
-                            : 0.0f;
-                        const float metadataBodyHeight = measuredBodyHeight > 0.0f
-                            ? std::min(metadataMaxBodyHeight, measuredBodyHeight)
-                            : metadataMaxBodyHeight;
-                        const float metadataPanelHeight = std::min(
-                            metadataMaxPanelHeight,
-                            (metadataPadding * 2.0f) + overlayMetrics.topNameHeight + overlayMetrics.metadataGap + metadataBodyHeight);
-                        const D2D1_RECT_F metadataPanel = D2D1::RectF(metadataLeft,
-                                                                      16.0f,
-                                                                      metadataLeft + metadataPanelWidth,
-                                                                      16.0f + metadataPanelHeight);
-                        const D2D1_ROUNDED_RECT roundedMetadata = D2D1::RoundedRect(metadataPanel, 10.0f, 10.0f);
-                        const D2D1_RECT_F metadataTitleRect = D2D1::RectF(metadataPanel.left + metadataPadding,
-                                                                          metadataPanel.top + metadataPadding,
-                                                                          metadataPanel.right - metadataPadding,
-                                                                          metadataPanel.top + metadataPadding + overlayMetrics.topNameHeight);
-                        const D2D1_RECT_F metadataBodyRect = D2D1::RectF(metadataPanel.left + metadataPadding,
-                                                                         metadataTitleRect.bottom + overlayMetrics.metadataGap,
-                                                                         metadataPanel.right - metadataPadding,
-                                                                         metadataTitleRect.bottom + overlayMetrics.metadataGap + metadataBodyHeight);
-
-                        if (d2dMetadataPanelFillBrush_)
-                        {
-                            d2dRenderTarget_->FillRoundedRectangle(roundedMetadata, d2dMetadataPanelFillBrush_.Get());
-                        }
-                        if (d2dMetadataPanelBorderBrush_)
-                        {
-                            d2dRenderTarget_->DrawRoundedRectangle(roundedMetadata, d2dMetadataPanelBorderBrush_.Get(), 1.0f);
-                        }
-                        if (d2dNameFormat_ && d2dTextBrush_)
-                        {
-                            d2dNameFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-                            d2dRenderTarget_->DrawText(L"Image Metadata", 14,
-                                                       d2dNameFormat_.Get(), metadataTitleRect, d2dTextBrush_.Get());
-                        }
-                        if (d2dMetadataFormat_ && (metadataLoading_ ? d2dMutedTextBrush_ : d2dTextBrush_))
-                        {
-                            d2dMetadataFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-                            d2dRenderTarget_->DrawText(metadataBody.c_str(), static_cast<UINT32>(metadataBody.size()),
-                                                       d2dMetadataFormat_.Get(), metadataBodyRect,
-                                                       metadataLoading_ ? d2dMutedTextBrush_.Get() : d2dTextBrush_.Get());
-                        }
                     }
 
                     if (!wraparoundMessage_.empty() && d2dTextBrush_)
@@ -2256,6 +2174,8 @@ namespace hyperbrowse::viewer
                     }
                 }
 
+                if (!currentImage_ && !compareSessionActive_)
+                    DrawInfoOverlays(d2dRenderTarget_.Get(), clientWidth, clientHeight, 0, 0, 0, nullptr, compareDirection_, false);
                 const HRESULT hr = d2dRenderTarget_->EndDraw();
                 const bool recreateTarget = hr == D2DERR_RECREATE_TARGET;
                 if (recreateTarget)
@@ -2369,6 +2289,7 @@ namespace hyperbrowse::viewer
                 }
             }
 
+            DrawOverlaysGdi(frameDc);
             if (backBufferDc)
             {
                 BitBlt(hdc, 0, 0, clientWidth, clientHeight, backBufferDc, 0, 0, SRCCOPY);
@@ -2423,6 +2344,7 @@ namespace hyperbrowse::viewer
             return 0;
         case WM_DESTROY:
             util::LogInfo(L"ViewerWindow WM_DESTROY hwnd=" + FormatWindowHandle(hwnd));
+            DrainHistogramResults(hwnd);
             displayColors_->BindTargetWindow(nullptr);
             KillTimer(hwnd_, services::DisplayColorService::kProfilePollTimer);
             ClearWraparoundMessage();

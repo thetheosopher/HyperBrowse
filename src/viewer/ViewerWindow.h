@@ -19,6 +19,8 @@
 #include "cache/ThumbnailCache.h"
 #include "services/DisplayColorService.h"
 #include "viewer/CompareSessionPolicy.h"
+#include "viewer/ViewerOverlay.h"
+#include "ui/DetailsPanelHistogram.h"
 #include "util/BackgroundExecutor.h"
 #include "util/ResourceSizing.h"
 #include "util/UiTextSize.h"
@@ -75,13 +77,6 @@ namespace hyperbrowse::viewer
         MonochromeReveal = 20,
     };
 
-    enum class InfoOverlayTextSize : int
-    {
-        Small = 0,
-        Medium = 1,
-        Large = 2,
-    };
-
     enum class QuickSendOperation : int
     {
         Move = 0,
@@ -118,6 +113,8 @@ namespace hyperbrowse::viewer
         static constexpr UINT kContextMenuToggleFullMetadata = 10;
         static constexpr UINT kContextMenuToggleCompareViewSync = 11;
         static constexpr UINT kContextMenuRefreshCompareTileMetadata = 12;
+        static constexpr UINT kContextMenuConfigureOverlays = 13;
+        static constexpr UINT kContextMenuTogglePaneBase = 14;
         static constexpr UINT kContextMenuSetCompareRatingBase = 20;
         static constexpr UINT kContextMenuEditCompareTags = 26;
         static constexpr UINT kCompareTileReadyMessage = WM_APP + 78;
@@ -177,6 +174,12 @@ namespace hyperbrowse::viewer
         void SetInfoOverlaysVisible(bool visible);
         void SetOverlayTextSize(InfoOverlayTextSize size);
         void SetFullMetadataVisible(bool visible);
+        const ViewerOverlaySettings& OverlaySettings() const noexcept;
+        void SetOverlaySettings(const ViewerOverlaySettings& settings);
+        static ViewerOverlaySettings DefaultOverlaySettings();
+        static bool SetDefaultOverlaySettings(const ViewerOverlaySettings& settings);
+        static OverlaySizes MeasureOverlaySizes(SIZE viewport, UINT dpi, InfoOverlayTextSize size);
+        OverlayLayout CurrentOverlayLayout() const;
         void SetAppTextSize(util::AppTextSize size);
         void SetMemoryPressureActive(bool active);
         void SetResourceProfile(util::ResourceProfile profile) noexcept;
@@ -197,10 +200,12 @@ namespace hyperbrowse::viewer
         void ShowQuickSendConfirmation(std::wstring message);
 
     private:
+        friend struct ViewerOverlayTestAccess;
         static constexpr const wchar_t* kWindowClassName = L"HyperBrowseViewerWindow";
         static constexpr UINT kDecodedImageMessage = WM_APP + 63;
         static constexpr UINT kPrefetchImageMessage = WM_APP + 64;
         static constexpr UINT kMetadataReadyMessage = WM_APP + 67;
+        static constexpr UINT kHistogramReadyMessage = WM_APP + 80;
 
         enum class ZoomMode
         {
@@ -273,6 +278,15 @@ namespace hyperbrowse::viewer
             std::wstring text;
             bool separator{};
         };
+        struct HistogramReady
+        {
+            std::uint64_t generation{};
+            int index{-1};
+            cache::ThumbnailCacheKey identity;
+            std::shared_ptr<const cache::CachedThumbnail> source;
+            ui::DetailsPanelHistogram::Result bins;
+            std::wstring error;
+        };
 
         bool RegisterWindowClass() const;
         void UpdateWindowTitle() const;
@@ -328,6 +342,14 @@ namespace hyperbrowse::viewer
         void SetFullScreen(bool enabled, HMONITOR targetMonitor = nullptr);
         void ToggleFullScreen();
         void ApplyFullMetadataVisible(bool visible);
+        void RefreshOverlayContent();
+        void RefreshHistogram();
+        void DrainHistogramResults(HWND window);
+        LRESULT HandleHistogramReadyMessage(LPARAM lParam);
+        std::shared_ptr<const cache::CachedThumbnail> OverlayImage() const;
+        int OverlayImageIndex() const noexcept;
+        std::wstring OverlayPaneText(OverlayPane pane, int width, int height, int zoom) const;
+        void DrawOverlaysGdi(HDC dc) const;
         void AdvanceSlideshow();
         void ShowNavigationMessage(std::wstring message);
         void ShowWraparoundMessage(bool forward);
@@ -448,6 +470,15 @@ namespace hyperbrowse::viewer
         bool infoOverlaysVisible_{true};
         InfoOverlayTextSize infoOverlayTextSize_{InfoOverlayTextSize::Small};
         bool fullMetadataVisible_{};
+        ViewerOverlaySettings overlaySettings_;
+        std::shared_ptr<const cache::CachedThumbnail> histogramSource_;
+        cache::ThumbnailCacheKey histogramIdentity_;
+        std::shared_ptr<std::atomic_uint64_t> histogramGeneration_{std::make_shared<std::atomic_uint64_t>(0)};
+        std::shared_ptr<std::atomic<std::shared_ptr<HistogramReady>>> histogramMailbox_{
+            std::make_shared<std::atomic<std::shared_ptr<HistogramReady>>>()};
+        ui::DetailsPanelHistogram::Result histogram_;
+        bool histogramLoading_{};
+        std::wstring histogramError_;
         std::atomic_uint64_t metadataRequestId_{0};
         bool metadataLoading_{};
         int currentMetadataIndex_{-1};

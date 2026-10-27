@@ -1,6 +1,6 @@
 # HyperBrowse Product Specification (Authoritative)
 
-**Current release:** 2.6.0
+**Current release:** 2.7.0
 **Status:** Current product contract
 **Authority:** Source code, smoke tests, and this document define shipped
 behavior. Proposed work belongs in [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) and
@@ -69,7 +69,11 @@ conversion, and low-friction culling.
   - selected total size
   - current zoom level while viewer window is active
 - Separate viewer window
+- Configurable viewer overlays for file information, image status, full
+  metadata, and RGB histogram
 - Recursive browsing support, default off
+- Folder-tree visibility aligned with Windows Explorer's hidden-folder and
+  protected-system-folder settings
 - Folder watching / live refresh
 - Slideshow
 - JPEG orientation adjustment (EXIF metadata-only rotation)
@@ -142,6 +146,8 @@ conversion, and low-friction culling.
   navigation for long drive/UNC paths
 - An off-by-default **Performance HUD** for live thumbnail decode/queue state,
   sampled scale/cache statistics, and memory pressure
+- Incremental folder-tree child insertion with deferred shell-label and
+  icon refinement to keep large branches responsive
 - Default-on SDR display color management for browser thumbnails, the viewer,
   and all two-to-four-image compare tiles, with a persisted **View > Color
   Management** opt-out and independent per-window monitor profiles
@@ -204,6 +210,15 @@ Status bar with folder totals, selection totals, and viewer zoom level.
 - Default is off
 - Can be toggled at runtime
 - Affects right-pane enumeration and slideshow navigation scope
+
+### Folder-tree visibility
+
+- The folder tree omits hidden folders unless Windows Explorer's **Show hidden
+  files, folders, and drives** setting is enabled.
+- Hidden system folders remain omitted unless **Hide protected operating
+  system files** is disabled in Explorer.
+- The same visibility policy applies to listed child folders and to the
+  expandability check; it does not filter the image browser's file list.
 
 ### Sorting
 Support custom sort options:
@@ -301,6 +316,20 @@ Support:
 - keyboard shortcuts
 - mouse wheel support
 
+### Viewer information overlays
+
+- Four panes are available: **File information**, **Image status**, **Full
+  metadata**, and **RGB histogram**.
+- Each pane has separate enabled state for windowed and full-screen viewing.
+  Corner, stack order, and importance are configurable; overlay text size has
+  small, medium, and large presets.
+- When a window is too small, lower-importance panes can be hidden to fit.
+  They return when space allows without changing their saved visibility.
+- `Tab` toggles all enabled panes without changing individual pane settings.
+- Histogram calculation runs asynchronously on decoded RGB pixels before
+  monitor-specific color conversion and follows the focused image in compare
+  mode. Loading and unavailable-data states are explicit.
+
 ### Viewer policies
 - double-click toggles full screen
 - prefer low latency over animated zoom/pan
@@ -334,7 +363,8 @@ Expose EXIF, IPTC, and XMP data where available.
 ### Metadata surfaces
 - details/list view columns where practical
 - image information dialog/panel
-- optional viewer info overlay
+- configurable viewer overlays for file information, image status, full
+  metadata, and RGB histogram
 
 ## 11. Performance Requirements
 

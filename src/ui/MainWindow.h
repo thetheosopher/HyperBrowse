@@ -88,6 +88,7 @@ namespace hyperbrowse::viewer
     enum class MouseWheelBehavior : int;
     enum class TransitionStyle : int;
     class ViewerWindow;
+    struct ViewerOverlaySettings;
 }
 
 namespace hyperbrowse::util
@@ -346,6 +347,7 @@ namespace hyperbrowse::ui
                         bool preferSecondaryMonitor = false,
                         bool resolvePairedRawJpegItems = true);
         std::vector<viewer::ViewerWindow*> OpenViewerWindows() const;
+        bool ConfigureViewerOverlays(HWND ownerWindow, const viewer::ViewerOverlaySettings* initialSettings = nullptr);
         viewer::ViewerWindow* FindViewerByHwnd(HWND viewerHwnd) const;
         viewer::ViewerWindow* ActiveViewer() const;
         bool ShouldDefaultViewerToSecondaryMonitor() const;

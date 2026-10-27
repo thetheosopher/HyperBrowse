@@ -1382,6 +1382,10 @@ namespace hyperbrowse::ui
             {
                 ImageList_SetBkColor(treeImageList_, CLR_NONE);
             }
+            const ThemeVariant treeVariant = ResolveThemeVariant(themeMode_ == ThemeMode::Dark);
+            SetWindowTheme(treePane_,
+                           treeVariant == ThemeVariant::Dark ? L"DarkMode_Explorer" : L"Explorer",
+                           nullptr);
             TreeView_SetBkColor(treePane_, palette.paneBackground);
             TreeView_SetTextColor(treePane_, palette.text);
             TreeView_SetLineColor(treePane_, palette.treeLine);

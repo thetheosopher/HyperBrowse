@@ -15,6 +15,7 @@ add_executable(HyperBrowseTests
     smoke_shell.cpp
     smoke_thumbnails.cpp
     smoke_viewer.cpp
+    smoke_viewer_overlays.cpp
     smoke_watch.cpp
     ../src/app/Application.cpp
 )
@@ -68,7 +69,11 @@ set_tests_properties(HyperBrowseJpegOrientationSmoke PROPERTIES TIMEOUT 30)
 add_test(NAME HyperBrowseFolderHistorySmoke COMMAND HyperBrowseTests --folder-history)
 add_test(NAME HyperBrowseFileOperationMediaCacheSmoke COMMAND HyperBrowseTests --file-operation-media-cache)
 add_test(NAME HyperBrowseViewerFitSmoke COMMAND HyperBrowseTests --viewer-fit)
+add_test(NAME HyperBrowseViewerOverlaySmoke COMMAND HyperBrowseTests --viewer-overlays)
+set_tests_properties(HyperBrowseViewerOverlaySmoke PROPERTIES TIMEOUT 90)
 add_test(NAME HyperBrowseViewerInteractionSmoke COMMAND HyperBrowseTests --viewer-interaction)
+add_test(NAME HyperBrowseViewerDeleteFocusSmoke COMMAND HyperBrowseTests --viewer-delete-focus)
+set_tests_properties(HyperBrowseViewerDeleteFocusSmoke PROPERTIES TIMEOUT 90)
 set_tests_properties(HyperBrowseSmoke PROPERTIES TIMEOUT 300)
 set_tests_properties(HyperBrowseViewerInteractionSmoke PROPERTIES TIMEOUT 120)
 add_test(NAME HyperBrowseRuntimePolicySmoke COMMAND HyperBrowseTests --runtime)
@@ -88,6 +93,8 @@ add_test(NAME HyperBrowseThumbnailMaintenanceSmoke COMMAND HyperBrowseTests --th
 add_test(NAME HyperBrowseThumbnailStaleCompletionSmoke COMMAND HyperBrowseTests --thumbnail-stale-completion)
 add_test(NAME HyperBrowseThumbnailFailureSmoke COMMAND HyperBrowseTests --thumbnail-failure)
 add_test(NAME HyperBrowseFileRenameSmoke COMMAND HyperBrowseTests --file-rename)
+add_test(NAME HyperBrowseFileOperationSmoke COMMAND HyperBrowseTests --file-operations)
+set_tests_properties(HyperBrowseFileOperationSmoke PROPERTIES TIMEOUT 60)
 add_test(NAME HyperBrowseAppTextSizeSmoke COMMAND HyperBrowseTests --app-text-size)
 add_test(NAME HyperBrowseFolderTreeRestoreSmoke COMMAND HyperBrowseTests --folder-tree-restore)
 add_test(NAME HyperBrowseFolderTreeLargeSmoke COMMAND HyperBrowseTests --folder-tree-large)

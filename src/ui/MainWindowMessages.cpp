@@ -421,7 +421,7 @@ namespace hyperbrowse::ui
         {
             util::ScopedTimer confirmTimer(L"MainWindow::OnViewerDeleteRequested ConfirmFileDeletion");
             if (ShouldConfirmDeletion(permanentDelete)
-                && !ConfirmFileDeletion(hwnd_, sourcePaths.size(), permanentDelete))
+                && !ConfirmFileDeletion(viewer->Hwnd(), sourcePaths.size(), permanentDelete))
             {
                 return 0;
             }
@@ -535,6 +535,9 @@ namespace hyperbrowse::ui
 
         switch (commandId)
         {
+        case viewer::ViewerWindow::kContextMenuConfigureOverlays:
+            ConfigureViewerOverlays(viewer->Hwnd());
+            break;
         case viewer::ViewerWindow::kContextMenuCopyImage:
             CopySelectedImagePixelsToClipboard(currentPath);
             break;

@@ -288,6 +288,7 @@ namespace hyperbrowse::ui::dialog_detail
             addCheck(ConsolidatedSettingsControl::WindowedFullMetadata, L"Show full metadata in windowed mode", y);
             addCheck(ConsolidatedSettingsControl::FullScreenFullMetadata, L"Show full metadata in full-screen mode", y);
             addLabelValue(L"Overlay text size", ConsolidatedSettingsControl::OverlayTextSize, y);
+            addAction(ConsolidatedSettingsControl::ConfigureOverlays, L"Configure overlays...", y);
             addLabelValue(L"ESC key behavior in full screen", ConsolidatedSettingsControl::EscapeKeyBehavior, y);
             break;
         case ConsolidatedSettingsPage::Appearance:

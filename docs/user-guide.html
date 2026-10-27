@@ -239,6 +239,7 @@
                         <li><strong>Details mode</strong> is useful for comparing filenames, dates, dimensions, file sizes, ratings, and tags.</li>
                         <li>The details panel shows information for the current selection. It can be toggled from <strong>View &gt; Show Details Panel</strong>.</li>
                         <li>Use <strong>View &gt; Show Subfolders</strong> to include folder entries while browsing.</li>
+                        <li>The folder tree follows Windows Explorer's hidden-folder settings. Hidden folders appear only when <strong>Show hidden files, folders, and drives</strong> is enabled; hidden system folders also require <strong>Hide protected operating system files</strong> to be turned off.</li>
                         <li>With a folder open, click a segment in the breadcrumb above the browser to navigate to that parent. Long paths put hidden ancestors in the <strong>More parent folders</strong> menu.</li>
                     </ul>
                 </div>
@@ -275,7 +276,7 @@
                         <li>Use the mouse wheel or the zoom commands to zoom. <strong>Fit to Window</strong> restores a complete-image view, while <strong>100%</strong> shows pixels at their native size.</li>
                         <li>Pan a zoomed image by dragging it. Rotate with the viewer rotate commands.</li>
                         <li>Double-click the viewer or use the fullscreen command for a chrome-free review.</li>
-                        <li>The info overlay shows image state without leaving the viewer. Choose a small, medium, or large overlay size.</li>
+                        <li>Configure independent file information, image status, full metadata, and RGB histogram overlays. Choose a small, medium, or large overlay text size.</li>
                         <li>Choose the fullscreen <strong>Esc</strong> action in <strong>Settings &gt; Viewer</strong>: close, fit width, fit height, or actual size. Actual Size falls back to Fit to Window when the native image dimensions exceed the monitor work area.</li>
                     </ul>
                 </div>
@@ -292,6 +293,14 @@
                     </ul>
                 </div>
             </div>
+            <h3>Configure viewer overlays</h3>
+            <p>Choose <strong>Configure overlays...</strong> in the viewer context menu or under <strong>Settings &gt; Viewer</strong>. Enable each pane separately for windowed and full-screen viewing. Both modes share positions, stack order, and importance. The histogram is disabled by default, and existing metadata visibility and overlay text-size preferences are preserved.</p>
+            <p>Assign each pane to a corner. Top-corner stacks grow downward; bottom-corner stacks grow upward. Visible panes in the same corner share the widest pane's width, with individual heights; other corners are sized independently. Move a pane toward or away from the corner to change its order. Position controls the pane's location, not text alignment. The histogram has no caption or reserved title row, but retains loading and error messages when needed.</p>
+            <p><strong>Importance</strong> controls which panes yield space in a small window, independently of stack order. Low yields before Normal, and High yields last. Equal importance retains File information first, then Image status, Histogram, and Full metadata. Panes never move to a different corner automatically. A pane hidden to fit returns when space allows; its saved visibility is unchanged. The configuration preview shows this temporary state.</p>
+            <p><strong>OK</strong> saves pending changes and closes the dialog. <strong>Apply</strong> saves without closing; it is disabled when nothing has changed. <strong>Cancel</strong>, <kbd>Esc</kbd>, or the window close button discard only changes made since the last Apply, including uncommitted restored defaults. Previously applied settings remain saved.</p>
+            <p>The preview highlights the selected pane and uses numbered markers matching the status legend below it. It preserves the viewer's aspect ratio and indicates panes hidden to fit in the legend.</p>
+            <p><kbd>Tab</kbd> and gamepad Y hide or show all enabled overlays without changing individual pane preferences. Long single-line labels use ellipses rather than cutting off text. The full metadata pane displays the filename as <strong>Name:</strong> on its own line below the heading; <strong>Path:</strong> shows only the containing folder. Full metadata is bounded to the available space; press <kbd>Ctrl</kbd> + <kbd>I</kbd> for complete image information.</p>
+            <p>The <strong>RGB histogram</strong> counts the decoded image's red, green, and blue values in 256 bins before monitor-specific color conversion. It is calculated in the background and does not change when you zoom, pan, or rotate. It is not a histogram of the visible crop or the browser's small thumbnail. For RAW files it describes the decoded/rendered image or preview, not raw sensor exposure. Loading or unavailable data is identified explicitly. In comparison mode, one configurable pane set follows the focused image.</p>
             <h3>XInput gamepad</h3>
             <p>In the viewer, use the D-pad or left stick to navigate (up / left goes to the previous image; down / right goes to the next), or use LB / RB for previous / next. LT / RT zoom out / in, and the right stick pans the image with smoothed motion that accelerates the longer it is held off-center. A toggles between Fit to Window and actual size. Y toggles overlays, like the Tab key. B uses the configured Escape behavior. X sends the displayed image to the Recycle Bin using the existing confirmation policy. Controls are active only while a HyperBrowse window is in the foreground.</p>
         </section>
@@ -359,7 +368,7 @@
             <p>Preferences are grouped in the consolidated <strong>Tools &gt; Settings</strong> dialog and are remembered per user. Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> to open it. The dialog stages edits until you choose <strong>Apply</strong> or <strong>OK</strong>; <strong>Cancel</strong> or closing the dialog discards uncommitted edits.</p>
             <ul>
                 <li><strong>Slideshow</strong> contains transition style and timing for slideshow playback.</li>
-                <li><strong>Viewer</strong> contains manual-navigation transitions, mouse-wheel behavior, overlay text size, detail overlays, full metadata, secondary-monitor defaults, and RAW/JPEG display preferences.</li>
+                <li><strong>Viewer</strong> contains manual-navigation transitions, mouse-wheel behavior, overlay configuration and text size, full metadata, RGB histogram, secondary-monitor defaults, and RAW/JPEG display preferences.</li>
                 <li><strong>Appearance</strong> contains the light/dark theme, app text size, thumbnail size, thumbnail details, compact layout, and details panel.</li>
                 <li><strong>Performance</strong> contains the resource profile, cache controls, NVIDIA JPEG acceleration, and out-of-process LibRaw fallback.</li>
                 <li><strong>Tools &gt; Diagnostics &gt; Snapshot</strong> refreshes HEIC and JPEG XL WIC discovery in the background. The Derived list separates recognized extensions, decoder creation or missing/discovery-failed states, and observed thumbnail/full-image success or failure. Pending results update the open window automatically. Choose Snapshot again after installing or removing a codec; HyperBrowse does not install codecs. Reset clears decode observations while retaining discovery, and redacted exports omit decoder-supplied names/error text.</li>
@@ -368,6 +377,12 @@
                 <li><strong>View &gt; Thumbnail Size</strong> still provides fixed presets and keyboard stepping.</li>
             </ul>
             <p>For large folders, leave the Balanced profile enabled first. Thumbnail work, metadata extraction, and folder enumeration continue in the background while the window remains interactive. Performance and Aggressive are intended for systems with spare CPU and memory; memory pressure automatically reduces viewer lookahead and trims active caches.</p>
+        </section>
+
+        <section id="release-2-7">
+            <h2>What changed in 2.7</h2>
+            <p>Version 2.7 adds configurable viewer panes for file information, image status, full metadata, and an asynchronously computed RGB histogram. Panes can be arranged and prioritized for windowed or full-screen use, and the viewer configuration includes a layout preview.</p>
+            <p>The folder tree now follows Windows Explorer's hidden-folder settings and fills large branches incrementally. Viewer file operations keep focus on the correct viewer, and high-contrast menus and About links use Windows system colors.</p>
         </section>
 
         <section id="release-2-6">

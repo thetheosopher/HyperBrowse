@@ -9,6 +9,7 @@
 #include <future>
 #include <system_error>
 
+#include "services/HiddenFolderPolicy.h"
 #include "util/Diagnostics.h"
 #include "util/Log.h"
 #include "util/StringConvert.h"
@@ -26,6 +27,8 @@ namespace hyperbrowse::services
 
 namespace
 {
+    using hyperbrowse::services::HiddenFolderPolicy;
+
     constexpr std::size_t kWorkerCount = 2;
     constexpr std::size_t kMaxPendingTaskCount = 8;
     constexpr std::size_t kMinimumParallelProbeCount = 8;
@@ -111,7 +114,7 @@ namespace
         PostUpdate(stateView.targetWindow, std::move(update));
     }
 
-    bool IsVisibleChildFolder(const fs::directory_entry& entry, bool showHiddenFolders)
+    bool IsVisibleChildFolder(const fs::directory_entry& entry, const hyperbrowse::services::HiddenFolderPolicy& hiddenPolicy)
     {
         std::error_code statusError;
         if (!entry.is_directory(statusError) || statusError)
@@ -119,15 +122,12 @@ namespace
             return false;
         }
 
-        const DWORD attributes = GetFileAttributesW(entry.path().c_str());
-        return attributes == INVALID_FILE_ATTRIBUTES
-            || (attributes & FILE_ATTRIBUTE_HIDDEN) == 0
-            || showHiddenFolders;
+        return hiddenPolicy.IsVisible(GetFileAttributesW(entry.path().c_str()));
     }
 
     bool HasVisibleChildDirectory(const EnumerationSharedStateView& stateView,
                                   const fs::path& folderPath,
-                                  bool showHiddenFolders)
+                                  const hyperbrowse::services::HiddenFolderPolicy& hiddenPolicy)
     {
         std::wstring searchPattern = folderPath.wstring();
         if (!searchPattern.empty() && searchPattern.back() != L'\\' && searchPattern.back() != L'/')
@@ -159,8 +159,7 @@ namespace
             if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0
                 && wcscmp(findData.cFileName, L".") != 0
                 && wcscmp(findData.cFileName, L"..") != 0
-                && (showHiddenFolders
-                    || (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) == 0))
+                && hiddenPolicy.IsVisible(findData.dwFileAttributes))
             {
                 hasVisibleChild = true;
                 break;
@@ -226,7 +225,7 @@ namespace
         const std::vector<std::wstring>& folderPaths,
         std::size_t begin,
         std::size_t end,
-        bool showHiddenFolders)
+        const hyperbrowse::services::HiddenFolderPolicy& hiddenPolicy)
     {
         ChildPresenceProbeBatch batch;
         batch.results.reserve(end - begin);
@@ -241,7 +240,7 @@ namespace
             const fs::path basePath(folderPaths[index]);
             hyperbrowse::services::FolderTreeChild childPresence;
             childPresence.path = folderPaths[index];
-            childPresence.hasChildren = HasVisibleChildDirectory(stateView, basePath, showHiddenFolders);
+            childPresence.hasChildren = HasVisibleChildDirectory(stateView, basePath, hiddenPolicy);
             batch.results.push_back(std::move(childPresence));
         }
 
@@ -258,9 +257,7 @@ namespace
                 return;
             }
 
-            SHELLFLAGSTATE shellState{};
-            SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
-            const bool showHiddenFolders = shellState.fShowAllObjects != FALSE;
+            const HiddenFolderPolicy hiddenPolicy = HiddenFolderPolicy::FromShellSettings();
             const fs::path basePath(folderPath);
             std::error_code existsError;
             if (!fs::exists(basePath, existsError) || existsError)
@@ -294,7 +291,7 @@ namespace
                     continue;
                 }
 
-                if (!IsVisibleChildFolder(*iterator, showHiddenFolders))
+                if (!IsVisibleChildFolder(*iterator, hiddenPolicy))
                 {
                     continue;
                 }
@@ -329,9 +326,7 @@ namespace
                 return;
             }
 
-            SHELLFLAGSTATE shellState{};
-            SHGetSettings(&shellState, SSF_SHOWALLOBJECTS);
-            const bool showHiddenFolders = shellState.fShowAllObjects != FALSE;
+            const HiddenFolderPolicy hiddenPolicy = HiddenFolderPolicy::FromShellSettings();
             if (folderPaths.size() < kMinimumParallelProbeCount
                 || !IsLowSeekPenaltyFixedVolume(folderPaths.front()))
             {
@@ -340,7 +335,7 @@ namespace
                     folderPaths,
                     0,
                     folderPaths.size(),
-                    showHiddenFolders);
+                    hiddenPolicy);
                 if (batch.cancelled)
                 {
                     return;
@@ -352,24 +347,24 @@ namespace
 
             const std::size_t splitIndex = (folderPaths.size() + 1) / 2;
             auto firstBatch = std::async(std::launch::async,
-                                         [&stateView, &folderPaths, splitIndex, showHiddenFolders]()
+                                         [&stateView, &folderPaths, splitIndex, hiddenPolicy]()
                                          {
                                              return ProbeChildDirectoryPresenceRange(
                                                  stateView,
                                                  folderPaths,
                                                  0,
                                                  splitIndex,
-                                                 showHiddenFolders);
+                                                 hiddenPolicy);
                                          });
             auto secondBatch = std::async(std::launch::async,
-                                          [&stateView, &folderPaths, splitIndex, showHiddenFolders]()
+                                          [&stateView, &folderPaths, splitIndex, hiddenPolicy]()
                                           {
                                               return ProbeChildDirectoryPresenceRange(
                                                   stateView,
                                                   folderPaths,
                                                   splitIndex,
                                                   folderPaths.size(),
-                                                  showHiddenFolders);
+                                                  hiddenPolicy);
                                           });
             ChildPresenceProbeBatch firstResults = firstBatch.get();
             ChildPresenceProbeBatch secondResults = secondBatch.get();
