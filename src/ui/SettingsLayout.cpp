@@ -276,7 +276,7 @@ namespace hyperbrowse::ui::dialog_detail
             y += rowHeight;
             break;
         case ConsolidatedSettingsPage::Viewer:
-            addCheck(ConsolidatedSettingsControl::TransitionEnabled, L"Use slideshow transitions", y);
+            addCheck(ConsolidatedSettingsControl::TransitionEnabled, L"Use the slideshow transition when navigating manually", y);
             addRadioPair(L"Mouse wheel", ConsolidatedSettingsControl::ViewerWheelZoom, L"Zoom",
                          ConsolidatedSettingsControl::ViewerWheelNavigate, L"Navigate", y);
             addCheck(ConsolidatedSettingsControl::InvertKeyboardPanning, L"Invert keyboard panning", y);

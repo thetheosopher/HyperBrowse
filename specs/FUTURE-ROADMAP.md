@@ -1,6 +1,6 @@
 # HyperBrowse Future Roadmap
 
-Last reviewed: 2026-09-30
+Last reviewed: 2026-11-15 (2.7.0 and 2.7.1 follow-ups)
 
 This is the single forward-looking product backlog for HyperBrowse. It is
 intentionally separate from the authoritative shipped contract in
@@ -17,6 +17,79 @@ The plan is organized around a single product north star:
 > Every accepted item must either (a) extend competitive workflow depth without
 > diluting that brand, or (b) measurably improve perceived speed, throughput,
 > or resource efficiency on real hardware.
+
+---
+
+## 0. Recommended Sequence (reviewed 2026-10-31; status refreshed 2026-11-15)
+
+This review compared the backlog with release 2.7.0 source, the
+[Bug Report 2 review plan](HyperBrowse-Bug-Reports-2-Review-Plan.md), and the
+[UI and design polish prompt](FUTURE-ROADMAP-PROMPT-10-UI-DESIGN-POLISH.md)
+ledger. The app was not exercised interactively for this review.
+
+### 2.7.1 correctness and documentation patch
+
+Items 40, 43, and 46 are complete in the working tree. The full-screen Escape
+default (item 24) and README screenshot refresh remain open.
+
+- **Bug item 40 — complete:** the Viewer setting now says "Use the slideshow
+  transition when navigating manually." The default-off opt-in continues to
+  apply the selected style and duration to manual navigation, without
+  affecting slideshow playback. Existing policy tests cover all four
+  slideshow/manual enabled combinations.
+- **Bug item 43 — complete:** viewer-context `Ctrl+I` is in
+  `ShortcutCatalog.h`, with a focused runtime catalog assertion.
+- **Bug item 46 — complete:** the README Quick Actions section now documents
+  the configurable assignment order, its `7890-=123456` default, and fallback
+  order.
+- **Bug item 24 (owner decision):** full-screen Escape still defaults to
+  Close (`EscapeKeyBehavior::Close`). Recommended default: leave full screen
+  first, close only when already windowed.
+- Refresh the README main-window screenshot; it predates the breadcrumb bar
+  and the 2.7.0 folder-tree behavior.
+
+### Next: 2.8 polish and accessibility
+
+- Prompt 10 Phases 3-6 in owner-ranked order: C8 dialog accessibility, C6
+  in-place label rename, C9 simplified title bar, B3 Quick Send polish.
+- One consolidated manual verification pass that closes the entries whose
+  software is shipped but whose sign-off is open: B2 (DPI, forced GDI,
+  per-tile metadata), B4 (physical display/color), C1-C3/C7 (theme/DPI),
+  C8 (NVDA/JAWS, Inspect), Bug Report 2 items 61 (Settings at 150/200% and
+  mixed DPI) and 69 (WebP end to end), and E2/E5 real-fixture decode.
+
+### Then: 2.9 performance evidence
+
+- Adopt the per-machine local gate (`tools/CheckPerf.ps1` with
+  `docs/perf/local-baseline.json`, shipped in the code-quality plan Phase 6)
+  as the approved no-cloud evidence policy, unblocking A8 and D3 without
+  re-enabling hosted Actions.
+- Use that evidence to make the A5 (WIC pooling) and A6 (GPU scaling)
+  go/no-go decisions.
+- **Bug item 48:** `DiskThumbnailCache::Store` holds the process-wide
+  filesystem mutex across bitmap extraction and cache-file I/O, serializing
+  parallel writers. Narrow it to index/journal coordination and benchmark one
+  and eight writers.
+
+### Feature queue (by user-visible value)
+
+1. `B7` animated GIF/WebP playback (most visible gap against competitors).
+2. `C10` command search over the existing shortcut catalog (see Theme C).
+3. `E3` multipage TIFF navigation.
+4. `B6` clip-warning overlay (the histogram itself is shipped).
+5. `E1` AVIF, `B8` PSD/PSB preview, `E4` lossless JPEG crop.
+
+### Usability observations to keep in view
+
+- Surface area is large (about 108 catalogued shortcuts and roughly 295 menu
+  entries); shortcut/command discoverability was parked in Prompt 10 and is
+  the best lever for new users.
+- Settings implementation has grown into a single very large source file
+  (`MainWindowExperimentalSettings.cpp`); unifying the settings dialogs was
+  parked, not rejected, and should be revisited after 2.8.
+- The README carries eight "What's New" sections plus the full version
+  history; moving history to a changelog would make the capability and
+  shortcut sections easier to find.
 
 ---
 
@@ -69,8 +142,14 @@ The active plan assumes the following are already shipped and stable:
   canonical shared-cache pixels.
 - Named saved searches with the inline filter Save action, worker-owned bounded
   UTF-8 persistence, and explicit cross-window reload/update operations.
-- Tools > Open Log Folder resolves the active logger path without changing the
-  browser folder or logging destination.
+- Configurable viewer overlays (2.7.0): file information, image status, full
+  metadata, and an asynchronously computed RGB histogram, configured
+  independently for windowed and full-screen viewing; the details panel also
+  shows an RGB histogram.
+- Folder tree follows Explorer hidden/protected-folder settings and fills
+  large folders incrementally off the UI-thread critical path (2.7.0).
+- XInput gamepad navigation, zoom, pan, and Recycle Bin delete in the browser
+  and viewer (2.6.0).
 - Diagnostics window, structured log, smoke + integration tests, GitHub
   Actions CI workflow (currently disabled; no cloud runs are active), portable
   zip + Inno Setup 6 installer.
@@ -249,11 +328,15 @@ animation is the next candidate; B6 and E1 remain in the follow-on queue.
 
 ### `B6` Histogram + Clip Warning Overlay (P1)
 
-- Compute a per-image RGB+luma histogram on the existing viewer decode
-  thread after the image becomes stable.
-- Render with a single D2D path geometry; toggle with `H`.
+**Implementation status:** The histogram half is shipped: the details panel
+shows an RGB histogram, and 2.7.0 added a configurable, asynchronously
+computed RGB histogram viewer overlay that follows the focused compare tile.
+Remaining: the clip warning overlay only.
+
 - Optional clip warning overlay: pixels with any channel ≥ 254 or ≤ 1 get
-  a flashing tint (toggle with `Shift+H`).
+  a tint, toggled from the overlay configuration or a free shortcut (`H` is
+  already assigned in the viewer; confirm the binding against the shortcut
+  catalog before choosing one).
 
 ### `B7` Animated GIF / WebP Playback in Viewer (P2)
 
@@ -281,14 +364,27 @@ The brand is "fast". The product should look the part.
 Execution sequence for the owner-selected 2026-10-25 UI observations (folder
 tree stall, theme leftovers, dialog accessibility, in-place rename, title bar,
 Quick Send polish): [UI and design polish prompt](FUTURE-ROADMAP-PROMPT-10-UI-DESIGN-POLISH.md).
+Phases 1 (folder tree stall) and 2 (theme tokens and high contrast) shipped
+in 2.7.0; Phases 3-6 (C8, C6, C9, B3) remain.
+
+### `C10` Command Search (P2)
+
+Shortcut and command discoverability was parked in Prompt 10, but the
+product now has about 108 catalogued shortcuts and a deep menu tree.
+
+- A keyboard-invoked search box that filters the existing `ShortcutCatalog`
+  and menu command IDs by name, shows each command's shortcut, and dispatches
+  through the existing `WM_COMMAND` path. No new command registry.
+- Must stay accessible (UIA names/roles) and theme-aware; confirm a free
+  shortcut against the catalog before assigning one.
 
 ### `C5` Tools Menu (P1)
 
 The core Tools menu and Settings organization are shipped and summarized in
-Appendix A. **Open Log Folder** shipped in 2.5.0 on 2026-09-30 using the
-actual logger directory and existing shell-launch/error path, with injected
-non-launching routing/path coverage. **Benchmark** remains deferred;
-the separate Cache Inspector window was superseded by D4's existing surfaces.
+Appendix A. **Open Log Folder** shipped in 2.5.0 and was later removed from
+the product (commit `74c1a4c`); it is not an active item. **Benchmark**
+remains deferred; the separate Cache Inspector window was superseded by D4's
+existing surfaces.
 
 ### `C6` Inline Rename / In-Place Label Edit (P2)
 
@@ -383,6 +479,10 @@ samples and thresholds under an explicitly approved evidence policy.
   against the Release build, compares compatible results against a reviewed
   baseline (`docs/perf/baseline.json`), retains JSON results, and fails on a
   supported threshold breach.
+- **2026-10-31 recommendation:** a per-machine local gate now exists
+  (`tools/CheckPerf.ps1`, `docs/perf/local-baseline.json`; advisory unless
+  `-Strict`). Approve it as the no-cloud evidence policy for A8/D3 so the
+  A5/A6 decisions are no longer blocked on hosted runners.
 
 ### `D5` ETW / WPR Trace Hooks (P2)
 
@@ -457,9 +557,9 @@ XL fixture decode and out-of-box compatibility remain unverified.
 - Cloud sync, mobile companion, web preview.
 - Formal decoder polymorphic interface (`CanDecode` / `ReadHeader` / …):
   current free-function chain (nvJPEG → WIC → LibRaw) is adequate.
-- `MainWindow.cpp` decomposition into per-controller files: tracked
-  separately as ongoing hygiene; not a product feature. See the
-  [code-quality hygiene plan](FUTURE-ROADMAP-PROMPT-09-CODE-QUALITY-HYGIENE.md).
+- Further `MainWindow` decomposition beyond the per-area file split completed
+  in the [code-quality hygiene plan](FUTURE-ROADMAP-PROMPT-09-CODE-QUALITY-HYGIENE.md)
+  (Phases 4-5); not a product feature.
 - doctest migration: catch2 stays for now.
 
 These remain deferred unless product direction changes.

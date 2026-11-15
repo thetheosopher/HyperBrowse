@@ -3021,7 +3021,7 @@ namespace hyperbrowse::ui
     {
         switch (control)
         {
-        case ConsolidatedSettingsControl::TransitionEnabled: return L"Use slideshow transitions";
+        case ConsolidatedSettingsControl::TransitionEnabled: return L"Use the slideshow transition when navigating manually";
         case ConsolidatedSettingsControl::TransitionStyle: return L"Transition style";
         case ConsolidatedSettingsControl::SlideshowDuration: return L"Slide duration in milliseconds";
         case ConsolidatedSettingsControl::TransitionDuration: return L"Transition duration in milliseconds";

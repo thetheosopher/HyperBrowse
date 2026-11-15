@@ -138,6 +138,12 @@ namespace hyperbrowse::tests
                                "View menu labels must display their registered shortcuts");
             Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
                                ShortcutContext::Viewer,
+                               ID_FILE_IMAGE_INFORMATION,
+                               'I',
+                               FCONTROL),
+                   "Viewer Ctrl+I image information shortcut is missing from the shared catalog");
+            Expect(hasShortcut(hyperbrowse::ui::ViewerShortcuts(),
+                               ShortcutContext::Viewer,
                                ID_FILE_COPY_IMAGE_PIXELS,
                                'I',
                                FCONTROL | FSHIFT),

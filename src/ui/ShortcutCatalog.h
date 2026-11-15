@@ -174,6 +174,7 @@ namespace hyperbrowse::ui
         ShortcutDefinition{ShortcutContext::Viewer, command_ids::ID_VIEW_SLIDESHOW_FOLDER, static_cast<WORD>('F'), FCONTROL | FSHIFT, L"Ctrl+Shift+F", L"Start a slideshow from the current folder", L"Viewer slideshow and Quick Actions"},
         ShortcutDefinition{ShortcutContext::Viewer, command_ids::ID_FILE_QUICK_SEND_MOVE, VK_F7, 0, L"F7", L"Move the displayed image to a Quick Actions destination", L"Viewer slideshow and Quick Actions"},
         ShortcutDefinition{ShortcutContext::Viewer, command_ids::ID_FILE_QUICK_SEND_COPY, VK_F8, 0, L"F8", L"Copy the displayed image to a Quick Actions destination", L"Viewer slideshow and Quick Actions"},
+        ShortcutDefinition{ShortcutContext::Viewer, command_ids::ID_FILE_IMAGE_INFORMATION, static_cast<WORD>('I'), FCONTROL, L"Ctrl+I", L"Show image information", L"Viewer compare and display"},
         ShortcutDefinition{ShortcutContext::Viewer, command_ids::ID_FILE_COPY_IMAGE_PIXELS, static_cast<WORD>('I'), FCONTROL | FSHIFT, L"Ctrl+Shift+I", L"Copy the displayed image", L"Viewer compare and display"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_TAB, 0, L"Tab", L"Toggle image information overlays", L"Viewer compare and display"},
         ShortcutDefinition{ShortcutContext::Viewer, 0, VK_ADD, 0, L"Numpad +", L"Zoom in", L"Viewer zoom and display"},

@@ -1,19 +1,21 @@
 # HyperBrowse Bug Report 2: Status Review and Follow-up Plan
 
-Reviewed: 2026-09-26
+Reviewed: 2026-11-15 (follow-up status refresh; initial review 2026-09-26)
 Source: [HyperBrowse-Bug-Reports 2.md](HyperBrowse-Bug-Reports%202.md)
 
-This review compares the report with the current source, settings UI, user documentation, and smoke tests. No implementation or source-document changes were made. Item numbers are preserved.
+The initial review compared the report with the source, settings UI, user documentation, and smoke tests; it made no implementation or source-document changes. This refresh records the owner-approved item 40 label correction and completion of items 43 and 46. Item numbers are preserved.
 
 ## Summary
 
-Most entries are implemented or withdrawn. The open implementation/documentation follow-ups remain items 15, 23, 24, 30, 33, 36, 40, 43, 46, and 48. The newly reviewed tail, items 58-72, is largely addressed in current source; runtime verification remains for DPI scaling (61) and WebP decoding (69). Two CTest failures also need triage before treating the test suite as green.
+Most entries are implemented or withdrawn. The remaining implementation/documentation follow-ups are items 15, 23, 24, 30, 33, 36, and 48. Item 40 is resolved as a label correction; items 43 and 46 are complete. The newly reviewed tail, items 58-72, is largely addressed in current source; runtime verification remains for DPI scaling (61) and WebP decoding (69). The original CTest failures below remain historical findings pending a current full-suite recheck.
 
 ## Verification
 
-The CMake Tools CTest suite was run against the existing `build` output, which was not rebuilt. 23 of 25 tests passed. No additional test run was performed while reviewing items 58-72; those statuses below are based on current source and focused policy-test inspection.
+The initial CMake Tools CTest suite was run against the existing `build` output, which was not rebuilt. 23 of 25 tests passed. No additional test run was performed while reviewing items 58-72; those statuses below are based on current source and focused policy-test inspection.
 
 `HyperBrowseSmoke` and `HyperBrowseViewerInteractionSmoke` both failed with `Viewer full metadata pane remained visible when full metadata was disabled`. In the failing scenario, `IsFullMetadataVisible()` already reports false before the test compares a single screen pixel. The implementation clears metadata and requests a repaint, so determine whether this is a rendering defect or an ambiguous pixel fixture before changing behavior. `HyperBrowseSettingsSmoke`, `HyperBrowseMultiViewerSettingsSmoke`, `HyperBrowseViewerFitSmoke`, `HyperBrowseFileRenameSmoke`, and `HyperBrowseItemNumberNavigationSmoke` passed.
+
+Follow-up validation on 2026-11-15: `cmake --build --preset debug --target HyperBrowse HyperBrowseTests` succeeded, and `ctest --preset debug-tests -R RuntimePolicySmoke --output-on-failure` passed 1/1. This focused run verifies the viewer `Ctrl+I` catalog entry; the full CTest suite and interactive Help-window presentation were not re-run.
 
 ## Per-Item Status
 
@@ -21,7 +23,7 @@ The CMake Tools CTest suite was run against the existing `build` output, which w
 | --- | --- | --- |
 | 1-6 | Complete | Consolidated Settings, corrected viewer pan and H behavior, confirmation, remembered destination, and Quick Actions naming are present. |
 | 7 | Withdrawn / complete | The requested folder-tree toggle existed; its label now uses Quick Actions. |
-| 8-9 | Complete, with item 43 caveat | The image-information UI is custom and theme-aware; shortcut catalog and README/user guide cover the reported keys. Viewer `Ctrl+I` is missing from the in-app catalog; see item 43. |
+| 8-9 | Complete | The image-information UI is custom and theme-aware; the shortcut catalog and README/user guide cover the reported keys, including viewer `Ctrl+I` after item 43 was completed. |
 | 10 | Retired | Removed from the report. |
 | 11 | Complete | The details pane extracts a prompt and exposes Copy Prompt when present. |
 | 12-14 | Complete | Startup viewer target is retained through enumeration; rotated full-resolution decode materializes the frame before the rotator; Quick Actions mutations reload/save under a named mutex. |
@@ -39,12 +41,12 @@ The CMake Tools CTest suite was run against the existing `build` output, which w
 | 35 | Retired | Number retired. |
 | 36 | Partial | The second full-tree walk was replaced by a local child scan, but locating the parent still recursively walks the tree once per insertion. |
 | 37-39 | Complete | Copy/move suppress the shell progress dialog; mouse and arrow panning settle smooth zoom first. |
-| 40 | Open | The slideshow transition setting is still passed to the viewer's manual-transition switch. |
+| 40 | Complete | The owner confirmed the setting should opt manual navigation into the selected slideshow transition. Its Viewer Settings label now says so; the default and slideshow behavior are unchanged. Existing policy tests cover the slideshow/manual transition combinations. |
 | 41-42 | Complete | Fast navigation repaints the overlay synchronously; item-number prompts exist in browser and viewer. |
-| 43 | Partial | Viewer `Ctrl+I` now routes to image information and the dialog is viewer-owned, but the viewer shortcut catalog omits `Ctrl+I`. |
+| 43 | Complete | Viewer-context `Ctrl+I` is in the shared shortcut catalog, and the runtime catalog smoke asserts its command, context, and chord. |
 | 44 | Complete | New Folder is in File and browser context menus and has `Ctrl+Shift+N`. |
 | 45 | Retired | Withdrawn; number retired. |
-| 46 | Partial documentation | Custom shortcut order exists and defaults to `7890-=123456`; README still describes digit-first allocation. |
+| 46 | Complete | README documents the configurable Quick Actions assignment order, its `7890-=123456` default, and the fallback order for remaining keys. |
 | 47 | Complete | Opening into a new viewer window is supported, with per-window viewer actions. |
 | 48 | Partial | The cache index now uses a journal, but `Store` still holds the shared filesystem mutex across bitmap extraction and cache-file I/O. |
 | 49 | Complete | Thumb tracking schedules visible thumbnail work as the thumb moves. |
@@ -67,11 +69,11 @@ The CMake Tools CTest suite was run against the existing `build` output, which w
 | 71 | Complete | External drag handling stores the data object in a WRL `ComPtr` and clears it on DragLeave or Drop. |
 | 72 | Complete | Clipboard error paths free the preferred-effect allocation unless ownership transferred successfully to the clipboard. |
 
-## Approval-Gated Follow-ups
+## Follow-up Decisions and Remaining Work
 
 1. **Triage the metadata rendering test failure (items 30/51).** Inspect the full-metadata draw path and the single-pixel assertion in `../tests/smoke.cpp#L4821`. Establish a test fixture where the enabled and disabled states must produce distinguishable pixels, then make the relevant smoke tests pass without weakening state coverage.
 
-2. **Separate slideshow and manual transitions (item 40).** `../src/ui/MainWindow.cpp#L15177` passes `useSlideshowTransition_` to `SetManualTransitionEnabled`; `../src/ui/ViewerTransitionPolicy.h#L5` consequently enables transitions for manual navigation. Keep slideshow transitions enabled in a slideshow while ordinary navigation remains a cut, unless a separate manual-transition preference is explicitly added. Add a policy test for both paths.
+2. **Resolved 2026-11-15 — item 40 label.** The owner wants the existing opt-in to apply the selected slideshow style and duration during manual navigation. The Viewer Settings label now describes that behavior. The preference remains off by default, slideshow playback remains independent, and existing `ViewerTransitionPolicy` tests cover both paths.
 
 3. **Reduce persistent-cache write contention (item 48).** `../src/cache/DiskThumbnailCache.cpp#L793` acquires the process-wide filesystem mutex before bitmap extraction and retains it through file writing. Narrow serialization to cache-index/journal coordination, preserve collision and eviction safety, then benchmark one and eight writers at representative cache sizes.
 
@@ -83,9 +85,9 @@ The CMake Tools CTest suite was run against the existing `build` output, which w
 
 7. **Measure the remaining folder-tree cost (item 36).** The current path performs one recursive `FindItemByPath` and then scans only the found parent's children. Benchmark file-operation completion with a deeply expanded tree; optimize further only if the remaining traversal reproduces meaningful latency.
 
-8. **Add viewer `Ctrl+I` to the in-app shortcut catalog (item 43).** Add the viewer-context entry to `../src/ui/ShortcutCatalog.h` and verify Help > Keyboard Shortcuts lists it alongside the main-window entry.
+8. **Complete 2026-11-15 — item 43.** Added the viewer-context `Ctrl+I` entry to `../src/ui/ShortcutCatalog.h` and a runtime smoke assertion. Help > Keyboard Shortcuts reads the shared viewer catalog.
 
-9. **Correct Quick Actions assignment-order documentation (item 46).** Update `../README.md#L79` to describe the configurable order and its current default instead of the obsolete `0`-through-`9`-first sequence.
+9. **Complete 2026-11-15 — item 46.** Updated `../README.md` to describe the configurable Quick Actions order, the default `7890-=123456`, and fallback order.
 
 10. **Defer the duplicate-destination indicator (item 33).** This remains an unimplemented wishlist request. If approved later, compare the current file with the default destination by name and size, show the destination key/path in fullscreen, and cover same-name/different-size files and completed move/copy operations.
 

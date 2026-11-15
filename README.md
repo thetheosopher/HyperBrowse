@@ -135,7 +135,7 @@ This release expands HyperBrowse's image-review and desktop file-management work
 
 ### Viewer Quick Actions
 
-Quick Actions supports saved destinations with one-character shortcuts from digits, letters, and supported printable punctuation. Each newly added destination is automatically assigned the lowest available key in `0` through `9`, then `A` through `Z`, followed by punctuation; its key field accepts one supported character and can be edited later. Assignments persist by folder path and remain associated with the same destination when the list is reordered. Recent folders are not included.
+Quick Actions supports saved destinations with one-character shortcuts from digits, letters, and supported printable punctuation. New destinations receive the first available key in the configurable shortcut order under **Tools > Settings > Behavior**. Its default priority is `7890-=123456`; after preferred keys are exhausted, assignment continues through any remaining `0`-`9`, `A`-`Z`, then supported printable punctuation, skipping keys already assigned. Keys omitted from a custom order follow that same fallback sequence. A key can be edited later. Assignments persist by folder path and remain associated with the same destination when the list is reordered. Recent folders are not included.
 
 In the viewer, press `F7` to move the currently displayed image to a selected favorite or `F8` to copy it. If the image has a paired RAW or JPEG companion, the companion is included in the same operation. With files selected in the main window, the same shortcuts open the chooser for moving or copying the selection. The destination chooser can be dismissed with `Escape`, by clicking outside it, or by making no selection. A successful move advances the viewer; a copy leaves the current image displayed. Press `F4` in the main window to restore the most recently recorded filing position for the current folder. Positions follow renamed or moved folders and keep up to 64 folders; the target must still be present in the current view.
 
@@ -604,11 +604,12 @@ Known limits: GIF and TIFF browsing displays the first frame or page; JPEG orien
 
 ## Next Features
 
-Planned near-term areas after 2.1.0 include:
+The forward-looking backlog lives in [specs/FUTURE-ROADMAP.md](specs/FUTURE-ROADMAP.md). Planned areas after 2.7.0 include:
 
-- Viewer polish and workflow depth improvements that keep navigation fast while expanding compare/cull ergonomics.
-- Additional browser workflow refinements for high-volume folder organization.
-- Ongoing metadata-forward UX updates and presentation polish while preserving startup and scroll performance.
+- Remaining 2.7.1 follow-ups: decide the full-screen Escape default and refresh the README main-window screenshot.
+- Polish and accessibility: dialog accessibility, in-place thumbnail and details rename, a simplified title bar, and Quick Actions hover hints and drag targets.
+- Performance evidence: local benchmark baselines for startup and thumbnail throughput, and reduced persistent-cache write contention.
+- Viewer depth: animated GIF/WebP playback, command search over the shortcut catalog, multipage TIFF navigation, and a clip-warning overlay.
 
 ## License
 
