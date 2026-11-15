@@ -49,6 +49,7 @@
 #include "ui/FolderHistory.h"
 #include "ui/WindowAsyncMessageRouter.h"
 #include "ui/WindowTimerRouter.h"
+#include "viewer/EscapeKeyBehavior.h"
 
 namespace hyperbrowse::browser
 {
@@ -84,7 +85,6 @@ namespace hyperbrowse::cache
 namespace hyperbrowse::viewer
 {
     enum class CompareDirection : int;
-    enum class EscapeKeyBehavior : int;
     enum class MouseWheelBehavior : int;
     enum class TransitionStyle : int;
     class ViewerWindow;
@@ -959,7 +959,7 @@ namespace hyperbrowse::ui
         bool detailsStripVisible_{true};
         viewer::MouseWheelBehavior viewerMouseWheelBehavior_{};
         bool invertKeyboardPanning_{};
-        viewer::EscapeKeyBehavior viewerEscapeKeyBehavior_{};
+        viewer::EscapeKeyBehavior viewerEscapeKeyBehavior_{viewer::EscapeKeyBehavior::ExitFullScreen};
         UINT_PTR memoryPressureTimerId_{};
         UINT_PTR displaySurfaceRecoveryTimerId_{};
         DisplaySurfaceRecoveryPolicy displaySurfaceRecoveryPolicy_;

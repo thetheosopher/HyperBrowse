@@ -126,6 +126,9 @@ conversion, and low-friction culling.
   current-user or all-users installation scope.
 - Multiple viewer windows, viewer display recovery, slideshow transitions, and
   configurable viewer input behavior
+- Full-screen Escape defaults to returning to windowed mode; Escape closes a
+  windowed viewer. Settings can select Exit Full Screen, Close, Fit Width, Fit
+  Height, or Actual Size as the full-screen Escape action.
 - XInput gamepad input for browser selection, viewer navigation, zoom and
   smoothed accelerated panning, fit/actual-size toggling, overlay toggling,
   Escape behavior, and Recycle Bin deletion using the existing confirmation

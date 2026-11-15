@@ -29,8 +29,8 @@ ledger. The app was not exercised interactively for this review.
 
 ### 2.7.1 correctness and documentation patch
 
-Items 40, 43, and 46 are complete in the working tree. The full-screen Escape
-default (item 24) and README screenshot refresh remain open.
+Items 24, 40, 43, and 46 and the README screenshot refresh are complete in the
+working tree.
 
 - **Bug item 40 — complete:** the Viewer setting now says "Use the slideshow
   transition when navigating manually." The default-off opt-in continues to
@@ -42,11 +42,11 @@ default (item 24) and README screenshot refresh remain open.
 - **Bug item 46 — complete:** the README Quick Actions section now documents
   the configurable assignment order, its `7890-=123456` default, and fallback
   order.
-- **Bug item 24 (owner decision):** full-screen Escape still defaults to
-  Close (`EscapeKeyBehavior::Close`). Recommended default: leave full screen
-  first, close only when already windowed.
-- Refresh the README main-window screenshot; it predates the breadcrumb bar
-  and the 2.7.0 folder-tree behavior.
+- **Bug item 24 — complete:** new profiles default to leaving full screen on
+  Escape; a windowed viewer still closes. Existing saved Escape choices are
+  preserved. The fullscreen interaction smoke passed.
+- **README screenshot — complete:** refreshed `docs/MainWindow.PNG` with the
+  current main-window UI and the public-domain nature example set.
 
 ### Next: 2.8 polish and accessibility
 

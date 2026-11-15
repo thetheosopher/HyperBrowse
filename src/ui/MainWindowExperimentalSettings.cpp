@@ -20,7 +20,8 @@ namespace
     int ExperimentalSettingsMnemonicIndex(std::wstring_view text, wchar_t mnemonic);
     std::vector<ConsolidatedSettingsControl> ExperimentalSettingsPageControlOrder(ConsolidatedSettingsPage page);
 
-    constexpr std::array<EscapeKeyBehaviorOption, 4> kEscapeKeyBehaviorOptions = {{
+    constexpr std::array<EscapeKeyBehaviorOption, 5> kEscapeKeyBehaviorOptions = {{
+        {hyperbrowse::viewer::EscapeKeyBehavior::ExitFullScreen, L"Exit Full Screen"},
         {hyperbrowse::viewer::EscapeKeyBehavior::Close, L"Close"},
         {hyperbrowse::viewer::EscapeKeyBehavior::FitWidth, L"Fit Width"},
         {hyperbrowse::viewer::EscapeKeyBehavior::FitHeight, L"Fit Height"},

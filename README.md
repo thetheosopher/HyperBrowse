@@ -15,6 +15,9 @@ HyperBrowse is a native Windows image browser and viewer focused on fast folder 
 
 ![HyperBrowse main window](docs/MainWindow.PNG)
 
+The reproducible screenshot image set is documented in
+[examples/nature-screenshot-dataset/README.md](examples/nature-screenshot-dataset/README.md).
+
 ## Highlights
 
 - Native Win32 desktop application built with CMake and modern C++20.
@@ -208,7 +211,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 
 | Shortcut | Action |
 | --- | --- |
-| `Esc` | In full screen, use the Viewer Settings action: close, fit width, fit height, or actual size; when windowed, close the viewer |
+| `Esc` | Default: exit full screen; Settings > Viewer can choose exit, close, fit width, fit height, or actual size. In windowed mode, close the viewer |
 | `Ctrl+W` | Close the viewer |
 | Arrow keys | Navigate, or pan when zoomed |
 | `Shift` + Arrow keys | Navigate the comparison pair |
@@ -606,7 +609,7 @@ Known limits: GIF and TIFF browsing displays the first frame or page; JPEG orien
 
 The forward-looking backlog lives in [specs/FUTURE-ROADMAP.md](specs/FUTURE-ROADMAP.md). Planned areas after 2.7.0 include:
 
-- Remaining 2.7.1 follow-ups: decide the full-screen Escape default and refresh the README main-window screenshot.
+- Next UI polish (2.8): dialog accessibility, in-place thumbnail/details rename, a simplified title bar, and Quick Actions hover/drag polish.
 - Polish and accessibility: dialog accessibility, in-place thumbnail and details rename, a simplified title bar, and Quick Actions hover hints and drag targets.
 - Performance evidence: local benchmark baselines for startup and thumbnail throughput, and reduced persistent-cache write contention.
 - Viewer depth: animated GIF/WebP playback, command search over the shortcut catalog, multipage TIFF navigation, and a clip-warning overlay.

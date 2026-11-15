@@ -481,6 +481,9 @@ namespace hyperbrowse::viewer
                 {
                     switch (escapeKeyBehavior_)
                     {
+                    case EscapeKeyBehavior::ExitFullScreen:
+                        SetFullScreen(false);
+                        break;
                     case EscapeKeyBehavior::FitWidth:
                         SetWindowFitMode(WindowFitMode::Width);
                         break;

@@ -19,6 +19,7 @@
 #include "cache/ThumbnailCache.h"
 #include "services/DisplayColorService.h"
 #include "viewer/CompareSessionPolicy.h"
+#include "viewer/EscapeKeyBehavior.h"
 #include "viewer/ViewerOverlay.h"
 #include "ui/DetailsPanelHistogram.h"
 #include "util/BackgroundExecutor.h"
@@ -42,14 +43,6 @@ namespace hyperbrowse::viewer
     {
         Zoom = 0,
         Navigate = 1,
-    };
-
-    enum class EscapeKeyBehavior : int
-    {
-        Close = 0,
-        FitWidth = 1,
-        FitHeight = 2,
-        ActualSize = 3,
     };
 
     enum class TransitionStyle : int
@@ -486,7 +479,7 @@ namespace hyperbrowse::viewer
         std::wstring currentMetadataText_;
         MouseWheelBehavior mouseWheelBehavior_{MouseWheelBehavior::Zoom};
         bool keyboardPanningInverted_{};
-        EscapeKeyBehavior escapeKeyBehavior_{EscapeKeyBehavior::Close};
+        EscapeKeyBehavior escapeKeyBehavior_{EscapeKeyBehavior::ExitFullScreen};
         bool panning_{};
         POINT lastPanPoint_{};
         bool fullScreen_{};

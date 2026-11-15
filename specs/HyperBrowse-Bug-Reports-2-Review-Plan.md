@@ -7,7 +7,7 @@ The initial review compared the report with the source, settings UI, user docume
 
 ## Summary
 
-Most entries are implemented or withdrawn. The remaining implementation/documentation follow-ups are items 15, 23, 24, 30, 33, 36, and 48. Item 40 is resolved as a label correction; items 43 and 46 are complete. The newly reviewed tail, items 58-72, is largely addressed in current source; runtime verification remains for DPI scaling (61) and WebP decoding (69). The original CTest failures below remain historical findings pending a current full-suite recheck.
+Most entries are implemented or withdrawn. The remaining implementation/documentation follow-ups are items 15, 23, 30, 33, 36, and 48. Items 24 and 40 are complete, as are items 43 and 46. The newly reviewed tail, items 58-72, is largely addressed in current source; runtime verification remains for DPI scaling (61) and WebP decoding (69). The original CTest failures below remain historical findings pending a current full-suite recheck.
 
 ## Verification
 
@@ -15,7 +15,7 @@ The initial CMake Tools CTest suite was run against the existing `build` output,
 
 `HyperBrowseSmoke` and `HyperBrowseViewerInteractionSmoke` both failed with `Viewer full metadata pane remained visible when full metadata was disabled`. In the failing scenario, `IsFullMetadataVisible()` already reports false before the test compares a single screen pixel. The implementation clears metadata and requests a repaint, so determine whether this is a rendering defect or an ambiguous pixel fixture before changing behavior. `HyperBrowseSettingsSmoke`, `HyperBrowseMultiViewerSettingsSmoke`, `HyperBrowseViewerFitSmoke`, `HyperBrowseFileRenameSmoke`, and `HyperBrowseItemNumberNavigationSmoke` passed.
 
-Follow-up validation on 2026-11-15: `cmake --build --preset debug --target HyperBrowse HyperBrowseTests` succeeded, and `ctest --preset debug-tests -R RuntimePolicySmoke --output-on-failure` passed 1/1. This focused run verifies the viewer `Ctrl+I` catalog entry; the full CTest suite and interactive Help-window presentation were not re-run.
+Follow-up validation on 2026-11-15: `cmake --build --preset debug --target HyperBrowse HyperBrowseTests` succeeded. `ctest --preset debug-tests -R RuntimePolicySmoke --output-on-failure` passed 1/1 for viewer `Ctrl+I`; `build\tests\Debug\HyperBrowseTests.exe --viewer-settings` passed for Escape persistence/defaults; and `ctest --preset debug-tests -R HyperBrowseViewerFitSmoke --output-on-failure` passed 1/1 for Escape behavior. `docs/MainWindow.PNG` was refreshed from the running app with the nature example set. The full CTest suite was not re-run.
 
 ## Per-Item Status
 
@@ -30,7 +30,7 @@ Follow-up validation on 2026-11-15: `cmake --build --preset debug --target Hyper
 | 15 | Partial | Printable punctuation and shifted printable symbols are supported, but assignments are one character and do not represent arbitrary Ctrl/Alt modifier chords. |
 | 16-22 | Complete | Startup theme setup, hidden-folder test ordering, monitor-bounded FitWidth behavior, menu mnemonics, rename-path fallback, and Tab discoverability are present. The local rename smoke passed; hosted CI was not rerun. |
 | 23 | Partial / needs visual confirmation | The consolidated Settings combo is owner-drawn. A legacy slideshow dialog still creates a native combo; its list colors are themed, but the closed field and drop button need dark-theme verification. |
-| 24 | Partial | Full-screen Escape has configurable actions, but its default remains Close rather than leaving full screen. |
+| 24 | Complete | Missing settings now default to Exit Full Screen; Escape still closes a windowed viewer, and persisted choices such as Close remain unchanged. The fullscreen interaction smoke passed. |
 | 25-26 | Complete | Fullscreen refits the image; opening a viewer explicitly foregrounds it. |
 | 27 | Retired | Removed from the report. |
 | 28-29 | Complete | Additional main windows are cascaded; disabling main-window Escape makes Escape a no-op. |
@@ -79,7 +79,7 @@ Follow-up validation on 2026-11-15: `cmake --build --preset debug --target Hyper
 
 4. **Resolve Quick Actions chord scope (item 15).** Confirm whether the request includes Ctrl/Alt chords beyond printable and shifted printable characters. If so, represent virtual keys and modifiers explicitly, update assignment capture and popup dispatch, and test conflicts with application shortcuts. Current docs explicitly exclude control and navigation keys.
 
-5. **Choose the fullscreen Escape default (item 24).** The current default is Close, while the request expects Escape to leave fullscreen and close only when already windowed. Confirm the desired default action, then test Escape in both modes and persistence of the setting.
+5. **Resolved 2026-11-15 — item 24.** The default is now Exit Full Screen; windowed Escape still closes the viewer. Existing persisted choices are preserved. Persistence/default and fullscreen interaction tests passed.
 
 6. **Finish combo-box dark theming (item 23).** Verify the closed field, list, text, and drop button for every reachable combo in dark mode, including the legacy slideshow dialog. Use a consistently themed control or remove the legacy path if it is no longer supported.
 

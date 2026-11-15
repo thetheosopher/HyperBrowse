@@ -346,7 +346,7 @@ namespace hyperbrowse::ui::dialog_detail
         int prefetchDepthOverride{hyperbrowse::util::kAutomaticPrefetchDepth};
         hyperbrowse::browser::ThumbnailSizePreset thumbnailSizePreset{static_cast<hyperbrowse::browser::ThumbnailSizePreset>(192)};
         hyperbrowse::viewer::MouseWheelBehavior viewerMouseWheelBehavior{hyperbrowse::viewer::MouseWheelBehavior::Zoom};
-        hyperbrowse::viewer::EscapeKeyBehavior viewerEscapeKeyBehavior{hyperbrowse::viewer::EscapeKeyBehavior::Close};
+        hyperbrowse::viewer::EscapeKeyBehavior viewerEscapeKeyBehavior{hyperbrowse::viewer::EscapeKeyBehavior::ExitFullScreen};
         bool invertKeyboardPanning{};
         hyperbrowse::viewer::TransitionStyle slideshowTransitionStyle{hyperbrowse::viewer::TransitionStyle::Crossfade};
         hyperbrowse::viewer::InfoOverlayTextSize overlayTextSize{hyperbrowse::viewer::InfoOverlayTextSize::Small};

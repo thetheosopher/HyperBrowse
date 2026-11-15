@@ -1715,9 +1715,25 @@ namespace hyperbrowse::tests
                        && fallback.slideshowTransitionStyle == TransitionStyle::Crossfade
                        && fallback.slideshowTransitionDurationMs == 350
                        && fallback.mouseWheelBehavior == MouseWheelBehavior::Zoom
-                       && fallback.escapeKeyBehavior == EscapeKeyBehavior::Close
+                       && fallback.escapeKeyBehavior == EscapeKeyBehavior::ExitFullScreen
                        && fallback.colorManagementEnabled,
                    "Viewer settings persistence did not apply defaults to invalid persisted values");
+
+            values[L"ViewerEscapeKeyBehavior"] = static_cast<DWORD>(EscapeKeyBehavior::Close);
+            const ViewerSettingsState preservedClosePreference = ViewerSettingsPersistence::Load(
+                [&values](std::wstring_view valueName, DWORD* value)
+                {
+                    const auto found = values.find(std::wstring(valueName));
+                    if (found == values.end())
+                    {
+                        return false;
+                    }
+
+                    *value = found->second;
+                    return true;
+                });
+            Expect(preservedClosePreference.escapeKeyBehavior == EscapeKeyBehavior::Close,
+                   "Viewer settings persistence did not preserve the saved Close action");
 
             values.clear();
             ViewerSettingsPersistence::Save(
@@ -1736,7 +1752,9 @@ namespace hyperbrowse::tests
                        && values[L"ColorManagementEnabled"] == 0,
                    "Viewer settings persistence did not write the expected registry value contract");
             const auto defaults = ViewerSettingsPersistence::Load([](std::wstring_view, DWORD*) { return false; });
-            Expect(defaults.colorManagementEnabled, "Missing color-management preference did not default on");
+            Expect(defaults.colorManagementEnabled
+                       && defaults.escapeKeyBehavior == EscapeKeyBehavior::ExitFullScreen,
+                   "Missing viewer preferences did not restore their defaults");
         }
 
         void RunBrowserPresentationPersistenceScenario()

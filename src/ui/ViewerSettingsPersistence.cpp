@@ -66,7 +66,7 @@ namespace hyperbrowse::ui
         }
 
         if (readDword(kEscapeKeyBehaviorValue, &value)
-            && value <= static_cast<DWORD>(viewer::EscapeKeyBehavior::ActualSize))
+            && value <= static_cast<DWORD>(viewer::EscapeKeyBehavior::ExitFullScreen))
         {
             state.escapeKeyBehavior = static_cast<viewer::EscapeKeyBehavior>(value);
         }

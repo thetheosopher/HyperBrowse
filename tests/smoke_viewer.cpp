@@ -587,6 +587,18 @@ namespace
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
             "Viewer fit-mode window did not finish the initial image decode");
         Expect(viewer.IsFullScreen(), "Viewer fit-mode window should open in full screen by default");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+        PumpMessagesFor(100);
+        Expect(!viewer.IsFullScreen() && viewer.IsOpen(),
+            "Default fullscreen Escape did not return to the windowed viewer");
+        SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+        PumpMessagesFor(100);
+        Expect(!viewer.IsOpen(), "Windowed Escape did not close the viewer");
+        Expect(viewer.Open(ownerWindow, items, 1, false),
+            "Viewer fit-mode window failed to reopen after testing default Escape behavior");
+        Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
+            "Reopened viewer fit-mode window did not finish the initial image decode");
+        Expect(viewer.IsFullScreen(), "Reopened viewer fit-mode window should open in full screen");
         RunViewerWindowFitModeChecks(viewer, 64, 32);
 
         Expect(viewer.CurrentIndex() == 1, "Viewer wraparound scenario did not start from the middle image");

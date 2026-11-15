@@ -17,7 +17,7 @@ namespace hyperbrowse::ui
         bool useSlideshowTransition{};
         viewer::MouseWheelBehavior mouseWheelBehavior{};
         bool invertKeyboardPanning{};
-        viewer::EscapeKeyBehavior escapeKeyBehavior{};
+        viewer::EscapeKeyBehavior escapeKeyBehavior{viewer::EscapeKeyBehavior::ExitFullScreen};
         bool colorManagementEnabled{true};
     };
 
