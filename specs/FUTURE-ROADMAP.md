@@ -1,6 +1,6 @@
 # HyperBrowse Future Roadmap
 
-Last reviewed: 2026-11-15 (2.7.0 and 2.7.1 follow-ups)
+Last reviewed: 2026-11-15 (2.7.1 release)
 
 This is the single forward-looking product backlog for HyperBrowse. It is
 intentionally separate from the authoritative shipped contract in
@@ -29,8 +29,8 @@ ledger. The app was not exercised interactively for this review.
 
 ### 2.7.1 correctness and documentation patch
 
-Items 24, 40, 43, and 46 and the README screenshot refresh are complete in the
-working tree.
+Items 24, 40, 43, and 46 and the README screenshot refresh are included in
+release 2.7.1.
 
 - **Bug item 40 — complete:** the Viewer setting now says "Use the slideshow
   transition when navigating manually." The default-off opt-in continues to

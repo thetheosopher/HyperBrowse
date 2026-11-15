@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.7.0-2EA043)
+![Version](https://img.shields.io/badge/Version-2.7.1-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -42,6 +42,20 @@ The reproducible screenshot image set is documented in
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 - A Windows CI workflow defines Debug/Release, CTest, benchmark, and release-package validation; it is currently manually disabled. Local release checks are documented in [docs/testing.md](docs/testing.md).
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
+
+## What's New In 2.7.1
+
+This maintenance release improves viewer Escape behavior and clarifies a few
+review and Quick Actions workflows.
+
+- Full-screen Escape now exits to windowed mode by default; Escape still closes
+  a windowed viewer. Existing saved Escape choices remain unchanged.
+- Renamed the Viewer setting to make clear that slideshow transitions are an
+  opt-in for manual image navigation.
+- Added viewer `Ctrl+I` to Help > Keyboard Shortcuts and corrected the
+  documented configurable Quick Actions assignment order.
+- Refreshed the main-window screenshot and added a small public-domain nature
+  image set for reproducing it.
 
 ## What's New In 2.7.0
 
@@ -362,13 +376,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.7.0-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.7.1-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.7.0-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.7.1-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -438,11 +452,20 @@ For the current backlog in detail, start with [specs/FUTURE-ROADMAP.md](specs/FU
 
 ## Version
 
-Current release: **2.7.0**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.7.0-portable-win64.zip` and `HyperBrowse-2.7.0-installer.exe`).
+Current release: **2.7.1**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.7.1-portable-win64.zip` and `HyperBrowse-2.7.1-installer.exe`).
 
 Release **2.0.0** expanded HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It added richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.7.1
+
+- Made leaving full-screen the default viewer Escape action, while preserving
+  saved choices and windowed close behavior.
+- Clarified the manual-navigation transition opt-in and added viewer `Ctrl+I`
+  to the in-app shortcut catalog.
+- Documented the configurable Quick Actions key order and refreshed the main
+  window screenshot with a public-domain nature example set.
 
 ### 2.7.0
 
@@ -607,7 +630,7 @@ Known limits: GIF and TIFF browsing displays the first frame or page; JPEG orien
 
 ## Next Features
 
-The forward-looking backlog lives in [specs/FUTURE-ROADMAP.md](specs/FUTURE-ROADMAP.md). Planned areas after 2.7.0 include:
+The forward-looking backlog lives in [specs/FUTURE-ROADMAP.md](specs/FUTURE-ROADMAP.md). Planned areas after 2.7.1 include:
 
 - Next UI polish (2.8): dialog accessibility, in-place thumbnail/details rename, a simplified title bar, and Quick Actions hover/drag polish.
 - Polish and accessibility: dialog accessibility, in-place thumbnail and details rename, a simplified title bar, and Quick Actions hover hints and drag targets.

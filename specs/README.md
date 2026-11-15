@@ -1,7 +1,7 @@
 # HyperBrowse Specifications
 
 HyperBrowse is a native Windows image browser and viewer. The current release
-is 2.7.0.
+is 2.7.1.
 
 ## Start Here
 

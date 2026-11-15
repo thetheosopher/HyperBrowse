@@ -774,7 +774,7 @@ namespace hyperbrowse::tests::smoke
                     && SendMessageW(appTextCombo, CB_GETCOUNT, 0, 0) == 3
                     && SendMessageW(thumbnailCombo, CB_GETCOUNT, 0, 0) >= 2
                     && SendMessageW(resourceCombo, CB_GETCOUNT, 0, 0) == 4
-                    && SendMessageW(escapeBehaviorCombo, CB_GETCOUNT, 0, 0) == 4)
+                    && SendMessageW(escapeBehaviorCombo, CB_GETCOUNT, 0, 0) == 5)
                 {
                     break;
                 }
@@ -786,7 +786,7 @@ namespace hyperbrowse::tests::smoke
                 || SendMessageW(appTextCombo, CB_GETCOUNT, 0, 0) != 3
                 || SendMessageW(thumbnailCombo, CB_GETCOUNT, 0, 0) < 2
                 || SendMessageW(resourceCombo, CB_GETCOUNT, 0, 0) != 4
-                || SendMessageW(escapeBehaviorCombo, CB_GETCOUNT, 0, 0) != 4)
+                || SendMessageW(escapeBehaviorCombo, CB_GETCOUNT, 0, 0) != 5)
             {
                 failAndClose("Experimental Settings did not create/populate all native combo boxes (transition="
                     + std::to_string(transitionCombo != nullptr) + ", overlay="
