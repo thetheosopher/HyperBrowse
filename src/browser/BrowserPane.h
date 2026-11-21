@@ -94,6 +94,16 @@ namespace hyperbrowse::browser
         static constexpr UINT kOpenItemMessage = WM_APP + 44;
         static constexpr UINT kContextMenuMessage = WM_APP + 45;
         static constexpr UINT kQuickSendDragMessage = WM_APP + 50;
+        static constexpr UINT kInlineRenameRequestMessage = WM_APP + 52;
+
+        struct InlineRenameRequest
+        {
+            std::wstring sourcePath;
+            std::wstring originalLeafName;
+            std::wstring newLeafName;
+            bool preserveCurrentFocus{};
+            HWND focusRestoreWindow{};
+        };
 
         struct ThemeColors
         {
@@ -118,6 +128,8 @@ namespace hyperbrowse::browser
         bool Create(HWND parent);
         HWND Hwnd() const noexcept;
         bool HandleNavigationKey(UINT message, WPARAM keyCode, LPARAM keyData);
+        bool BeginInlineRename();
+        bool IsInlineRenameEdit(HWND window) const noexcept;
 
         void SetModel(BrowserModel* model);
         void BeginFolderLoad();
@@ -240,6 +252,15 @@ namespace hyperbrowse::browser
         void RebuildOrder();
         void PruneSelectionToVisibleItems();
         void UpdateDetailsListView();
+        bool GetInlineRenameEditBounds(RECT* bounds) const;
+        void UpdateInlineRenameEditPosition();
+        void FinishInlineRename(bool commit, bool restoreFocus, HWND focusRestoreWindow = nullptr);
+        static LRESULT CALLBACK InlineRenameEditSubclassProc(HWND hwnd,
+                                                              UINT message,
+                                                              WPARAM wParam,
+                                                              LPARAM lParam,
+                                                              UINT_PTR subclassId,
+                                                              DWORD_PTR refData);
         void UpdateVerticalScrollBar();
         void CancelSmoothScrollAnimation();
         void SetScrollOffset(int value, bool scheduleVisibleWork = true, bool forceVisibleWork = false);
@@ -324,6 +345,12 @@ namespace hyperbrowse::browser
         HWND parent_{};
         HWND hwnd_{};
         HWND detailsList_{};
+        HWND inlineRenameEdit_{};
+        HWND inlineRenameFocusRestoreWindow_{};
+        UINT_PTR inlineRenameSessionId_{};
+        std::wstring inlineRenameSourcePath_;
+        std::wstring inlineRenameOriginalLeafName_;
+        bool inlineRenameEnding_{};
         HWND thumbnailTooltip_{};
         HFONT detailsListFont_{};
         HFONT thumbnailTitleFont_{};

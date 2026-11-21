@@ -27,15 +27,16 @@ The reproducible screenshot image set is documented in
 - Asynchronous folder enumeration, folder tree loading, metadata extraction, folder watching, and thumbnail scheduling.
 - WIC decode for JPEG, PNG, GIF, TIFF, WebP, HEIC, and JPEG XL, with HEIC/JPEG XL dependent on compatible Windows codecs; LibRaw-based RAW support and optional nvJPEG acceleration with runtime fallback.
 - Thumbnail and details modes, optional Explorer-style subfolder entries, recursive browsing, sorting, filename/rating/tag/type filtering, named saved searches, thumbnail ratings, and multi-selection workflows.
+- The main-window title identifies the active folder path; the status bar and corresponding menus surface view mode, recursive-browsing, and theme state.
 - Full-screen viewer with zoom, pan, rotate, edge-hover previous/next navigation, 2-4 image N-up comparison with synchronized zoom and pan, configurable file-information, image-status, full-metadata, and RGB-histogram overlays, current-folder slideshow launch, adjacent-image prefetch, and multiple independent viewer windows within one HyperBrowse instance.
 - Performance profiles (Conservative, Balanced, Performance, and Aggressive) with adaptive cache sizing and configurable 1-16 item lookahead; Auto follows the active profile and memory pressure reduces speculative work.
-- Quick Actions with saved destinations, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy for the currently displayed image or selected browser files.
+- Quick Actions with favorite and recent destinations, per-row image-count/last-used hints, thumbnail-to-row filing, persistent key assignments, F4 filing-position resume, F7 move, and F8 copy.
 - Persistent thumbnail cache statistics, deterministic per-shard inspection, asynchronous compact/purge maintenance, bounded migration, one low-priority worker for persistent I/O, and safer remembered window/folder restore on startup.
 - Expanded slideshow system with richer transition controls, keyboard shortcut access, and effect-backed Direct2D transition styles.
 - Consolidated tabbed Settings dialog covering slideshow, viewer, appearance, performance, and behavior preferences with Apply, OK, and Cancel workflow; open it with Ctrl+Shift+T.
 - Folder tree workflow upgrades with validated folder moves, inline folder creation, Quick Actions destinations, back-navigation history, a toolbar back button, and image drag-and-drop from the browser into tree folders or shell-aware apps such as File Explorer.
 - Selected thumbnails and details rows can be dragged to File Explorer, mail clients, and other shell-aware applications using native Windows file-drop data.
-- Keyboard navigation now covers browser and viewer workflows with consistent focus, selection, and folder-history behavior.
+- Keyboard navigation now covers browser and viewer workflows with consistent focus, selection, and folder-history behavior. Press F2 to edit a selected file name in place in thumbnail or details mode; the rename dialog remains a fallback.
 - XInput gamepads can navigate and open browser selections, navigate/zoom/pan in the viewer, and send selected images to the Recycle Bin. Browser: D-pad/left stick selects, A opens, B uses the Escape behavior, and X recycles. Viewer: D-pad/left stick (up/left previous, down/right next) or LB/RB navigates, LT/RT zooms, right stick pans with smoothed motion that accelerates while held, A toggles fit/actual size, Y toggles overlays (Tab), B follows the configured Escape behavior, and X recycles. Gamepad commands act only while HyperBrowse is active; deletion follows the existing confirmation policy.
 - Display changes and graphics-surface loss trigger redraw and resource recovery across the main window, viewer, diagnostics window, and thumbnail pipeline.
 - Files dropped onto the application can open directly in the viewer or be copied into the current folder through the existing shell-aware workflows.
@@ -191,7 +192,7 @@ The same catalogue is available in the application from Help > Keyboard Shortcut
 | `Esc` | Close the main window when enabled in Settings; otherwise do nothing |
 | `Ctrl+W` | Minimize the main window |
 | `F5` | Refresh the folder tree |
-| `F2` | Rename the selected item |
+| `F2` | Rename the selected item; edit in place when possible |
 | `Ctrl+Shift+R` | Batch rename the selected items |
 | `Enter` | Open the selected image in the viewer |
 | `Alt+Up` | Navigate to the parent folder |
@@ -632,8 +633,7 @@ Known limits: GIF and TIFF browsing displays the first frame or page; JPEG orien
 
 The forward-looking backlog lives in [specs/FUTURE-ROADMAP.md](specs/FUTURE-ROADMAP.md). Planned areas after 2.7.1 include:
 
-- Next UI polish (2.8): dialog accessibility, in-place thumbnail/details rename, a simplified title bar, and Quick Actions hover/drag polish.
-- Polish and accessibility: dialog accessibility, in-place thumbnail and details rename, a simplified title bar, and Quick Actions hover hints and drag targets.
+- Remaining 2.8 UI polish: dialog accessibility sign-off and the consolidated visual/manual verification pass. The folder-path title/status context, in-place image rename, and Quick Actions panel polish are implemented.
 - Performance evidence: local benchmark baselines for startup and thumbnail throughput, and reduced persistent-cache write contention.
 - Viewer depth: animated GIF/WebP playback, command search over the shortcut catalog, multipage TIFF navigation, and a clip-warning overlay.
 

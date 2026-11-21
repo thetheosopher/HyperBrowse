@@ -1,13 +1,13 @@
 # HyperBrowse Bug Report 2: Status Review and Follow-up Plan
 
-Reviewed: 2026-11-15 (follow-up status refresh; initial review 2026-09-26)
+Reviewed: 2026-11-17 (item 69 runtime follow-up; initial review 2026-09-26)
 Source: [HyperBrowse-Bug-Reports 2.md](HyperBrowse-Bug-Reports%202.md)
 
 The initial review compared the report with the source, settings UI, user documentation, and smoke tests; it made no implementation or source-document changes. This refresh records the owner-approved item 40 label correction and completion of items 43 and 46. Item numbers are preserved.
 
 ## Summary
 
-Most entries are implemented or withdrawn. The remaining implementation/documentation follow-ups are items 15, 23, 30, 33, 36, and 48. Items 24 and 40 are complete, as are items 43 and 46. The newly reviewed tail, items 58-72, is largely addressed in current source; runtime verification remains for DPI scaling (61) and WebP decoding (69). The original CTest failures below remain historical findings pending a current full-suite recheck.
+Most entries are implemented or withdrawn. The remaining implementation/documentation follow-ups are items 15, 23, 30, 33, 36, and 48. Items 24 and 40 are complete, as are items 43 and 46. The newly reviewed tail, items 58-72, is largely addressed in current source; runtime verification remains for DPI scaling (61). The original CTest failures below remain historical findings pending a current full-suite recheck.
 
 ## Verification
 
@@ -16,6 +16,8 @@ The initial CMake Tools CTest suite was run against the existing `build` output,
 `HyperBrowseSmoke` and `HyperBrowseViewerInteractionSmoke` both failed with `Viewer full metadata pane remained visible when full metadata was disabled`. In the failing scenario, `IsFullMetadataVisible()` already reports false before the test compares a single screen pixel. The implementation clears metadata and requests a repaint, so determine whether this is a rendering defect or an ambiguous pixel fixture before changing behavior. `HyperBrowseSettingsSmoke`, `HyperBrowseMultiViewerSettingsSmoke`, `HyperBrowseViewerFitSmoke`, `HyperBrowseFileRenameSmoke`, and `HyperBrowseItemNumberNavigationSmoke` passed.
 
 Follow-up validation on 2026-11-15: `cmake --build --preset debug --target HyperBrowse HyperBrowseTests` succeeded. `ctest --preset debug-tests -R RuntimePolicySmoke --output-on-failure` passed 1/1 for viewer `Ctrl+I`; `build\tests\Debug\HyperBrowseTests.exe --viewer-settings` passed for Escape persistence/defaults; and `ctest --preset debug-tests -R HyperBrowseViewerFitSmoke --output-on-failure` passed 1/1 for Escape behavior. `docs/MainWindow.PNG` was refreshed from the running app with the nature example set. The full CTest suite was not re-run.
+
+Item 69 runtime validation on 2026-11-17: with Microsoft WebP Image Extension 1.2.31.0 installed, HyperBrowse enumerated and rendered a thumbnail for a temporary 220x146 WebP derived from the public-domain USGS Yellowstone example. The Viewer rendered the file, and entering its path in Windows Run launched HyperBrowse and displayed it. No default-app setting was changed; this verifies the codec and file association on this machine.
 
 ## Per-Item Status
 
@@ -64,7 +66,7 @@ Follow-up validation on 2026-11-15: `cmake --build --preset debug --target Hyper
 | 66 | Complete | Keep-in-notification-area is an option gated by single-instance mode; close hides to the tray, whose Open/Exit commands restore or quit. |
 | 67 | Complete | Persistent cache index and journal use explicit UTF-8 encoding and decoding rather than locale-dependent wide streams. |
 | 68 | Complete | A finished decode is inserted into memory cache and queued for disk storage even when its viewport request is stale; only the UI-ready notification is epoch-gated. |
-| 69 | Implemented; runtime check pending | WebP is included in the supported WIC file types; successful decoding still depends on an installed WIC WebP codec. Verify listing, thumbnailing, and opening with a representative file. |
+| 69 | Complete; runtime verified 2026-11-17 | Browser enumeration, thumbnailing, Viewer decode, and Windows Run launch by file path succeeded for a temporary WebP derived from the public-domain USGS Yellowstone example. Microsoft WebP Image Extension 1.2.31.0 was installed; codec availability remains machine-specific. |
 | 70 | Complete | Recovery retries snapshot the viewer HWNDs present when the retry series starts and skip viewers opened afterward. |
 | 71 | Complete | External drag handling stores the data object in a WRL `ComPtr` and clears it on DragLeave or Drop. |
 | 72 | Complete | Clipboard error paths free the preferred-effect allocation unless ownership transferred successfully to the clipboard. |
@@ -93,7 +95,7 @@ Follow-up validation on 2026-11-15: `cmake --build --preset debug --target Hyper
 
 11. **Verify Settings DPI scaling (item 61).** Exercise the consolidated Settings dialog at 150% and 200%, then move it between monitors with different scale factors. Confirm that the frame, tabs, custom text, and native controls resize together and remain usable.
 
-12. **Verify WebP end to end (item 69).** On Windows with the Webp Image Extension installed, test browser enumeration, thumbnail decode, command-line/Explorer launch, and viewer decode using a representative `.webp` file. Keep codec availability as an explicit runtime prerequisite.
+12. **Complete 2026-11-17 — item 69.** Browser enumeration, thumbnail decode, Viewer rendering, and Windows Run launch by file path succeeded with Microsoft WebP Image Extension 1.2.31.0. The sample was a temporary derivative of the public-domain USGS Yellowstone example; codec availability remains machine-specific.
 
 ## External Validation Notes
 

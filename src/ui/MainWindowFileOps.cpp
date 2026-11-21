@@ -132,6 +132,11 @@ namespace hyperbrowse::ui
             return;
         }
 
+        if (browserPaneController_->BeginInlineRename())
+        {
+            return;
+        }
+
         if (browserPaneController_->SelectedCount() != 1)
         {
             MessageBoxW(hwnd_, L"Select a single image to rename.", L"Rename Image", MB_OK | MB_ICONINFORMATION);
@@ -161,6 +166,32 @@ namespace hyperbrowse::ui
             return;
         }
 
+        StartRenameSelectedImageFromPath(sourcePath, sourceLeafName, renamedLeafName);
+    }
+
+    void MainWindow::StartRenameSelectedImageFromPath(const std::wstring& sourcePath,
+                                                      const std::wstring& sourceLeafName,
+                                                      const std::wstring& renamedLeafName,
+                                                      bool preserveCurrentFocus,
+                                                      HWND focusRestoreWindow)
+    {
+        if (!browserModel_ || fileOperationActive_ || sourcePath.empty())
+        {
+            return;
+        }
+
+        if (renamedLeafName == sourceLeafName)
+        {
+            return;
+        }
+
+        std::wstring validationError;
+        if (!IsValidRenameLeafName(renamedLeafName, &validationError))
+        {
+            MessageBoxW(hwnd_, validationError.c_str(), L"Rename Image", MB_OK | MB_ICONWARNING);
+            return;
+        }
+
         const bool sourceStillCurrent = std::any_of(
             browserModel_->Items().begin(),
             browserModel_->Items().end(),
@@ -181,7 +212,10 @@ namespace hyperbrowse::ui
                            {sourcePath},
                            {},
                            services::FileConflictPolicy::PromptShell,
-                           {renamedLeafName});
+                           {renamedLeafName},
+                           nullptr,
+                           preserveCurrentFocus,
+                           focusRestoreWindow);
     }
 
     void MainWindow::StartBatchRenameSelection()
@@ -613,7 +647,9 @@ namespace hyperbrowse::ui
                                         std::wstring destinationFolder,
                                         services::FileConflictPolicy conflictPolicy,
                                         std::vector<std::wstring> targetLeafNames,
-                                        HWND ownerWindow)
+                                        HWND ownerWindow,
+                                        bool preserveCurrentFocus,
+                                        HWND focusRestoreWindow)
     {
         if (!fileOperationService_ || sourcePaths.empty() || fileOperationActive_)
         {
@@ -655,6 +691,14 @@ namespace hyperbrowse::ui
         else if (!activeTreeFolderOperationPath_.empty() && treePane_)
         {
             focusWindowAtFileOperationStart_ = treePane_;
+        }
+        else if (preserveCurrentFocus)
+        {
+            focusWindowAtFileOperationStart_ = focusRestoreWindow
+                && IsWindow(focusRestoreWindow) != FALSE
+                && (focusRestoreWindow == hwnd_ || IsChild(hwnd_, focusRestoreWindow))
+                ? focusRestoreWindow
+                : nullptr;
         }
         else if (browserPaneController_)
         {

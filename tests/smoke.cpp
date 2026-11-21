@@ -65,6 +65,9 @@ int main(int argc, char* argv[])
         const bool appTextSizeOnly = argc > 1 && std::string_view(argv[1]) == "--app-text-size";
         const bool folderTreeRestoreOnly = argc > 1 && std::string_view(argv[1]) == "--folder-tree-restore";
         const bool folderTreeLargeOnly = argc > 1 && std::string_view(argv[1]) == "--folder-tree-large";
+        const bool windowChromeOnly = argc > 1 && std::string_view(argv[1]) == "--window-chrome";
+        const bool quickSendOnly = argc > 1 && std::string_view(argv[1]) == "--quick-send";
+        const bool inlineRenameOnly = argc > 1 && std::string_view(argv[1]) == "--inline-rename";
         const bool accessibilityOnly = argc > 1 && std::string_view(argv[1]) == "--accessibility";
         const bool dialogGeometryOnly = argc > 1 && std::string_view(argv[1]) == "--dialog-geometry";
         const bool settingsOnly = argc > 1 && std::string_view(argv[1]) == "--settings";
@@ -174,6 +177,18 @@ int main(int argc, char* argv[])
         {
             RunMainWindowFolderTreeLargeScenario(instance);
         }
+        else if (windowChromeOnly)
+        {
+            RunMainWindowChromeScenario(instance);
+        }
+        else if (quickSendOnly)
+        {
+            RunQuickSendPolishScenario(instance);
+        }
+        else if (inlineRenameOnly)
+        {
+            RunBrowserInlineRenameScenario(instance);
+        }
         else if (accessibilityOnly)
         {
             RunMainWindowAccessibilityScenario(instance);
@@ -259,10 +274,13 @@ int main(int argc, char* argv[])
             RunStartupViewerEnumerationScenario(instance);
             RunViewerDeleteFocusScenario(instance);
             RunMainWindowFolderTreeScenario(instance);
+            RunMainWindowChromeScenario(instance);
+            RunBrowserInlineRenameScenario(instance);
             RunMainWindowKeyboardFocusScenario(instance);
             RunMainWindowAccessibilityScenario(instance);
             RunMainWindowTextInputAcceleratorScenario(instance);
             RunExternalDropTargetDataObjectLifetimeScenario();
+            RunQuickSendPolishScenario(instance);
         }
 
         DestroyWindow(hwnd);

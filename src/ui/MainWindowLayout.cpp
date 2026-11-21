@@ -340,10 +340,16 @@ namespace hyperbrowse::ui
             statusPrimaryText_ = imageCommandActivityLabel_ + L" (Esc to cancel)  |  " + statusPrimaryText_;
         }
 
+        const std::wstring browserContextText =
+            L"View: " + std::wstring(browserMode_ == BrowserMode::Thumbnails ? L"Thumbnails" : L"Details")
+            + L" | Recursive: " + (recursiveBrowsingEnabled_ ? L"On" : L"Off")
+            + L" | Theme: " + (themeMode_ == ThemeMode::Dark ? L"Dark" : L"Light");
+        statusSecondaryText_ = browserContextText + L"  |  Selected: ";
         const std::uint64_t selectedCount = browserPaneController_ ? browserPaneController_->SelectedCount() : 0;
         const std::uint64_t selectedBytes = browserPaneController_ ? browserPaneController_->SelectedBytes() : 0;
-        statusSecondaryText_ = L"Selected: " + std::to_wstring(selectedCount)
-            + L" items | " + browser::FormatByteSize(selectedBytes);
+        statusSecondaryText_.append(std::to_wstring(selectedCount));
+        statusSecondaryText_.append(L" items | ");
+        statusSecondaryText_.append(browser::FormatByteSize(selectedBytes));
         if (rawJpegPairedOperationsEnabled_)
         {
             std::size_t pairedCompanionCount = 0;
@@ -383,6 +389,18 @@ namespace hyperbrowse::ui
                 ? L"Scanning folders...  |  "
                 : (folderEnumerationActive ? L"Scanning folder...  |  " : L"Probing folders...  |  ");
             statusPrimaryText_ = activityText + statusPrimaryText_;
+        }
+
+        wchar_t currentStatusContext[128]{};
+        const int currentStatusContextLength = GetWindowTextW(
+            statusBar_,
+            currentStatusContext,
+            static_cast<int>(std::size(currentStatusContext)));
+        if (std::wstring_view(currentStatusContext, static_cast<std::size_t>(currentStatusContextLength))
+            != browserContextText
+            && !SetWindowTextW(statusBar_, browserContextText.c_str()))
+        {
+            util::LogLastError(L"SetWindowTextW(StatusBarAccessibilityName)");
         }
 
         InvalidateRect(statusBar_, nullptr, TRUE);

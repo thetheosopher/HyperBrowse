@@ -71,7 +71,7 @@ Status: Implemented and smoke-validated.
 
 ### Slice 5: Accessibility exposure and verification
 
-- Status: Main-window custom surfaces expose an MSAA `IAccessible` bridge and are covered by `HyperBrowseAccessibilitySmoke`. Dialog-specific custom surfaces and manual screen-reader verification remain.
+- Status: Main-window and Experimental Settings custom surfaces use the shared MSAA `IAccessible` bridge. `HyperBrowseAccessibilitySmoke` covers main-window semantics; `HyperBrowseSettingsSmoke` covers Settings names and roles, focused and selected tab state, page-focus restoration, and checked/unavailable state transitions for automatic cache sizing. The owner confirmed high-contrast, theme, DPI, and larger-text visual checks passed on 2026-11-15; manual NVDA/JAWS and Inspect/UIA sign-off remains.
 
 - Implement a UI Automation provider or the smallest existing project-compatible accessibility bridge for custom targets.
 - Expose name, role, enabled/disabled, checked/selected, expanded/open, and focused state.
@@ -81,13 +81,14 @@ Status: Implemented and smoke-validated.
 Implementation notes:
 
 - The main window serves `WM_GETOBJECT` for `OBJID_CLIENT` through an MSAA provider without changing native child controls.
+- Experimental Settings reuses the same provider for its custom tabs, custom controls, and footer actions; native fields and choice controls remain native child controls.
 - The provider exposes command-bar menus, toolbar actions/toggles/dropdowns, the image browser surface, details tabs/close, and Quick Actions rows/buttons with names, roles, screen bounds, states, default actions, and focus/state notifications.
 - Breadcrumb segments are owner-drawn native Button controls with full target paths as accessible names; the overflow button is named **More parent folders** and exposes hidden ancestors through a native menu. The Performance HUD remains a checked View-menu toggle rather than a focusable overlay surface.
 
 ### Slice 6: Regression and release gates
 
 - Add smoke coverage for main-window Tab/Shift+Tab order, custom activation, hidden/disabled skipping, settings page navigation, dialog mnemonics, accessibility names/roles/focus state, initial focus, focus restoration, and filter accelerator leakage.
-- Verify light/dark themes, high-contrast mode, larger text, DPI scaling, narrow layouts, and empty/loading Quick Actions states.
+- Owner visual review of light/dark themes, high-contrast mode, larger text, DPI scaling, narrow layouts, and empty/loading Quick Actions states passed on 2026-11-15.
 - Build the exact executable used for manual verification and confirm its timestamp is newer than the edited sources.
 
 ## First-slice validation

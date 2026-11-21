@@ -459,6 +459,7 @@ namespace hyperbrowse::ui
         };
         messageHandlers.onBrowserPaneState = std::bind_front(&MainWindow::OnBrowserPaneStateMessage, this);
         messageHandlers.onBrowserPaneOpenItem = std::bind_front(&MainWindow::OnBrowserPaneOpenItemMessage, this);
+        messageHandlers.onBrowserPaneInlineRename = std::bind_front(&MainWindow::OnBrowserPaneInlineRenameMessage, this);
         messageHandlers.onBrowserPaneContextMenu = std::bind_front(&MainWindow::OnBrowserPaneContextMenuMessage, this);
         messageHandlers.onBrowserPaneQuickSendDrag = std::bind_front(&MainWindow::OnBrowserPaneQuickSendDragMessage, this);
         messageHandlers.onBatchConvert = std::bind_front(&MainWindow::OnBatchConvertMessage, this);
@@ -482,6 +483,8 @@ namespace hyperbrowse::ui
             return static_cast<LRESULT>(0);
         };
         messageHandlers.onDetailsPanelThumbnail = std::bind_front(&MainWindow::OnDetailsPanelThumbnailMessage, this);
+        messageHandlers.onQuickAccessDirectoryMetadata =
+            std::bind_front(&MainWindow::OnQuickAccessDirectoryMetadataMessage, this);
         messageHandlers.onViewerZoom = std::bind_front(&MainWindow::OnViewerZoomMessage, this);
         messageHandlers.onViewerActivity = std::bind_front(&MainWindow::OnViewerActivityMessage, this);
         messageHandlers.onViewerCurrentItemChanged = std::bind_front(&MainWindow::OnViewerCurrentItemChangedMessage, this);
@@ -1076,6 +1079,8 @@ namespace hyperbrowse::ui
 
     MainWindow::~MainWindow()
     {
+        CancelQuickAccessDirectoryMetadata();
+        quickAccessDirectoryMetadataService_.reset();
         if (performanceHudTimerId_ != 0 && hwnd_ && IsWindow(hwnd_) != FALSE)
         {
             KillTimer(hwnd_, performanceHudTimerId_);
@@ -1532,6 +1537,18 @@ namespace hyperbrowse::ui
         if (message->message == WM_SYSKEYDOWN
             && message->wParam == VK_UP
             && IsTextInputControlWindow(message->hwnd))
+        {
+            return false;
+        }
+
+        if (message->message == WM_KEYDOWN
+            && browserPaneController_
+            && browserPaneController_->IsInlineRenameEdit(message->hwnd)
+            && (message->wParam == VK_RETURN
+                || message->wParam == VK_ESCAPE
+                || message->wParam == VK_TAB
+                || message->wParam == VK_F2
+                || message->wParam == VK_F6))
         {
             return false;
         }
@@ -2464,6 +2481,18 @@ namespace hyperbrowse::ui
                 return 0;
             }
 
+            if (di->hdr.idFrom >= kQuickAccessDestinationTooltipBase)
+            {
+                const std::size_t rowIndex = static_cast<std::size_t>(
+                    di->hdr.idFrom - kQuickAccessDestinationTooltipBase);
+                if (rowIndex < quickAccessDestinationRows_.size())
+                {
+                    quickAccessTooltipText_ = quickAccessDestinationRows_[rowIndex].tooltipText;
+                    di->lpszText = const_cast<LPWSTR>(quickAccessTooltipText_.c_str());
+                    return 0;
+                }
+            }
+
             if (di->hdr.idFrom == kDetailsPanelHistogramTooltipId)
             {
                 di->lpszText = const_cast<LPWSTR>(L"RGB histogram: shows the distribution of pixel brightness across the red, green, and blue channels.");
@@ -3316,6 +3345,7 @@ namespace hyperbrowse::ui
 
     LRESULT MainWindow::HandleDestroyMessage()
     {
+        CancelQuickAccessDirectoryMetadata();
         if (gamepadTimerId_ != 0)
         {
             KillTimer(hwnd_, gamepadTimerId_);

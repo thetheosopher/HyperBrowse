@@ -177,8 +177,11 @@ codec. Results update the open window; another Snapshot refreshes installation
 changes. Successful evidence requires completed pixels and matching decoder
 metadata, not an optional filename extension alone. Reset clears decode
 observations but retains discovery; redacted exports omit external decoder
-names/errors and image paths. `.heif` remains outside the allowlist. Actual
-HEIC/JPEG XL fixture compatibility remains a separate installed-codec gate.
+names/errors and image paths. `.heif` remains outside the allowlist. The basic
+HEIC and JPEG XL fixtures produced thumbnails and rendered in the full viewer
+on 2026-11-17 with installed Microsoft codecs. Support remains
+codec-dependent; broader format and machine compatibility are not established
+by those samples.
 GIF and TIFF browsing presents the available first frame or page. Animated playback remains deferred.
 See [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) for proposed work and explicit
 product boundaries.

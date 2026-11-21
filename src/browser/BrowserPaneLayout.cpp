@@ -496,6 +496,7 @@ namespace hyperbrowse::browser
         }
 
         UpdateVerticalScrollBar();
+        UpdateInlineRenameEditPosition();
         if (viewMode_ == BrowserViewMode::Thumbnails)
         {
             ScheduleVisibleThumbnailWork();
@@ -933,6 +934,7 @@ namespace hyperbrowse::browser
         scrollInfo.fMask = SIF_POS;
         scrollInfo.nPos = scrollOffsetY_;
         SetScrollInfo(hwnd_, SB_VERT, &scrollInfo, TRUE);
+        UpdateInlineRenameEditPosition();
         InvalidateRect(hwnd_, nullptr, FALSE);
         if (scheduleVisibleWork)
         {

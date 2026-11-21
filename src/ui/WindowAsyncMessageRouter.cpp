@@ -6,6 +6,7 @@
 #include "services/BatchConvertService.h"
 #include "services/FileOperationService.h"
 #include "services/ImageCommandService.h"
+#include "services/QuickAccessDirectoryMetadataService.h"
 #include "services/ThumbnailScheduler.h"
 #include "services/UserMetadataStore.h"
 #include "ui/FolderLoadCoordinator.h"
@@ -75,6 +76,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onBrowserPaneState, wParam, lParam);
         case browser::BrowserPane::kOpenItemMessage:
             return Invoke(handlers_.onBrowserPaneOpenItem, wParam, lParam);
+        case browser::BrowserPane::kInlineRenameRequestMessage:
+            return Invoke(handlers_.onBrowserPaneInlineRename, wParam, lParam);
         case browser::BrowserPane::kContextMenuMessage:
             return Invoke(handlers_.onBrowserPaneContextMenu, wParam, lParam);
         case browser::BrowserPane::kQuickSendDragMessage:
@@ -93,6 +96,8 @@ namespace hyperbrowse::ui
             return Invoke(handlers_.onSavedSearchChanged);
         case services::ThumbnailScheduler::kMessageId:
             return Invoke(handlers_.onDetailsPanelThumbnail, lParam);
+        case services::QuickAccessDirectoryMetadataService::kMessageId:
+            return Invoke(handlers_.onQuickAccessDirectoryMetadata, lParam);
         case viewer::ViewerWindow::kZoomChangedMessage:
             return Invoke(handlers_.onViewerZoom, wParam, lParam);
         case viewer::ViewerWindow::kActivityChangedMessage:

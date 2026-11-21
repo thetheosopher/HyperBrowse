@@ -707,6 +707,18 @@ namespace
         items.push_back(hyperbrowse::browser::BrowserItem{L"third.png", thirdPath.wstring(), L"PNG", L"2026-04-11 12:02", 3, 30, 256, 256});
         items.push_back(hyperbrowse::browser::BrowserItem{L"tall.png", tallPath.wstring(), L"PNG", L"2026-04-11 12:03", 4, 40, 256, 256});
 
+        const fs::path metadataDirectory = root.Root() / L"metadata";
+        fs::create_directories(metadataDirectory);
+        hyperbrowse::services::UserMetadataStore metadataStore(metadataDirectory.wstring());
+        metadataStore.SetRating({firstPath.wstring()}, 1);
+        metadataStore.SetTags({firstPath.wstring()}, L"first-only");
+        metadataStore.SetRating({secondPath.wstring()}, 2);
+        metadataStore.SetTags({secondPath.wstring()}, L"second-original");
+        const hyperbrowse::services::UserMetadataEntry firstInitialMetadata =
+            metadataStore.EntryForPath(firstPath.wstring());
+        const hyperbrowse::services::UserMetadataEntry secondInitialMetadata =
+            metadataStore.EntryForPath(secondPath.wstring());
+
         hyperbrowse::viewer::ViewerWindow viewer(instance);
         Expect(viewer.Open(ownerWindow, items, 0, false), "Viewer window failed to open");
         Expect(PumpMessagesUntil([&]() { return viewer.CurrentZoomPercent() > 0; }, 5000),
@@ -720,7 +732,13 @@ namespace
          Expect(!viewer.BeginCompareSession({0}, {}), "Compare session accepted fewer than two tiles");
          Expect(!viewer.BeginCompareSession({0, 0}, {}), "Compare session accepted duplicate tile identities");
          Expect(!viewer.BeginCompareSession({0, 1, 2, 3, 4}, {}), "Compare session accepted more than four tiles");
-         Expect(viewer.BeginCompareSession({0, 1}, {}), "Viewer did not start a two-tile compare session");
+         Expect(viewer.BeginCompareSession(
+                    {0, 1},
+                    {
+                        {firstInitialMetadata.rating, firstInitialMetadata.tags},
+                        {secondInitialMetadata.rating, secondInitialMetadata.tags},
+                    }),
+                "Viewer did not start a two-tile compare session");
          RECT compareClientRect{};
          GetClientRect(viewer.Hwnd(), &compareClientRect);
          SendMessageW(viewer.Hwnd(),
@@ -786,6 +804,61 @@ namespace
          SetKeyboardState(compareKeyboardState);
          Expect(viewer.FocusedCompareTile() == 1,
              "Ctrl+Tab did not focus the next compare tile");
+
+         const std::wstring focusedComparePath = viewer.CurrentFilePath();
+         Expect(focusedComparePath == secondPath.wstring(),
+             "Focused compare tile did not expose its own stable file path");
+         state->viewerCompareRatingRequests = 0;
+         SendMessageW(viewer.Hwnd(), WM_KEYDOWN, '5', 0);
+         Expect(PumpMessagesUntil([&]() { return state->viewerCompareRatingRequests == 1; }, 2000)
+                    && state->lastViewerCompareRating == 5
+                    && state->lastViewerCompareRatingSource == viewer.Hwnd(),
+             "Focused compare tile did not dispatch its rating request to the owner");
+         metadataStore.SetRating({focusedComparePath}, 5);
+         const hyperbrowse::services::UserMetadataEntry ratedSecondMetadata =
+             metadataStore.EntryForPath(focusedComparePath);
+         viewer.UpdateCompareTileMetadata(
+             focusedComparePath,
+             {ratedSecondMetadata.rating, ratedSecondMetadata.tags});
+         Expect(ratedSecondMetadata.rating == 5
+                    && metadataStore.EntryForPath(firstPath.wstring()) == firstInitialMetadata,
+             "A focused-tile rating changed another file's metadata");
+
+         state->viewerCompareTagRequests = 0;
+         Expect(PostMessageW(
+                    ownerWindow,
+                    hyperbrowse::viewer::ViewerWindow::kContextMenuCommandMessage,
+                    hyperbrowse::viewer::ViewerWindow::kContextMenuEditCompareTags,
+                    reinterpret_cast<LPARAM>(viewer.Hwnd())) != FALSE,
+             "Could not dispatch the focused compare tile's tag-edit request");
+         Expect(PumpMessagesUntil([&]() { return state->viewerCompareTagRequests == 1; }, 2000)
+                    && state->lastViewerCompareTagSource == viewer.Hwnd(),
+             "Focused compare tile did not dispatch its tag-edit request to the owner");
+         metadataStore.SetTags({focusedComparePath}, L"second-updated");
+         const hyperbrowse::services::UserMetadataEntry taggedSecondMetadata =
+             metadataStore.EntryForPath(focusedComparePath);
+         viewer.UpdateCompareTileMetadata(
+             focusedComparePath,
+             {taggedSecondMetadata.rating, taggedSecondMetadata.tags});
+         Expect(taggedSecondMetadata.rating == 5
+                    && taggedSecondMetadata.tags == L"second-updated"
+                    && metadataStore.EntryForPath(firstPath.wstring()) == firstInitialMetadata,
+             "A focused-tile tag update changed another file's metadata");
+
+         std::wstring metadataSaveError;
+         Expect(metadataStore.Flush(std::chrono::seconds(10), &metadataSaveError)
+                    && metadataSaveError.empty()
+                    && metadataStore.LastSaveError().empty(),
+             "Focused compare tile metadata did not save successfully");
+         metadataStore.Shutdown();
+         {
+             hyperbrowse::services::UserMetadataStore reopenedMetadataStore(metadataDirectory.wstring());
+             Expect(reopenedMetadataStore.EntryForPath(firstPath.wstring()) == firstInitialMetadata
+                        && reopenedMetadataStore.EntryForPath(secondPath.wstring())
+                            == hyperbrowse::services::UserMetadataEntry{5, L"second-updated"},
+                 "Focused compare tile rating and tags did not persist independently");
+             reopenedMetadataStore.Shutdown();
+         }
 
          SendMessageW(viewer.Hwnd(), WM_KEYDOWN, VK_OEM_PERIOD, 0);
          Expect(PumpMessagesUntil([&]() { return viewer.CompareTileItemIndex(1) == 2; }, 5000),

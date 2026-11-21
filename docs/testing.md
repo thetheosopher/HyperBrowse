@@ -101,8 +101,11 @@ The current test target registers:
 - `HyperBrowseFolderHistorySmoke`
 - `HyperBrowseFileOperationMediaCacheSmoke`
 - `HyperBrowseViewerFitSmoke`
+- `HyperBrowseViewerOverlaySmoke`
 - `HyperBrowseViewerInteractionSmoke`
+- `HyperBrowseViewerDeleteFocusSmoke`
 - `HyperBrowseRuntimePolicySmoke`
+- `HyperBrowseGamepadPolicySmoke`
 - `HyperBrowseCompareSessionPolicySmoke`
 - `HyperBrowseColorManagementSmoke`
 - `HyperBrowseCodecReadinessSmoke`
@@ -114,6 +117,10 @@ The current test target registers:
 - `HyperBrowseThumbnailStaleCompletionSmoke`
 - `HyperBrowseThumbnailFailureSmoke`
 - `HyperBrowseFileRenameSmoke`
+- `HyperBrowseInlineRenameSmoke`
+- `HyperBrowseWindowChromeSmoke`
+- `HyperBrowseQuickSendSmoke`
+- `HyperBrowseFileOperationSmoke`
 - `HyperBrowseAppTextSizeSmoke`
 - `HyperBrowseFolderTreeRestoreSmoke`
 - `HyperBrowseFolderTreeLargeSmoke`
@@ -126,8 +133,32 @@ The current test target registers:
 - `HyperBrowseExternalDropTargetSmoke`
 - `HyperBrowseMenuMetricsSmoke`
 - `HyperBrowseResponsivePanelSmoke`
+- `HyperBrowseThemeTokensSmoke`
 
-All 32 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+All 40 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON snapshot but does not enforce hosted-runner budgets by itself. When `HYPERBROWSE_BUILD_FUZZ_TESTS=ON`, CMake also registers `HyperBrowsePersistentCacheFuzz` and `HyperBrowseRawHelperProtocolFuzz`; these optional boundary tests are absent from normal builds rather than registered as disabled tests.
+
+`HyperBrowseSettingsSmoke` inspects the Settings `IAccessible` tree and exercises
+accessible focus, tab selection, page-focus restoration, and the automatic
+thumbnail-cache checked/unavailable state transition. `HyperBrowseAccessibilitySmoke`
+covers the main-window provider. These tests complement, but do not replace,
+manual screen-reader and Inspect/UI Automation verification.
+
+`HyperBrowseInlineRenameSmoke` exercises F2 editing in both browser views,
+filename-stem selection, Enter and Tab commits, focus-loss commit, Escape
+cancellation, modal fallback, and asynchronous browser-model refresh.
+
+`HyperBrowseWindowChromeSmoke` verifies the full-path title and its accessible
+name remain stable across view, recursive-browsing, and theme changes. It also
+checks the status strip's accessible state summary, independent titles for
+multiple windows, and narrow-window geometry.
+
+`HyperBrowseQuickSendSmoke` verifies favorite/recent row deduplication,
+background image counts, per-destination last-use persistence, tooltip and
+accessible-description text, and a real thumbnail-to-row file operation.
+
+`HyperBrowseSmoke` also verifies that compare rating/tag owner requests identify
+the focused viewer and that the associated per-file updates survive the
+`UserMetadataStore` flush/reopen lifecycle without changing the other tile.
 
 Smoke processes isolate registry settings, the default persistent cache, and
 saved searches.
@@ -233,10 +264,24 @@ nvJPEG fallback gates remain unchanged.
 For real installed discovery, run `HyperBrowseTests --codec-inventory` from
 the normal Debug or Release test directory. This is an explicit worker-backed
 inventory, not a standard deterministic CTest or a successful image-decode gate.
-On 2026-09-30 it created Microsoft HEIF Decoder and Microsoft JPEG XL Decoder;
-thumbnail/full-image outcomes were `Not observed`. No optional-codec fixtures
-were present under `tests`, and none were downloaded or installed. Actual
-HEIC/JXL decode and `.heif` recognition remain unverified/excluded respectively.
+The 2026-09-30 inventory recorded Microsoft HEIF and JPEG XL decoders, but
+thumbnail/full-image outcomes were `Not observed`. On 2026-11-17, the Debug
+application was manually opened on one real fixture of each format. The
+CC0 1.0 ([license](https://heic.fyi/samples/LICENSE.txt))
+[`basic-8bit-srgb.heic`](https://heic.fyi/samples/basic-8bit-srgb.heic)
+(1600 x 1200 HEVC Main Still Picture, 8-bit 4:2:0; SHA-256
+`3fe7d32e5568f8bfd6b5d3290e61ac9b964d08464d388fa064f69cddddfee82c`) and
+OpenPrinting's Apache-2.0 ([license](https://github.com/OpenPrinting/sample-files/blob/main/LICENSE))
+[`4x6-landscape-photo-srgb.jxl`](https://github.com/OpenPrinting/sample-files/blob/main/jxl/4x6-landscape-photo-srgb.jxl)
+(234,933 bytes; SHA-256
+`CE10D94C01A690227EE5CC5DE7B261A4CB27FAE90950390A691767242E9F8F8E`) both
+produced browser thumbnails and rendered in the full viewer. The installed
+packages were Microsoft HEIF Image Extension 1.2.62.0, HEVC Video Extension
+2.5.48.0, and JPEG XL Image Extension 1.2.68.0 (WIC decoder
+10.0.26100.1). This closes the manual fixture gate for these files on this
+codec configuration only; broader compatibility and `.heif` support remain
+unverified/excluded. The downloaded samples were kept outside `tests`, so the
+automated CTest suite still does not bundle real optional-codec fixtures.
 
 Final normal Debug/Release app, smoke, and benchmark targets built; full
 presets passed 30/30 (56.05 s / 52.66 s). The initial Debug full run passed

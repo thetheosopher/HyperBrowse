@@ -227,6 +227,7 @@
                 <img src="MainWindow.PNG" alt="HyperBrowse main window showing a folder tree, image thumbnails, and the action strip">
                 <figcaption>The main window combines an Explorer-style folder tree, a browser pane, an action strip, and a status bar.</figcaption>
             </figure>
+            <p>The window title identifies the active folder by its full path. The status bar shows the current view mode, recursive-browsing state, and theme alongside folder and selection details; the corresponding menus retain their checked states.</p>
         </section>
 
         <section id="browser">
@@ -319,7 +320,7 @@
                     <ul>
                         <li><strong>Copy</strong> and <strong>Move</strong> use Windows shell operations and can target the current folder, a recent destination, or a favorite destination.</li>
                         <li><strong>Delete</strong> sends files to the Recycle Bin. Use <kbd>Shift</kbd> + <kbd>Delete</kbd> for permanent deletion.</li>
-                        <li><strong>Rename</strong> supports a selected image or inline folder renaming. <kbd>F2</kbd> starts the common rename action.</li>
+                        <li><strong>Rename</strong> edits one selected file in place in Thumbnail or Details mode. Press <kbd>Enter</kbd> or move focus away to commit, or <kbd>Esc</kbd> to cancel. The rename dialog remains a fallback when inline editing is unavailable; folder-tree renaming is also inline.</li>
                         <li>For two or more selected images, use <strong>File &gt; Batch Rename...</strong> or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd>. Enter a pattern and review every generated name in the preview; extensions are preserved unless the pattern includes <code>{ext}</code>.</li>
                         <li><strong>Duplicate</strong> copies selected files into the same folder with an automatic numeric suffix.</li>
                         <li>Use <kbd>Ctrl</kbd> + <kbd>C</kbd> and <kbd>Ctrl</kbd> + <kbd>V</kbd> to copy and paste files through the Windows clipboard.</li>
@@ -341,6 +342,7 @@
         <section id="quick-actions">
             <h2>Use Quick Actions</h2>
             <p>Quick Actions keeps frequently used destinations close to the viewer. Open the Quick Actions panel, add destinations, and assign each one a supported printable keyboard character. Shifted characters such as <kbd>*</kbd> are supported; function, control, and navigation keys are not.</p>
+            <p>The Quick Actions tab in the details rail lists favorite destinations first, followed by recent destinations. Hover a row for its image count and last-used time. Drag selected thumbnails onto a row to file them in-app: <kbd>Ctrl</kbd> forces Copy, <kbd>Shift</kbd> forces Move, and without modifiers a same-drive drop moves while a cross-drive drop copies. A shell file drop onto a row copies by default; hold <kbd>Shift</kbd> to move.</p>
             <ul>
                 <li>Press <kbd>F7</kbd> to move the displayed image to a Quick Actions destination.</li>
                 <li>Press <kbd>F8</kbd> to copy the displayed image to a Quick Actions destination.</li>
@@ -424,7 +426,7 @@
                     <tr><td>File</td><td><kbd>F1</kbd></td><td>Open this user guide</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>O</kbd></td><td>Open a folder</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></td><td>Create a folder in the current folder</td></tr>
-                    <tr><td>File</td><td><kbd>F2</kbd></td><td>Rename the selected item</td></tr>
+                    <tr><td>File</td><td><kbd>F2</kbd></td><td>Rename the selected item; edit in place in Thumbnail or Details mode when eligible, otherwise open the rename dialog</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd></td><td>Batch rename the selected items</td></tr>
                     <tr><td>Browser</td><td><kbd>Enter</kbd></td><td>Open the selected image in the viewer</td></tr>
                     <tr><td>File</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>Open the selected image in a new viewer window</td></tr>

@@ -218,7 +218,8 @@ namespace hyperbrowse::ui
             RECT labelRect = row.rowRect;
             labelRect.left += state.metrics.textHorizontalInset;
             labelRect.top += state.metrics.labelTopInset;
-            labelRect.right = row.shortcutRect.left - state.metrics.textHorizontalInset;
+            labelRect.right = (row.favorite ? row.shortcutRect.left : row.copyRect.left)
+                - state.metrics.textHorizontalInset;
             labelRect.bottom = labelRect.top + state.metrics.labelHeight;
             const auto rowTextBrush = createBrush(rowState.navigationEnabled ? palette.text : palette.mutedText);
             drawText(row.displayLabel, summaryFormat, labelRect, rowTextBrush.Get());
@@ -435,7 +436,8 @@ namespace hyperbrowse::ui
             RECT labelRect = row.rowRect;
             labelRect.left += state.metrics.textHorizontalInset;
             labelRect.top += state.metrics.labelTopInset;
-            labelRect.right = row.shortcutRect.left - state.metrics.textHorizontalInset;
+            labelRect.right = (row.favorite ? row.shortcutRect.left : row.copyRect.left)
+                - state.metrics.textHorizontalInset;
             labelRect.bottom = labelRect.top + state.metrics.labelHeight;
             render::DrawGdiText(hdc,
                                 resolvedSummaryFont,

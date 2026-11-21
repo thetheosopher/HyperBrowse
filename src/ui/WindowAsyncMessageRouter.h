@@ -30,6 +30,7 @@ namespace hyperbrowse::ui
             LParamHandler onFolderWatch;
             WParamLParamHandler onBrowserPaneState;
             WParamLParamHandler onBrowserPaneOpenItem;
+            WParamLParamHandler onBrowserPaneInlineRename;
             WParamLParamHandler onBrowserPaneContextMenu;
             WParamLParamHandler onBrowserPaneQuickSendDrag;
             LParamHandler onBatchConvert;
@@ -39,6 +40,7 @@ namespace hyperbrowse::ui
             NoArgumentHandler onUserMetadataSaveError;
             NoArgumentHandler onSavedSearchChanged;
             LParamHandler onDetailsPanelThumbnail;
+            LParamHandler onQuickAccessDirectoryMetadata;
             WParamLParamHandler onViewerZoom;
             WParamLParamHandler onViewerActivity;
             WParamHandler onViewerCurrentItemChanged;

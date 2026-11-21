@@ -495,10 +495,7 @@ namespace hyperbrowse::ui
                         : std::nullopt};
             }
 
-            MutateQuickSendState([&]
-            {
-                lastQuickSendDestination_ = quickSendDestination;
-            });
+            RecordQuickSendDestinationUsage(quickSendDestination);
         }
     }
 

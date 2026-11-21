@@ -19,6 +19,7 @@
 
 #include "browser/BrowserModel.h"
 #include "render/D2DRenderer.h"
+#include "services/QuickAccessDirectoryMetadataService.h"
 #include "util/ResourceSizing.h"
 #include "util/UiTextSize.h"
 #include "ui/FileOperationJournal.h"
@@ -44,6 +45,7 @@
 #include "ui/QuickAccessLayout.h"
 #include "ui/QuickAccessPainter.h"
 #include "ui/QuickSend.h"
+#include "ui/QuickSendPersistence.h"
 #include "ui/ViewerPendingOperationState.h"
 #include "ui/ViewCommandController.h"
 #include "ui/FolderHistory.h"
@@ -161,6 +163,12 @@ namespace hyperbrowse::ui
             FileDetails = 0,
             QuickSend = 1,
             CacheStats = 2,
+        };
+
+        struct PendingQuickAccessImageCount
+        {
+            std::wstring folderPath;
+            std::uint64_t requestId{};
         };
 
         struct DetailsPanelPerformanceStats
@@ -358,8 +366,14 @@ namespace hyperbrowse::ui
         bool SyncViewerToBrowserModel(viewer::ViewerWindow& viewer, std::wstring_view preferredPath = {});
         void RebuildQuickAccessDestinationRows(int innerLeft, int innerRight, int top);
         void UpdateQuickAccessSortTooltip();
+        void UpdateQuickAccessDestinationTooltips();
+        void UpdateQuickAccessDestinationTooltipTexts();
+        void RequestQuickAccessDirectoryImageCounts(const std::vector<std::wstring>& folderPaths);
+        void CancelQuickAccessDirectoryMetadata();
+        void InvalidateQuickAccessDirectoryImageCount(std::wstring_view folderPath);
         void UpdateQuickAccessShortcutEditControls();
         void HideQuickAccessShortcutEditControls();
+        void RecordQuickSendDestinationUsage(std::wstring folderPath);
         void MutateQuickSendState(const std::function<void()>& mutation);
         void LoadQuickSendStateFromRegistry();
         void SaveQuickSendStateToRegistry() const;
@@ -409,6 +423,11 @@ namespace hyperbrowse::ui
                                      std::shared_ptr<const services::ImageMetadata> metadata,
                                      HWND ownerWindow);
         void StartRenameSelectedImage();
+        void StartRenameSelectedImageFromPath(const std::wstring& sourcePath,
+                                              const std::wstring& sourceLeafName,
+                                              const std::wstring& renamedLeafName,
+                                              bool preserveCurrentFocus = false,
+                                              HWND focusRestoreWindow = nullptr);
         void StartBatchRenameSelection();
         void StartCompareSelected();
         void SetSelectionRating(int rating);
@@ -440,7 +459,9 @@ namespace hyperbrowse::ui
                     std::wstring destinationFolder,
                     services::FileConflictPolicy conflictPolicy,
                     std::vector<std::wstring> targetLeafNames = {},
-                    HWND ownerWindow = nullptr);
+                    HWND ownerWindow = nullptr,
+                    bool preserveCurrentFocus = false,
+                    HWND focusRestoreWindow = nullptr);
         void UpdateTaskbarProgress(ULONGLONG completed, ULONGLONG total);
         void ClearTaskbarProgress();
         void NotifyLongOperationComplete(const std::wstring& title, const std::wstring& message);
@@ -530,8 +551,10 @@ namespace hyperbrowse::ui
         void ClearExternalDropVisuals();
         LRESULT OnBrowserPaneStateMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneOpenItemMessage(WPARAM wParam, LPARAM lParam);
+        LRESULT OnBrowserPaneInlineRenameMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam);
         LRESULT OnBrowserPaneQuickSendDragMessage(WPARAM wParam, LPARAM lParam);
+        LRESULT OnQuickAccessDirectoryMetadataMessage(LPARAM lParam);
         LRESULT OnBatchConvertMessage(LPARAM lParam);
         LRESULT OnImageCommandMessage(LPARAM lParam);
         LRESULT OnFileOperationMessage(LPARAM lParam);
@@ -688,6 +711,8 @@ namespace hyperbrowse::ui
         HWND detailsPanelText_{};
         HWND quickAccessScrollBar_{};
         HWND tooltipControl_{};
+        std::wstring quickAccessTooltipText_;
+        std::size_t quickAccessRowTooltipCount_{};
         std::wstring treeFolderTooltipText_;
         std::wstring treeTooltipPath_;
         HMODULE detailsPanelRichEditModule_{};
@@ -768,7 +793,10 @@ namespace hyperbrowse::ui
         std::vector<std::wstring> recentDestinationFolders_;
         std::vector<std::wstring> favoriteDestinationFolders_;
         std::wstring lastQuickSendDestination_;
+        std::vector<QuickSendDestinationUsage> quickSendDestinationUsage_;
         std::wstring quickSendShortcutOrder_{kDefaultQuickSendShortcutOrder};
+        std::vector<services::QuickAccessDirectoryImageCount> quickAccessImageCountCache_;
+        std::vector<PendingQuickAccessImageCount> quickAccessImageCountPendingPaths_;
         FilingResumePersistedState filingResumeState_;
         QuickSendModel quickSendModel_;
         std::vector<std::unique_ptr<MenuDrawItemData>> menuDrawItems_;
@@ -779,6 +807,7 @@ namespace hyperbrowse::ui
         std::unique_ptr<services::FileOperationService> fileOperationService_;
         std::unique_ptr<FolderLoadCoordinator> folderLoadCoordinator_;
         std::unique_ptr<FolderWatchChangeCoordinator> folderWatchChangeCoordinator_;
+        std::unique_ptr<services::QuickAccessDirectoryMetadataService> quickAccessDirectoryMetadataService_;
         std::unique_ptr<FolderTreeController> folderTreeController_;
         FolderTreeDragController folderTreeDragController_;
         WindowAsyncMessageRouter asyncMessageRouter_;

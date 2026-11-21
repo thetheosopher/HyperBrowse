@@ -898,6 +898,201 @@ namespace hyperbrowse::tests::smoke
         PumpMessagesFor(100);
     }
 
+    void RunBrowserInlineRenameScenario(HINSTANCE instance)
+    {
+        using namespace hyperbrowse::ui::command_ids;
+
+        ScopedRegistryDwordBackup browserModeBackup(kRegistryPath, L"BrowserMode");
+        ScopedRegistryDwordBackup subfoldersBackup(kRegistryPath, L"ShowSubfoldersInBrowser");
+        ScopedRegistryDwordBackup thumbnailDetailsBackup(kRegistryPath, L"ThumbnailDetailsVisible");
+        ScopedRegistryDwordBackup sortModeBackup(kRegistryPath, L"SortMode");
+        ScopedRegistryDwordBackup sortAscendingBackup(kRegistryPath, L"SortAscending");
+        ScopedRegistryDwordBackup detailsStripBackup(kRegistryPath, L"DetailsStripVisible");
+        SetRegistryDwordValue(kRegistryPath, L"BrowserMode", 0);
+        SetRegistryDwordValue(kRegistryPath, L"ShowSubfoldersInBrowser", 0);
+        SetRegistryDwordValue(kRegistryPath, L"ThumbnailDetailsVisible", 1);
+        SetRegistryDwordValue(kRegistryPath,
+                              L"SortMode",
+                              static_cast<DWORD>(hyperbrowse::browser::BrowserSortMode::FileName));
+        SetRegistryDwordValue(kRegistryPath, L"SortAscending", 1);
+        SetRegistryDwordValue(kRegistryPath, L"DetailsStripVisible", 0);
+
+        TempFolder root(L"HyperBrowseInlineRename");
+        root.WriteFile(L"before.jpg", 16);
+        const fs::path beforePath = root.Root() / L"before.jpg";
+        const fs::path thumbnailRenamePath = root.Root() / L"thumbnail.jpg";
+        const fs::path detailsRenamePath = root.Root() / L"details.jpg";
+        const fs::path tabRenamePath = root.Root() / L"tab.jpg";
+        const fs::path cancelledPath = root.Root() / L"cancelled.jpg";
+
+        hyperbrowse::ui::MainWindow mainWindow(instance);
+        mainWindow.SetStartupLaunchPath(root.Root().wstring());
+        Expect(mainWindow.Create(), "Failed to create MainWindow for inline rename coverage");
+        mainWindow.Show(SW_SHOW);
+
+        const HWND browserPane = FindWindowExW(
+            mainWindow.Hwnd(), nullptr, L"HyperBrowseBrowserPane", nullptr);
+        const HWND detailsList = browserPane
+            ? FindWindowExW(browserPane, nullptr, WC_LISTVIEWW, nullptr)
+            : nullptr;
+        const HWND filterEdit = GetDlgItem(mainWindow.Hwnd(), ID_ACTION_FILTER_EDIT);
+        Expect(browserPane != nullptr && detailsList != nullptr,
+               "Could not find the browser pane and details list for inline rename coverage");
+        Expect(filterEdit != nullptr, "Could not find the filter edit for inline rename coverage");
+        Expect(PumpMessagesUntil([&]()
+        {
+            return ListView_GetItemCount(detailsList) == 1;
+        }, 10000), "The inline rename fixture did not finish loading");
+
+        const auto readDetailsName = [&]()
+        {
+            wchar_t name[512]{};
+            ListView_GetItemText(detailsList, 0, 0, name, static_cast<int>(std::size(name)));
+            return std::wstring(name);
+        };
+        const auto startInlineRename = [&](HWND focusTarget, const wchar_t* expectedName)
+        {
+            SetFocus(focusTarget);
+            Expect(GetFocus() == focusTarget, "Could not focus the browser view before inline rename");
+            SendMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_FILE_SELECT_ALL, 0), 0);
+
+            MSG f2Message{};
+            f2Message.hwnd = focusTarget;
+            f2Message.message = WM_KEYDOWN;
+            f2Message.wParam = VK_F2;
+            Expect(mainWindow.TranslateAcceleratorMessage(&f2Message),
+                   "F2 did not start the browser rename command");
+
+            const HWND edit = FindWindowExW(browserPane, nullptr, L"Edit", nullptr);
+            Expect(edit != nullptr && IsWindowVisible(edit) != FALSE,
+                   "F2 did not create a visible inline rename editor");
+            wchar_t text[512]{};
+            GetWindowTextW(edit, text, static_cast<int>(std::size(text)));
+            Expect(std::wstring(text) == expectedName,
+                   "The inline rename editor did not contain the selected filename");
+            DWORD selectionStart = 0;
+            DWORD selectionEnd = 0;
+            SendMessageW(edit,
+                         EM_GETSEL,
+                         reinterpret_cast<WPARAM>(&selectionStart),
+                         reinterpret_cast<LPARAM>(&selectionEnd));
+            const std::wstring stem = fs::path(expectedName).stem().wstring();
+            const std::wstring extension = fs::path(expectedName).extension().wstring();
+            const std::size_t expectedSelectionEnd = !stem.empty() && !extension.empty()
+                ? stem.size()
+                : std::wstring(expectedName).size();
+            Expect(selectionStart == 0 && selectionEnd == expectedSelectionEnd,
+                   "Inline rename did not select the filename stem while preserving its extension");
+            return edit;
+        };
+        const auto waitForRename = [&](const fs::path& oldPath,
+                                       const fs::path& newPath,
+                                       const wchar_t* expectedName)
+        {
+            return PumpMessagesUntil([&]()
+            {
+                return !fs::exists(oldPath)
+                    && fs::exists(newPath)
+                    && ListView_GetItemCount(detailsList) == 1
+                    && readDetailsName() == expectedName;
+            }, 10000);
+        };
+
+        const auto activateWindow = [](HWND window)
+        {
+            if (!SetForegroundWindow(window))
+            {
+                const DWORD foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+                const DWORD currentThread = GetCurrentThreadId();
+                if (foregroundThread != 0 && foregroundThread != currentThread
+                    && AttachThreadInput(currentThread, foregroundThread, TRUE))
+                {
+                    SetForegroundWindow(window);
+                    AttachThreadInput(currentThread, foregroundThread, FALSE);
+                }
+            }
+            SetFocus(window);
+        };
+        activateWindow(mainWindow.Hwnd());
+        HWND edit = startInlineRename(browserPane, L"before.jpg");
+        SetWindowTextW(edit, L"thumbnail.jpg");
+        SendMessageW(edit, WM_KEYDOWN, VK_RETURN, 0);
+        Expect(FindWindowExW(browserPane, nullptr, L"Edit", nullptr) == nullptr,
+               "Enter did not close the thumbnail inline rename editor");
+        Expect(waitForRename(beforePath, thumbnailRenamePath, L"thumbnail.jpg"),
+               "Enter did not finish the thumbnail-view rename and refresh the browser model");
+
+        SendMessageW(mainWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_DETAILS, 0), 0);
+        Expect(PumpMessagesUntil([&]()
+        {
+            return IsWindowVisible(detailsList) != FALSE
+                && readDetailsName() == L"thumbnail.jpg";
+        }, 5000), "Details mode did not show the renamed thumbnail item");
+
+        edit = startInlineRename(detailsList, L"thumbnail.jpg");
+        SetWindowTextW(edit, L"details.jpg");
+        SetFocus(browserPane);
+        Expect(GetFocus() == detailsList,
+               "Focus loss did not return focus to the Details view");
+        const bool focusLossRenameCompleted = waitForRename(
+            thumbnailRenamePath, detailsRenamePath, L"details.jpg");
+        Expect(focusLossRenameCompleted,
+               "Focus loss did not finish the details-view rename and refresh the browser model");
+
+        edit = startInlineRename(detailsList, L"details.jpg");
+        SetWindowTextW(edit, L"tab.jpg");
+        SendMessageW(edit, WM_KEYDOWN, VK_TAB, 0);
+        Expect(GetFocus() != edit && GetFocus() != detailsList,
+               "Tab did not leave the inline editor through the main-window focus sequence");
+        Expect(waitForRename(detailsRenamePath, tabRenamePath, L"tab.jpg"),
+               "Tab did not commit the details-view rename and refresh the browser model");
+
+        SetFocus(detailsList);
+        edit = startInlineRename(detailsList, L"tab.jpg");
+        SetWindowTextW(edit, L"cancelled.jpg");
+        SendMessageW(edit, WM_KEYDOWN, VK_ESCAPE, 0);
+        Expect(FindWindowExW(browserPane, nullptr, L"Edit", nullptr) == nullptr,
+               "Escape did not close the inline rename editor");
+        Expect(fs::exists(tabRenamePath) && !fs::exists(cancelledPath),
+               "Escape committed an inline rename instead of cancelling it");
+
+        std::atomic_bool fallbackDialogOpened{false};
+        std::thread fallbackDialogCloser([&]()
+        {
+            ComScope workerComScope;
+            const ULONGLONG deadline = GetTickCount64() + 10000;
+            HWND dialog = nullptr;
+            while (GetTickCount64() < deadline
+                   && !(dialog = FindWindowW(L"HyperBrowseTextInputDialog", nullptr)))
+            {
+                Sleep(10);
+            }
+            if (dialog)
+            {
+                fallbackDialogOpened.store(true, std::memory_order_release);
+                SendMessageW(dialog, WM_CLOSE, 0, 0);
+            }
+            else
+            {
+                SendMessageW(mainWindow.Hwnd(), WM_CLOSE, 0, 0);
+            }
+        });
+        SetFocus(filterEdit);
+        MSG fallbackMessage{};
+        fallbackMessage.hwnd = filterEdit;
+        fallbackMessage.message = WM_KEYDOWN;
+        fallbackMessage.wParam = VK_F2;
+        const bool fallbackHandled = mainWindow.TranslateAcceleratorMessage(&fallbackMessage);
+        fallbackDialogCloser.join();
+        Expect(fallbackHandled && fallbackDialogOpened.load(std::memory_order_acquire),
+               "F2 outside the browser did not open the modal rename fallback");
+        Expect(fs::exists(tabRenamePath) && !fs::exists(cancelledPath),
+               "Cancelling the modal rename fallback changed the selected file");
+
+        DestroyWindow(mainWindow.Hwnd());
+        PumpMessagesFor(100);
+    }
+
         void RunMainWindowAccessibilityScenario(HINSTANCE instance)
         {
          ScopedRegistryDwordBackup detailsStripBackup(kRegistryPath, L"DetailsStripVisible");
@@ -1340,6 +1535,488 @@ namespace hyperbrowse::tests::smoke
             SendMessageW(viewerHandle, WM_CLOSE, 0, 0);
             PumpMessagesFor(100);
         }
+        DestroyWindow(mainWindow.Hwnd());
+        PumpMessagesFor(100);
+    }
+
+    void RunMainWindowChromeScenario(HINSTANCE instance)
+    {
+        using namespace hyperbrowse::ui::command_ids;
+
+        ScopedRegistryDwordBackup browserModeBackup(kRegistryPath, L"BrowserMode");
+        ScopedRegistryDwordBackup themeModeBackup(kRegistryPath, L"ThemeMode");
+        SetRegistryDwordValue(kRegistryPath, L"BrowserMode", 0);
+        SetRegistryDwordValue(kRegistryPath, L"ThemeMode", 0);
+
+        const auto readWindowText = [](HWND window)
+        {
+            const int textLength = GetWindowTextLengthW(window);
+            std::wstring text(static_cast<std::size_t>(textLength) + 1, L'\0');
+            const int copiedLength = GetWindowTextW(window, text.data(), static_cast<int>(text.size()));
+            if (copiedLength <= 0)
+            {
+                return std::wstring{};
+            }
+            text.resize(static_cast<std::size_t>(copiedLength));
+            return text;
+        };
+        const auto findStatusStrip = [](HWND parent)
+        {
+            HWND statusStrip{};
+            EnumChildWindows(parent, [](HWND child, LPARAM parameter) -> BOOL
+            {
+                wchar_t className[32]{};
+                if (GetClassNameW(child, className, static_cast<int>(std::size(className))) > 0
+                    && _wcsicmp(className, L"STATIC") == 0
+                    && (GetWindowLongPtrW(child, GWL_STYLE) & SS_TYPEMASK) == SS_OWNERDRAW)
+                {
+                    *reinterpret_cast<HWND*>(parameter) = child;
+                    return FALSE;
+                }
+                return TRUE;
+            }, reinterpret_cast<LPARAM>(&statusStrip));
+            return statusStrip;
+        };
+        const auto readAccessibleName = [](HWND window, LONG objectId, const char* failureMessage)
+        {
+            IAccessible* accessible = nullptr;
+            const HRESULT objectResult = AccessibleObjectFromWindow(
+                window,
+                objectId,
+                IID_IAccessible,
+                reinterpret_cast<void**>(&accessible));
+            if (FAILED(objectResult) || !accessible)
+            {
+                if (accessible)
+                {
+                    accessible->Release();
+                }
+                Expect(false, failureMessage);
+            }
+
+            VARIANT self{};
+            self.vt = VT_I4;
+            self.lVal = CHILDID_SELF;
+            BSTR name = nullptr;
+            const HRESULT nameResult = accessible->get_accName(self, &name);
+            std::wstring value;
+            if (name)
+            {
+                value.assign(name, SysStringLen(name));
+                SysFreeString(name);
+            }
+            accessible->Release();
+            Expect(SUCCEEDED(nameResult) && !value.empty(), failureMessage);
+            return value;
+        };
+
+        TempFolder firstFolder(L"HyperBrowseWindowChromeFirst");
+        TempFolder secondFolder(L"HyperBrowseWindowChromeSecond");
+        const std::wstring firstFolderPath = firstFolder.Root().wstring();
+        const std::wstring secondFolderPath = secondFolder.Root().wstring();
+        const std::wstring firstTitle = L"HyperBrowse - " + firstFolderPath;
+        const std::wstring secondTitle = L"HyperBrowse - " + secondFolderPath;
+        const std::wstring initialContext = L"View: Thumbnails | Recursive: Off | Theme: Light";
+        const std::wstring changedContext = L"View: Details | Recursive: On | Theme: Dark";
+
+        hyperbrowse::ui::MainWindow firstWindow(instance);
+        firstWindow.SetStartupLaunchPath(firstFolderPath);
+        Expect(firstWindow.Create(), "Failed to create the first MainWindow for chrome coverage");
+        firstWindow.Show(SW_SHOW);
+        const HWND firstStatusStrip = findStatusStrip(firstWindow.Hwnd());
+        Expect(firstStatusStrip != nullptr, "Could not find the first MainWindow status strip");
+        Expect(PumpMessagesUntil([&]()
+        {
+            return readWindowText(firstWindow.Hwnd()) == firstTitle
+                && readWindowText(firstStatusStrip) == initialContext;
+        }, 10000), "First MainWindow did not expose its full-path title and browser state");
+
+        hyperbrowse::ui::MainWindow secondWindow(instance);
+        secondWindow.SetStartupLaunchPath(secondFolderPath);
+        Expect(secondWindow.Create(), "Failed to create the second MainWindow for chrome coverage");
+        secondWindow.Show(SW_SHOW);
+        const HWND secondStatusStrip = findStatusStrip(secondWindow.Hwnd());
+        Expect(secondStatusStrip != nullptr, "Could not find the second MainWindow status strip");
+        Expect(PumpMessagesUntil([&]()
+        {
+            return readWindowText(secondWindow.Hwnd()) == secondTitle
+                && readWindowText(secondStatusStrip) == initialContext;
+        }, 10000), "Second MainWindow did not expose its own full-path title and browser state");
+
+        Expect(readAccessibleName(firstWindow.Hwnd(), OBJID_WINDOW,
+                                  "Could not read the first MainWindow's accessible window name") == firstTitle,
+               "First MainWindow accessible name did not include its active folder path");
+        Expect(readAccessibleName(firstStatusStrip, OBJID_CLIENT,
+                                  "Could not read the first status strip's accessible name") == initialContext,
+               "Status strip accessible name did not expose the initial browser state");
+
+        SendMessageW(firstWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_DETAILS, 0), 0);
+        SendMessageW(firstWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_RECURSIVE, 0), 0);
+        SendMessageW(firstWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_THEME_DARK, 0), 0);
+        Expect(PumpMessagesUntil([&]()
+        {
+            return readWindowText(firstStatusStrip) == changedContext;
+        }, 5000), "Status strip did not update its view, recursive, and theme states");
+        Expect(readWindowText(firstWindow.Hwnd()) == firstTitle,
+               "Changing view, recursive browsing, or theme changed the simplified title");
+        Expect(readAccessibleName(firstWindow.Hwnd(), OBJID_WINDOW,
+                                  "Could not read the changed MainWindow accessible name") == firstTitle,
+               "MainWindow accessible name did not retain the active folder path");
+        Expect(readAccessibleName(firstStatusStrip, OBJID_CLIENT,
+                                  "Could not read the changed status strip accessible name") == changedContext,
+               "Status strip accessible name did not track the changed browser state");
+        Expect(readWindowText(secondStatusStrip) == initialContext,
+               "Changing one MainWindow changed another window's browser-state summary");
+
+        SendMessageW(secondWindow.Hwnd(), WM_COMMAND, MAKEWPARAM(ID_VIEW_THUMBNAILS, 0), 0);
+        Expect(PumpMessagesUntil([&]()
+        {
+            return readWindowText(secondWindow.Hwnd()) == secondTitle;
+        }, 5000), "Changing the second MainWindow view changed its folder-path title");
+        Expect(readWindowText(firstStatusStrip) == changedContext,
+               "Changing the second MainWindow changed the first window's browser-state summary");
+
+        Expect(SetWindowPos(firstWindow.Hwnd(),
+                            nullptr,
+                            0,
+                            0,
+                            480,
+                            640,
+                            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE,
+               "Could not resize the first MainWindow for narrow-layout coverage");
+        PumpMessagesFor(100);
+        RECT clientRect{};
+        RECT statusRect{};
+        Expect(GetClientRect(firstWindow.Hwnd(), &clientRect) != FALSE
+                   && GetWindowRect(firstStatusStrip, &statusRect) != FALSE,
+               "Could not read the narrow MainWindow status-strip bounds");
+        MapWindowPoints(nullptr, firstWindow.Hwnd(), reinterpret_cast<POINT*>(&statusRect), 2);
+        Expect(statusRect.left >= 0 && statusRect.top >= 0
+                   && statusRect.right <= clientRect.right && statusRect.bottom <= clientRect.bottom,
+               "Status strip exceeded the client bounds in a narrow MainWindow");
+        Expect(readWindowText(firstStatusStrip) == changedContext,
+               "Narrow layout truncated the accessible browser-state summary");
+
+        DestroyWindow(secondWindow.Hwnd());
+        DestroyWindow(firstWindow.Hwnd());
+        PumpMessagesFor(100);
+    }
+
+    void RunQuickSendPolishScenario(HINSTANCE instance)
+    {
+        TempFolder sourceFolder(L"HyperBrowseQuickSendSource");
+        TempFolder favoriteFolder(L"HyperBrowseQuickSendFavorite");
+        TempFolder recentFolder(L"HyperBrowseQuickSendRecent");
+        const fs::path sourceFile = sourceFolder.Root() / L"drag-source.jpg";
+        const fs::path favoriteExistingFile = favoriteFolder.Root() / L"existing.png";
+        const fs::path recentFirstFile = recentFolder.Root() / L"recent-one.jpg";
+        const fs::path recentSecondFile = recentFolder.Root() / L"recent-two.png";
+        WriteTestImage(sourceFile, TestImageFormat::Jpeg, 64, 32, 6);
+        WriteTestImage(favoriteExistingFile, TestImageFormat::Png, 32, 16);
+        WriteTestImage(recentFirstFile, TestImageFormat::Jpeg, 32, 16, 6);
+        WriteTestImage(recentSecondFile, TestImageFormat::Png, 32, 16);
+
+        const std::wstring favoritePath = favoriteFolder.Root().wstring();
+        const std::wstring recentPath = recentFolder.Root().wstring();
+        hyperbrowse::ui::QuickSendPersistedState persistedQuickSendState;
+        persistedQuickSendState.favoriteDestinationFolders = {favoritePath};
+        FILETIME recentLastUsed{};
+        GetSystemTimeAsFileTime(&recentLastUsed);
+        ULARGE_INTEGER recentLastUsedFileTime{};
+        recentLastUsedFileTime.LowPart = recentLastUsed.dwLowDateTime;
+        recentLastUsedFileTime.HighPart = recentLastUsed.dwHighDateTime;
+        persistedQuickSendState.destinationUsage = {
+            {recentPath, recentLastUsedFileTime.QuadPart}};
+        hyperbrowse::ui::QuickSendPersistence::Save(
+            persistedQuickSendState,
+            [](std::wstring_view valueName, std::wstring_view value)
+            {
+                const std::wstring registryValueName(valueName);
+                SetRegistryStringValue(kRegistryPath, registryValueName.c_str(), value);
+            },
+            [](std::wstring_view valueName)
+            {
+                const std::wstring registryValueName(valueName);
+                DeleteRegistryValue(kRegistryPath, registryValueName.c_str());
+            });
+        SetRegistryStringValue(
+            kRegistryPath,
+            L"RecentDestinationFolders",
+            favoritePath + L"\n" + recentPath);
+        SetRegistryDwordValue(kRegistryPath, L"BrowserMode", 0);
+        SetRegistryDwordValue(kRegistryPath, L"DetailsStripVisible", 1);
+
+        hyperbrowse::ui::MainWindow mainWindow(instance);
+        mainWindow.SetStartupLaunchPath(sourceFolder.Root().wstring());
+        Expect(mainWindow.Create(), "Failed to create MainWindow for Quick Actions polish coverage");
+        mainWindow.Show(SW_SHOW);
+        Expect(SetWindowPos(mainWindow.Hwnd(),
+                            nullptr,
+                            100,
+                            100,
+                            1400,
+                            900,
+                            SWP_NOZORDER | SWP_NOACTIVATE) != FALSE,
+               "Could not size MainWindow for Quick Actions polish coverage");
+
+        const HWND browserHwnd = FindWindowExW(
+            mainWindow.Hwnd(),
+            nullptr,
+            L"HyperBrowseBrowserPane",
+            nullptr);
+        auto* browser = reinterpret_cast<hyperbrowse::browser::BrowserPane*>(
+            GetWindowLongPtrW(browserHwnd, GWLP_USERDATA));
+        Expect(browser != nullptr, "Could not find the browser pane for Quick Actions drag coverage");
+        Expect(PumpMessagesUntil([&]()
+        {
+            return browser->DisplayedItemCount() == 1;
+        }, 10000), "Browser did not finish loading the Quick Actions drag source image");
+
+        const auto getAccessible = [](HWND window)
+        {
+            ComPtr<IAccessible> accessible;
+            const LRESULT objectResult = SendMessageW(window, WM_GETOBJECT, 0, OBJID_CLIENT);
+            Expect(objectResult != 0, "MainWindow did not return its accessibility object for Quick Actions coverage");
+            const HRESULT result = ObjectFromLresult(
+                objectResult,
+                IID_IAccessible,
+                0,
+                reinterpret_cast<void**>(accessible.GetAddressOf()));
+            Expect(SUCCEEDED(result) && accessible.Get() != nullptr,
+                   "Could not materialize MainWindow accessibility for Quick Actions coverage");
+            return accessible;
+        };
+        const auto selectQuickActionsTab = [&]()
+        {
+            ComPtr<IAccessible> accessible = getAccessible(mainWindow.Hwnd());
+            long childCount = 0;
+            Expect(SUCCEEDED(accessible->get_accChildCount(&childCount)),
+                   "Could not enumerate MainWindow accessibility children for Quick Actions");
+            for (LONG childId = 1; childId <= childCount; ++childId)
+            {
+                VARIANT child{};
+                child.vt = VT_I4;
+                child.lVal = childId;
+                BSTR name = nullptr;
+                const HRESULT nameResult = accessible->get_accName(child, &name);
+                const std::wstring childName = SUCCEEDED(nameResult) && name
+                    ? std::wstring(name, SysStringLen(name))
+                    : std::wstring{};
+                SysFreeString(name);
+                if (childName == L"Quick Actions")
+                {
+                    Expect(SUCCEEDED(accessible->accDoDefaultAction(child)),
+                           "Could not select the Quick Actions tab through accessibility");
+                    return;
+                }
+            }
+            Expect(false, "MainWindow accessibility did not expose the Quick Actions tab");
+        };
+        struct QuickSendRowProbe
+        {
+            RECT clientBounds{};
+            std::wstring description;
+        };
+        const auto readQuickSendRow = [&](std::wstring_view destinationPath)
+            -> std::optional<QuickSendRowProbe>
+        {
+            ComPtr<IAccessible> accessible = getAccessible(mainWindow.Hwnd());
+            long childCount = 0;
+            Expect(SUCCEEDED(accessible->get_accChildCount(&childCount)),
+                   "Could not enumerate MainWindow accessibility rows for Quick Actions");
+            for (LONG childId = 1; childId <= childCount; ++childId)
+            {
+                VARIANT child{};
+                child.vt = VT_I4;
+                child.lVal = childId;
+                BSTR value = nullptr;
+                const HRESULT valueResult = accessible->get_accValue(child, &value);
+                const std::wstring childValue = SUCCEEDED(valueResult) && value
+                    ? std::wstring(value, SysStringLen(value))
+                    : std::wstring{};
+                SysFreeString(value);
+                if (_wcsicmp(childValue.c_str(), std::wstring(destinationPath).c_str()) != 0)
+                {
+                    continue;
+                }
+
+                BSTR description = nullptr;
+                const HRESULT descriptionResult = accessible->get_accDescription(child, &description);
+                const std::wstring childDescription = SUCCEEDED(descriptionResult) && description
+                    ? std::wstring(description, SysStringLen(description))
+                    : std::wstring{};
+                SysFreeString(description);
+                LONG left = 0;
+                LONG top = 0;
+                LONG width = 0;
+                LONG height = 0;
+                Expect(SUCCEEDED(accessible->accLocation(&left, &top, &width, &height, child))
+                           && width > 0 && height > 0,
+                       "Quick Actions row did not expose accessible bounds");
+                RECT clientBounds{left, top, left + width, top + height};
+                MapWindowPoints(nullptr,
+                                mainWindow.Hwnd(),
+                                reinterpret_cast<POINT*>(&clientBounds),
+                                2);
+                return QuickSendRowProbe{clientBounds, childDescription};
+            }
+            return std::nullopt;
+        };
+
+        selectQuickActionsTab();
+        Expect(PumpMessagesUntil([&]()
+        {
+            const auto favoriteRow = readQuickSendRow(favoritePath);
+            const auto recentRow = readQuickSendRow(recentPath);
+            return favoriteRow && recentRow
+                && favoriteRow->description.find(L"1 image") != std::wstring::npos
+                && recentRow->description.find(L"2 images") != std::wstring::npos;
+        }, 10000), "Quick Actions did not expose deduplicated favorite and recent image counts");
+        const auto initialFavoriteRow = readQuickSendRow(favoritePath);
+        const auto initialRecentRow = readQuickSendRow(recentPath);
+        Expect(initialFavoriteRow && initialRecentRow
+                   && initialFavoriteRow->description.find(L"Last used: Never") != std::wstring::npos
+                   && initialRecentRow->description.find(L"Last used: Never") == std::wstring::npos,
+               "Quick Actions row accessibility did not expose per-destination last-use state");
+
+        struct TooltipWindowSearch
+        {
+            HWND owner{};
+            std::vector<HWND> tooltips;
+        };
+        TooltipWindowSearch tooltipSearch{mainWindow.Hwnd(), {}};
+        EnumThreadWindows(GetCurrentThreadId(), [](HWND candidate, LPARAM parameter) -> BOOL
+        {
+            auto& search = *reinterpret_cast<TooltipWindowSearch*>(parameter);
+            wchar_t className[64]{};
+            if (GetClassNameW(candidate, className, static_cast<int>(std::size(className))) > 0
+                && _wcsicmp(className, TOOLTIPS_CLASSW) == 0
+                && GetWindow(candidate, GW_OWNER) == search.owner)
+            {
+                search.tooltips.push_back(candidate);
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&tooltipSearch));
+
+        const auto readRowTooltip = [&](const QuickSendRowProbe& row)
+        {
+            HWND tooltipWindow = nullptr;
+            UINT_PTR rowToolId = 0;
+            std::string enumerationSummary;
+            for (HWND candidate : tooltipSearch.tooltips)
+            {
+                const LRESULT toolCount = SendMessageW(candidate, TTM_GETTOOLCOUNT, 0, 0);
+                enumerationSummary.append(" window-tools=");
+                enumerationSummary.append(std::to_string(toolCount));
+                for (LRESULT index = 0; index < toolCount; ++index)
+                {
+                    TOOLINFOW toolInfo{};
+                    toolInfo.cbSize = sizeof(toolInfo);
+                    if (SendMessageW(candidate,
+                                     TTM_ENUMTOOLSW,
+                                     static_cast<WPARAM>(index),
+                                     reinterpret_cast<LPARAM>(&toolInfo)) == FALSE)
+                    {
+                        enumerationSummary.append(" enum-failed");
+                        continue;
+                    }
+                    if (toolInfo.hwnd == mainWindow.Hwnd()
+                        && EqualRect(&toolInfo.rect, &row.clientBounds) != FALSE)
+                    {
+                        tooltipWindow = candidate;
+                        rowToolId = toolInfo.uId;
+                        break;
+                    }
+                }
+                if (rowToolId != 0)
+                {
+                    break;
+                }
+            }
+            if (rowToolId == 0)
+            {
+                Expect(false,
+                       "Quick Actions row did not register a hover tooltip; count="
+                           + std::to_string(tooltipSearch.tooltips.size())
+                           + " row="
+                           + std::to_string(row.clientBounds.left) + ","
+                           + std::to_string(row.clientBounds.top) + ","
+                           + std::to_string(row.clientBounds.right) + ","
+                           + std::to_string(row.clientBounds.bottom)
+                           + enumerationSummary);
+            }
+
+            NMTTDISPINFOW notification{};
+            notification.hdr.hwndFrom = tooltipWindow;
+            notification.hdr.idFrom = rowToolId;
+            notification.hdr.code = TTN_GETDISPINFOW;
+            SendMessageW(mainWindow.Hwnd(),
+                         WM_NOTIFY,
+                         static_cast<WPARAM>(rowToolId),
+                         reinterpret_cast<LPARAM>(&notification));
+            Expect(notification.lpszText != nullptr, "Quick Actions tooltip callback returned no text");
+            return std::wstring(notification.lpszText);
+        };
+        const std::wstring favoriteTooltip = readRowTooltip(*initialFavoriteRow);
+        const std::wstring recentTooltip = readRowTooltip(*initialRecentRow);
+        Expect(favoriteTooltip.find(L"1 image") != std::wstring::npos
+                   && favoriteTooltip.find(L"Last used: Never") != std::wstring::npos
+                   && recentTooltip.find(L"2 images") != std::wstring::npos
+                   && recentTooltip.find(L"Last used: Never") == std::wstring::npos,
+               "Quick Actions hover tooltips omitted image counts or last-use timestamps");
+
+        RECT browserClient{};
+        Expect(GetClientRect(browserHwnd, &browserClient) != FALSE,
+               "Could not read the thumbnail browser bounds for Quick Actions drag");
+        const POINT thumbnailStart{50, 50};
+        POINT thumbnailStartScreen = thumbnailStart;
+        ClientToScreen(browserHwnd, &thumbnailStartScreen);
+        SetCursorPos(thumbnailStartScreen.x, thumbnailStartScreen.y);
+        SendMessageW(browserHwnd,
+                     WM_LBUTTONDOWN,
+                     MK_LBUTTON,
+                     MAKELPARAM(thumbnailStart.x, thumbnailStart.y));
+        const int dragDistance = (std::max)(1, GetSystemMetrics(SM_CXDRAG)) + 2;
+        const POINT dragThresholdPoint{thumbnailStart.x + dragDistance, thumbnailStart.y};
+        POINT dragThresholdScreen = dragThresholdPoint;
+        ClientToScreen(browserHwnd, &dragThresholdScreen);
+        SetCursorPos(dragThresholdScreen.x, dragThresholdScreen.y);
+        SendMessageW(browserHwnd,
+                     WM_MOUSEMOVE,
+                     MK_LBUTTON,
+                     MAKELPARAM(dragThresholdPoint.x, dragThresholdPoint.y));
+        Expect(GetCapture() == mainWindow.Hwnd(),
+               "Dragging a thumbnail did not start the in-app Quick Actions drag");
+
+        const POINT dropPoint{
+            (initialFavoriteRow->clientBounds.left + initialFavoriteRow->clientBounds.right) / 2,
+            (initialFavoriteRow->clientBounds.top + initialFavoriteRow->clientBounds.bottom) / 2};
+        POINT dropScreen = dropPoint;
+        ClientToScreen(mainWindow.Hwnd(), &dropScreen);
+        SetCursorPos(dropScreen.x, dropScreen.y);
+        SendMessageW(mainWindow.Hwnd(),
+                     WM_MOUSEMOVE,
+                     MK_LBUTTON,
+                     MAKELPARAM(dropPoint.x, dropPoint.y));
+        SendMessageW(mainWindow.Hwnd(),
+                     WM_LBUTTONUP,
+                     0,
+                     MAKELPARAM(dropPoint.x, dropPoint.y));
+
+        const fs::path deliveredFile = favoriteFolder.Root() / sourceFile.filename();
+        Expect(PumpMessagesUntil([&]()
+        {
+            std::error_code error;
+            return fs::exists(deliveredFile, error) && !error;
+        }, 10000), "In-app thumbnail drag did not deliver the image to its Quick Actions row");
+        Expect(PumpMessagesUntil([&]()
+        {
+            const auto favoriteRow = readQuickSendRow(favoritePath);
+            return favoriteRow
+                && favoriteRow->description.find(L"2 images") != std::wstring::npos
+                && favoriteRow->description.find(L"Last used: Never") == std::wstring::npos;
+        }, 10000), "Quick Actions did not refresh image count and last-used time after the row drop");
+
         DestroyWindow(mainWindow.Hwnd());
         PumpMessagesFor(100);
     }

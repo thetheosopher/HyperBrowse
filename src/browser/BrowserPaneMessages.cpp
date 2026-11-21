@@ -5,6 +5,9 @@ namespace
 
     constexpr int kWheelScrollAmount = 72;
     constexpr double kThumbnailWheelRowsPerNotch = 1.0;
+    constexpr int kInlineRenameEditControlId = 1001;
+    constexpr UINT_PTR kInlineRenameEditSubclassId = 1;
+    constexpr UINT kInlineRenameFocusLostMessage = WM_APP + 53;
 
     RECT NormalizeRect(POINT start, POINT end)
     {
@@ -293,6 +296,366 @@ namespace hyperbrowse::browser
         SendMessageW(parent_, kContextMenuMessage, reinterpret_cast<WPARAM>(hwnd_), MAKELPARAM(screenPoint.x, screenPoint.y));
     }
 
+    bool BrowserPane::BeginInlineRename()
+    {
+        if (!hwnd_ || !parent_ || !model_ || inlineRenameEdit_ || SelectedCount() != 1)
+        {
+            return false;
+        }
+
+        const HWND focus = GetFocus();
+        if (focus != hwnd_ && focus != detailsList_)
+        {
+            return false;
+        }
+
+        const int modelIndex = PrimarySelectedModelIndex();
+        const BrowserItem* item = ItemFromViewIndex(ViewIndexFromModelIndex(modelIndex));
+        if (!item || item->isDirectory || item->filePath.empty() || item->fileName.empty())
+        {
+            return false;
+        }
+
+        const int viewIndex = ViewIndexFromModelIndex(modelIndex);
+        if (viewIndex < 0)
+        {
+            return false;
+        }
+        if (viewMode_ == BrowserViewMode::Details)
+        {
+            if (!detailsList_ || !IsWindowVisible(detailsList_))
+            {
+                return false;
+            }
+            ListView_EnsureVisible(detailsList_, viewIndex, FALSE);
+        }
+        else if (viewMode_ == BrowserViewMode::Thumbnails)
+        {
+            if (!thumbnailDetailsVisible_)
+            {
+                return false;
+            }
+            EnsureThumbnailViewIndexVisible(viewIndex);
+        }
+        else
+        {
+            return false;
+        }
+
+        inlineRenameFocusRestoreWindow_ = nullptr;
+        if (++inlineRenameSessionId_ == 0)
+        {
+            ++inlineRenameSessionId_;
+        }
+        inlineRenameSourcePath_ = item->filePath;
+        inlineRenameOriginalLeafName_ = item->fileName;
+        RECT bounds{};
+        if (!GetInlineRenameEditBounds(&bounds))
+        {
+            inlineRenameSourcePath_.clear();
+            inlineRenameOriginalLeafName_.clear();
+            return false;
+        }
+
+        inlineRenameEdit_ = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            L"EDIT",
+            inlineRenameOriginalLeafName_.c_str(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+            bounds.left,
+            bounds.top,
+            bounds.right - bounds.left,
+            bounds.bottom - bounds.top,
+            hwnd_,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(kInlineRenameEditControlId)),
+            instance_,
+            nullptr);
+        if (!inlineRenameEdit_)
+        {
+            util::LogError(L"Could not create the inline rename edit control. Error "
+                           + std::to_wstring(GetLastError()) + L".");
+            inlineRenameSourcePath_.clear();
+            inlineRenameOriginalLeafName_.clear();
+            return false;
+        }
+
+        if (!SetWindowSubclass(inlineRenameEdit_,
+                               &BrowserPane::InlineRenameEditSubclassProc,
+                               kInlineRenameEditSubclassId,
+                               reinterpret_cast<DWORD_PTR>(this)))
+        {
+            const HWND edit = inlineRenameEdit_;
+            inlineRenameEdit_ = nullptr;
+            util::LogError(L"Could not install the inline rename edit subclass. Error "
+                           + std::to_wstring(GetLastError()) + L".");
+            DestroyWindow(edit);
+            inlineRenameSourcePath_.clear();
+            inlineRenameOriginalLeafName_.clear();
+            return false;
+        }
+
+        const HFONT font = viewMode_ == BrowserViewMode::Details ? detailsListFont_ : thumbnailTitleFont_;
+        if (font)
+        {
+            SendMessageW(inlineRenameEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+        }
+
+        if (SetWindowPos(inlineRenameEdit_,
+                         HWND_TOP,
+                         bounds.left,
+                         bounds.top,
+                         bounds.right - bounds.left,
+                         bounds.bottom - bounds.top,
+                         SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE)
+        {
+            util::LogError(L"Could not position the inline rename edit control. Error "
+                           + std::to_wstring(GetLastError()) + L".");
+            FinishInlineRename(false, false);
+            return false;
+        }
+        SetFocus(inlineRenameEdit_);
+        if (GetFocus() != inlineRenameEdit_)
+        {
+            util::LogError(L"Could not focus the inline rename edit control.");
+            FinishInlineRename(false, false);
+            return false;
+        }
+
+        const std::filesystem::path leafPath(inlineRenameOriginalLeafName_);
+        const std::wstring stem = leafPath.stem().wstring();
+        const std::wstring extension = leafPath.extension().wstring();
+        const std::size_t selectionEnd = !stem.empty() && !extension.empty()
+            ? stem.size()
+            : inlineRenameOriginalLeafName_.size();
+        SendMessageW(inlineRenameEdit_,
+                     EM_SETSEL,
+                     0,
+                     static_cast<LPARAM>(selectionEnd));
+        return true;
+    }
+
+    bool BrowserPane::IsInlineRenameEdit(HWND window) const noexcept
+    {
+        return inlineRenameEdit_ && window == inlineRenameEdit_;
+    }
+
+    bool BrowserPane::GetInlineRenameEditBounds(RECT* bounds) const
+    {
+        if (!bounds || !hwnd_ || !model_ || inlineRenameSourcePath_.empty())
+        {
+            return false;
+        }
+
+        const int modelIndex = model_->FindItemIndexByPath(inlineRenameSourcePath_);
+        const int viewIndex = ViewIndexFromModelIndex(modelIndex);
+        if (viewIndex < 0)
+        {
+            return false;
+        }
+
+        if (viewMode_ == BrowserViewMode::Details)
+        {
+            if (!detailsList_ || !IsWindowVisible(detailsList_))
+            {
+                return false;
+            }
+            RECT labelRect{};
+            if (ListView_GetSubItemRect(detailsList_, viewIndex, 0, LVIR_LABEL, &labelRect) == FALSE)
+            {
+                return false;
+            }
+            POINT corners[2]{{labelRect.left, labelRect.top}, {labelRect.right, labelRect.bottom}};
+            MapWindowPoints(detailsList_, hwnd_, corners, 2);
+            *bounds = RECT{corners[0].x, corners[0].y, corners[1].x, corners[1].y};
+        }
+        else if (viewMode_ == BrowserViewMode::Thumbnails)
+        {
+            const ThumbnailLayoutMetrics layout = CurrentThumbnailLayout();
+            if (!thumbnailDetailsVisible_ || layout.titleHeight <= 0)
+            {
+                return false;
+            }
+            const RECT cellRect = GetThumbnailCellRect(viewIndex);
+            const RECT previewRect = GetThumbnailPreviewRect(cellRect);
+            const int titleTop = previewRect.bottom + layout.titleTopGap;
+            *bounds = RECT{
+                cellRect.left + layout.textInset,
+                titleTop,
+                cellRect.right - layout.textInset,
+                titleTop + layout.titleHeight};
+        }
+        else
+        {
+            return false;
+        }
+
+        RECT clientRect{};
+        GetClientRect(hwnd_, &clientRect);
+        return bounds->right > bounds->left
+            && bounds->bottom > bounds->top
+            && bounds->left >= clientRect.left
+            && bounds->top >= clientRect.top
+            && bounds->right <= clientRect.right
+            && bounds->bottom <= clientRect.bottom;
+    }
+
+    void BrowserPane::UpdateInlineRenameEditPosition()
+    {
+        if (!inlineRenameEdit_)
+        {
+            return;
+        }
+
+        RECT bounds{};
+        if (!GetInlineRenameEditBounds(&bounds))
+        {
+            FinishInlineRename(false, GetFocus() == inlineRenameEdit_);
+            return;
+        }
+
+        if (SetWindowPos(inlineRenameEdit_,
+                         HWND_TOP,
+                         bounds.left,
+                         bounds.top,
+                         bounds.right - bounds.left,
+                         bounds.bottom - bounds.top,
+                         SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE)
+        {
+            util::LogError(L"Could not reposition the inline rename edit control. Error "
+                           + std::to_wstring(GetLastError()) + L".");
+            FinishInlineRename(false, GetFocus() == inlineRenameEdit_);
+        }
+    }
+
+    void BrowserPane::FinishInlineRename(bool commit, bool restoreFocus, HWND focusRestoreWindow)
+    {
+        if (!inlineRenameEdit_ || inlineRenameEnding_)
+        {
+            return;
+        }
+
+        inlineRenameEnding_ = true;
+        if (++inlineRenameSessionId_ == 0)
+        {
+            ++inlineRenameSessionId_;
+        }
+        const HWND edit = inlineRenameEdit_;
+        const std::wstring sourcePath = inlineRenameSourcePath_;
+        const std::wstring originalLeafName = inlineRenameOriginalLeafName_;
+        inlineRenameFocusRestoreWindow_ = nullptr;
+        if (commit)
+        {
+            const int textLength = GetWindowTextLengthW(edit);
+            std::wstring newLeafName(static_cast<std::size_t>(std::max(0, textLength)) + 1, L'\0');
+            const int copiedLength = GetWindowTextW(edit, newLeafName.data(), static_cast<int>(newLeafName.size()));
+            newLeafName.resize(static_cast<std::size_t>(std::max(0, copiedLength)));
+            if (newLeafName != originalLeafName && parent_ && IsWindow(parent_))
+            {
+                const InlineRenameRequest request{
+                    sourcePath,
+                    originalLeafName,
+                    std::move(newLeafName),
+                    !restoreFocus,
+                    focusRestoreWindow};
+                SendMessageW(parent_,
+                             kInlineRenameRequestMessage,
+                             reinterpret_cast<WPARAM>(hwnd_),
+                             reinterpret_cast<LPARAM>(&request));
+            }
+        }
+
+        inlineRenameEdit_ = nullptr;
+        inlineRenameSourcePath_.clear();
+        inlineRenameOriginalLeafName_.clear();
+        if (DestroyWindow(edit) == FALSE && IsWindow(edit) != FALSE)
+        {
+            util::LogError(L"Could not destroy the inline rename edit control. Error "
+                           + std::to_wstring(GetLastError()) + L".");
+        }
+        inlineRenameEnding_ = false;
+        if (restoreFocus && hwnd_ && IsWindow(hwnd_))
+        {
+            SetFocus(viewMode_ == BrowserViewMode::Details && detailsList_ && IsWindowVisible(detailsList_)
+                         ? detailsList_
+                         : hwnd_);
+        }
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
+    LRESULT CALLBACK BrowserPane::InlineRenameEditSubclassProc(HWND hwnd,
+                                                                UINT message,
+                                                                WPARAM wParam,
+                                                                LPARAM lParam,
+                                                                UINT_PTR subclassId,
+                                                                DWORD_PTR refData)
+    {
+        auto* pane = reinterpret_cast<BrowserPane*>(refData);
+        if (message == WM_KILLFOCUS)
+        {
+            const LRESULT result = DefSubclassProc(hwnd, message, wParam, lParam);
+            if (pane && pane->inlineRenameEdit_ == hwnd && !pane->inlineRenameEnding_)
+            {
+                const HWND focusRestoreWindow = reinterpret_cast<HWND>(wParam);
+                pane->inlineRenameFocusRestoreWindow_ = focusRestoreWindow;
+                if (!pane->hwnd_
+                    || IsWindow(pane->hwnd_) == FALSE
+                    || PostMessageW(pane->hwnd_,
+                                    kInlineRenameFocusLostMessage,
+                                    static_cast<WPARAM>(pane->inlineRenameSessionId_),
+                                    0) == FALSE)
+                {
+                    util::LogError(L"Could not queue the inline rename focus-loss commit.");
+                    pane->inlineRenameFocusRestoreWindow_ = nullptr;
+                    pane->FinishInlineRename(true, false, focusRestoreWindow);
+                }
+            }
+            return result;
+        }
+
+        if (pane && message == WM_KEYDOWN)
+        {
+            if (wParam == VK_RETURN)
+            {
+                pane->FinishInlineRename(true, true);
+                return 0;
+            }
+            if (wParam == VK_ESCAPE)
+            {
+                pane->FinishInlineRename(false, true);
+                return 0;
+            }
+            if (wParam == VK_TAB || wParam == VK_F6)
+            {
+                const HWND parent = pane->parent_;
+                pane->FinishInlineRename(true, true);
+                if (parent && IsWindow(parent))
+                {
+                    SendMessageW(parent, WM_KEYDOWN, wParam, lParam);
+                }
+                return 0;
+            }
+            if (wParam == VK_F2)
+            {
+                return 0;
+            }
+        }
+        if (message == WM_NCDESTROY)
+        {
+            if (pane && pane->inlineRenameEdit_ == hwnd)
+            {
+                pane->inlineRenameEdit_ = nullptr;
+                pane->inlineRenameSourcePath_.clear();
+                pane->inlineRenameOriginalLeafName_.clear();
+                if (++pane->inlineRenameSessionId_ == 0)
+                {
+                    ++pane->inlineRenameSessionId_;
+                }
+            }
+            RemoveWindowSubclass(hwnd, &BrowserPane::InlineRenameEditSubclassProc, subclassId);
+        }
+        return DefSubclassProc(hwnd, message, wParam, lParam);
+    }
+
     LRESULT BrowserPane::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
         if (message == services::DisplayColorService::kReadyMessage)
@@ -328,11 +691,32 @@ namespace hyperbrowse::browser
             RefreshColorProfile(true);
             break;
         case WM_NCDESTROY:
+            FinishInlineRename(false, false);
             if (displayColors_) displayColors_->BindTargetWindow(nullptr);
             KillTimer(hwnd_, services::DisplayColorService::kProfilePollTimer);
             break;
+        case kInlineRenameFocusLostMessage:
+        {
+            if (inlineRenameEdit_
+                && !inlineRenameEnding_
+                && static_cast<UINT_PTR>(wParam) == inlineRenameSessionId_)
+            {
+                const HWND focusRestoreWindow = inlineRenameFocusRestoreWindow_;
+                inlineRenameFocusRestoreWindow_ = nullptr;
+                FinishInlineRename(true, false, focusRestoreWindow);
+            }
+            return 0;
+        }
         case WM_ERASEBKGND:
             return 1;
+        case WM_CTLCOLOREDIT:
+            if (inlineRenameEdit_ == reinterpret_cast<HWND>(lParam))
+            {
+                SetTextColor(reinterpret_cast<HDC>(wParam), colors_.selectionText);
+                SetBkColor(reinterpret_cast<HDC>(wParam), colors_.accentFill);
+                return reinterpret_cast<LRESULT>(selectedCellBrush_);
+            }
+            break;
         case WM_SETFOCUS:
             if (viewMode_ == BrowserViewMode::Details && detailsList_ && IsWindowVisible(detailsList_))
             {

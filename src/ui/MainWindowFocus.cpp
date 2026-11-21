@@ -178,7 +178,10 @@ namespace hyperbrowse::ui
                 addTarget({KeyboardFocusTargetKind::QuickAccessSortButton});
                 for (int rowIndex = 0; rowIndex < static_cast<int>(quickAccessDestinationRows_.size()); ++rowIndex)
                 {
-                    addTarget({KeyboardFocusTargetKind::QuickAccessShortcutEdit, rowIndex});
+                    if (quickAccessDestinationRows_[static_cast<std::size_t>(rowIndex)].favorite)
+                    {
+                        addTarget({KeyboardFocusTargetKind::QuickAccessShortcutEdit, rowIndex});
+                    }
                     addTarget({KeyboardFocusTargetKind::QuickAccessRow, rowIndex});
                     addTarget({KeyboardFocusTargetKind::QuickAccessButton, rowIndex * 3});
                     addTarget({KeyboardFocusTargetKind::QuickAccessButton, rowIndex * 3 + 1});
@@ -409,7 +412,7 @@ namespace hyperbrowse::ui
                 const auto& row = quickAccessDestinationRows_[static_cast<std::size_t>(focusTarget.index)];
                 const std::wstring label = quickAccessLabel(row);
                 item.name = L"Quick Actions folder: " + label;
-                item.description = row.destinationPath;
+                item.description = row.destinationPath + L"\r\n" + row.tooltipText;
                 item.defaultAction = L"Open folder";
                 item.value = row.destinationPath;
                 item.bounds = clientToScreenRect(row.rowRect);
@@ -635,6 +638,7 @@ namespace hyperbrowse::ui
             return activeRightPaneTab_ == RightPaneTab::QuickSend
                 && target.index >= 0
                 && target.index < static_cast<int>(quickAccessDestinationRows_.size())
+                && quickAccessDestinationRows_[static_cast<std::size_t>(target.index)].favorite
                 && target.index < static_cast<int>(quickAccessShortcutEdits_.size())
                 && quickAccessShortcutEdits_[static_cast<std::size_t>(target.index)]
                 && IsWindow(quickAccessShortcutEdits_[static_cast<std::size_t>(target.index)]) != FALSE

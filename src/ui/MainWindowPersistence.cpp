@@ -171,6 +171,7 @@ namespace hyperbrowse::ui
                 kFavoriteDestinationLimit);
             favoriteDestinationFolders_ = persistedState.favoriteDestinationFolders;
             lastQuickSendDestination_ = persistedState.lastQuickSendDestination;
+            quickSendDestinationUsage_ = persistedState.destinationUsage;
             SyncQuickSendModel();
             quickSendModel_.SetShortcutAssignments(persistedState.shortcutAssignments);
             SortFavoriteDestinationsByShortcutInMemory();

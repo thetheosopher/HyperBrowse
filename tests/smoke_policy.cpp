@@ -2273,9 +2273,14 @@ namespace hyperbrowse::tests
                 L"C:\\Favorites\\One",
                 L"D:\\Favorites\\Two",
             };
+            const std::vector<std::wstring> recentDestinations = {
+                L"D:\\Favorites\\Two",
+                L"E:\\Recent\\Three",
+            };
             const std::vector<hyperbrowse::ui::QuickAccessLayout::Destination> destinations =
                 QuickAccessDestinationBuilder::Build(
                     favoriteDestinations,
+                    recentDestinations,
                     [](std::wstring_view destinationPath)
                     {
                         return std::wstring(L"Metadata: ") + std::wstring(destinationPath);
@@ -2287,7 +2292,7 @@ namespace hyperbrowse::tests
                             : std::nullopt;
                     });
 
-            Expect(destinations.size() == 2
+            Expect(destinations.size() == 3
                        && destinations[0].destinationPath == L"C:\\Favorites\\One"
                        && destinations[0].displayLabel == L"One (C:\\Favorites\\One)"
                        && destinations[0].metadataLabel == L"Metadata: C:\\Favorites\\One"
@@ -2295,7 +2300,10 @@ namespace hyperbrowse::tests
                        && destinations[0].favorite
                        && destinations[1].destinationPath == L"D:\\Favorites\\Two"
                        && destinations[1].assignedShortcut == -1
-                       && destinations[1].favorite,
+                       && destinations[1].favorite
+                       && destinations[2].destinationPath == L"E:\\Recent\\Three"
+                       && destinations[2].assignedShortcut == -1
+                       && !destinations[2].favorite,
                    "Quick Actions destination builder changed the layout snapshot contract");
         }
 

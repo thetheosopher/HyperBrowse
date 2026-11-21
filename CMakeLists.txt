@@ -149,6 +149,7 @@ add_library(HyperBrowseCore STATIC
     src/services/FileAssociationService.cpp
     src/services/FileOperationService.cpp
     src/services/FolderEnumerationService.cpp
+    src/services/QuickAccessDirectoryMetadataService.cpp
     src/services/FolderTreeEnumerationService.cpp
     src/services/FolderWatchService.cpp
     src/services/ImageMetadataService.cpp

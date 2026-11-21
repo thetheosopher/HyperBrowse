@@ -256,6 +256,7 @@ namespace hyperbrowse::tests
 
               void RunQuickSendPersistenceScenario()
               {
+                     using hyperbrowse::ui::QuickSendDestinationUsage;
                      using hyperbrowse::ui::QuickSendPersistedState;
                      using hyperbrowse::ui::QuickSendPersistence;
 
@@ -267,6 +268,11 @@ namespace hyperbrowse::tests
                             L"E:\\Favorites\\Three",
                      };
                      state.lastQuickSendDestination = L"D:\\Favorites\\Two";
+                     state.destinationUsage = {
+                            {L"C:\\Favorites\\One", 133537919990000000ULL},
+                            {L"D:\\Favorites\\Two", 133537919980000000ULL},
+                            {L"E:\\Favorites\\Three", 133537919970000000ULL},
+                     };
                      state.shortcutAssignments[3] = L"D:\\Favorites\\Two";
                      state.shortcutAssignmentOrder = L"987";
 
@@ -283,6 +289,8 @@ namespace hyperbrowse::tests
 
                      Expect(values[L"FavoriteDestinationFolders"] == L"C:\\Favorites\\One\nD:\\Favorites\\Two\nE:\\Favorites\\Three"
                                       && values[L"LastQuickSendDestination"] == L"D:\\Favorites\\Two"
+                                      && values[L"QuickSendDestinationUsageHistory"]
+                                             == L"C:\\Favorites\\One\t133537919990000000\nD:\\Favorites\\Two\t133537919980000000\nE:\\Favorites\\Three\t133537919970000000"
                                       && values[L"QuickSendShortcutOrder"] == L"987"
                                       && values[L"QuickSendShortcut3"] == L"D:\\Favorites\\Two",
                                "Quick Send persistence did not write the expected registry value contract");
@@ -304,6 +312,9 @@ namespace hyperbrowse::tests
                                              L"C:\\Favorites\\One",
                                              L"D:\\Favorites\\Two"}
                                       && restored.lastQuickSendDestination == L"D:\\Favorites\\Two"
+                                      && restored.destinationUsage == std::vector<QuickSendDestinationUsage>{
+                                             {L"C:\\Favorites\\One", 133537919990000000ULL},
+                                             {L"D:\\Favorites\\Two", 133537919980000000ULL}}
                                       && restored.shortcutAssignmentOrder == L"987"
                                       && restored.shortcutAssignments[3] == L"D:\\Favorites\\Two",
                                "Quick Send persistence did not restore capped favorites, last destination, and shortcuts");

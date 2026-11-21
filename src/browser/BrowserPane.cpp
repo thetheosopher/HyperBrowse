@@ -276,6 +276,7 @@ namespace hyperbrowse::browser
 
     BrowserPane::~BrowserPane()
     {
+        FinishInlineRename(false, false);
         displayColors_->BindTargetWindow(nullptr);
         displayColors_.reset();
         ReleaseD2DResources();
@@ -381,6 +382,7 @@ namespace hyperbrowse::browser
             return;
         }
 
+        FinishInlineRename(false, false);
         model_ = model;
         displayColors_->InvalidateImages();
         ++thumbnailSessionId_;
@@ -395,6 +397,7 @@ namespace hyperbrowse::browser
 
     void BrowserPane::BeginFolderLoad()
     {
+        FinishInlineRename(false, false);
         displayColors_->InvalidateImages();
         d2dBitmapCache_.clear();
         ++thumbnailSessionId_;
@@ -429,6 +432,7 @@ namespace hyperbrowse::browser
             return;
         }
 
+        FinishInlineRename(false, false);
         HideThumbnailTooltip();
         viewMode_ = mode;
         LayoutChildren();
@@ -620,6 +624,7 @@ namespace hyperbrowse::browser
         RebuildThumbnailFonts();
         RebuildD2DTextFormats();
         UpdateVerticalScrollBar();
+        UpdateInlineRenameEditPosition();
         ScheduleVisibleThumbnailWork();
         NotifyStateChanged();
         InvalidateRect(hwnd_, nullptr, TRUE);
@@ -641,6 +646,7 @@ namespace hyperbrowse::browser
         RebuildThumbnailFonts();
         RebuildD2DTextFormats();
         UpdateVerticalScrollBar();
+        UpdateInlineRenameEditPosition();
         ScheduleVisibleThumbnailWork();
         NotifyStateChanged();
         InvalidateRect(hwnd_, nullptr, TRUE);
@@ -662,6 +668,7 @@ namespace hyperbrowse::browser
         RebuildThumbnailFonts();
         RebuildD2DTextFormats();
         UpdateVerticalScrollBar();
+        UpdateInlineRenameEditPosition();
         ScheduleVisibleThumbnailWork();
         NotifyStateChanged();
         InvalidateRect(hwnd_, nullptr, TRUE);
@@ -685,6 +692,7 @@ namespace hyperbrowse::browser
         RebuildThumbnailFonts();
         RebuildD2DTextFormats();
         UpdateVerticalScrollBar();
+        UpdateInlineRenameEditPosition();
         ScheduleVisibleThumbnailWork();
         NotifyStateChanged();
         InvalidateRect(hwnd_, nullptr, TRUE);

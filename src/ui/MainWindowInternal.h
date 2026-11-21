@@ -181,6 +181,7 @@ namespace main_window_shared
     inline constexpr int kQuickAccessPanelShortcutGap = 8;
     inline constexpr int kQuickAccessPanelSortButtonGap = 6;
     inline constexpr UINT kQuickAccessShortcutEditBaseId = 5200;
+    inline constexpr UINT_PTR kQuickAccessDestinationTooltipBase = 0x10000;
     inline constexpr UINT_PTR kQuickAccessSortTooltipId = static_cast<UINT_PTR>(-1);
     inline constexpr UINT_PTR kDetailsPanelHistogramTooltipId = static_cast<UINT_PTR>(-2);
 

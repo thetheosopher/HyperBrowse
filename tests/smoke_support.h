@@ -226,6 +226,8 @@ namespace hyperbrowse::tests::smoke
         int viewerCompareRatingRequests{};
         int lastViewerCompareRating{-1};
         HWND lastViewerCompareRatingSource{};
+        int viewerCompareTagRequests{};
+        HWND lastViewerCompareTagSource{};
     };
 
     inline std::vector<HWND> FindOpenViewerWindowHandles()
@@ -441,6 +443,34 @@ namespace hyperbrowse::tests::smoke
                                            sizeof(value));
         RegCloseKey(key);
         Expect(result == ERROR_SUCCESS, "Failed to write a HyperBrowse registry smoke-test value");
+    }
+
+    inline void SetRegistryStringValue(const wchar_t* path,
+                                       const wchar_t* valueName,
+                                       std::wstring_view value)
+    {
+        HKEY key{};
+        DWORD disposition = 0;
+        Expect(RegCreateKeyExW(HKEY_CURRENT_USER,
+                               path,
+                               0,
+                               nullptr,
+                               0,
+                               KEY_WRITE,
+                               nullptr,
+                               &key,
+                               &disposition) == ERROR_SUCCESS,
+               "Failed to open the HyperBrowse registry key for a smoke-test string");
+        const std::wstring terminatedValue(value);
+        const DWORD byteCount = static_cast<DWORD>((terminatedValue.size() + 1) * sizeof(wchar_t));
+        const LONG result = RegSetValueExW(key,
+                                           valueName,
+                                           0,
+                                           REG_SZ,
+                                           reinterpret_cast<const BYTE*>(terminatedValue.c_str()),
+                                           byteCount);
+        RegCloseKey(key);
+        Expect(result == ERROR_SUCCESS, "Failed to write a HyperBrowse registry smoke-test string");
     }
 
     inline void DeleteRegistryValue(const wchar_t* path, const wchar_t* valueName)
@@ -690,6 +720,19 @@ namespace hyperbrowse::tests::smoke
             state->lastViewerCompareRating = static_cast<int>(
                 wParam - hyperbrowse::viewer::ViewerWindow::kContextMenuSetCompareRatingBase);
             state->lastViewerCompareRatingSource = reinterpret_cast<HWND>(lParam);
+            return 0;
+        }
+
+        if (message == hyperbrowse::viewer::ViewerWindow::kContextMenuCommandMessage
+            && wParam == hyperbrowse::viewer::ViewerWindow::kContextMenuEditCompareTags)
+        {
+            if (!state)
+            {
+                return 0;
+            }
+
+            ++state->viewerCompareTagRequests;
+            state->lastViewerCompareTagSource = reinterpret_cast<HWND>(lParam);
             return 0;
         }
 

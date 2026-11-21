@@ -3,6 +3,7 @@
 #include "ui/QuickSend.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -10,10 +11,19 @@
 
 namespace hyperbrowse::ui
 {
+    struct QuickSendDestinationUsage
+    {
+        std::wstring folderPath;
+        std::uint64_t lastUsedFileTime{};
+
+        bool operator==(const QuickSendDestinationUsage&) const = default;
+    };
+
     struct QuickSendPersistedState
     {
         std::vector<std::wstring> favoriteDestinationFolders;
         std::wstring lastQuickSendDestination;
+        std::vector<QuickSendDestinationUsage> destinationUsage;
         QuickSendModel::ShortcutAssignments shortcutAssignments{};
         std::wstring shortcutAssignmentOrder{kDefaultQuickSendShortcutOrder};
     };

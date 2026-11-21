@@ -46,6 +46,7 @@ namespace hyperbrowse::ui
             RECT copyRect{};
             RECT moveRect{};
             RECT removeRect{};
+            std::wstring tooltipText;
         };
 
         struct Input

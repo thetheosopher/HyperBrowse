@@ -161,6 +161,138 @@ under Light and Dark, assert the tokenized colors equal the tokens.
 Redesigning the palettes, changing any visible Light or Dark color beyond the
 within-6-steps collapse, and the data-visualization and status colors above.
 
+## Phase 3 design note: dialog accessibility
+
+### Existing coverage and gap
+
+The main window and Experimental Settings already reuse
+`MainWindowAccessibility`, an MSAA `IAccessible` provider returned through
+`WM_GETOBJECT`. The current Settings smoke checks accessible names and roles for
+the selected Slideshow tab, Transition style field, and Apply action, but it
+does not exercise accessible focus, page changes, or dynamic checked/disabled
+state transitions.
+
+### Approved design
+
+- Keep the existing provider and custom-rendered controls; do not add a new
+  accessibility framework or dependency.
+- Extend `HyperBrowseSettingsSmoke` to verify the initially focused control,
+  accessible focus and selected state when switching tabs, focus on the first
+  control after a page change, and checked/unavailable state changes for
+  automatic thumbnail-cache sizing.
+- Assert using accessible names, roles, and states rather than pixel
+  coordinates. Fix only gaps exposed by those checks.
+- Leave NVDA/JAWS, Inspect/UI Automation, high-contrast, theme, DPI, and
+  larger-text checks as manual sign-off.
+
+### Out of scope
+
+Replacing custom controls, adding a second provider, and treating automated
+smoke coverage as a substitute for manual screen-reader verification.
+
+## Phase 4 design note: in-place image label rename
+
+### Existing behavior and constraints
+
+The thumbnail grid paints image names itself. Details mode uses an owner-data
+ListView, so both modes need an editor owned by the browser pane rather than
+relying on a conventional ListView label edit. F2 currently routes to
+`StartRenameSelectedImage`, which uses the modal rename prompt and then the
+existing asynchronous shell rename path. The folder tree already demonstrates
+inline editing with Enter/focus-loss commit and Escape cancel.
+
+### Selected design
+
+- When browser focus is in either view and one non-directory file is selected,
+  F2 begins editing its displayed filename in a temporary native Edit child.
+  The name stem is selected initially, matching the current rename dialog.
+- Enter, Tab/Shift+Tab, or focus loss commits; Escape cancels. Tab traversal
+  continues through the existing main-window focus sequence. Defer focus-loss
+  commit until the new target has focus and pass that target through file
+  operation completion. An unchanged or cancelled edit starts no operation.
+- Do not force focus back to the browser after a focus-loss commit.
+- Keep the modal rename dialog as fallback when focus is outside the browser,
+  the target is not an eligible visible file, or the inline editor cannot be
+  created.
+- Reuse existing rename validation and `FileOperationType::Rename`. Capture
+  the source path before editing, confirm it is still current and present at
+  commit time, and let the existing operation/folder-watch path refresh the
+  model rather than changing the item optimistically.
+- Add focused smoke coverage for both browser views, commit/cancel behavior,
+  and asynchronous refresh. Review the rendered editor at the end of the plan.
+
+### Out of scope
+
+Batch rename, folder-tree rename changes, optimistic model mutation, and
+changes to the existing shell conflict policy.
+
+## Phase 5 design note: simplified title bar
+
+### Existing behavior and constraints
+
+`MainWindow::UpdateWindowTitle` already sets the title to `HyperBrowse` or
+`HyperBrowse - <full folder path>`; it does not append view, recursive-browsing,
+or theme state. The two-column owner-drawn status strip currently shows folder,
+selection, profile, and activity details, but not those three browser states.
+The View and Appearance menus already expose their check states.
+
+### Selected design
+
+- Keep the full folder path in the title for identification across multiple
+  main-window instances. The title must remain unchanged when view mode,
+  recursive browsing, or theme changes.
+- Add concise `View`, `Recursive`, and `Theme` values at the beginning of the
+  secondary status text, before selection and profile details. Keep the menu
+  check states as an alternate discovery path; put the browser state first so
+  it retains priority when the existing status text is clipped at narrow
+  widths.
+- Set the owner-drawn status control's window text to the same concise state
+  summary so native accessibility can expose it. Verify the window-level
+  accessible name continues to include the active folder path.
+- Add a focused smoke for the title and accessibility names, changing all
+  three settings, two windows with distinct paths, and narrow-window geometry.
+
+### Out of scope
+
+Changing the full-path title to a leaf-only title, redesigning the status strip
+or menus, and replacing the existing main-window accessibility provider.
+
+## Phase 6 design note: Quick Actions polish
+
+### Existing behavior and constraints
+
+The Quick Actions panel currently builds rows from favorites only, although
+recent destinations remain available in the File menu and B3 calls for both.
+Rows already show image-count metadata and support one-click Copy/Move, shell
+drops, and an in-app thumbnail drag path to a row; that internal drag path has
+no focused smoke. The image-count metadata is currently enumerated
+synchronously while rebuilding rows, and Quick Send persistence stores only
+the single most-recent destination path, not per-destination times.
+
+### Selected design
+
+- Show favorites first and recent destinations after them, deduplicating
+  paths; keep shortcut assignments on favorites and preserve the existing
+  favorite/recent remove behavior.
+- Move image-count enumeration to a bounded background worker. Keep the
+  current row text while a count is pending, then refresh it from the
+  worker-result message; do not enumerate again when a tooltip is requested.
+- Add a per-row tooltip with the row's image count and a local last-used
+  date/time, or `Never` when unused. Persist a bounded per-destination UTC
+  FILETIME history through the existing Quick Send persistence path, updating
+  it when a destination operation starts. Include the same information in the
+  row's accessible description.
+- Keep the existing in-app thumbnail-to-row drag implementation and add a
+  focused smoke that verifies the selected image reaches the row destination
+  under the existing modifier-aware Copy/Move behavior, along with
+  recent/favorite deduplication, asynchronous count refresh, and
+  tooltip/accessibility text.
+
+### Out of scope
+
+Changing Copy/Move drag semantics, shell file drops, or the existing Quick Send
+menu and shortcut assignment behavior.
+
 ## Ledger
 
 | Slice | Date | Files | Validation | Result |
@@ -168,3 +300,11 @@ within-6-steps collapse, and the data-visualization and status colors above.
 | 1 design note | 2026-10-25 | this file | Headless timing of the per-folder shell calls (see Evidence) | Approved; owner chose option C |
 | 1 implementation | 2026-10-25 | `FolderTreeController.*`, `tests/smoke*.cpp`, `tests/CMakeLists.txt`, `docs/testing.md` | Debug build clean. `HyperBrowseFolderTreeLargeSmoke` passed (5,000 subfolders, longest UI dispatch 51.5 ms, 3 s total; before the change the shell calls alone blocked the UI thread for ~6.9 s). `HyperBrowseFolderTreeRestoreSmoke` passed. Both create only hidden windows. Visual check is the owner's at the end | Time-sliced fill (8 ms budget, 10 ms timer), "Loading..." row, generic-icon insert plus visible-first refinement, presence applied through an item map (no tree walks), selection restore gated on fill completion |
 | 2 implementation | 2026-10-25 | `SystemTheme.h`, `ThemeTokens.h`, `BrowserPane.cpp`, `ViewerWindowContextMenu.cpp`, `MainWindowAppDialogs.cpp`, `MainWindowExperimentalSettings.cpp`, `tests/smoke_policy.cpp` | Debug build clean; `HyperBrowseThemeTokensSmoke` (now with forced high-contrast and forced-off checks) and the three `*PolicySmoke` tests passed. Headless only; visual and real high-contrast review is the owner's | Added `HighContrastOverrideForTesting()` seam and `MakeMenuSelectionFill`. Viewer context menu uses the highlight fill and highlight text in high contrast; About link buttons use system colors only in high contrast; settings edit brush initial value now uses the field token. Light browser-pane placeholder and stripe colors use `windowBackground`. Deviations from the note: the dark browser-pane colors stay local (merging them would flatten the row stripes), and the edit background uses `fieldBackground` to match the brush `ApplyExperimentalSettingsTheme` already installs |
+| 3 design note | 2026-11-15 | this file | Source audit of `WM_GETOBJECT`, the shared provider, and Settings smoke coverage | Approved by the owner; reuse the current provider and target the untested focus/page/state behavior |
+| 3 implementation | 2026-11-15 | `tests/smoke_settings.cpp`, `docs/keyboard-accessibility-plan.md`, `docs/testing.md`, `specs/FUTURE-ROADMAP.md`, this file | CMake Tools Release build of `HyperBrowseTests`; `HyperBrowseSettingsSmoke` and `HyperBrowseAccessibilitySmoke` passed 1/1 each; `git diff --check` passed | Added accessible focus/page navigation and automatic-cache state-transition assertions. Manual NVDA/JAWS and Inspect/UI Automation sign-off remains open |
+| 4 design note | 2026-11-15 | this file | Source review of thumbnail rendering, owner-data details, file rename handling, and folder-tree inline edit | Selected the roadmap-aligned native Edit overlay and existing asynchronous rename path under the broader request to proceed with 2.8 |
+| 4 implementation | 2026-11-15 | `src/browser/BrowserPane.*`, `src/ui/MainWindow*.{h,cpp}`, `src/ui/WindowAsyncMessageRouter.*`, `tests/smoke*.{cpp,h}`, `tests/CMakeLists.txt`, `README.md`, `docs/user-guide.html`, `docs/testing.md`, `specs/FUTURE-ROADMAP.md`, this file | CMake Tools Release builds of `HyperBrowse` and `HyperBrowseTests`; `HyperBrowseInlineRenameSmoke`, `HyperBrowseFileRenameSmoke`, `HyperBrowseFileOperationSmoke`, `HyperBrowseRuntimePolicySmoke`, and `HyperBrowseSmoke` passed 1/1 each; `git diff --check` passed | F2 inline rename works in both views; Enter, Tab, focus loss, Escape, modal fallback, and async refresh are covered. Owner visual review passed 2026-11-15; cross-pane focus-loss behavior remains open |
+| 5 design note | 2026-11-15 | this file | Source audit of main-window title/status updates, status-strip painting, menus, and window/status accessibility | User was unavailable; applied the recommended default to retain the full path and move concise browser state to the status strip |
+| 5 implementation | 2026-11-15 | `src/ui/MainWindowLayout.cpp`, `tests/smoke_main_window.cpp`, `tests/smoke.cpp`, `tests/smoke_scenarios.h`, `tests/CMakeLists.txt`, `README.md`, `docs/user-guide.html`, `docs/testing.md`, `specs/FUTURE-ROADMAP.md`, this file | CMake Tools Release builds of `HyperBrowse` and `HyperBrowseTests`; `HyperBrowseWindowChromeSmoke`, `HyperBrowseAccessibilitySmoke`, and `HyperBrowseResponsivePanelSmoke` passed 1/1 each; `git diff --check` passed | Preserved the full-path title; surfaced view, recursive, and theme state in the status bar and its accessible name. Multiple windows and narrow geometry are automated; owner visual review passed 2026-11-15, screen-reader name review remains open |
+| 6 design note | 2026-11-15 | this file | Source audit of Quick Actions row construction, persistence, tooltip routing, image-count work, and existing thumbnail drag flow | User was unavailable; applied the recommended full B3 scope while preserving existing modifier-aware Copy/Move behavior |
+| 6 implementation | 2026-11-15 | `src/services/QuickAccessDirectoryMetadataService.*`, `src/ui/QuickAccessDestinationBuilder.*`, `src/ui/QuickAccessLayout.h`, `src/ui/QuickAccessPainter.cpp`, `src/ui/QuickSendPersistence.*`, `src/ui/MainWindow*.{h,cpp}`, `src/ui/WindowAsyncMessageRouter.*`, `tests/smoke_main_window.cpp`, `tests/smoke_model.cpp`, `tests/smoke_policy.cpp`, `tests/smoke.cpp`, `tests/smoke_scenarios.h`, `tests/smoke_support.h`, `tests/CMakeLists.txt`, `README.md`, `docs/user-guide.html`, `docs/testing.md`, `specs/FUTURE-ROADMAP.md`, this file | CMake Tools Release builds of `HyperBrowse` and `HyperBrowseTests`; full Release CTest suite (40/40) passed; `git diff --check` passed | Added deduplicated favorite/recent rows, bounded background image counts, per-destination last-use persistence, and hover/accessibility hints. The existing thumbnail-to-row drag path is covered end to end; owner visual review passed 2026-11-15 |

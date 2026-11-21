@@ -78,6 +78,22 @@ namespace hyperbrowse::ui
         return 0;
     }
 
+    LRESULT MainWindow::OnBrowserPaneInlineRenameMessage(WPARAM wParam, LPARAM lParam)
+    {
+        if (reinterpret_cast<HWND>(wParam) != browserPane_ || lParam == 0)
+        {
+            return 0;
+        }
+
+        const auto* request = reinterpret_cast<const browser::BrowserPane::InlineRenameRequest*>(lParam);
+        StartRenameSelectedImageFromPath(request->sourcePath,
+                                         request->originalLeafName,
+                                         request->newLeafName,
+                                         request->preserveCurrentFocus,
+                                         request->focusRestoreWindow);
+        return 0;
+    }
+
     LRESULT MainWindow::OnBrowserPaneContextMenuMessage(WPARAM wParam, LPARAM lParam)
     {
         if (reinterpret_cast<HWND>(wParam) != browserPane_)

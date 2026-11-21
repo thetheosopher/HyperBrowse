@@ -683,24 +683,32 @@ namespace hyperbrowse::tests::smoke
                 failAndClose("Experimental Settings did not return an accessibility object");
                 return;
             }
-            IAccessible* settingsAccessible = nullptr;
+            Microsoft::WRL::ComPtr<IAccessible> settingsAccessible;
             const HRESULT settingsObjectStatus = ObjectFromLresult(
                 settingsObjectResult,
                 IID_IAccessible,
                 0,
-                reinterpret_cast<void**>(&settingsAccessible));
+                reinterpret_cast<void**>(settingsAccessible.GetAddressOf()));
             if (FAILED(settingsObjectStatus) || !settingsAccessible)
             {
                 failAndClose("Could not materialize the Experimental Settings accessibility object");
                 return;
             }
+            struct AccessibleChild
+            {
+                long id{};
+                long role{};
+                long state{};
+                std::wstring name;
+            };
             long settingsChildCount = 0;
             bool foundSelectedSlideshowTab = false;
             bool foundTransitionStyle = false;
             bool foundApplyAction = false;
+            long slideshowTabChildId = 0;
+            long performanceTabChildId = 0;
             if (FAILED(settingsAccessible->get_accChildCount(&settingsChildCount)) || settingsChildCount < 11)
             {
-                settingsAccessible->Release();
                 failAndClose("Experimental Settings accessibility object omitted semantic children");
                 return;
             }
@@ -725,7 +733,6 @@ namespace hyperbrowse::tests::smoke
                     }
                     VariantClear(&role);
                     VariantClear(&accessibleState);
-                    settingsAccessible->Release();
                     failAndClose("Experimental Settings accessibility child omitted its name, role, or state");
                     return;
                 }
@@ -734,6 +741,14 @@ namespace hyperbrowse::tests::smoke
                     || (accessibleName == L"Slideshow tab"
                         && role.lVal == ROLE_SYSTEM_PAGETAB
                         && (accessibleState.lVal & STATE_SYSTEM_SELECTED) != 0);
+                if (accessibleName == L"Slideshow tab" && role.lVal == ROLE_SYSTEM_PAGETAB)
+                {
+                    slideshowTabChildId = childId;
+                }
+                if (accessibleName == L"Performance tab" && role.lVal == ROLE_SYSTEM_PAGETAB)
+                {
+                    performanceTabChildId = childId;
+                }
                 foundTransitionStyle = foundTransitionStyle
                     || (accessibleName == L"Transition style" && role.lVal == ROLE_SYSTEM_COMBOBOX);
                 foundApplyAction = foundApplyAction
@@ -742,12 +757,206 @@ namespace hyperbrowse::tests::smoke
                 VariantClear(&role);
                 VariantClear(&accessibleState);
             }
-            settingsAccessible->Release();
-            if (!foundSelectedSlideshowTab || !foundTransitionStyle || !foundApplyAction)
+            if (!foundSelectedSlideshowTab || !foundTransitionStyle || !foundApplyAction
+                || slideshowTabChildId == 0 || performanceTabChildId == 0)
             {
-                failAndClose("Experimental Settings accessibility tree did not expose its selected tab, field, and footer action");
+                failAndClose("Experimental Settings accessibility tree did not expose its selected tabs, field, and footer action");
                 return;
             }
+            const auto findAccessibleChildByName = [&](const wchar_t* expectedName,
+                                                       AccessibleChild* accessibleChild)
+            {
+                if (!expectedName || !accessibleChild)
+                {
+                    return false;
+                }
+                long childCount = 0;
+                if (FAILED(settingsAccessible->get_accChildCount(&childCount)))
+                {
+                    return false;
+                }
+                for (long childId = 1; childId <= childCount; ++childId)
+                {
+                    VARIANT child{};
+                    child.vt = VT_I4;
+                    child.lVal = childId;
+                    BSTR name = nullptr;
+                    VARIANT role{};
+                    VARIANT accessibleState{};
+                    const HRESULT nameStatus = settingsAccessible->get_accName(child, &name);
+                    const HRESULT roleStatus = settingsAccessible->get_accRole(child, &role);
+                    const HRESULT stateStatus = settingsAccessible->get_accState(child, &accessibleState);
+                    if (FAILED(nameStatus) || !name
+                        || FAILED(roleStatus) || role.vt != VT_I4
+                        || FAILED(stateStatus) || accessibleState.vt != VT_I4)
+                    {
+                        if (name)
+                        {
+                            SysFreeString(name);
+                        }
+                        VariantClear(&role);
+                        VariantClear(&accessibleState);
+                        return false;
+                    }
+                    const bool matches = std::wstring(name, SysStringLen(name)) == expectedName;
+                    if (matches)
+                    {
+                        accessibleChild->id = childId;
+                        accessibleChild->role = role.lVal;
+                        accessibleChild->state = accessibleState.lVal;
+                        accessibleChild->name.assign(name, SysStringLen(name));
+                    }
+                    SysFreeString(name);
+                    VariantClear(&role);
+                    VariantClear(&accessibleState);
+                    if (matches)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            const auto getFocusedAccessibleChild = [&](AccessibleChild* accessibleChild)
+            {
+                if (!accessibleChild)
+                {
+                    return false;
+                }
+                VARIANT focusedChild{};
+                if (FAILED(settingsAccessible->get_accFocus(&focusedChild))
+                    || focusedChild.vt != VT_I4
+                    || focusedChild.lVal <= 0)
+                {
+                    VariantClear(&focusedChild);
+                    return false;
+                }
+                BSTR name = nullptr;
+                VARIANT role{};
+                VARIANT accessibleState{};
+                const HRESULT nameStatus = settingsAccessible->get_accName(focusedChild, &name);
+                const HRESULT roleStatus = settingsAccessible->get_accRole(focusedChild, &role);
+                const HRESULT stateStatus = settingsAccessible->get_accState(focusedChild, &accessibleState);
+                if (FAILED(nameStatus) || !name
+                    || FAILED(roleStatus) || role.vt != VT_I4
+                    || FAILED(stateStatus) || accessibleState.vt != VT_I4)
+                {
+                    if (name)
+                    {
+                        SysFreeString(name);
+                    }
+                    VariantClear(&role);
+                    VariantClear(&accessibleState);
+                    VariantClear(&focusedChild);
+                    return false;
+                }
+                accessibleChild->id = focusedChild.lVal;
+                accessibleChild->role = role.lVal;
+                accessibleChild->state = accessibleState.lVal;
+                accessibleChild->name.assign(name, SysStringLen(name));
+                SysFreeString(name);
+                VariantClear(&role);
+                VariantClear(&accessibleState);
+                VariantClear(&focusedChild);
+                return true;
+            };
+
+            AccessibleChild focusedSettingsChild;
+            if (!getFocusedAccessibleChild(&focusedSettingsChild)
+                || focusedSettingsChild.name != L"Transition style"
+                || focusedSettingsChild.role != ROLE_SYSTEM_COMBOBOX
+                || (focusedSettingsChild.state & STATE_SYSTEM_FOCUSED) == 0)
+            {
+                failAndClose("Experimental Settings did not expose its initial focused control");
+                return;
+            }
+
+            VARIANT slideshowTabChild{};
+            slideshowTabChild.vt = VT_I4;
+            slideshowTabChild.lVal = slideshowTabChildId;
+            if (settingsAccessible->accSelect(SELFLAG_TAKEFOCUS, slideshowTabChild) != S_OK
+                || !getFocusedAccessibleChild(&focusedSettingsChild)
+                || focusedSettingsChild.id != slideshowTabChildId
+                || (focusedSettingsChild.state & STATE_SYSTEM_FOCUSED) == 0)
+            {
+                failAndClose("Experimental Settings accessibility focus did not follow the selected tab");
+                return;
+            }
+
+            VARIANT performanceTabChild{};
+            performanceTabChild.vt = VT_I4;
+            performanceTabChild.lVal = performanceTabChildId;
+            if (settingsAccessible->accDoDefaultAction(performanceTabChild) != S_OK)
+            {
+                failAndClose("The Performance tab accessibility action failed");
+                return;
+            }
+            AccessibleChild performanceTab;
+            AccessibleChild slideshowTab;
+            if (!findAccessibleChildByName(L"Performance tab", &performanceTab)
+                || (performanceTab.state & STATE_SYSTEM_SELECTED) == 0
+                || !findAccessibleChildByName(L"Slideshow tab", &slideshowTab)
+                || (slideshowTab.state & STATE_SYSTEM_SELECTED) != 0
+                || !getFocusedAccessibleChild(&focusedSettingsChild)
+                || focusedSettingsChild.name != L"Resource profile"
+                || focusedSettingsChild.role != ROLE_SYSTEM_COMBOBOX
+                || (focusedSettingsChild.state & STATE_SYSTEM_FOCUSED) == 0)
+            {
+                failAndClose("Experimental Settings did not restore accessible focus and selection after changing pages");
+                return;
+            }
+
+            AccessibleChild thumbnailCacheAutomatic;
+            AccessibleChild thumbnailCacheCapacity;
+            if (!findAccessibleChildByName(L"Follow profile for thumbnail cache", &thumbnailCacheAutomatic)
+                || thumbnailCacheAutomatic.role != ROLE_SYSTEM_CHECKBUTTON
+                || !findAccessibleChildByName(L"Thumbnail cache cap in megabytes", &thumbnailCacheCapacity)
+                || thumbnailCacheCapacity.role != ROLE_SYSTEM_TEXT)
+            {
+                failAndClose("Experimental Settings omitted accessible cache controls");
+                return;
+            }
+            const bool automaticBefore = (thumbnailCacheAutomatic.state & STATE_SYSTEM_CHECKED) != 0;
+            const bool capacityUnavailableBefore = (thumbnailCacheCapacity.state & STATE_SYSTEM_UNAVAILABLE) != 0;
+            if (automaticBefore != capacityUnavailableBefore)
+            {
+                failAndClose("Experimental Settings automatic cache state disagreed with the capacity field state");
+                return;
+            }
+            VARIANT thumbnailCacheAutomaticChild{};
+            thumbnailCacheAutomaticChild.vt = VT_I4;
+            thumbnailCacheAutomaticChild.lVal = thumbnailCacheAutomatic.id;
+            if (settingsAccessible->accDoDefaultAction(thumbnailCacheAutomaticChild) != S_OK
+                || !findAccessibleChildByName(L"Follow profile for thumbnail cache", &thumbnailCacheAutomatic)
+                || !findAccessibleChildByName(L"Thumbnail cache cap in megabytes", &thumbnailCacheCapacity)
+                || ((thumbnailCacheAutomatic.state & STATE_SYSTEM_CHECKED) != 0) == automaticBefore
+                || ((thumbnailCacheCapacity.state & STATE_SYSTEM_UNAVAILABLE) != 0) == capacityUnavailableBefore)
+            {
+                failAndClose("Experimental Settings accessibility states did not update when automatic cache sizing changed");
+                return;
+            }
+            thumbnailCacheAutomaticChild.lVal = thumbnailCacheAutomatic.id;
+            if (settingsAccessible->accDoDefaultAction(thumbnailCacheAutomaticChild) != S_OK
+                || !findAccessibleChildByName(L"Follow profile for thumbnail cache", &thumbnailCacheAutomatic)
+                || !findAccessibleChildByName(L"Thumbnail cache cap in megabytes", &thumbnailCacheCapacity)
+                || ((thumbnailCacheAutomatic.state & STATE_SYSTEM_CHECKED) != 0) != automaticBefore
+                || ((thumbnailCacheCapacity.state & STATE_SYSTEM_UNAVAILABLE) != 0) != capacityUnavailableBefore)
+            {
+                failAndClose("Experimental Settings accessibility states did not restore after automatic cache sizing changed back");
+                return;
+            }
+
+            if (settingsAccessible->accDoDefaultAction(slideshowTabChild) != S_OK
+                || !findAccessibleChildByName(L"Slideshow tab", &slideshowTab)
+                || (slideshowTab.state & STATE_SYSTEM_SELECTED) == 0
+                || !getFocusedAccessibleChild(&focusedSettingsChild)
+                || focusedSettingsChild.name != L"Transition style"
+                || (focusedSettingsChild.state & STATE_SYSTEM_FOCUSED) == 0)
+            {
+                failAndClose("Experimental Settings did not restore logical focus when returning to the Slideshow page");
+                return;
+            }
+            settingsAccessible.Reset();
+
             if (GetDlgItem(dialog, 5601) != nullptr)
             {
                 failAndClose("Experimental Settings unexpectedly created a native OK button");

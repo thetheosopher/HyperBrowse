@@ -1,6 +1,6 @@
 # HyperBrowse Future Roadmap
 
-Last reviewed: 2026-11-15 (2.7.1 release)
+Last reviewed: 2026-11-17 (2.8 and WebP verification status refreshed)
 
 This is the single forward-looking product backlog for HyperBrowse. It is
 intentionally separate from the authoritative shipped contract in
@@ -20,7 +20,7 @@ The plan is organized around a single product north star:
 
 ---
 
-## 0. Recommended Sequence (reviewed 2026-10-31; status refreshed 2026-11-15)
+## 0. Recommended Sequence (reviewed 2026-10-31; status refreshed 2026-11-17)
 
 This review compared the backlog with release 2.7.0 source, the
 [Bug Report 2 review plan](HyperBrowse-Bug-Reports-2-Review-Plan.md), and the
@@ -50,13 +50,27 @@ release 2.7.1.
 
 ### Next: 2.8 polish and accessibility
 
-- Prompt 10 Phases 3-6 in owner-ranked order: C8 dialog accessibility, C6
-  in-place label rename, C9 simplified title bar, B3 Quick Send polish.
-- One consolidated manual verification pass that closes the entries whose
-  software is shipped but whose sign-off is open: B2 (DPI, forced GDI,
-  per-tile metadata), B4 (physical display/color), C1-C3/C7 (theme/DPI),
-  C8 (NVDA/JAWS, Inspect), Bug Report 2 items 61 (Settings at 150/200% and
-  mixed DPI) and 69 (WebP end to end), and E2/E5 real-fixture decode.
+- Prompt 10 Phases 3 (C8), 4 (C6), 5 (C9), and 6 (B3) are implemented.
+- **Visual review — complete (owner confirmed 2026-11-15):** C6/C9/B3,
+  B2 DPI/forced-GDI review, B4 physical display/color, C1-C3/C7 theme/DPI,
+  C8 high-contrast/theme/DPI/larger text, and Bug Report 2 item 61 Settings
+  scaling.
+- Full Debug and Release CTest suites passed 40/40 on 2026-11-17.
+- Remaining manual and release verification: C8 NVDA/JAWS and Inspect/UIA;
+  C6 cross-pane focus-loss behavior.
+- **B2 per-tile metadata and Debug gate — passed 2026-11-17:** the focused
+  viewer smoke verifies focused-tile rating/tag requests, per-file isolation,
+  and persistence through store flush/reopen. The full Debug CTest suite passed
+  40/40.
+- **E2/E5 real-fixture decode — passed 2026-11-17:** one HEIC and one JPEG XL
+  sample produced thumbnails and rendered in the Debug full viewer with
+  installed Microsoft codecs. This closes the sample/configuration gate only;
+  broader format and machine compatibility remain codec-dependent.
+- **Bug Report 2 item 69 WebP — passed 2026-11-17:** with Microsoft WebP Image
+  Extension 1.2.31.0 installed, HyperBrowse enumerated and thumbnailed a
+  temporary WebP derived from the public-domain Yellowstone example, rendered
+  it in the Viewer, and opened it by path through Windows Run. This verifies
+  only this machine's installed codec and file association.
 
 ### Then: 2.9 performance evidence
 
@@ -122,8 +136,10 @@ The active plan assumes the following are already shipped and stable:
 - HEIC (`.heic`) and JPEG XL (`.jxl`) are recognized and routed through WIC.
   The 2.5.0 Tools > Diagnostics > Snapshot surface reports bounded worker-owned
   decoder discovery separately from observed thumbnail/full-image results.
-  Decoder creation does not prove real-file compatibility; fixture-backed
-  HEIC/JPEG XL decode remains unverified, and `.heif` stays outside the allowlist.
+  Basic HEIC and JPEG XL fixtures were rendered in the full viewer on
+  2026-11-17 with installed Microsoft codecs. This validates those samples on
+  that configuration only; broader compatibility remains codec-dependent, and
+  `.heif` stays outside the allowlist.
 - Runtime-adaptive thumbnail cache (128 MB–1 GB) and metadata cache (2,048–
   65,536 entries) sized from `GlobalMemoryStatusEx`.
 - Optional `%LOCALAPPDATA%\HyperBrowse\thumbnail-cache` persistent cache.
@@ -257,20 +273,30 @@ verification only. See the
 [B2 long-horizon prompt](FUTURE-ROADMAP-PROMPT-05-N-UP-COMPARE-AND-ZOOM-SYNC.md)
 for the complete interaction contract.
 
-- Complete manual review at 100%, 150%, and 200% DPI, including forced GDI
-  fallback.
-- Add focused per-tile rating/tag isolation and persistence coverage.
-- Complete the local Debug and Release build and CTest gates.
+- Owner visual review at 100%, 150%, and 200% DPI, including forced GDI
+  fallback, passed on 2026-11-15.
+- Focused viewer smoke coverage now verifies per-tile rating/tag targeting,
+  isolation from the other file, and persistence through `UserMetadataStore`
+  flush/reopen.
+- `cmake --build --preset debug --target HyperBrowseTests` succeeded;
+  `ctest --preset debug-tests -R "^HyperBrowseSmoke$" --output-on-failure`
+  passed 1/1 (42.38 s); and `ctest --preset debug-tests --output-on-failure`
+  passed 40/40 on 2026-11-17.
+- `cmake --build --preset release --target HyperBrowseTests` succeeded;
+  `ctest --preset release-tests --output-on-failure` passed 40/40 on
+  2026-11-17 (102.33 s).
 
 ### `B3` Quick-Pick Destination Panel (P1)
 
-**Implementation status:** In progress. The existing details rail now exposes a
-quick-send panel that lists favorite and recent destinations with one-click
-`Copy` and `Move` actions for the current selection, visible per-row metadata,
-and direct shell file drops onto destination rows. Dropping files onto a row
-now copies by default and switches to move while `Shift` is held. Remaining:
-decide whether the panel still needs richer hover-only affordances or a deeper
-in-app drag source beyond the new row drop targets.
+**Implementation status:** Favorite and recent destinations appear in the
+details-rail panel with one-click `Copy` and `Move` actions, per-row image-count
+and last-used hover hints, and the existing direct shell file-drop targets.
+Image counts are gathered on a bounded worker, and the existing in-app
+thumbnail drag path now has focused end-to-end coverage. `HyperBrowseQuickSendSmoke`
+covers row deduplication, asynchronous count refresh, accessible hint text, and
+delivery to a row. Shell drops copy by default and move with `Shift`; in-app
+drags retain their existing modifier/drive-based Copy/Move behavior. Owner
+visual review passed on 2026-11-15.
 
 - Optional right-rail strip listing favorite + recent destinations as drop
   targets and one-click "Send Selection To" actions.
@@ -288,11 +314,11 @@ succeeded; both exact full CTest presets passed 27/27 (50.77 s Debug, 47.03 s
 Release). The prior idle-client failure was traced to live-cache journal replay
 and generic WCS lookup's printer-spooler RPC, not pipe cancellation. Test-cache
 isolation, exact-display DC profile lookup, and bounded message pumping closed
-the software gates. Physical sRGB/wide-gamut multi-monitor and 100/150/200%
-visual review remains unverified: this session exposes one 1024x768 display at
-100% with a system sRGB profile. B4 remains pending that physical sign-off;
-automated pixel checks do not certify physical color accuracy. Cloud Actions
-remain disabled; no workflow, packaging, commit, or push was performed.
+the software gates. The owner confirmed the physical display/color visual
+review passed on 2026-11-15; the specific display/profile/DPI measurements are
+not recorded here, and automated pixel checks do not certify physical color
+accuracy. Cloud Actions remain disabled; no workflow, packaging, commit, or
+push was performed.
 
 - Default-on, persisted **View > Color Management** opt-out, applied to the
   browser and every viewer/compare tile.
@@ -365,7 +391,7 @@ Execution sequence for the owner-selected 2026-10-25 UI observations (folder
 tree stall, theme leftovers, dialog accessibility, in-place rename, title bar,
 Quick Send polish): [UI and design polish prompt](FUTURE-ROADMAP-PROMPT-10-UI-DESIGN-POLISH.md).
 Phases 1 (folder tree stall) and 2 (theme tokens and high contrast) shipped
-in 2.7.0; Phases 3-6 (C8, C6, C9, B3) remain.
+in 2.7.0; Phases 3 (C8), 4 (C6), 5 (C9), and 6 (B3) are implemented.
 
 ### `C10` Command Search (P2)
 
@@ -388,11 +414,16 @@ existing surfaces.
 
 ### `C6` Inline Rename / In-Place Label Edit (P2)
 
-**Implementation status:** Folder-tree inline rename is shipped. In-place
-editing of image labels in thumbnail/details surfaces remains deferred.
+**Implementation status:** Folder-tree inline rename remains shipped. F2 now
+edits a single selected file in place in both thumbnail and details views,
+with the existing modal rename dialog as fallback. The editor uses the current
+rename validation and asynchronous file-operation path; the focused inline
+rename smoke covers Enter, Tab, focus loss, Escape, and model refresh.
+Owner visual review passed on 2026-11-15; cross-pane focus-loss behavior
+remains an end-of-plan verification item.
 
-- True in-place label editing in the thumbnail and details surfaces; `F2`
-  currently opens a dialog.
+- Preserve the filename-stem selection, file-operation semantics, and modal
+  fallback when extending this workflow.
 
 ### C1-C3 / C7 UI Surface Verification
 
@@ -400,22 +431,26 @@ The local implementations are summarized in Appendix B. The coordinated
 implementation brief is the
 [long-horizon UI surfaces prompt](FUTURE-ROADMAP-PROMPT-06-PERFORMANCE-UI-SURFACES.md).
 
-- Complete Release CTest and manual theme/DPI visual review.
+- Owner theme/DPI visual review passed on 2026-11-15.
+- The full Release CTest gate passed 40/40 on 2026-11-15; the Debug CTest gate
+  remains tracked under B2.
 
 ### `C8` Accessibility Completion and Release Verification (P1)
 
-**Implementation status:** Main-window custom surfaces expose semantic names,
-roles, states, focus, and state-change notifications. Dialog-specific custom
-surfaces and platform-facing verification remain.
+**Implementation status:** Main-window and Experimental Settings custom
+surfaces reuse the shared `MainWindowAccessibility` MSAA/`IAccessible` provider.
+`HyperBrowseSettingsSmoke` now covers Settings names and roles, focused and
+selected tab state, page-focus restoration, and checked/unavailable state
+transitions for automatic cache sizing. The owner confirmed high-contrast,
+theme, DPI, and larger-text visual checks passed on 2026-11-15. NVDA/JAWS and
+Inspect/UIA manual sign-off remains open.
 
-- Complete the smallest project-compatible accessibility bridge for the
-  remaining custom dialog surfaces.
-- Expose meaningful names, roles, enabled/disabled, checked/selected,
-  expanded/open, and focused state consistently across dialogs.
-- Add focused smoke coverage for dialog semantics and focus restoration.
-- Complete NVDA or JAWS, Inspect/UI Automation, high-contrast, theme, DPI, and
-  larger-text verification before treating the accessibility contract as
-  release-complete.
+- Keep using the existing bridge for custom dialog surfaces; no framework
+  migration or replacement of custom-rendered controls is required.
+- Preserve meaningful names, roles, enabled/disabled, checked/selected,
+  expanded/open, and focused state as dialog surfaces evolve.
+- Complete NVDA or JAWS and Inspect/UI Automation verification before treating
+  the accessibility contract as release-complete.
 - Keep the custom-rendered controls and existing Win32, Direct2D, and GDI
   ownership split; accessibility work must not become a framework migration.
 
@@ -423,6 +458,14 @@ The detailed implementation queue remains in
 [docs/keyboard-accessibility-plan.md](../docs/keyboard-accessibility-plan.md).
 
 ### `C9` Simplified Window Chrome (P2)
+
+**Implementation status:** The main-window title keeps `HyperBrowse` and the
+full active folder path. The status bar now surfaces view mode,
+recursive-browsing, and theme state, with the same concise summary exposed as
+the status control's accessible name. `HyperBrowseWindowChromeSmoke` covers
+state changes, accessible names, independent window paths, and narrow geometry.
+Owner visual review passed on 2026-11-15; screen-reader name review remains
+part of the C8 sign-off.
 
 - Remove redundant view mode, recursive-browsing, and theme indicators from
   the title bar when the active folder path already identifies the window.
@@ -511,13 +554,16 @@ and full-image decode outcomes. Discovery never blocks browsing or disables a
 working decoder; no codec is installed automatically. Discovery is on demand,
 not startup work. `.heif` remains outside the allowlist.
 
-Local inventory created Microsoft HEIF Decoder on 2026-09-30; no actual HEIC
-fixture decode was verified. Deterministic and native readiness tests passed,
-with final full Debug/Release presets at 30/30 (56.05 s / 52.66 s). Real media
-compatibility and physical/manual review remain separate from readiness.
-
-- Retain a separate provenance-backed HEIC fixture gate on a supported
-  installed-codec configuration; decoder creation alone is not a decode pass.
+On 2026-11-17, `basic-8bit-srgb.heic` (1600 x 1200, HEVC Main Still Picture,
+8-bit 4:2:0; [CC0 1.0 sample](https://heic.fyi/heic-sample-files)) rendered as
+a browser thumbnail and in the full viewer in `build\Debug\HyperBrowse.exe`.
+The installed codecs were Microsoft HEIF Image Extension 1.2.62.0 and HEVC
+Video Extension 2.5.48.0. Fixture SHA-256:
+`3fe7d32e5568f8bfd6b5d3290e61ac9b964d08464d388fa064f69cddddfee82c`.
+This closes the basic HEIC fixture gate for this installed-codec
+configuration only; it does not establish support for other HEIC variants or
+`.heif`. Deterministic and native readiness tests passed, with final full
+Debug/Release presets at 30/30 (56.05 s / 52.66 s).
 
 ### `E3` Multipage TIFF Navigation (P2)
 
@@ -538,11 +584,17 @@ discovery, independent decode outcomes, explicit refresh, failure fallback,
 and redacted diagnostics as HEIC. Mocked discovery and renamed PNGs are not
 JPEG XL decode evidence. Final full Debug/Release presets passed 30/30.
 
-Local inventory created Microsoft JPEG XL Decoder on 2026-09-30; actual JPEG
-XL fixture decode and out-of-box compatibility remain unverified.
-
-- Add a separate provenance-backed JPEG XL fixture gate before describing
-  JPEG XL decoding as generally available.
+On 2026-11-17, [OpenPrinting's
+`4x6-landscape-photo-srgb.jxl`](https://github.com/OpenPrinting/sample-files/blob/main/jxl/4x6-landscape-photo-srgb.jxl)
+rendered as a browser thumbnail and in the full viewer in
+`build\Debug\HyperBrowse.exe`. The sample is covered by the repository's
+[Apache-2.0 license](https://github.com/OpenPrinting/sample-files/blob/main/LICENSE);
+its size is 234,933 bytes and SHA-256 is
+`CE10D94C01A690227EE5CC5DE7B261A4CB27FAE90950390A691767242E9F8F8E`.
+The installed Microsoft JPEG XL Image Extension was 1.2.68.0, with WIC
+`Microsoft JPEG XL Decoder` version 10.0.26100.1. This closes the basic JPEG XL
+fixture gate for this installed-codec configuration only; out-of-box and
+broader format compatibility remain unverified.
 
 ---
 
@@ -651,11 +703,13 @@ to anchor the active plan above.
 
 - **B2 N-Up Compare:** shipped in 2.5.0 with two-to-four tiles, captured
   candidate cycling, synchronized or independent zoom/pan, and focused-tile
-  rating/tag actions through the existing metadata store. The compare-session
-  policy smoke and final Debug/Release CTest gates passed 30/30. Manual DPI,
-  forced-GDI-fallback, and per-tile metadata isolation/persistence review
-  remain open in Theme B.
+  rating/tag actions through the existing metadata store. Focused viewer smoke
+  coverage verifies per-tile targeting, file isolation, and persistence through
+  store flush/reopen. The full Debug and Release CTest gates passed 40/40 on
+  2026-11-17. Owner visual review at the supported DPI settings and forced-GDI
+  fallback passed on 2026-11-15.
 - **C1/C2/C3/C7 UI Surfaces:** the About dialog, empty-state watermarks,
   Performance HUD, and breadcrumb/path bar are implemented and present in
-  2.5.0. Final Debug/Release CTest gates passed 30/30; manual theme/DPI visual
-  review remains open in Theme C.
+  2.5.0. Final Debug/Release CTest gates passed 30/30; owner theme/DPI visual
+  review passed on 2026-11-15. The updated Release CTest gate remains open in
+  Theme C.

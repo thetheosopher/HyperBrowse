@@ -14,58 +14,23 @@ namespace
         return std::to_wstring(imageCount) + (imageCount == 1 ? L" image" : L" images");
     }
 
-    bool TryCountSupportedImagesInFolder(std::wstring_view folderPath, std::uintmax_t* imageCount)
-    {
-        if (!imageCount)
-        {
-            return false;
-        }
-
-        *imageCount = 0;
-
-        std::error_code error;
-        const fs::path directoryPath(folderPath);
-        if (!fs::is_directory(directoryPath, error) || error)
-        {
-            return false;
-        }
-
-        for (fs::directory_iterator iterator(directoryPath, fs::directory_options::skip_permission_denied, error), end;
-             iterator != end;
-             iterator.increment(error))
-        {
-            if (error)
-            {
-                return false;
-            }
-
-            std::error_code statusError;
-            if (!iterator->is_regular_file(statusError) || statusError)
-            {
-                continue;
-            }
-
-            if (hyperbrowse::browser::IsSupportedImageExtension(iterator->path().extension().wstring()))
-            {
-                ++(*imageCount);
-            }
-        }
-
-        return true;
-    }
-
-    std::wstring BuildQuickAccessDestinationMetadata(std::wstring_view folderPath, bool currentFolder)
+    std::wstring BuildQuickAccessDestinationMetadata(
+        bool currentFolder,
+        const hyperbrowse::services::QuickAccessDirectoryImageCount* imageCount)
     {
         std::wstring metadata;
 
-        std::uintmax_t imageCount = 0;
-        if (TryCountSupportedImagesInFolder(folderPath, &imageCount))
+        if (!imageCount)
         {
-            metadata.append(FormatQuickAccessImageCount(imageCount));
+            metadata.append(L"Counting images...");
+        }
+        else if (imageCount->available)
+        {
+            metadata.append(FormatQuickAccessImageCount(imageCount->imageCount));
         }
         else
         {
-            metadata.append(L"folder unavailable");
+            metadata.append(L"image count unavailable");
         }
 
         if (currentFolder)
@@ -73,6 +38,41 @@ namespace
             metadata.append(L" | Current folder");
         }
         return metadata;
+    }
+
+    std::wstring TwoDigitNumber(unsigned int value)
+    {
+        return value < 10 ? L"0" + std::to_wstring(value) : std::to_wstring(value);
+    }
+
+    std::wstring FormatQuickAccessLastUsedTime(
+        const std::vector<hyperbrowse::ui::QuickSendDestinationUsage>& usage,
+        std::wstring_view folderPath)
+    {
+        const std::wstring normalizedFolderPath(folderPath);
+        const auto found = std::find_if(usage.begin(), usage.end(), [&normalizedFolderPath](const auto& entry)
+        {
+            return _wcsicmp(entry.folderPath.c_str(), normalizedFolderPath.c_str()) == 0;
+        });
+        if (found == usage.end() || found->lastUsedFileTime == 0)
+        {
+            return L"Never";
+        }
+
+        FILETIME fileTime{
+            static_cast<DWORD>(found->lastUsedFileTime & 0xFFFFFFFFULL),
+            static_cast<DWORD>(found->lastUsedFileTime >> 32)};
+        FILETIME localFileTime{};
+        SYSTEMTIME localTime{};
+        if (FileTimeToLocalFileTime(&fileTime, &localFileTime) == FALSE
+            || FileTimeToSystemTime(&localFileTime, &localTime) == FALSE)
+        {
+            return L"Unknown";
+        }
+
+        return std::to_wstring(localTime.wYear) + L"-" + TwoDigitNumber(localTime.wMonth)
+            + L"-" + TwoDigitNumber(localTime.wDay) + L" "
+            + TwoDigitNumber(localTime.wHour) + L":" + TwoDigitNumber(localTime.wMinute);
     }
 
     std::wstring EscapeMenuMnemonicText(std::wstring_view text)
@@ -160,14 +160,42 @@ namespace hyperbrowse::ui
 
     void MainWindow::RecordRecentDestination(std::wstring folderPath)
     {
-        if (QuickAccessPathList::Insert(&recentDestinationFolders_, std::move(folderPath), kQuickAccessFolderLimit, true) && menu_)
+        InvalidateQuickAccessDirectoryImageCount(folderPath);
+        const bool changed = QuickAccessPathList::Insert(
+            &recentDestinationFolders_,
+            std::move(folderPath),
+            kQuickAccessFolderLimit,
+            true);
+        if (changed && menu_)
         {
             UpdateMenuState();
-            if (hwnd_ && detailsStripVisible_)
-            {
-                LayoutChildren();
-            }
         }
+        if (hwnd_ && detailsStripVisible_
+            && (changed || activeRightPaneTab_ == RightPaneTab::QuickSend))
+        {
+            LayoutChildren();
+        }
+    }
+
+    void MainWindow::InvalidateQuickAccessDirectoryImageCount(std::wstring_view folderPath)
+    {
+        const auto cachedEnd = std::remove_if(
+            quickAccessImageCountCache_.begin(),
+            quickAccessImageCountCache_.end(),
+            [folderPath](const services::QuickAccessDirectoryImageCount& result)
+            {
+                return FolderPathsEqual(result.folderPath, folderPath);
+            });
+        quickAccessImageCountCache_.erase(cachedEnd, quickAccessImageCountCache_.end());
+
+        const auto pendingEnd = std::remove_if(
+            quickAccessImageCountPendingPaths_.begin(),
+            quickAccessImageCountPendingPaths_.end(),
+            [folderPath](const PendingQuickAccessImageCount& pending)
+            {
+                return FolderPathsEqual(pending.folderPath, folderPath);
+            });
+        quickAccessImageCountPendingPaths_.erase(pendingEnd, quickAccessImageCountPendingPaths_.end());
     }
 
     void MainWindow::SyncQuickSendModel()
@@ -209,6 +237,7 @@ namespace hyperbrowse::ui
             kFavoriteDestinationLimit);
         favoriteDestinationFolders_ = persistedState.favoriteDestinationFolders;
         lastQuickSendDestination_ = persistedState.lastQuickSendDestination;
+        quickSendDestinationUsage_ = persistedState.destinationUsage;
         quickSendShortcutOrder_ = persistedState.shortcutAssignmentOrder;
         SyncQuickSendModel();
         quickSendModel_.SetShortcutAssignments(persistedState.shortcutAssignments);
@@ -227,6 +256,7 @@ namespace hyperbrowse::ui
         QuickSendPersistedState state;
         state.favoriteDestinationFolders = favoriteDestinationFolders_;
         state.lastQuickSendDestination = lastQuickSendDestination_;
+        state.destinationUsage = quickSendDestinationUsage_;
         state.shortcutAssignments = quickSendModel_.ShortcutAssignmentsByKey();
         state.shortcutAssignmentOrder = quickSendShortcutOrder_;
         QuickSendPersistence::Save(
@@ -392,17 +422,43 @@ namespace hyperbrowse::ui
                 ShowWindow(quickAccessScrollBar_, SW_HIDE);
             }
             HideQuickAccessShortcutEditControls();
+            UpdateQuickAccessDestinationTooltips();
             return;
         }
+
+        std::vector<std::wstring> destinationPaths = quickSendModel_.FavoriteDestinations();
+        destinationPaths.insert(destinationPaths.end(),
+                                recentDestinationFolders_.begin(),
+                                recentDestinationFolders_.end());
+        const auto cachedEnd = std::remove_if(
+            quickAccessImageCountCache_.begin(),
+            quickAccessImageCountCache_.end(),
+            [&destinationPaths](const services::QuickAccessDirectoryImageCount& result)
+            {
+                return std::none_of(destinationPaths.begin(), destinationPaths.end(), [&result](const std::wstring& path)
+                {
+                    return FolderPathsEqual(result.folderPath, path);
+                });
+            });
+        quickAccessImageCountCache_.erase(cachedEnd, quickAccessImageCountCache_.end());
+        RequestQuickAccessDirectoryImageCounts(destinationPaths);
 
         std::vector<QuickAccessLayout::Destination> destinations =
             QuickAccessDestinationBuilder::Build(
                 quickSendModel_.FavoriteDestinations(),
+                recentDestinationFolders_,
                 [this](std::wstring_view favoritePath)
                 {
+                    const auto imageCount = std::find_if(
+                        quickAccessImageCountCache_.begin(),
+                        quickAccessImageCountCache_.end(),
+                        [favoritePath](const services::QuickAccessDirectoryImageCount& result)
+                        {
+                            return FolderPathsEqual(result.folderPath, favoritePath);
+                        });
                     return BuildQuickAccessDestinationMetadata(
-                        favoritePath,
-                        IsQuickAccessDestinationCurrentFolder(favoritePath));
+                        IsQuickAccessDestinationCurrentFolder(favoritePath),
+                        imageCount == quickAccessImageCountCache_.end() ? nullptr : &*imageCount);
                 },
                 [this](std::wstring_view favoritePath)
                 {
@@ -416,6 +472,7 @@ namespace hyperbrowse::ui
                 ShowWindow(quickAccessScrollBar_, SW_HIDE);
             }
             HideQuickAccessShortcutEditControls();
+            UpdateQuickAccessDestinationTooltips();
             return;
         }
 
@@ -432,6 +489,7 @@ namespace hyperbrowse::ui
                 ShowWindow(quickAccessScrollBar_, SW_HIDE);
             }
             HideQuickAccessShortcutEditControls();
+            UpdateQuickAccessDestinationTooltips();
             return;
         }
 
@@ -501,9 +559,271 @@ namespace hyperbrowse::ui
         quickAccessDestinationViewportRect_ = layout.viewportRect;
         quickAccessSortButtonRect_ = layout.sortButtonRect;
         quickAccessDestinationRows_ = std::move(layout.rows);
+        UpdateQuickAccessDestinationTooltipTexts();
+        UpdateQuickAccessDestinationTooltips();
         UpdateQuickAccessSortTooltip();
 
         UpdateQuickAccessShortcutEditControls();
+    }
+
+    void MainWindow::RequestQuickAccessDirectoryImageCounts(const std::vector<std::wstring>& folderPaths)
+    {
+        std::vector<std::wstring> missingPaths;
+        for (const std::wstring& folderPath : folderPaths)
+        {
+            const bool cached = std::any_of(
+                quickAccessImageCountCache_.begin(),
+                quickAccessImageCountCache_.end(),
+                [&folderPath](const services::QuickAccessDirectoryImageCount& result)
+                {
+                    return FolderPathsEqual(result.folderPath, folderPath);
+                });
+            const bool pending = std::any_of(
+                quickAccessImageCountPendingPaths_.begin(),
+                quickAccessImageCountPendingPaths_.end(),
+                [&folderPath](const PendingQuickAccessImageCount& candidate)
+                {
+                    return FolderPathsEqual(candidate.folderPath, folderPath);
+                });
+            if (!cached && !pending
+                && std::none_of(missingPaths.begin(), missingPaths.end(), [&folderPath](const std::wstring& candidate)
+                {
+                    return FolderPathsEqual(candidate, folderPath);
+                }))
+            {
+                missingPaths.push_back(folderPath);
+            }
+        }
+
+        if (missingPaths.empty() || !hwnd_)
+        {
+            return;
+        }
+        if (!quickAccessDirectoryMetadataService_)
+        {
+            quickAccessDirectoryMetadataService_ =
+                std::make_unique<services::QuickAccessDirectoryMetadataService>();
+        }
+
+        const std::uint64_t requestId = quickAccessDirectoryMetadataService_->CountSupportedImagesAsync(
+            hwnd_,
+            missingPaths);
+        if (requestId == 0)
+        {
+            util::LogInfo(L"Quick Actions image counts could not be queued");
+            for (const std::wstring& folderPath : missingPaths)
+            {
+                quickAccessImageCountCache_.push_back(
+                    {folderPath, false, 0, ERROR_BUSY});
+            }
+            return;
+        }
+
+        for (const std::wstring& folderPath : missingPaths)
+        {
+            quickAccessImageCountPendingPaths_.push_back({folderPath, requestId});
+        }
+    }
+
+    LRESULT MainWindow::OnQuickAccessDirectoryMetadataMessage(LPARAM lParam)
+    {
+        std::unique_ptr<services::QuickAccessDirectoryMetadataUpdate> update(
+            reinterpret_cast<services::QuickAccessDirectoryMetadataUpdate*>(lParam));
+        if (!update)
+        {
+            return 0;
+        }
+
+        for (services::QuickAccessDirectoryImageCount& imageCount : update->imageCounts)
+        {
+            const auto pending = std::find_if(
+                quickAccessImageCountPendingPaths_.begin(),
+                quickAccessImageCountPendingPaths_.end(),
+                [&imageCount, &update](const PendingQuickAccessImageCount& candidate)
+                {
+                    return candidate.requestId == update->requestId
+                        && FolderPathsEqual(candidate.folderPath, imageCount.folderPath);
+                });
+            if (pending == quickAccessImageCountPendingPaths_.end())
+            {
+                continue;
+            }
+            quickAccessImageCountPendingPaths_.erase(pending);
+
+            const bool destinationStillListed = std::any_of(
+                quickSendModel_.FavoriteDestinations().begin(),
+                quickSendModel_.FavoriteDestinations().end(),
+                [&imageCount](const std::wstring& path)
+                {
+                    return FolderPathsEqual(path, imageCount.folderPath);
+                })
+                || std::any_of(recentDestinationFolders_.begin(),
+                               recentDestinationFolders_.end(),
+                               [&imageCount](const std::wstring& path)
+                               {
+                                   return FolderPathsEqual(path, imageCount.folderPath);
+                               });
+            if (!destinationStillListed)
+            {
+                continue;
+            }
+
+            const auto cached = std::find_if(
+                quickAccessImageCountCache_.begin(),
+                quickAccessImageCountCache_.end(),
+                [&imageCount](const services::QuickAccessDirectoryImageCount& candidate)
+                {
+                    return FolderPathsEqual(candidate.folderPath, imageCount.folderPath);
+                });
+            if (cached == quickAccessImageCountCache_.end())
+            {
+                quickAccessImageCountCache_.push_back(imageCount);
+            }
+            else
+            {
+                *cached = imageCount;
+            }
+
+            for (QuickAccessDestinationRow& row : quickAccessDestinationRows_)
+            {
+                if (FolderPathsEqual(row.destinationPath, imageCount.folderPath))
+                {
+                    row.metadataLabel = BuildQuickAccessDestinationMetadata(
+                        IsQuickAccessDestinationCurrentFolder(row.destinationPath),
+                        &imageCount);
+                }
+            }
+        }
+
+        UpdateQuickAccessDestinationTooltipTexts();
+        if (!IsRectEmpty(&quickAccessDestinationPanelRect_))
+        {
+            InvalidateRect(hwnd_, &quickAccessDestinationPanelRect_, FALSE);
+            if (tooltipControl_)
+            {
+                SendMessageW(tooltipControl_, TTM_UPDATE, 0, 0);
+            }
+        }
+        return 0;
+    }
+
+    void MainWindow::UpdateQuickAccessDestinationTooltipTexts()
+    {
+        for (QuickAccessDestinationRow& row : quickAccessDestinationRows_)
+        {
+            row.tooltipText = L"Image count: " + row.metadataLabel + L"\r\nLast used: "
+                + FormatQuickAccessLastUsedTime(quickSendDestinationUsage_, row.destinationPath);
+        }
+    }
+
+    void MainWindow::UpdateQuickAccessDestinationTooltips()
+    {
+        if (!tooltipControl_ || !hwnd_)
+        {
+            return;
+        }
+
+        const std::size_t rowCount = quickAccessDestinationRows_.size();
+        while (quickAccessRowTooltipCount_ > rowCount)
+        {
+            --quickAccessRowTooltipCount_;
+            TTTOOLINFOW toolInfo{};
+            toolInfo.cbSize = sizeof(toolInfo);
+            toolInfo.hwnd = hwnd_;
+            toolInfo.uId = kQuickAccessDestinationTooltipBase + quickAccessRowTooltipCount_;
+            SendMessageW(tooltipControl_, TTM_DELTOOLW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+        }
+
+        for (std::size_t rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+        {
+            TTTOOLINFOW toolInfo{};
+            toolInfo.cbSize = sizeof(toolInfo);
+            toolInfo.uFlags = TTF_SUBCLASS;
+            toolInfo.hwnd = hwnd_;
+            toolInfo.uId = kQuickAccessDestinationTooltipBase + rowIndex;
+            toolInfo.rect = quickAccessDestinationRows_[rowIndex].rowRect;
+            toolInfo.lpszText = LPSTR_TEXTCALLBACKW;
+            if (rowIndex < quickAccessRowTooltipCount_)
+            {
+                SendMessageW(tooltipControl_, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&toolInfo));
+            }
+            else if (SendMessageW(tooltipControl_,
+                                  TTM_ADDTOOLW,
+                                  0,
+                                  reinterpret_cast<LPARAM>(&toolInfo)) != FALSE)
+            {
+                ++quickAccessRowTooltipCount_;
+            }
+            else
+            {
+                util::LogLastError(L"TTM_ADDTOOLW(QuickAccessDestination)");
+                break;
+            }
+        }
+    }
+
+    void MainWindow::RecordQuickSendDestinationUsage(std::wstring folderPath)
+    {
+        folderPath = NormalizeFolderPath(std::move(folderPath));
+        if (folderPath.empty())
+        {
+            return;
+        }
+
+        FILETIME fileTime{};
+        GetSystemTimeAsFileTime(&fileTime);
+        ULARGE_INTEGER lastUsedFileTime{};
+        lastUsedFileTime.LowPart = fileTime.dwLowDateTime;
+        lastUsedFileTime.HighPart = fileTime.dwHighDateTime;
+
+        MutateQuickSendState([this, &folderPath, lastUsedFileTime]
+        {
+            const auto newEnd = std::remove_if(
+                quickSendDestinationUsage_.begin(),
+                quickSendDestinationUsage_.end(),
+                [&folderPath](const QuickSendDestinationUsage& usage)
+                {
+                    return FolderPathsEqual(usage.folderPath, folderPath);
+                });
+            quickSendDestinationUsage_.erase(newEnd, quickSendDestinationUsage_.end());
+            quickSendDestinationUsage_.insert(
+                quickSendDestinationUsage_.begin(),
+                QuickSendDestinationUsage{folderPath, lastUsedFileTime.QuadPart});
+            if (quickSendDestinationUsage_.size() > kFavoriteDestinationLimit)
+            {
+                quickSendDestinationUsage_.resize(kFavoriteDestinationLimit);
+            }
+            lastQuickSendDestination_ = folderPath;
+        });
+
+        UpdateQuickAccessDestinationTooltipTexts();
+        if (tooltipControl_)
+        {
+            SendMessageW(tooltipControl_, TTM_UPDATE, 0, 0);
+        }
+    }
+
+    void MainWindow::CancelQuickAccessDirectoryMetadata()
+    {
+        if (!quickAccessDirectoryMetadataService_)
+        {
+            return;
+        }
+
+        quickAccessDirectoryMetadataService_->CancelAll();
+        if (hwnd_ && IsWindow(hwnd_) != FALSE)
+        {
+            MSG queuedMessage{};
+            while (PeekMessageW(&queuedMessage,
+                                hwnd_,
+                                services::QuickAccessDirectoryMetadataService::kMessageId,
+                                services::QuickAccessDirectoryMetadataService::kMessageId,
+                                PM_REMOVE) != FALSE)
+            {
+                delete reinterpret_cast<services::QuickAccessDirectoryMetadataUpdate*>(queuedMessage.lParam);
+            }
+        }
+        quickAccessImageCountPendingPaths_.clear();
     }
 
     void MainWindow::UpdateQuickAccessSortTooltip()
@@ -601,6 +921,11 @@ namespace hyperbrowse::ui
             }
 
             const QuickAccessDestinationRow& row = quickAccessDestinationRows_[index];
+            if (!row.favorite)
+            {
+                ShowWindow(edit, SW_HIDE);
+                continue;
+            }
             RECT visibleIntersection{};
             const bool visible = !IsRectEmpty(&row.shortcutRect)
                 && IntersectRect(&visibleIntersection,
@@ -1139,10 +1464,7 @@ namespace hyperbrowse::ui
             viewerPendingOperations_.ClearQuickSend();
             return false;
         }
-        MutateQuickSendState([&]
-        {
-            lastQuickSendDestination_ = quickSendDestination;
-        });
+        RecordQuickSendDestinationUsage(quickSendDestination);
 
         if (type == services::FileOperationType::Move)
         {

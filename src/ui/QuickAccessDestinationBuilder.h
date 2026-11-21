@@ -18,6 +18,7 @@ namespace hyperbrowse::ui
 
         static std::vector<QuickAccessLayout::Destination> Build(
             const std::vector<std::wstring>& favoriteDestinations,
+            const std::vector<std::wstring>& recentDestinations,
             const MetadataBuilder& metadataBuilder,
             const ShortcutLookup& shortcutLookup);
     };

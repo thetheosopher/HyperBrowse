@@ -12,7 +12,9 @@ has shipped. The ledger records completed work and unresolved acceptance
 boundaries; the active roadmap and product spec remain authoritative.
 
 Shipped in 2.5.0: B5 saved searches, E2/E5 codec readiness, and C5 Open Log
-Folder. Actual HEIC/JPEG XL file decoding remains unverified.
+Folder. One provenance-cleared HEIC fixture and one Apache-2.0 JPEG XL fixture
+were rendered in the full viewer on 2026-11-17 with installed Microsoft codecs;
+broader compatibility remains codec-dependent.
 
 Primary sequence:
 
@@ -161,6 +163,12 @@ metadata changes, store corruption, or a separate search engine.
 **Gate:** Users can distinguish recognized formats from actually usable
 codecs; discovery is nonblocking and deterministic tests cover all states.
 
+**Real-fixture evidence (2026-11-17):** `basic-8bit-srgb.heic` (CC0 1.0) and
+OpenPrinting's `4x6-landscape-photo-srgb.jxl` (Apache-2.0) both produced
+thumbnails and rendered in the full viewer in the Debug build. This closes
+the basic fixture gate on this machine only; it does not establish broad
+codec/format compatibility, and `.heif` remains excluded.
+
 ## Phase 3: B7 Viewer Animation
 
 - Use WIC and its frame/metadata interfaces for parsing and decode. Do not
@@ -258,7 +266,7 @@ Update this section as work proceeds; keep evidence factual and brief.
 | Validation lifecycle repair | Regression Covered | Native exception-teardown stack exposed a display-profile refresh posting through the viewer's retired borrowed executor. DisplayColorService now shuts down before executor release and rejects late requests. Color regression passed in both configurations; temporary probes and timeout overrides were removed, and original viewer pixel assertions are unchanged. |
 | B5 inline Save | Shipped in 2.5.0 | Fixed scaled Lucide icon with ISC notice, shared File command/state, narrow-width fallback, both painter guards, tooltip/MSAA action, and 96/144/192-DPI-metric/all-text-size layout checks. Native fixture restores maximized startup state before wide geometry. Physical DPI/theme review remains separate. |
 | E2/E5 readiness | Shipped in 2.5.0 | Bounded one-worker WIC discovery, cached state, explicit Snapshot refresh, native async diagnostics, independent thumbnail/full-image outcomes, concurrent observation preservation, shutdown/stale rejection, and redacted external text. Recognized extensions unchanged; `.heif` excluded. Final full Debug/Release passed 30/30 (56.05 s / 52.66 s). All six exact app/test/benchmark binaries verified fresh; C++ diagnostics and `git diff --check` clean. |
-| E2/E5 installed inventory | Observed | Worker inventory created Microsoft HEIF Decoder and Microsoft JPEG XL Decoder on 2026-09-30. This proves discovery/creation only, not file decode. No optional-codec fixture was present under `tests`; actual HEIC/JXL fixture compatibility remains unverified. Renamed PNGs and injected providers are not optional-codec evidence. |
+| E2/E5 real fixture decode | Passed (sample/configuration) | On 2026-11-17, `basic-8bit-srgb.heic` (CC0 1.0; SHA-256 `3fe7d32e5568f8bfd6b5d3290e61ac9b964d08464d388fa064f69cddddfee82c`) and OpenPrinting's `4x6-landscape-photo-srgb.jxl` (Apache-2.0; SHA-256 `CE10D94C01A690227EE5CC5DE7B261A4CB27FAE90950390A691767242E9F8F8E`) both produced thumbnails and rendered in the Debug viewer. Installed Microsoft HEIF/HEVC/JPEG XL extensions were present. This verifies these samples on this codec configuration only; broader compatibility remains unverified and `.heif` remains excluded. |
 | B7 animation | Next | Begin at WIC frame/metadata ownership; lock composition/timing/cache rules with bounded original fixtures. |
 | B6 histogram | Queued | Inspect existing details histogram before adding another producer. |
 | E1 AVIF | Dependency Gated | Review optional decoder/dependency plan before downloading or packaging. |
@@ -279,5 +287,6 @@ timeout increase, codec/dependency installation, cloud run, commit, or packaging
 
 Immediate next action: begin B7 at the WIC frame/metadata owner and lock
 viewer-only composition, timing, disposal/blending, loop, and bounded-cache
-contracts. Keep genuine HEIC/JXL fixture validation separate, `.heif` excluded,
-physical/manual gates unverified, and E1 dependency approval queued.
+contracts. The fixture pass is limited to this codec configuration; `.heif`
+remains excluded, broader HEIC/JPEG XL compatibility and physical/manual gates
+remain unverified, and E1 dependency approval is queued.
