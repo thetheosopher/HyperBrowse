@@ -51,16 +51,20 @@ release 2.7.1.
 - **README screenshot — complete:** refreshed `docs/MainWindow.PNG` with the
   current main-window UI and the public-domain nature example set.
 
-### 2.8 local implementation and verification
+### 2.8 release and validation
 
 - Prompt 10 Phases 3 (C8), 4 (C6), 5 (C9), and 6 (B3) are implemented.
-- Local implementation and verification are complete. This does not publish a
-  2.8 release; the current released version remains 2.7.1.
+- **2.8.0 published 2026-11-21:** the dedicated Release packaging preset and
+  target produced the portable ZIP, Inno Setup installer, and SHA-256 manifest
+  under `build-release-package/dist`. The packaging target's Release CTest
+  suite passed 40/40 and its artifact validation completed. The installer was
+  not installed on a clean Windows profile before publication.
 - **Visual review — complete (owner confirmed 2026-11-15):** C6/C9/B3,
   B2 DPI/forced-GDI review, B4 physical display/color, C1-C3/C7 theme/DPI,
   C8 high-contrast/theme/DPI/larger text, and Bug Report 2 item 61 Settings
   scaling.
-- Full Debug and Release CTest suites passed 40/40 on 2026-11-17.
+- Full Debug and Release CTest suites passed 40/40 on 2026-11-17 and
+  2026-11-21.
 - **C6/C8 manual sign-off requirements removed by the owner on 2026-11-21.**
   Shipped rename and accessibility behavior, existing automated coverage, and
   the previously passed visual reviews remain in place.

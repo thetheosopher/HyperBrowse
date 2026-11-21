@@ -1,6 +1,6 @@
 # HyperBrowse Product Specification (Authoritative)
 
-**Current release:** 2.7.1
+**Current release:** 2.8.0
 **Status:** Current product contract
 **Authority:** Source code, smoke tests, and this document define shipped
 behavior. Proposed work belongs in [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md) and
@@ -68,6 +68,8 @@ conversion, and low-friction culling.
   - selected image count
   - selected total size
   - current zoom level while viewer window is active
+- Main-window title identifies the active folder path; the status bar surfaces
+  view mode, recursive-browsing, and theme state.
 - Separate viewer window
 - Configurable viewer overlays for file information, image status, full
   metadata, and RGB histogram
@@ -117,6 +119,11 @@ conversion, and low-friction culling.
 - Copy, move, rename, batch rename (`Ctrl+Shift+R`), delete, permanent delete,
   duplicate, clipboard transfer, shell drag/drop, Quick Actions, paired RAW/JPEG
   operations, taskbar progress, and supported file-operation undo/redo
+- Quick Actions deduplicates favorite and recent destinations, asynchronously
+  counts destination images, persists last-used times for row hints, and
+  accepts in-app thumbnail-to-destination drag filing.
+- F2 renames files inline in thumbnail and details views; the rename dialog
+  remains available as a fallback.
 - Copy/move conflict handling supports overwrite or automatic numeric suffixes;
   planned target names account for existing destination files and collisions
   within the same operation. Same-folder Duplicate selects the next available
@@ -133,6 +140,8 @@ conversion, and low-friction culling.
   smoothed accelerated panning, fit/actual-size toggling, overlay toggling,
   Escape behavior, and Recycle Bin deletion using the existing confirmation
   policy
+- Settings page navigation restores keyboard focus, and accessible controls
+  expose their names, roles, and state.
 - Per-monitor DPI awareness, asynchronous folder-tree child-presence probing,
   stale-result rejection, persistent thumbnail-cache maintenance, diagnostics,
   and smoke-tested Debug/Release packaging paths

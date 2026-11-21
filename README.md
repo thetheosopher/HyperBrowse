@@ -1,6 +1,6 @@
 # HyperBrowse
 
-![Version](https://img.shields.io/badge/Version-2.7.1-2EA043)
+![Version](https://img.shields.io/badge/Version-2.8.0-2EA043)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)
 ![CMake](https://img.shields.io/badge/CMake-3.23%2B-064F8C)
@@ -43,6 +43,21 @@ The reproducible screenshot image set is documented in
 - Portable and installer packaging outputs, plus smoke-tested release packaging targets.
 - A Windows CI workflow defines Debug/Release, CTest, benchmark, and release-package validation; it is currently manually disabled. Local release checks are documented in [docs/testing.md](docs/testing.md).
 - An offline HTML user guide available from Help > User Guide or by pressing F1.
+
+## What's New In 2.8.0
+
+This release polishes Quick Actions, file renaming, and main-window state
+visibility.
+
+- Quick Actions deduplicates favorite and recent destinations, shows
+  asynchronously counted image totals and persisted last-used hints, and
+  supports dragging thumbnails to destination rows.
+- F2 renames files inline in thumbnail and details views, with the rename
+  dialog retained as a fallback.
+- The main-window title identifies the active folder while the status bar
+  surfaces view, recursive-browsing, and theme state.
+- Expanded automated accessibility coverage for Settings focus restoration,
+  page navigation, and control state.
 
 ## What's New In 2.7.1
 
@@ -377,13 +392,13 @@ The release packaging path builds the release binaries, runs the smoke executabl
 Create the portable layout after building:
 
 ```powershell
-cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.7.1-portable
+cmake --install build --config Release --component Portable --prefix build/dist/HyperBrowse-2.8.0-portable
 ```
 
 Create the installer-friendly staging layout:
 
 ```powershell
-cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.7.1-installer-layout
+cmake --install build --config Release --component Runtime --prefix build/dist/HyperBrowse-2.8.0-installer-layout
 ```
 
 Create the full release artifact set, including a zipped portable package and an Inno Setup 6 installer:
@@ -453,11 +468,25 @@ For the current backlog in detail, start with [specs/FUTURE-ROADMAP.md](specs/FU
 
 ## Version
 
-Current release: **2.7.1**. The version is defined by the top-level `project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and flows into the generated build metadata, the Windows version resource, the About dialog, and all release artifact names (for example `HyperBrowse-2.7.1-portable-win64.zip` and `HyperBrowse-2.7.1-installer.exe`).
+Current release: **2.8.0**. The build version is defined by the top-level
+`project(HyperBrowse VERSION ...)` call in [CMakeLists.txt](CMakeLists.txt) and
+flows into the generated build metadata, Windows version resource, About
+dialog, and release artifact names (for example
+`HyperBrowse-2.8.0-portable-win64.zip` and
+`HyperBrowse-2.8.0-installer.exe`).
 
 Release **2.0.0** expanded HyperBrowse from a fast image browser into a more complete, resilient desktop workflow while preserving asynchronous browsing and viewing. It added richer shell integration, safer file operations, single-instance launch forwarding, persistent state and cache improvements, and reproducible Windows release validation.
 
 ## Version History
+
+### 2.8.0
+
+- Added Quick Actions destination counts and last-used hints, recent/favorite
+  deduplication, and thumbnail-to-destination filing.
+- Added inline F2 rename in thumbnail and details views, retaining the dialog
+  as a fallback.
+- Surfaced main-window view, recursive-browsing, and theme state in the status
+  bar, and expanded automated Settings accessibility coverage.
 
 ### 2.7.1
 
