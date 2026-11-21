@@ -45,10 +45,11 @@ execution, report that gate instead of starting a workflow.
 - C3 is an in-process display feature, not a new benchmark runner. Do not
   calibrate or change A8/D3 baselines, enable hosted evidence collection, or
   change absolute performance budgets.
-- C8 accessibility release verification, C9 title-bar simplification, and
-  unrelated MainWindow decomposition remain separate work. New controls must
-  still follow the accessibility contract already available in the touched
-  surfaces.
+- C8 accessibility implementation is complete; its separate release
+  verification requirement was removed by the owner on 2026-11-21. C9 title-bar
+  simplification and unrelated MainWindow decomposition remain separate work.
+  New controls must still follow the accessibility contract already available
+  in the touched surfaces.
 
 ## Starting Facts to Verify
 

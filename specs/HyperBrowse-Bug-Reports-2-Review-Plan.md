@@ -1,21 +1,21 @@
 # HyperBrowse Bug Report 2: Status Review and Follow-up Plan
 
-Reviewed: 2026-11-17 (item 69 runtime follow-up; initial review 2026-09-26)
+Reviewed: 2026-11-21 (status consolidation; initial review 2026-09-26)
 Source: [HyperBrowse-Bug-Reports 2.md](HyperBrowse-Bug-Reports%202.md)
 
 The initial review compared the report with the source, settings UI, user documentation, and smoke tests; it made no implementation or source-document changes. This refresh records the owner-approved item 40 label correction and completion of items 43 and 46. Item numbers are preserved.
 
 ## Summary
 
-Most entries are implemented or withdrawn. The remaining implementation/documentation follow-ups are items 15, 23, 30, 33, 36, and 48. Items 24 and 40 are complete, as are items 43 and 46. The newly reviewed tail, items 58-72, is largely addressed in current source; runtime verification remains for DPI scaling (61). The original CTest failures below remain historical findings pending a current full-suite recheck.
+Most entries are implemented or withdrawn. The remaining implementation/documentation follow-ups are items 15, 23, 33, 36, and 48. Items 24 and 40 are complete, as are items 43 and 46. The newly reviewed tail, items 58-72, is largely addressed in current source; item 61 has owner-confirmed visual verification, and item 69 has runtime verification on this machine.
 
 ## Verification
 
-The initial CMake Tools CTest suite was run against the existing `build` output, which was not rebuilt. 23 of 25 tests passed. No additional test run was performed while reviewing items 58-72; those statuses below are based on current source and focused policy-test inspection.
+The initial CMake Tools CTest suite was run against the existing `build` output, which was not rebuilt; 23 of 25 tests passed. Those results are historical, not the current test status. On 2026-11-17, both `ctest --preset debug-tests --output-on-failure` and `ctest --preset release-tests --output-on-failure` passed 40/40.
 
-`HyperBrowseSmoke` and `HyperBrowseViewerInteractionSmoke` both failed with `Viewer full metadata pane remained visible when full metadata was disabled`. In the failing scenario, `IsFullMetadataVisible()` already reports false before the test compares a single screen pixel. The implementation clears metadata and requests a repaint, so determine whether this is a rendering defect or an ambiguous pixel fixture before changing behavior. `HyperBrowseSettingsSmoke`, `HyperBrowseMultiViewerSettingsSmoke`, `HyperBrowseViewerFitSmoke`, `HyperBrowseFileRenameSmoke`, and `HyperBrowseItemNumberNavigationSmoke` passed.
+On the unrebuilt output, `HyperBrowseSmoke` and `HyperBrowseViewerInteractionSmoke` failed with `Viewer full metadata pane remained visible when full metadata was disabled`; the reported state was already false before the test compared a screen pixel. The failure was not reproduced in the later full Debug/Release runs. Its root cause was not established; reopen this investigation only if the current tests reproduce it.
 
-Follow-up validation on 2026-11-15: `cmake --build --preset debug --target HyperBrowse HyperBrowseTests` succeeded. `ctest --preset debug-tests -R RuntimePolicySmoke --output-on-failure` passed 1/1 for viewer `Ctrl+I`; `build\tests\Debug\HyperBrowseTests.exe --viewer-settings` passed for Escape persistence/defaults; and `ctest --preset debug-tests -R HyperBrowseViewerFitSmoke --output-on-failure` passed 1/1 for Escape behavior. `docs/MainWindow.PNG` was refreshed from the running app with the nature example set. The full CTest suite was not re-run.
+Follow-up validation on 2026-11-15: `cmake --build --preset debug --target HyperBrowse HyperBrowseTests` succeeded. `ctest --preset debug-tests -R RuntimePolicySmoke --output-on-failure` passed 1/1 for viewer `Ctrl+I`; `build\tests\Debug\HyperBrowseTests.exe --viewer-settings` passed for Escape persistence/defaults; and `ctest --preset debug-tests -R HyperBrowseViewerFitSmoke --output-on-failure` passed 1/1 for Escape behavior. `docs/MainWindow.PNG` was refreshed from the running app with the nature example set. The full CTest suites were not re-run during that follow-up; both were run successfully on 2026-11-17 as noted above.
 
 Item 69 runtime validation on 2026-11-17: with Microsoft WebP Image Extension 1.2.31.0 installed, HyperBrowse enumerated and rendered a thumbnail for a temporary 220x146 WebP derived from the public-domain USGS Yellowstone example. The Viewer rendered the file, and entering its path in Windows Run launched HyperBrowse and displayed it. No default-app setting was changed; this verifies the codec and file association on this machine.
 
@@ -36,7 +36,7 @@ Item 69 runtime validation on 2026-11-17: with Microsoft WebP Image Extension 1.
 | 25-26 | Complete | Fullscreen refits the image; opening a viewer explicitly foregrounds it. |
 | 27 | Retired | Removed from the report. |
 | 28-29 | Complete | Additional main windows are cascaded; disabling main-window Escape makes Escape a no-op. |
-| 30 | Partial validation | Windowed/full-screen metadata preferences are split, but the visual smoke assertion currently fails in two tests. |
+| 30 | Implemented; prior test failure not reproduced | The initial pixel-assertion failure came from an unrebuilt test output; the full Debug and Release suites passed 40/40 on 2026-11-17. Its root cause was not established. |
 | 31-32 | Complete | Smoke settings use a per-process registry path; `Ctrl+Enter` toggles viewer fullscreen. |
 | 33 | Open wishlist | No full-screen indicator for a file already in the default destination was found. |
 | 34 | Complete | Successful viewer Quick Sends avoid rebuilding/resyncing the viewer item list. |
@@ -53,13 +53,13 @@ Item 69 runtime validation on 2026-11-17: with Microsoft WebP Image Extension 1.
 | 48 | Partial | The cache index now uses a journal, but `Store` still holds the shared filesystem mutex across bitmap extraction and cache-file I/O. |
 | 49 | Complete | Thumb tracking schedules visible thumbnail work as the thumb moves. |
 | 50 | Retired | Number retired. |
-| 51 | Complete implementation; see item 30 | Settings update viewer defaults while no viewer is open; the current visual-test failure is tracked under item 30. |
+| 51 | Complete | Settings update viewer defaults while no viewer is open. The historical item 30 pixel-assertion failure was not reproduced by the current full suites. |
 | 52 | Complete | Text-input accelerator bypass allows punctuation and edit keys to reach main-window text fields. |
 | 53-57 | Complete | PackageRelease locates Visual Studio's CMake; viewer arrow panning settles smooth zoom; Quick Actions confirms success; command-bar menus track pointer movement; fit-mode reapplication preserves window position. |
 | 58 | Complete | Viewer synchronization filters directory rows; `ViewerSynchronizer` policy coverage includes mixed image/directory lists. |
 | 59 | Complete | `BrowserItemScopeCollector` excludes directories in selection and whole-folder scopes; smoke-policy tests cover both. |
 | 60 | Complete | Smoke settings use a per-process registry key and a scoped cleanup object removes it when the test exits. |
-| 61 | Implemented; runtime check pending | Settings dimensions and fonts use DPI-aware scaling and the dialog handles `WM_DPICHANGED`; verify at 150/200% and while moving between mixed-DPI monitors. |
+| 61 | Implemented; owner visual review passed 2026-11-15 | Settings dimensions and fonts use DPI-aware scaling and the dialog handles `WM_DPICHANGED`. No additional DPI sign-off remains open in this plan. |
 | 62 | Complete | Both WIC decoders retain each `Initialize` HRESULT and pass through the bitmap-allocation result instead of reporting stale success. |
 | 63 | Complete | Consolidated Settings handles Escape, Enter, and Ctrl+Tab only when the message targets that dialog or one of its children. |
 | 64-65 | Complete | Text-control navigation keys bypass browser navigation; `BrowserPane::HandleNavigationKey` declines `WM_SYSKEYDOWN`, preserving Alt-arrow accelerators. Smoke coverage checks that Alt arrows are not consumed as browser navigation. |
@@ -73,7 +73,7 @@ Item 69 runtime validation on 2026-11-17: with Microsoft WebP Image Extension 1.
 
 ## Follow-up Decisions and Remaining Work
 
-1. **Triage the metadata rendering test failure (items 30/51).** Inspect the full-metadata draw path and the single-pixel assertion in `../tests/smoke.cpp#L4821`. Establish a test fixture where the enabled and disabled states must produce distinguishable pixels, then make the relevant smoke tests pass without weakening state coverage.
+1. **Closed unless reproduced — metadata rendering test failure (items 30/51).** The failure occurred on an unrebuilt test output and was not reproduced by the full Debug/Release suites (40/40 each) on 2026-11-17. Its original root cause remains unknown; reopen only if a current build reproduces it.
 
 2. **Resolved 2026-11-15 — item 40 label.** The owner wants the existing opt-in to apply the selected slideshow style and duration during manual navigation. The Viewer Settings label now describes that behavior. The preference remains off by default, slideshow playback remains independent, and existing `ViewerTransitionPolicy` tests cover both paths.
 
@@ -93,7 +93,7 @@ Item 69 runtime validation on 2026-11-17: with Microsoft WebP Image Extension 1.
 
 10. **Defer the duplicate-destination indicator (item 33).** This remains an unimplemented wishlist request. If approved later, compare the current file with the default destination by name and size, show the destination key/path in fullscreen, and cover same-name/different-size files and completed move/copy operations.
 
-11. **Verify Settings DPI scaling (item 61).** Exercise the consolidated Settings dialog at 150% and 200%, then move it between monitors with different scale factors. Confirm that the frame, tabs, custom text, and native controls resize together and remain usable.
+11. **Complete 2026-11-15 — item 61.** Owner visual review of Settings scaling passed; no further DPI runtime gate is tracked here.
 
 12. **Complete 2026-11-17 — item 69.** Browser enumeration, thumbnail decode, Viewer rendering, and Windows Run launch by file path succeeded with Microsoft WebP Image Extension 1.2.31.0. The sample was a temporary derivative of the public-domain USGS Yellowstone example; codec availability remains machine-specific.
 

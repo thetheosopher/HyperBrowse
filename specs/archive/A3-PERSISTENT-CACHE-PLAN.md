@@ -3,7 +3,7 @@
 Status: Complete
 Owner: HyperBrowse cache/scheduler path
 Started: 2026-09-13
-Roadmap item: `A3` in [FUTURE-ROADMAP.md](FUTURE-ROADMAP.md)
+Roadmap item: `A3` in [FUTURE-ROADMAP.md](../FUTURE-ROADMAP.md)
 
 Latest progress: A3.0 completed on 2026-09-13. A3.1 completed on 2026-09-13
 with independent RAM/free-space-aware persistent capacity, pressure-mode store
@@ -18,11 +18,11 @@ measurements, cache-worker queue-delay instrumentation, and Release CI gates
 for cache and startup latency. The final Release startup run also fixed and
 covered stale disk-lookup retry handling, then captured the first thumbnail.
 
-This is the implementation tracker for A3. It is subordinate to the shipped
-contract in [PRODUCT_SPEC.md](PRODUCT_SPEC.md) and should be updated as each
-slice is implemented and validated.
+This document records completed A3 implementation and validation history. It
+is subordinate to the shipped contract in [PRODUCT_SPEC.md](../PRODUCT_SPEC.md)
+and is retained as a historical reference, not an active work queue.
 
-## Current Baseline
+## Baseline at Completion
 
 - `DiskThumbnailCache` uses `index.tsv`, `index.journal.tsv`, and a
       `format.version` marker. New entries use `xx/yy/<stable-hash>.bin` shards;

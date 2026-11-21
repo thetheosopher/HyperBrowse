@@ -140,8 +140,9 @@ All 40 tests above are enabled. `HyperBrowsePerformanceBenchmark` writes a JSON 
 `HyperBrowseSettingsSmoke` inspects the Settings `IAccessible` tree and exercises
 accessible focus, tab selection, page-focus restoration, and the automatic
 thumbnail-cache checked/unavailable state transition. `HyperBrowseAccessibilitySmoke`
-covers the main-window provider. These tests complement, but do not replace,
-manual screen-reader and Inspect/UI Automation verification.
+covers the main-window provider. These tests provide the recorded automated accessibility coverage. A separate
+manual screen-reader and Inspect/UI Automation sign-off is not a release
+requirement per the owner (2026-11-21).
 
 `HyperBrowseInlineRenameSmoke` exercises F2 editing in both browser views,
 filename-stem selection, Enter and Tab commits, focus-loss commit, Escape
@@ -283,14 +284,15 @@ codec configuration only; broader compatibility and `.heif` support remain
 unverified/excluded. The downloaded samples were kept outside `tests`, so the
 automated CTest suite still does not bundle real optional-codec fixtures.
 
-Final normal Debug/Release app, smoke, and benchmark targets built; full
-presets passed 30/30 (56.05 s / 52.66 s). The initial Debug full run passed
-29/30 and failed the existing startup viewer Escape/Fit Height assertion. The
-unchanged combined smoke then passed (22.22 s), followed by the exact full
-Debug pass. No viewer/keyboard fix, skipped assertion, or timeout increase was
-used. Native display/focus sensitivity remains a test risk, not a codec issue
-proven by this observation. Tests remained on, fuzz/CUDA bundling off; no cloud,
-packaging, commit, or dependency installation ran.
+At codec-readiness delivery, normal Debug/Release app, smoke, and benchmark
+targets built; full presets passed 30/30 (56.05 s / 52.66 s). The initial Debug
+full run passed 29/30 and failed the existing startup viewer Escape/Fit Height
+assertion. The unchanged combined smoke then passed (22.22 s), followed by the
+exact full Debug pass. No viewer/keyboard fix, skipped assertion, or timeout
+increase was used. The latest full Debug and Release CTest suites passed 40/40
+on 2026-11-17. Native display/focus sensitivity remains a test risk, not a
+codec issue proven by this observation. Tests remained on, fuzz/CUDA bundling
+off; no cloud, packaging, commit, or dependency installation ran.
 
 ### SDR display-color checks
 

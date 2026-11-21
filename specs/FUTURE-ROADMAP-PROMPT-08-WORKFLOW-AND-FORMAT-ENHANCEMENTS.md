@@ -46,7 +46,8 @@ Follow-on queue:
 - Keep canonical caches independent of monitor profiles. Animation and
   histogram work must respect B4's source/display distinction.
 - Do not expand into A5/A6 GPU work, D1-D3/A8 evidence calibration, or unrelated
-  B2/C8 refactors. Their existing acceptance gates remain tracked separately.
+  B2/C8 refactors. B2 acceptance gates remain tracked separately; the owner
+  removed C8's separate manual sign-off as a release requirement on 2026-11-21.
 - Do not manufacture physical-display or screen-reader evidence. Report
   unavailable hardware and manual verification plainly.
 
@@ -262,17 +263,17 @@ Update this section as work proceeds; keep evidence factual and brief.
 | B5 filter contract | Focused Gate Passed | Existing BrowserPane owner supports RAW/exact-extension conjunction and rating/tag/name composition, including details mode. |
 | B5 persistence | Focused Gate Passed | SavedSearchStore: strict bounded UTF-8 TSV, restart, Unicode/escaping, duplicates, reload-under-lock mutations, committed snapshots, atomic replacement, and failure preservation. |
 | B5 UI/integration | Shipped in 2.5.0 | File menu and inline Save share the existing dialog/filter/worker path. Open/save/update/rename/delete/reload, native accessible action, empty/busy state, icon pixels, and restart smoke passed in Debug/Release (1.71 s / 1.65 s in the final full runs). No activation refresh; it competed with modal save enqueueing. |
-| B5 broader software gates | Shipped in 2.5.0 | Historical B5/C5 checkpoint passed 28/28 before codec-readiness tests were added (55.04 s / 50.63 s; six binaries fresh). Current full Debug and Release CTest runs pass 30/30; the Release package is recorded below. B5 checkpoint: tests on, fuzz off, CUDA bundling off. |
+| B5 broader software gates | Shipped in 2.5.0 | Historical B5/C5 checkpoint passed 28/28 before codec-readiness tests were added (55.04 s / 50.63 s; six binaries fresh); the 2.5.0 full suites then passed 30/30. The current full Debug and Release CTest suites passed 40/40 on 2026-11-17. B5 checkpoint: tests on, fuzz off, CUDA bundling off. |
 | Validation lifecycle repair | Regression Covered | Native exception-teardown stack exposed a display-profile refresh posting through the viewer's retired borrowed executor. DisplayColorService now shuts down before executor release and rejects late requests. Color regression passed in both configurations; temporary probes and timeout overrides were removed, and original viewer pixel assertions are unchanged. |
 | B5 inline Save | Shipped in 2.5.0 | Fixed scaled Lucide icon with ISC notice, shared File command/state, narrow-width fallback, both painter guards, tooltip/MSAA action, and 96/144/192-DPI-metric/all-text-size layout checks. Native fixture restores maximized startup state before wide geometry. Physical DPI/theme review remains separate. |
-| E2/E5 readiness | Shipped in 2.5.0 | Bounded one-worker WIC discovery, cached state, explicit Snapshot refresh, native async diagnostics, independent thumbnail/full-image outcomes, concurrent observation preservation, shutdown/stale rejection, and redacted external text. Recognized extensions unchanged; `.heif` excluded. Final full Debug/Release passed 30/30 (56.05 s / 52.66 s). All six exact app/test/benchmark binaries verified fresh; C++ diagnostics and `git diff --check` clean. |
+| E2/E5 readiness | Shipped in 2.5.0 | Bounded one-worker WIC discovery, cached state, explicit Snapshot refresh, native async diagnostics, independent thumbnail/full-image outcomes, concurrent observation preservation, shutdown/stale rejection, and redacted external text. Recognized extensions unchanged; `.heif` excluded. Feature-delivery Debug/Release passed 30/30 (56.05 s / 52.66 s); current full suites passed 40/40 on 2026-11-17. All six exact app/test/benchmark binaries verified fresh; C++ diagnostics and `git diff --check` clean. |
 | E2/E5 real fixture decode | Passed (sample/configuration) | On 2026-11-17, `basic-8bit-srgb.heic` (CC0 1.0; SHA-256 `3fe7d32e5568f8bfd6b5d3290e61ac9b964d08464d388fa064f69cddddfee82c`) and OpenPrinting's `4x6-landscape-photo-srgb.jxl` (Apache-2.0; SHA-256 `CE10D94C01A690227EE5CC5DE7B261A4CB27FAE90950390A691767242E9F8F8E`) both produced thumbnails and rendered in the Debug viewer. Installed Microsoft HEIF/HEVC/JPEG XL extensions were present. This verifies these samples on this codec configuration only; broader compatibility remains unverified and `.heif` remains excluded. |
 | B7 animation | Next | Begin at WIC frame/metadata ownership; lock composition/timing/cache rules with bounded original fixtures. |
 | B6 histogram | Queued | Inspect existing details histogram before adding another producer. |
 | E1 AVIF | Dependency Gated | Review optional decoder/dependency plan before downloading or packaging. |
 | C5 Open Log Folder | Shipped in 2.5.0 | Tools command uses the logger's real parent and existing shell/error helper. View-command callback tests capture the destination without Explorer, covering Unicode/relative/UNC paths and no new shortcut. Logging destination/behavior is unchanged. |
 | 2.5.0 release package | Built and verified | Dedicated Release package preset passed 30/30 CTest; portable ZIP and installer versions/hashes match `SHA256SUMS.txt`. |
-| Physical/manual verification | Pending | Preserve B2/B4/C8 manual sign-off; do not substitute mocks or this execution brief. |
+| Physical/manual verification | Passed (owner confirmed 2026-11-15) | B2 DPI/forced-GDI and B4 physical display/color reviews passed. C8's separate manual sign-off requirement was removed by the owner on 2026-11-21. This brief is not evidence for other hardware checks. |
 
 Continuation note: the focused `--runtime` selector does not run command-bar
 policy scenarios; use the new `--command-bar` selector. Rendered checks were
@@ -288,5 +289,7 @@ timeout increase, codec/dependency installation, cloud run, commit, or packaging
 Immediate next action: begin B7 at the WIC frame/metadata owner and lock
 viewer-only composition, timing, disposal/blending, loop, and bounded-cache
 contracts. The fixture pass is limited to this codec configuration; `.heif`
-remains excluded, broader HEIC/JPEG XL compatibility and physical/manual gates
-remain unverified, and E1 dependency approval is queued.
+remains excluded and broader HEIC/JPEG XL compatibility remains unverified.
+B2/B4 visual reviews are owner-confirmed passed; C8's separate manual
+sign-off was removed as a release requirement on 2026-11-21. E1 dependency
+approval remains queued.

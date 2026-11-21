@@ -631,11 +631,10 @@ Known limits: GIF and TIFF browsing displays the first frame or page; JPEG orien
 
 ## Next Features
 
-The forward-looking backlog lives in [specs/FUTURE-ROADMAP.md](specs/FUTURE-ROADMAP.md). Planned areas after 2.7.1 include:
-
-- Remaining 2.8 UI polish: dialog accessibility sign-off and the consolidated visual/manual verification pass. The folder-path title/status context, in-place image rename, and Quick Actions panel polish are implemented.
-- Performance evidence: local benchmark baselines for startup and thumbnail throughput, and reduced persistent-cache write contention.
-- Viewer depth: animated GIF/WebP playback, command search over the shortcut catalog, multipage TIFF navigation, and a clip-warning overlay.
+The prioritized backlog and implementation status for work after 2.7.1 are
+maintained in the [HyperBrowse roadmap](specs/FUTURE-ROADMAP.md). This README
+does not duplicate that queue; roadmap entries do not imply inclusion in a
+release.
 
 ## License
 

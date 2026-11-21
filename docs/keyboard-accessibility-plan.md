@@ -22,7 +22,7 @@ Make keyboard-only operation predictable across HyperBrowse while preserving the
 - Settings pages can be changed by keyboard and focus moves to the first enabled target on the selected page.
 - Focus is restored after modal dialogs, modeless windows, viewer close, and dynamic Quick Actions updates.
 - UI Automation or an equivalent accessibility bridge exposes meaningful names, roles, states, and focus events for custom targets.
-- Focused smoke coverage exercises the behavior; manual NVDA/JAWS, Inspect/UI Automation, high-contrast, theme, DPI, and larger-text checks cover the platform-facing behavior.
+- Focused smoke coverage exercises the behavior. The owner confirmed high-contrast, theme, DPI, and larger-text visual checks passed on 2026-11-15; separate NVDA/JAWS and Inspect/UI Automation sign-off was removed as a release requirement on 2026-11-21.
 
 ## Work queue
 
@@ -71,13 +71,11 @@ Status: Implemented and smoke-validated.
 
 ### Slice 5: Accessibility exposure and verification
 
-- Status: Main-window and Experimental Settings custom surfaces use the shared MSAA `IAccessible` bridge. `HyperBrowseAccessibilitySmoke` covers main-window semantics; `HyperBrowseSettingsSmoke` covers Settings names and roles, focused and selected tab state, page-focus restoration, and checked/unavailable state transitions for automatic cache sizing. The owner confirmed high-contrast, theme, DPI, and larger-text visual checks passed on 2026-11-15; manual NVDA/JAWS and Inspect/UIA sign-off remains.
+- Status: Main-window and Experimental Settings custom surfaces use the shared MSAA `IAccessible` bridge. `HyperBrowseAccessibilitySmoke` covers main-window semantics; `HyperBrowseSettingsSmoke` covers Settings names and roles, focused and selected tab state, page-focus restoration, and checked/unavailable state transitions for automatic cache sizing. The owner confirmed high-contrast, theme, DPI, and larger-text visual checks passed on 2026-11-15; separate NVDA/JAWS and Inspect/UIA sign-off was removed as a release requirement on 2026-11-21.
 
 - Implement a UI Automation provider or the smallest existing project-compatible accessibility bridge for custom targets.
 - Expose name, role, enabled/disabled, checked/selected, expanded/open, and focused state.
 - Raise focus and state-change events when custom focus or activation changes.
-- Add manual verification with NVDA or JAWS and Windows Inspect/UI Automation.
-
 Implementation notes:
 
 - The main window serves `WM_GETOBJECT` for `OBJID_CLIENT` through an MSAA provider without changing native child controls.

@@ -40,10 +40,12 @@ system. Its contents remain here as historical context:
 
 ## Archived Reviews and Engineering Plans
 
-The following documents were moved here from `docs/` because they record dated
-reviews, completed release work, or implementation plans that no longer guide
-the current repository:
+The following historical reviews and completed plans are retained here because
+they no longer guide current work. Some were moved from `docs/`; others were
+retired from the active specifications:
 
+- `A3-PERSISTENT-CACHE-PLAN.md` records the completed persistent-cache
+  implementation sequence and validation evidence.
 - `CODE_REVIEW_2026-05-31.md`
 - `CODE_REVIEW_2026-07-30.md`
 - `ENHANCEMENT_ROADMAP_2026-05-31.md`
